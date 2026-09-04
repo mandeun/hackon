@@ -67,6 +67,10 @@ nav button.on{color:var(--navy);font-weight:700}
 nav .i{font-size:17px}
 .share{font-family:Consolas,monospace;font-size:12px;background:var(--bg2);border:1px solid var(--rule);
        border-radius:8px;padding:8px 10px;word-break:break-all;margin-top:8px}
+.due{font-size:13px;font-weight:700;color:var(--ink2);background:var(--bg2);
+     border:1px solid var(--rule);border-radius:9px;padding:8px 11px;margin-bottom:10px}
+.due.hot{color:var(--acc);border-color:#F6CFC2;background:#FDF3EF}
+.due.over{color:var(--bad);border-color:#F0D6D6;background:#FCF1F1}
 .shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
 .shrow .share{flex:1;margin-top:0}
 </style>
@@ -140,6 +144,25 @@ function statusOf(e) {
   return { k: '진행 중', c: 'warn' };
 }
 const badge = e => { const s = statusOf(e); return `<span class="pill ${s.c}">${s.k}</span>`; };
+
+/* 마감까지 남은 시간. 1시간을 끊으면 색이 바뀐다. */
+function dueText(due) {
+  const ms = new Date(due) - new Date();
+  if (ms <= 0) return { t: '제출 마감이 지났습니다', c: 'over' };
+  const m = Math.floor(ms / 60000), h = Math.floor(m / 60);
+  return { t: '제출 마감까지 ' + (h ? h + '시간 ' + (m % 60) + '분' : m + '분'),
+           c: ms < 3600000 ? 'hot' : '' };
+}
+/* 화면 전체를 다시 그리지 않고 그 칸의 글자만 갈아 끼운다. */
+function tickDue() {
+  document.querySelectorAll('[data-due]').forEach(el => {
+    if (!el.dataset.due) return;
+    const r = dueText(el.dataset.due);
+    el.textContent = r.t; el.className = 'due ' + r.c;
+  });
+}
+setInterval(tickDue, 1000);
+const dueBox = e => e.due ? `<div class="due" data-due="${esc(e.due)}"></div>` : '';
 let msg = null;
 
 function flash(text, bad) { msg = { text, bad }; render(); setTimeout(() => { msg = null; render(); }, 2600); }
@@ -156,6 +179,7 @@ async function render() {
   try { view.innerHTML = head() + await SCREEN[tab](); }
   catch (e) { view.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   wire();
+  tickDue();
   document.body.dataset.ready = '1';   // 완주 테스트가 이 표시를 기다린다
 }
 
@@ -186,6 +210,8 @@ const SCREEN = {
         <div><label>상금(원)</label><input id="f-prize" type="number" value="0"></div>
         <div><label>팀 정원 (0=무제한)</label><input id="f-cap" type="number" value="0"></div>
       </div>
+      <label>제출 마감 (선택)</label><input id="f-due" type="datetime-local">
+      <div class="meta">비워 두면 마감을 안 막습니다. 넣으면 그 시각부터 서버가 제출을 막습니다.</div>
       <label>심사 기준</label>
       <div class="card"><div class="meta">독창성 30 · 완성도 30 · 실용성 25 · 전달력 15
         <br>합이 100이어야 저장됩니다. 지금은 기본값을 씁니다.</div></div>
@@ -201,6 +227,9 @@ const SCREEN = {
     const full = d.rows.filter(r => (r.judges || 0) >= js.length && js.length).length;
     return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
+      ${dueBox(e)}
+      ${e.due ? `<button class="btn sec sm" id="b-ext">마감 30분 미루기</button>
+        <div class="meta" style="margin:6px 0 12px">인터넷이 터졌을 때 진행자가 누릅니다.</div>` : ''}
       ${js.length ? `<div class="card" style="padding:11px 13px">
         <div class="meta"><b>심사 진행</b> · 심사위원 ${js.length}명 (${js.map(esc).join(', ')})<br>
           전원이 다 본 팀 ${full}/${d.rows.length}팀${
@@ -236,6 +265,7 @@ const SCREEN = {
     return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
         ${e.topic ? '· 주제 ' + esc(e.topic) : ''}<br>상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
+      ${dueBox(e)}
 
       ${e.sponsors.length ? `<div class="card"><h3>함께한 곳</h3>
         <div class="meta">${e.sponsors.map(s => esc(s.name) + ' <span class="pill">' + esc(s.kind) + '</span>').join(' · ')}</div>
@@ -276,9 +306,13 @@ const SCREEN = {
                    return no.length ? ' · 안 본 사람 ' + no.map(esc).join(', ') : ''; })()}
       </div>` : ''}
 
+      ${dueBox(d.event)}
       <div class="card">
         <h3>결과물 제출</h3>
         <div class="meta">참가팀이 씁니다. 다시 내면 덮어써집니다.</div>
+        ${d.event.due && new Date(d.event.due) < new Date()
+          ? `<div class="err" style="margin:8px 0 0">마감이 지나 더는 낼 수 없습니다.
+             진행자가 마감을 미루면 다시 열립니다.</div>` : ''}
         <label>링크</label><input id="s-url" value="${esc(t.url || '')}" placeholder="https://...">
         <label>설명</label><textarea id="s-note" rows="3" placeholder="무엇을 만들었는지 짧게">${esc(t.note || '')}</textarea>
         <div style="height:10px"></div>
@@ -354,6 +388,7 @@ function wire() {
       title: $('#f-title').value.trim(), host: $('#f-host').value.trim(),
       topic: $('#f-topic').value.trim(), starts: $('#f-starts').value,
       ends: $('#f-ends').value, prize: $('#f-prize').value, cap: $('#f-cap').value,
+      due: $('#f-due').value,
     };
     if (!b.title) return flash('대회 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
@@ -401,6 +436,15 @@ function wire() {
       await api(`/teams/${curTeam}/score`, { method: 'POST', body: { judge, values } });
       localStorage.setItem('hackon.judge', judge);
       flash('점수를 저장했습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+
+  const ext = $('#b-ext');
+  if (ext) ext.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try {
+      const r = await api(`/events/${cur}/extend`, { method: 'POST', body: { minutes: 30 } });
+      flash(`마감을 ${r.minutes}분 미뤘습니다`);
     } catch (e) { flash(e.message, true); }
   };
 

@@ -9,6 +9,7 @@
 """
 import json
 import os
+from datetime import datetime, timedelta
 import subprocess
 import sys
 import urllib.error
@@ -86,6 +87,8 @@ with sync_playwright() as p:
     pg.fill("#f-starts", "2026-10-11")
     pg.fill("#f-ends", "2026-10-12")
     pg.fill("#f-prize", "3000000")
+    due = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+    pg.fill("#f-due", due)
     pg.click("#f-save")
     pg.wait_for_timeout(700)
     evs = api("/api/events")
@@ -145,6 +148,28 @@ with sync_playwright() as p:
     tt = pg.inner_text("#view")
     A("본 사람 심사1" in tt, f"누가 봤는지 안 나온다: {tt[:120]}")
     ok("상태 배지 · 심사 진행 현황 (전원이 다 본 팀 1/2)")
+
+    # ── 마감 — 남은 시간이 뜨고, 지나면 서버가 막는가 ──────
+    visit(f"/#{ev}")
+    txt = pg.inner_text("#view")
+    A("제출 마감까지" in txt, f"남은 시간이 안 보인다: {txt[:100]}")
+    ok("마감까지 남은 시간이 뜬다")
+
+    # 마감이 지난 대회를 따로 만들어 서버가 막는지 본다.
+    # 화면만 잠그면 주소를 아는 사람은 그냥 낸다. 그래서 서버를 때려서 확인한다.
+    gone = (datetime.now() - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M')
+    _, late = post('/api/events', {'title': '마감지난대회', 'due': gone})
+    _, lt = post(f"/api/events/{late['id']}/teams", {'name': '늦은팀'})
+    A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'})[0] == 409,
+      '마감이 지났는데 제출이 됐다')
+    ok('마감 뒤 제출 차단 (409)')
+
+    # 인터넷이 터졌을 때 진행자가 미룬다. 미룬 뒤에는 다시 받아야 한다.
+    code, r = post(f"/api/events/{late['id']}/extend", {'minutes': 60})
+    A(code == 200, f'연장 실패 {code}')
+    A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'})[0] == 200,
+      '미뤘는데도 제출이 막힌다')
+    ok(f"마감 60분 연장 → 다시 제출됨 (새 마감 {r['due']})")
 
     # 심사위원 이름이 같으면 덮어쓴다. 두 번 눌러도 평균이 안 흔들려야 한다.
     A(post(f"/api/teams/{top['id']}/score",

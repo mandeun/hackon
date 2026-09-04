@@ -41,6 +41,7 @@ function open(file) {
       ends     TEXT NOT NULL,
       prize    INTEGER NOT NULL DEFAULT 0,
       cap      INTEGER NOT NULL DEFAULT 0,   -- 0 = 제한 없음
+      due      TEXT NOT NULL DEFAULT '',      -- 제출 마감 'YYYY-MM-DDTHH:MM'. 비면 안 막는다
       rubric   TEXT NOT NULL DEFAULT '[]',   -- [{key,label,weight}]
       created  TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -92,6 +93,8 @@ function open(file) {
       note   TEXT NOT NULL DEFAULT ''
     );
   `);
+  /* 이미 쓰던 DB 에도 칸을 붙인다. 있으면 에러가 나는데 그건 그냥 넘긴다. */
+  try { db.exec("ALTER TABLE events ADD COLUMN due TEXT NOT NULL DEFAULT ''"); } catch {}
   return db;
 }
 /* #endregion reuse:db-open */
@@ -113,11 +116,11 @@ function createEvent(db, b) {
   const rubric = Array.isArray(b.rubric) && b.rubric.length ? b.rubric : DEFAULT_RUBRIC;
   const sum = rubric.reduce((a, r) => a + Number(r.weight || 0), 0);
   if (sum !== 100) throw new HttpError(400, `심사 배점 합이 ${sum} 입니다. 100 이어야 합니다`);
-  db.prepare(`INSERT INTO events(id,title,host,topic,starts,ends,prize,cap,rubric)
-              VALUES(?,?,?,?,?,?,?,?,?)`)
+  db.prepare(`INSERT INTO events(id,title,host,topic,starts,ends,prize,cap,rubric,due)
+              VALUES(?,?,?,?,?,?,?,?,?,?)`)
     .run(id, b.title, b.host || '주최자', b.topic || '',
          b.starts || today(), b.ends || b.starts || today(),
-         +b.prize || 0, +b.cap || 0, JSON.stringify(rubric));
+         +b.prize || 0, +b.cap || 0, JSON.stringify(rubric), b.due || '');
   return id;
 }
 
@@ -143,7 +146,18 @@ function joinTeam(db, event, b) {
   }
 }
 
+/** 마감이 지났나. 마감이 비어 있으면 안 막는다. */
+function pastDue(db, team) {
+  const r = db.prepare(`SELECT e.due FROM teams t JOIN events e ON e.id = t.event
+                        WHERE t.id = ?`).get(team);
+  if (!r) throw new HttpError(404, '없는 팀입니다');
+  if (!r.due) return false;
+  // 마감은 그 자리 시각으로 적는다. 서버와 참가자가 같은 방에 있으니 시간대를 따지지 않는다.
+  return new Date() > new Date(r.due);
+}
+
 function submit(db, team, b) {
+  if (pastDue(db, team)) throw new HttpError(409, '제출 마감이 지났습니다');
   db.prepare(`INSERT INTO submissions(team,url,note) VALUES(?,?,?)
               ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note, at=datetime('now')`)
     .run(team, b.url || '', b.note || '');
@@ -280,6 +294,21 @@ function routes(db) {
             return json(res, 201, { ok: true });
           }
         }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/extend$/)) && req.method === 'POST') {
+          /* 인터넷이 터지면 마감을 미룰 수 있어야 한다 (매뉴얼 3장).
+             진행자가 그 자리에서 누른다. */
+          const b = await body(req);
+          const e = db.prepare('SELECT due FROM events WHERE id=?').get(m[1]);
+          if (!e) throw new HttpError(404, '없는 대회입니다');
+          if (!e.due) throw new HttpError(400, '마감 시각이 없습니다');
+          const mins = Math.min(Math.max(+b.minutes || 30, 1), 240);
+          const due = new Date(new Date(e.due).getTime() + mins * 60000);
+          const pad = n => String(n).padStart(2, '0');
+          const txt = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`
+                    + `T${pad(due.getHours())}:${pad(due.getMinutes())}`;
+          db.prepare('UPDATE events SET due=? WHERE id=?').run(txt, m[1]);
+          return json(res, 200, { due: txt, minutes: mins });
+        }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/submit$/)) && req.method === 'POST') {
           submit(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
@@ -347,6 +376,15 @@ function selftest() {
   const b2 = board(db, ev);
   ok(b2.judges.length === 2, '심사위원 명단이 모인다 (' + b2.judges.join() + ')');
   ok(b2.rows.find(r => r.name === '가팀').by.length === 1, '팀별로 누가 봤는지 나온다');
+
+  // 마감 — 지났으면 서버가 막고, 미루면 다시 받는다
+  const past = createEvent(db, { title: '마감지남', due: '2020-01-01T10:00' });
+  const pt = joinTeam(db, past, { name: '늦은팀' });
+  bad = false; try { submit(db, pt, { url: 'x' }); } catch { bad = true; }
+  ok(bad, '마감이 지나면 제출을 막는다');
+  db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T10:00', past);
+  submit(db, pt, { url: 'https://example.com/late' });
+  ok(!!db.prepare('SELECT url FROM submissions WHERE team=?').get(pt), '마감을 미루면 다시 받는다');
 
   db.prepare('INSERT INTO outcomes(event,team,kind,who) VALUES(?,?,?,?)').run(ev, t1, '면접', '어느회사');
   const o = outcomes(db, ev);
