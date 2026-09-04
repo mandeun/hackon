@@ -131,12 +131,12 @@ with sync_playwright() as p:
 
     pg.click("#f-save")
     pg.wait_for_timeout(900)
-    evs = api("/api/events")
-    A(len(evs) == 1, f"대회가 1개여야 하는데 {len(evs)}")
-    ev = evs[0]["id"]
+    # 목록은 공개한 것만 준다. 방금 만든 대회는 아직 공개 전이라 화면에서 id 를 가져온다.
+    ev = pg.evaluate("cur")
+    A(ev and len(ev) == 8, f"대회가 안 만들어졌다: {ev}")
     OK = pg.evaluate("localStorage.getItem('hackon.okey.' + cur)")
     A(OK and len(OK) == 10, f"운영자 열쇠가 저장되지 않았다: {OK}")
-    A(evs[0]["title"] == "우리 동네 문제 해결 해커톤", f"화면이 보낸 값이 안 들어갔다: {evs[0]}")
+    A(api(f"/api/events/{ev}")["title"] == "우리 동네 문제 해결 해커톤", "화면이 보낸 값이 안 들어갔다")
     ok("대회 이름 하나로 개설 — 나머지는 안 묻는다")
 
     # 만든 뒤에 나머지를 채운다
@@ -207,6 +207,8 @@ with sync_playwright() as p:
     pg.wait_for_selector("#s-url")
     pg.fill("#s-url", "https://example.com/walk")
     pg.fill("#s-note", "보행 장벽을 미리 알려 주는 지도")
+    pg.fill("#s-aiuse", "화면 만들 때 썼습니다")
+    pg.fill("#s-aidrop", "추천 로직은 우리 문제와 안 맞아 버렸습니다")
     pg.click("#s-save")
     pg.wait_for_timeout(700)
     pg.wait_for_selector("#j-name")
@@ -222,7 +224,19 @@ with sync_playwright() as p:
     # 95*.30 + 90*.30 + 85*.25 + 80*.15 = 88.75 → 88.8
     A(abs(top["score"] - 88.8) < 0.05, f"가중 평균이 틀렸다: {top['score']}")
     A(rows[1]["score"] == 0, "심사 안 한 팀이 점수를 받았다")
-    ok(f"제출 · 심사 저장 — 1등 {top['name']} {top['score']}점 (가중 평균)")
+    A(top["aiuse"] == "화면 만들 때 썼습니다" and "버렸습니다" in top["aidrop"],
+      f"AI 사용 기록이 안 남았다: {top.get('aiuse')} / {top.get('aidrop')}")
+    ok(f"제출 · 심사 저장 — 1등 {top['name']} {top['score']}점 · AI 사용 기록까지")
+
+    # 목록 공개 — 이름만 넣은 대회는 첫 화면에 안 뜬다
+    A(len(api("/api/events")) == 0, "공개 안 한 대회가 첫 화면 목록에 떴다")
+    visit(f"/app#{ev}")
+    vtxt = pg.inner_text("#view")
+    A("아직 첫 화면 목록에 안 보입니다" in vtxt, f"공개 안내가 없다: {vtxt[:150]}")
+    A(post(f"/api/events/{ev}/list", {"list": True}, OK)[0] == 200, "목록 공개 실패")
+    A(len(api("/api/events")) == 1, "공개했는데 목록에 안 뜬다")
+    A(post(f"/api/events/{ev}/list", {"list": True})[0] == 403, "열쇠 없이 목록 공개가 됐다")
+    ok("첫 화면 목록 — 이름만 넣은 대회는 안 뜬다. 올려야 뜬다")
 
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
     visit(f"/app#{ev}")
@@ -491,6 +505,7 @@ with sync_playwright() as p:
                         (f"/api/events/{ev}/extend", {"minutes": 30})]:
         A(post(path, body_)[0] == 403, f"열쇠 없이 {path} 가 됐다")
     A(post(f"/api/teams/{top['id']}/checkin", {})[0] == 403, "열쇠 없이 체크인이 됐다")
+    A(post(f"/api/events/{ev}/list", {"list": False})[0] == 403, "열쇠 없이 목록 조작이 됐다")
 
     # 대회 삭제 — 이게 제일 위험하다
     dreq = urllib.request.Request(f"{BASE}/api/events/{ev}", method="DELETE")

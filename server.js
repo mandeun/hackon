@@ -46,6 +46,7 @@ function open(file) {
       opened   INTEGER NOT NULL DEFAULT 0,   -- 결과 공개. 켜면 팀이 자기 점수와 심사평을 본다
       okey     TEXT NOT NULL DEFAULT '',      -- 운영자 열쇠. 이걸 아는 사람만 운영 화면을 연다
       plan     TEXT NOT NULL DEFAULT '[]',    -- 진행 순서 [{at,what}]. 일정은 여기 한 곳에만 둔다
+      listed   INTEGER NOT NULL DEFAULT 0,    -- 첫 화면 목록에 띄울지. 빈 대회가 쌓이면 신뢰가 무너진다
       rubric   TEXT NOT NULL DEFAULT '[]',   -- [{key,label,weight}]
       created  TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -73,6 +74,8 @@ function open(file) {
       team   INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
       url    TEXT NOT NULL DEFAULT '',
       note   TEXT NOT NULL DEFAULT '',
+      aiuse  TEXT NOT NULL DEFAULT '',   -- AI 를 어느 단계에서 썼나
+      aidrop TEXT NOT NULL DEFAULT '',   -- AI 가 제안한 것 중 버리거나 고친 판단
       at     TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(team)
     );
@@ -146,6 +149,9 @@ function open(file) {
   try { db.exec('ALTER TABLE events ADD COLUMN opened INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN okey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'"); } catch {}
+  try { db.exec('ALTER TABLE events ADD COLUMN listed INTEGER NOT NULL DEFAULT 0'); } catch {}
+  for (const c of ['aiuse', 'aidrop'])
+    try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
   for (const c of ['role', 'found', 'note', 'agreed', 'came', 'want'])
@@ -269,6 +275,7 @@ function getEvent(db, id) {
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
   e.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(id).c;
   e.sponsors = db.prepare('SELECT * FROM sponsors WHERE event=? ORDER BY amount DESC').all(id);
+  e.missing = ready(e);
   return e;
 }
 
@@ -301,9 +308,11 @@ function pastDue(db, team) {
 
 function submit(db, team, b) {
   if (pastDue(db, team)) throw new HttpError(409, '제출 마감이 지났습니다');
-  db.prepare(`INSERT INTO submissions(team,url,note) VALUES(?,?,?)
-              ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note, at=datetime('now')`)
-    .run(team, b.url || '', b.note || '');
+  db.prepare(`INSERT INTO submissions(team,url,note,aiuse,aidrop) VALUES(?,?,?,?,?)
+              ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note,
+                aiuse=excluded.aiuse, aidrop=excluded.aidrop, at=datetime('now')`)
+    .run(team, b.url || '', b.note || '',
+         (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500));
 }
 
 /** 한 팀이 받은 성적표. 점수 분해와 심사평을 같이 준다.
@@ -359,7 +368,7 @@ function board(db, event, admin = false) {
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply,
            t.agreed, t.photo, t.came, t.size, t.want,
-           s.url, s.note
+           s.url, s.note, s.aiuse, s.aidrop
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
   const rows = teams.map(t => {
@@ -460,7 +469,7 @@ function tv(db, event) {
     화면에서 감추는 게 아니라 서버가 안 준다. 심사 중에 순위를 보면 점수가 끌려간다. */
 function judgeView(db, event, judge) {
   const e = getEvent(db, event);
-  const teams = db.prepare(`SELECT t.id, t.name, s.url, s.note
+  const teams = db.prepare(`SELECT t.id, t.name, s.url, s.note, s.aiuse, s.aidrop
                             FROM teams t LEFT JOIN submissions s ON s.team = t.id
                             WHERE t.event = ? ORDER BY t.id`).all(event);
   for (const t of teams) {
@@ -512,6 +521,17 @@ function outcomes(db, event) {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+/** 첫 화면 목록에 올릴 준비가 됐나. 막지는 않고 무엇이 비었는지 알려 준다.
+    빈 대회 카드가 쌓이면 목록 전체의 신뢰가 무너진다. */
+function ready(e) {
+  const miss = [];
+  if (!e.host || e.host === '주최자') miss.push('여는 사람');
+  if (e.starts === e.ends && e.starts === today()) miss.push('날짜');
+  if (!e.due) miss.push('제출 마감');
+  if (!(e.plan || []).length) miss.push('진행 순서');
+  return miss;
+}
 
 /** 대회 하나를 통째로 담는다. 노트북이 죽으면 이걸로 살린다. */
 function dump(db, event) {
@@ -617,8 +637,11 @@ function routes(db) {
         let m;
 
         if (p === '/api/events' && req.method === 'GET')
+          /* 목록에는 공개한 것만 싣는다. 이름만 넣고 만 대회가 첫 화면에 쌓이면
+             들어온 사람이 "여긴 빈 곳이구나" 하고 나간다. */
           return json(res, 200, db.prepare(
-            'SELECT id,title,host,starts,ends,prize FROM events ORDER BY created DESC LIMIT 50').all());
+            `SELECT id,title,host,starts,ends,prize FROM events
+             WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all());
 
         const key = req.headers['x-okey'] || q.k || '';
 
@@ -667,6 +690,13 @@ function routes(db) {
         if ((m = p.match(/^\/api\/teams\/(\d+)\/card$/)) && req.method === 'GET')
           return json(res, 200, card(db, +m[1]));
 
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/list$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key);
+          const b = await body(req);
+          db.prepare('UPDATE events SET listed=? WHERE id=?')
+            .run(b.list === false ? 0 : 1, m[1]);
+          return json(res, 200, getEvent(db, m[1]));
+        }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/open$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key);
           const b = await body(req);
@@ -886,6 +916,31 @@ function selftest() {
   ok(cd.reviews.length === 1 && cd.reviews[0].good.includes('문제를'), '심사평이 붙는다');
   ok(!('judge' in cd.reviews[0]), '심사평에 이름이 안 붙는다');
   db.prepare('UPDATE events SET opened=0 WHERE id=?').run(ev);
+
+  // 목록 공개 — 이름만 넣은 대회는 첫 화면에 안 뜬다
+  const bare = createEvent(db, { title: '이름만넣은대회' }).id;
+  ok(db.prepare('SELECT listed FROM events WHERE id=?').get(bare).listed === 0,
+     '만들자마자는 목록에 안 뜬다');
+  const miss = getEvent(db, bare).missing;
+  ok(miss.includes('여는 사람') && miss.includes('날짜') && miss.includes('제출 마감'),
+     '무엇이 비었는지 알려 준다 (' + miss.join() + ')');
+  editEvent(db, bare, { host: '유재원', starts: '2026-12-05', ends: '2026-12-05',
+                        due: '2026-12-05T17:00' });
+  ok(getEvent(db, bare).missing.length === 0, '채우면 빈 것이 없어진다 ('
+     + JSON.stringify(getEvent(db, bare).missing) + ')');
+  db.prepare('UPDATE events SET listed=1 WHERE id=?').run(bare);
+  ok(db.prepare('SELECT COUNT(*) c FROM events WHERE listed=1').get().c === 1,
+     '공개한 것만 목록에 든다');
+  db.prepare('DELETE FROM events WHERE id=?').run(bare);
+
+  // 제출할 때 AI 를 어떻게 썼는지 남긴다.
+  // 따로 연 대회에서 본다 — 여기에 제출을 하나 더하면 아래 제출 현황 검사가 흔들린다.
+  const evAI = createEvent(db, { title: 'AI기록시험' }).id;
+  const ta = joinTeam(db, evAI, { name: '기록팀', agree: true });
+  submit(db, ta, { url: 'https://example.com/b', aiuse: '화면 만들 때', aidrop: '추천 로직은 버렸다' });
+  const sb = board(db, evAI, true).rows.find(r => r.id === ta);
+  ok(sb.aiuse === '화면 만들 때' && sb.aidrop === '추천 로직은 버렸다', 'AI 사용 기록이 남는다');
+  db.prepare('DELETE FROM events WHERE id=?').run(evAI);
 
   // 팀 짜기 — 혼자 온 사람과 자리 남은 팀
   const soloTeam = joinTeam(db, ev, { name: '혼자온사람', agree: true, solo: true, role: '기획' });

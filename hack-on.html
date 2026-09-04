@@ -453,6 +453,26 @@ const SCREEN = {
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
       ${dueBox(e)}
 
+      ${e.listed
+        ? `<div class="card" style="border-color:#CDE6DD;background:var(--ok-l)">
+             <div class="meta"><b style="color:var(--ok)">첫 화면 목록에 보입니다.</b>
+               아무나 들어와서 이 대회를 찾을 수 있습니다.</div>
+             <div style="height:10px"></div>
+             <button class="btn sec sm" id="b-unlist">목록에서 내리기</button>
+           </div>`
+        : `<div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
+             <h3 style="color:var(--warn)">아직 첫 화면 목록에 안 보입니다</h3>
+             <div class="meta">지금은 <b>주소를 아는 사람만</b> 들어옵니다.
+               그대로 두셔도 대회는 굴러갑니다.<br>
+               ${(e.missing || []).length
+                 ? `올리기 전에 이것들을 채우시길 권합니다 —
+                    <b>${(e.missing || []).map(esc).join(' · ')}</b>.
+                    빈 대회가 목록에 쌓이면 들어온 사람이 그냥 나갑니다.`
+                 : '채울 것은 다 채우셨습니다.'}</div>
+             <div style="height:10px"></div>
+             <button class="btn sm" id="b-list">첫 화면 목록에 올리기</button>
+           </div>`}
+
       ${(() => { const todo = !e.due || !e.prize || (e.starts === e.ends && !e.topic);
                  return `<details${todo ? ' open' : ''}>
         <summary>${todo ? '아직 안 정한 것' : '대회 정보 고치기'}
@@ -753,6 +773,10 @@ const SCREEN = {
         ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ''}
         ${t.url ? `<div class="share">${esc(t.url)}</div>`
                 : '<div class="meta">아직 제출하지 않았습니다.</div>'}
+        ${(t.aiuse || t.aidrop) ? `<div class="meta" style="margin-top:8px">
+          ${t.aiuse ? `<b>AI 를 쓴 곳</b> ${esc(t.aiuse)}<br>` : ''}
+          ${t.aidrop ? `<b>버린 판단</b> ${esc(t.aidrop)}` : ''}
+        </div>` : ''}
         ${d.event.rubric.map(r => `
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
           <input class="jv-${esc(t.id)}" data-key="${esc(r.key)}" type="number" min="0" max="100"
@@ -878,6 +902,14 @@ const SCREEN = {
              진행자가 마감을 미루면 다시 열립니다.</div>` : ''}
         <label>링크</label><input id="s-url" value="${esc(t.url || '')}" placeholder="https://...">
         <label>설명</label><textarea id="s-note" rows="3" placeholder="무엇을 만들었는지 짧게">${esc(t.note || '')}</textarea>
+        <label>AI 를 어느 단계에서 쓰셨나요 <span class="pill ok">막지 않습니다</span></label>
+        <textarea id="s-aiuse" rows="2"
+          placeholder="예) 화면 만들 때. 데이터 정리할 때">${esc(t.aiuse || '')}</textarea>
+        <label>AI 가 준 것 중 버리거나 고친 판단이 있나요</label>
+        <textarea id="s-aidrop" rows="2"
+          placeholder="예) 추천 로직을 제안했는데 우리 문제와 안 맞아서 버렸습니다">${esc(t.aidrop || '')}</textarea>
+        <div class="meta">이 두 줄이 심사에서 가장 크게 보이는 곳입니다.
+          만드는 것은 이제 누구나 합니다. <b>무엇을 버렸는지가 그 팀의 판단입니다.</b></div>
         <div style="height:10px"></div>
         <button class="btn sm" id="s-save">제출하기</button>
       </div>
@@ -1111,7 +1143,8 @@ function wire() {
     if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
     try {
       await api(`/teams/${curTeam}/submit`, { method: 'POST',
-        body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim() } });
+        body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim(),
+                aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim() } });
       flash('제출했습니다');
     } catch (e) { flash(e.message, true); }
   };
@@ -1182,6 +1215,17 @@ function wire() {
       flash('저장했습니다');
     } catch (e) { flash(e.message, true); }
   });
+
+  const lst = $('#b-list'), unlst = $('#b-unlist');
+  const setList = async on => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try {
+      await api(`/events/${cur}/list`, { method: 'POST', body: { list: on } });
+      flash(on ? '첫 화면 목록에 올렸습니다' : '목록에서 내렸습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+  if (lst) lst.onclick = () => setList(true);
+  if (unlst) unlst.onclick = () => setList(false);
 
   const op = $('#b-open');
   if (op) op.onclick = async () => {
