@@ -16,7 +16,7 @@
 
 ## 지금 열려 있는 곳
 
-**https://hackon.fly.dev**
+**https://hackon.mandeun.com**
 
 누구나 들어가서 대회를 열 수 있다. 서버는 평소에 꺼져 있다가 첫 접속에 몇 초 걸려 깨어난다.
 행사 당일에는 `fly.toml` 의 `min_machines_running` 을 1 로 올려 두고 켜 둔다.
@@ -29,7 +29,7 @@
 
 | 무엇 | 어떻게 | 비고 |
 |---|---|---|
-| **웹앱** | https://hackon.fly.dev (첫 화면) · /app (대회 굴리는 곳) | 링크만 주면 설치 없이 참여 |
+| **웹앱** | https://hackon.mandeun.com (첫 화면) · /app (대회 굴리는 곳) | 링크만 주면 설치 없이 참여 |
 | **윈도우 프로그램** | `HACKON.bat` 더블클릭 (콘솔까지 없애려면 `HACKON.vbs`) | 주소창 없는 앱 창으로 뜬다. 창을 닫으면 서버도 꺼진다 |
 | **휴대폰 앱** | 브라우저에서 “홈 화면에 추가” | PWA. 아이콘이 생기고 전체 화면으로 뜬다 |
 
@@ -176,17 +176,17 @@ node desktop.js --check   # 띄우지 않고 브라우저·포트·화면 파일
 키가 없으면 로그인 단추가 아예 안 보이고 열쇠로만 돈다. 켜려면 셋을 넣는다.
 
 ```bash
-fly secrets set KAKAO_KEY=<REST API 키> KAKAO_SECRET=<보안 키> SITE=https://hackon.fly.dev
+fly secrets set KAKAO_KEY=<REST API 키> KAKAO_SECRET=<보안 키> SITE=https://hackon.mandeun.com
 ```
 
 카카오 개발자 사이트에서 할 일은 네 가지다.
 
 1. 애플리케이션 추가 → **REST API 키**를 복사
 2. 카카오 로그인 → **사용 설정 ON**
-3. **리다이렉트 URI** 등록 — `https://hackon.fly.dev/auth/kakao/done`
+3. **리다이렉트 URI** 등록 — `https://hackon.mandeun.com/auth/kakao/done`
 4. 동의항목 → **닉네임만** 필수로. 이메일은 켜지 않는다 (비즈 앱 심사가 붙는다)
 
-플랫폼 등록은 웹 도메인 `https://hackon.fly.dev` 하나면 된다.
+플랫폼 등록은 웹 도메인 `https://hackon.mandeun.com` 하나면 된다.
 도메인을 옮기면 3번과 `SITE` 만 같이 바꾼다.
 
 ## 노트북이 죽으면
