@@ -176,6 +176,41 @@ with sync_playwright() as p:
     A("본 사람 심사1" in tt, f"누가 봤는지 안 나온다: {tt[:120]}")
     ok("상태 배지 · 심사 진행 현황 (전원이 다 본 팀 1/2)")
 
+    # ── 심사평과 성적표 — 불만 1위가 "왜 떨어졌는지 모른다" 였다 ──
+    jc3 = b.new_context()
+    jp3 = jc3.new_page()
+    jp3.goto(f"{BASE}/j/{ev}")
+    jp3.wait_for_selector("body[data-ready='1']", timeout=8000)
+    jp3.fill("#jn", "심사1"); jp3.click("#jn-go"); jp3.wait_for_timeout(700)
+    tid = str(top["id"])
+    jp3.fill(f".jg-{tid}", "문제를 잘 골랐습니다")
+    jp3.fill(f".jn2-{tid}", "실제로 쓰는 사람을 한 명만 만나 보세요")
+    jp3.click(f'[data-jsave="{tid}"]')
+    jp3.wait_for_timeout(800)
+    jc3.close()
+
+    # 공개하기 전에는 팀도 못 본다
+    cd = api(f"/api/teams/{tid}/card")
+    A(cd["opened"] is False, f"공개 전인데 성적표가 열렸다: {cd}")
+    A(post(f"/api/events/{ev}/open", {"open": True})[0] == 200, "결과 공개 실패")
+    cd = api(f"/api/teams/{tid}/card")
+    A(cd["opened"] is True and len(cd["items"]) == 4, f"성적표가 안 열렸다: {cd}")
+    A(cd["reviews"] and "문제를" in cd["reviews"][0]["good"], f"심사평이 없다: {cd['reviews']}")
+    A("judge" not in cd["reviews"][0], "심사평에 심사위원 이름이 붙었다")
+    # 어디서 깎였는지 보이는가 — 항목별 점수와 그 항목 배점
+    A(all("got" in i and "weight" in i for i in cd["items"]), "항목별 분해가 없다")
+    ok(f"성적표 — {len(cd['items'])}개 항목 분해 + 심사평 {len(cd['reviews'])}건 (이름 없이)")
+
+    # 팀 화면에서 실제로 보이는가
+    visit(f"/#{ev}")
+    pg.click("tr[data-team]")
+    pg.wait_for_timeout(800)
+    ctxt = pg.inner_text("#view")
+    A("내 점수" in ctxt and "심사평" in ctxt and "문제를 잘 골랐습니다" in ctxt,
+      f"팀 화면에 성적표가 안 보인다: {ctxt[:200]}")
+    ok("팀이 자기 점수 분해와 심사평을 본다")
+    post(f"/api/events/{ev}/open", {"open": False})
+
     # ── 심사 눈높이 — 운영자만 본다 ─────────────────────────
     # 짜게 주는 심사위원을 하나 더 넣어 차이를 만든다
     A(post(f"/api/teams/{top['id']}/score",
@@ -220,6 +255,17 @@ with sync_playwright() as p:
     txt = pg.inner_text("#view")
     A("제출 마감까지" in txt, f"남은 시간이 안 보인다: {txt[:100]}")
     ok("마감까지 남은 시간이 뜬다")
+
+    # 공유 주소 — localhost 로 나가면 참가자 폰에서 안 열린다
+    share = pg.inner_text(".share")
+    net = api("/api/health")["net"]
+    if net:
+        A("localhost" not in share and "127.0.0.1" not in share,
+          f"공유 주소가 랜 주소가 아니다: {share}")
+        A(net[0] in share, f"공유 주소에 랜 주소가 없다: {share} / {net}")
+        ok(f"공유 주소가 랜 주소로 나간다 — {share.strip()}")
+    else:
+        ok("랜 주소가 없는 환경이라 공유 주소 검사는 건너뜀")
 
     # 마감이 지난 대회를 따로 만들어 서버가 막는지 본다.
     # 화면만 잠그면 주소를 아는 사람은 그냥 낸다. 그래서 서버를 때려서 확인한다.

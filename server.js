@@ -17,6 +17,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = __dirname;
@@ -42,6 +43,7 @@ function open(file) {
       prize    INTEGER NOT NULL DEFAULT 0,
       cap      INTEGER NOT NULL DEFAULT 0,   -- 0 = 제한 없음
       due      TEXT NOT NULL DEFAULT '',      -- 제출 마감 'YYYY-MM-DDTHH:MM'. 비면 안 막는다
+      opened   INTEGER NOT NULL DEFAULT 0,   -- 결과 공개. 켜면 팀이 자기 점수와 심사평을 본다
       rubric   TEXT NOT NULL DEFAULT '[]',   -- [{key,label,weight}]
       created  TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -78,6 +80,18 @@ function open(file) {
       key    TEXT NOT NULL,
       value  REAL NOT NULL,
       UNIQUE(team, judge, key)
+    );
+
+    /* 심사평. 점수만 주고 이유를 안 주면 참가자는 아무것도 못 배운다.
+       국내외 해커톤 불만 1순위가 "왜 떨어졌는지 모른다" 였다. */
+    CREATE TABLE IF NOT EXISTS reviews(
+      id     INTEGER PRIMARY KEY,
+      team   INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      judge  TEXT NOT NULL,
+      good   TEXT NOT NULL DEFAULT '',   -- 좋았던 점
+      next   TEXT NOT NULL DEFAULT '',   -- 더 하면 좋을 것
+      at     TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(team, judge)
     );
 
     CREATE TABLE IF NOT EXISTS sponsors(
@@ -125,6 +139,7 @@ function open(file) {
   `);
   /* 이미 쓰던 DB 에도 칸을 붙인다. 있으면 에러가 나는데 그건 그냥 넘긴다. */
   try { db.exec("ALTER TABLE events ADD COLUMN due TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec('ALTER TABLE events ADD COLUMN opened INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
   for (const c of ['role', 'found', 'note', 'agreed', 'came'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
@@ -134,6 +149,18 @@ function open(file) {
 /* #endregion reuse:db-open */
 
 const nid = () => crypto.randomBytes(4).toString('hex');
+
+/** 이 컴퓨터의 랜 주소. 참가자 폰은 localhost 로 못 온다.
+    유선과 무선이 다를 수 있어서 찾은 것을 다 준다. */
+function lanIPs() {
+  const out = [];
+  for (const list of Object.values(os.networkInterfaces() || {}))
+    for (const n of list || [])
+      if (n.family === 'IPv4' && !n.internal) out.push(n.address);
+  // 192.168 · 10. 대역을 앞에 둔다. 가상 어댑터 주소가 먼저 잡히는 일이 많다.
+  return out.sort((a, b) => (b.startsWith('192.168') || b.startsWith('10.') ? 1 : 0)
+                          - (a.startsWith('192.168') || a.startsWith('10.') ? 1 : 0));
+}
 
 /* ───────────────────── 도메인 ───────────────────── */
 
@@ -201,6 +228,34 @@ function submit(db, team, b) {
     .run(team, b.url || '', b.note || '');
 }
 
+/** 한 팀이 받은 성적표. 점수 분해와 심사평을 같이 준다.
+    운영자가 결과를 공개하기 전에는 그 팀도 못 본다. */
+function card(db, team) {
+  const t = db.prepare(`SELECT t.id, t.name, t.event, e.opened, e.rubric, e.title
+                        FROM teams t JOIN events e ON e.id = t.event WHERE t.id = ?`).get(team);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  if (!t.opened) return { opened: false, name: t.name, title: t.title };
+  const rubric = JSON.parse(t.rubric);
+  const by = {};
+  for (const r of db.prepare('SELECT judge, key, value FROM scores WHERE team=?').all(team)) {
+    (by[r.judge] = by[r.judge] || {})[r.key] = r.value;
+  }
+  /* 항목별 평균과 그 항목의 만점. 어디서 깎였는지 한눈에 보이게 한다. */
+  const items = rubric.map(r => {
+    const vals = Object.values(by).map(v => v[r.key]).filter(v => v !== undefined);
+    const avg = vals.length ? vals.reduce((a, c) => a + c, 0) / vals.length : 0;
+    return { key: r.key, label: r.label, weight: r.weight,
+             avg: Math.round(avg * 10) / 10, got: Math.round(avg * r.weight) / 100 };
+  });
+  return {
+    opened: true, name: t.name, title: t.title, items,
+    total: Math.round(items.reduce((a, c) => a + c.got, 0) * 10) / 10,
+    judges: Object.keys(by).length,
+    /* 누가 뭐라고 했는지는 이름 없이 준다. 이름을 붙이면 심사위원이 솔직하게 못 쓴다. */
+    reviews: db.prepare('SELECT good, next FROM reviews WHERE team=? ORDER BY id').all(team),
+  };
+}
+
 function score(db, team, b) {
   if (!b.judge) throw new HttpError(400, '심사위원 이름이 필요합니다');
   const t = db.prepare('SELECT event FROM teams WHERE id=?').get(team);
@@ -214,6 +269,10 @@ function score(db, team, b) {
                 ON CONFLICT(team,judge,key) DO UPDATE SET value=excluded.value`)
       .run(team, b.judge, k, v);
   }
+  if (b.good !== undefined || b.next !== undefined)
+    db.prepare(`INSERT INTO reviews(team,judge,good,next) VALUES(?,?,?,?)
+                ON CONFLICT(team,judge) DO UPDATE SET good=excluded.good, next=excluded.next`)
+      .run(team, b.judge, (b.good || '').slice(0, 500), (b.next || '').slice(0, 500));
 }
 
 /** 순위 — 항목별 가중 평균. 심사위원 수가 달라도 평균이라 흔들리지 않는다. */
@@ -273,6 +332,10 @@ function judgeView(db, event, judge) {
       for (const r of db.prepare('SELECT key, value FROM scores WHERE team=? AND judge=?')
                         .all(t.id, judge)) t.mine[r.key] = r.value;
     t.doneByMe = Object.keys(t.mine).length > 0;
+    t.review = judge
+      ? (db.prepare('SELECT good, next FROM reviews WHERE team=? AND judge=?').get(t.id, judge)
+         || { good: '', next: '' })
+      : { good: '', next: '' };
   }
   // 아직 안 본 팀을 위로. 심사위원이 스스로 남은 것을 안다.
   teams.sort((a, b) => (a.doneByMe ? 1 : 0) - (b.doneByMe ? 1 : 0));
@@ -405,6 +468,14 @@ function routes(db) {
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
           return json(res, 201, { ok: true });
         }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/card$/)) && req.method === 'GET')
+          return json(res, 200, card(db, +m[1]));
+
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/open$/)) && req.method === 'POST') {
+          const b = await body(req);
+          db.prepare('UPDATE events SET opened=? WHERE id=?').run(b.open === false ? 0 : 1, m[1]);
+          return json(res, 200, { opened: b.open === false ? 0 : 1 });
+        }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/spread$/)) && req.method === 'GET')
           return json(res, 200, spread(db, m[1]));
 
@@ -475,6 +546,7 @@ function routes(db) {
         if (p === '/api/health') return json(res, 200, {
           ok: true, events: db.prepare('SELECT COUNT(*) c FROM events').get().c,
           teams: db.prepare('SELECT COUNT(*) c FROM teams').get().c,
+          net: lanIPs(), port: +PORT,
         });
         throw new HttpError(404, '없는 주소입니다');
       }
@@ -556,6 +628,18 @@ function selftest() {
   submit(db, pt, { url: 'https://example.com/late' });
   ok(!!db.prepare('SELECT url FROM submissions WHERE team=?').get(pt), '마감을 미루면 다시 받는다');
 
+  // 성적표 — 공개하기 전에는 팀도 못 본다
+  score(db, t1, { judge: '심사1', values: { idea: 90, make: 80, use: 70, tell: 60 },
+                  good: '문제를 잘 골랐습니다', next: '실제로 쓰는 사람을 한 명만 만나 보세요' });
+  ok(card(db, t1).opened === false, '공개 전에는 성적표가 안 열린다');
+  db.prepare('UPDATE events SET opened=1 WHERE id=?').run(ev);
+  const cd = card(db, t1);
+  ok(cd.items.length === 4 && cd.items[0].label === '독창성', '항목별로 쪼개서 보여 준다');
+  ok(cd.items[0].got === 27, '항목 배점이 반영된다 (90 * 30% = 27)');
+  ok(cd.reviews.length === 1 && cd.reviews[0].good.includes('문제를'), '심사평이 붙는다');
+  ok(!('judge' in cd.reviews[0]), '심사평에 이름이 안 붙는다');
+  db.prepare('UPDATE events SET opened=0 WHERE id=?').run(ev);
+
   // 심사 편차 — 후한 사람과 짠 사람의 차이
   const sp0 = spread(db, ev);
   ok(sp0.rows.length === 2, '심사위원별 평균이 나온다 (' + JSON.stringify(sp0.rows) + ')');
@@ -608,6 +692,8 @@ function selftest() {
 
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
+  ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
+
   console.log(`점검 통과 — ${n}가지`);
 }
 
@@ -615,8 +701,16 @@ function selftest() {
 if (require.main === module) {
   if (process.argv.includes('--test')) { selftest(); process.exit(0); }
   const db = open(DBFILE);
-  http.createServer(routes(db)).listen(PORT, () => {
-    console.log(`HACK:ON  →  http://localhost:${PORT}`);
+  /* 0.0.0.0 으로 듣는다. 이걸 안 하면 같은 와이파이의 폰이 못 붙는다. */
+  http.createServer(routes(db)).listen(PORT, '0.0.0.0', () => {
+    console.log(`HACK:ON  →  http://localhost:${PORT}   (운영자용)`);
+    const ips = lanIPs();
+    if (ips.length) {
+      console.log('참가자에게는 아래 주소를 알려 주세요 — 같은 와이파이여야 합니다.');
+      for (const ip of ips) console.log(`             http://${ip}:${PORT}`);
+    } else {
+      console.log('랜 주소를 못 찾았습니다. 와이파이에 연결돼 있는지 확인해 주세요.');
+    }
   });
 }
 module.exports = { open, createEvent, joinTeam, submit, score, board, outcomes };

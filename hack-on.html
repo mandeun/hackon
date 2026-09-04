@@ -76,6 +76,9 @@ nav .i{font-size:17px}
 .agree .meta{line-height:1.6}
 .ck{display:flex;gap:8px;align-items:flex-start;margin-top:9px;font-size:13px;font-weight:600}
 .ck input{width:16px;height:16px;flex:none;margin-top:2px}
+.bar{height:7px;border-radius:99px;background:var(--rule);overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--navy)}
+.rv{border-left:3px solid var(--rule);padding:2px 0 2px 10px;margin:8px 0}
 .shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
 .shrow .share{flex:1;margin-top:0}
 @media print{
@@ -143,6 +146,8 @@ const DEMO = {
 };
 
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '';
+/* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
+let NET = null;
 const $ = s => document.querySelector(s);
 const view = $('#view');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -215,7 +220,17 @@ let msg = null;
 function flash(text, bad) { msg = { text, bad }; render(); setTimeout(() => { msg = null; render(); }, 2600); }
 function head() { return msg ? `<div class="${msg.bad ? 'err' : 'ok-msg'}">${esc(msg.text)}</div>` : ''; }
 
+/** 공유에 쓸 바깥 주소. 운영자가 localhost 로 보고 있어도 참가자용은 랜 주소로 준다. */
+function shareBase() {
+  if (!LIVE) return 'http://localhost:8788';
+  const h = location.hostname;
+  if (h !== 'localhost' && h !== '127.0.0.1') return location.origin;   // 이미 랜 주소로 보고 있다
+  if (NET && NET.net && NET.net.length) return `http://${NET.net[0]}:${NET.port}`;
+  return location.origin;
+}
+
 async function render() {
+  if (LIVE && !NET) { try { NET = await api('/health'); } catch { NET = { net: [] }; } }
   $('#mode').textContent = LIVE ? '서버 연결됨' : '데모';
   $('#mode').className = 'chip' + (LIVE ? ' live' : '');
   // 팀 화면은 순위에서 들어가는 곳이라 아래 탭은 '순위'를 켜 둔다
@@ -294,15 +309,22 @@ const SCREEN = {
             : '<br>눈높이가 맞는 편입니다.'}</div>
       </div>` : ''}
       <div class="card" style="padding:11px 13px">
-        <div class="meta">아래 주소를 그대로 보내면 로그인 없이 열립니다. 협찬사·참가자용.</div>
+        <div class="meta">아래 주소를 그대로 보내면 로그인 없이 열립니다. 협찬사·참가자용.
+          ${NET && NET.net && NET.net.length > 1
+            ? `<br>랜 주소가 여러 개입니다. 안 열리면 다른 것을 쓰세요 —
+               ${NET.net.slice(1).map(ip => `http://${esc(ip)}:${NET.port}`).join(' · ')}`
+            : ''}
+          ${NET && NET.net && !NET.net.length
+            ? '<br><b class="late">랜 주소를 못 찾았습니다.</b> 와이파이 연결을 확인하세요. 지금 주소는 이 노트북에서만 열립니다.'
+            : ''}</div>
         <div class="shrow">
-          <div class="share">${LIVE ? location.origin : 'http://localhost:8788'}/e/${esc(e.id)}</div>
+          <div class="share">${shareBase()}/e/${esc(e.id)}</div>
           <button class="btn sec sm" id="b-copy">복사</button>
         </div>
         <div class="meta" style="margin-top:10px">심사위원에게는 아래 주소를 보냅니다.
           점수만 넣을 수 있고 순위는 안 보입니다.</div>
         <div class="shrow">
-          <div class="share" id="jlink">${LIVE ? location.origin : 'http://localhost:8788'}/j/${esc(e.id)}</div>
+          <div class="share" id="jlink">${shareBase()}/j/${esc(e.id)}</div>
           <button class="btn sec sm" id="b-copyj">복사</button>
         </div>
       </div>
@@ -327,7 +349,16 @@ const SCREEN = {
       </div>
 
       <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>
-      <button class="btn sec sm" id="b-report">결과 보고서 보기</button>`;
+      <button class="btn sec sm" id="b-report">결과 보고서 보기</button>
+      <div class="card" style="margin-top:10px">
+        <h3>결과 공개</h3>
+        <div class="meta">켜면 각 팀이 <b>자기 점수 분해와 심사평</b>을 봅니다.
+          다른 팀 점수는 안 보입니다. 시상이 끝난 뒤에 켜세요.<br>
+          국내외 해커톤에서 참가자 불만 1위가 “왜 떨어졌는지 모른다” 입니다.</div>
+        <div style="height:10px"></div>
+        <button class="btn ${e.opened ? 'sec' : ''} sm" id="b-open">${
+          e.opened ? '공개 중 — 다시 닫기' : '결과 공개하기'}</button>
+      </div>`;
   },
 
   /* 공개 화면 — 로그인 없이 링크만으로 보는 읽기 전용. 협찬사와 참가자에게 뿌리는 주소다. */
@@ -399,7 +430,9 @@ const SCREEN = {
       ${dueBox(d.event)}
       <div class="card" style="padding:11px 13px"><div class="meta">
         심사 기준 · ${d.event.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}<br>
-        시작한 뒤에는 기준이 바뀌지 않습니다. 다른 분 점수와 순위는 보이지 않습니다.
+        시작한 뒤에는 기준이 바뀌지 않습니다. 다른 분 점수와 순위는 보이지 않습니다.<br>
+        <b>한 줄이라도 심사평을 남겨 주세요.</b> 참가자가 가장 아쉬워하는 것이
+        “왜 떨어졌는지 모른다” 입니다. 이름 없이 전달됩니다.
       </div></div>
 
       ${d.teams.map(t => `<div class="card">
@@ -412,6 +445,12 @@ const SCREEN = {
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
           <input class="jv-${esc(t.id)}" data-key="${esc(r.key)}" type="number" min="0" max="100"
                  value="${t.mine[r.key] ?? 70}">`).join('')}
+        <label>좋았던 점 <span class="pill ok">참가팀에게 전달됩니다</span></label>
+        <textarea class="jg-${esc(t.id)}" rows="2"
+          placeholder="한 줄이면 됩니다">${esc(t.review.good)}</textarea>
+        <label>더 하면 좋을 것</label>
+        <textarea class="jn2-${esc(t.id)}" rows="2"
+          placeholder="한 줄이면 됩니다">${esc(t.review.next)}</textarea>
         <div style="height:10px"></div>
         <button class="btn sm" data-jsave="${esc(t.id)}">${t.doneByMe ? '점수 고치기' : '점수 저장'}</button>
       </div>`).join('')}`;
@@ -505,6 +544,7 @@ const SCREEN = {
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const t = d.rows.find(r => String(r.id) === String(curTeam)) || d.rows[0];
     if (!t) return `<h2>팀이 없습니다</h2>`;
+    const cardData = LIVE ? await api(`/teams/${t.id}/card`) : null;
     return `<button class="btn sec sm" data-go="board">← 순위로</button>
       <h2 style="margin-top:12px">${esc(t.name)}</h2>
       <p class="sub">${t.rank}위 · ${t.score}점 · 심사 ${t.judges}명</p>
@@ -526,6 +566,23 @@ const SCREEN = {
         <div style="height:10px"></div>
         <button class="btn sm" id="s-save">제출하기</button>
       </div>
+
+      ${LIVE && cardData ? (cardData.opened ? `<div class="card">
+        <h3>내 점수</h3>
+        <div class="meta">심사위원 ${cardData.judges}명의 평균입니다. 합계 <b>${cardData.total}점</b></div>
+        ${cardData.items.map(i => `<div style="margin-top:10px">
+          <div class="meta">${esc(i.label)} · 100점 만점에 ${i.avg}점
+            <span style="float:right">${i.got} / ${i.weight}점</span></div>
+          <div class="bar"><i style="width:${i.avg}%"></i></div>
+        </div>`).join('')}
+        ${cardData.reviews.length ? `<div style="margin-top:14px"><b style="font-size:13px">심사평</b>
+          ${cardData.reviews.map(r => `<div class="rv">
+            ${r.good ? `<div class="meta"><b>좋았던 점</b> ${esc(r.good)}</div>` : ''}
+            ${r.next ? `<div class="meta"><b>더 하면</b> ${esc(r.next)}</div>` : ''}
+          </div>`).join('')}</div>` : ''}
+      </div>` : `<div class="card"><div class="meta">
+        결과는 아직 공개되지 않았습니다. 공개되면 항목별 점수와 심사평을 여기서 보실 수 있습니다.
+      </div></div>`) : ''}
 
       <div class="card">
         <h3>심사</h3>
@@ -748,12 +805,24 @@ function wire() {
   document.querySelectorAll('[data-jsave]').forEach(b => b.onclick = async () => {
     const id = b.dataset.jsave, values = {};
     document.querySelectorAll('.jv-' + id).forEach(i => { values[i.dataset.key] = +i.value; });
+    const g = document.querySelector('.jg-' + id), nx = document.querySelector('.jn2-' + id);
     try {
       await api(`/teams/${id}/score`, { method: 'POST',
-        body: { judge: localStorage.getItem('hackon.judge'), values } });
+        body: { judge: localStorage.getItem('hackon.judge'), values,
+                good: g ? g.value : '', next: nx ? nx.value : '' } });
       flash('저장했습니다');
     } catch (e) { flash(e.message, true); }
   });
+
+  const op = $('#b-open');
+  if (op) op.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try {
+      const now = op.textContent.includes('닫기');
+      const r = await api(`/events/${cur}/open`, { method: 'POST', body: { open: !now } });
+      flash(r.opened ? '결과를 공개했습니다' : '결과 공개를 닫았습니다');
+    } catch (e) { flash(e.message, true); }
+  };
 
   const pr = $('#b-print');
   if (pr) pr.onclick = () => window.print();
