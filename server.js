@@ -173,6 +173,37 @@ const DEFAULT_RUBRIC = [
   { key: 'tell', label: '전달력', weight: 15 },
 ];
 
+/** 대회를 만든 뒤 나머지를 채운다. 처음부터 다 물으면 만들다가 그만둔다. */
+const EDITABLE = ['title', 'host', 'topic', 'starts', 'ends', 'prize', 'cap', 'due'];
+function editEvent(db, id, b) {
+  const set = [], val = [];
+  for (const k of EDITABLE) {
+    if (b[k] === undefined) continue;
+    set.push(`${k}=?`);
+    val.push(k === 'prize' || k === 'cap' ? (+b[k] || 0) : String(b[k]));
+  }
+  if (!set.length) return;
+  db.prepare(`UPDATE events SET ${set.join(',')} WHERE id=?`).run(...val, id);
+}
+
+/** 참가팀이 나중에 채우는 칸. 비어 있는 것만 채운다 —
+    남의 팀 id 를 아는 사람이 이미 적은 것을 덮어쓰면 안 된다. */
+function moreTeam(db, id, b) {
+  const t = db.prepare('SELECT * FROM teams WHERE id=?').get(id);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  const set = [], val = [];
+  for (const k of ['contact', 'role', 'found', 'note']) {
+    if (b[k] === undefined || !String(b[k]).trim()) continue;
+    if (t[k]) continue;                       // 이미 적힌 것은 안 건드린다
+    set.push(`${k}=?`); val.push(String(b[k]).slice(0, 300));
+  }
+  if (b.solo !== undefined && !t.solo) { set.push('solo=?'); val.push(b.solo ? 1 : 0); }
+  if (b.photo !== undefined && !t.photo) { set.push('photo=?'); val.push(b.photo ? 1 : 0); }
+  if (!set.length) return { filled: 0 };
+  db.prepare(`UPDATE teams SET ${set.join(',')} WHERE id=?`).run(...val, id);
+  return { filled: set.length };
+}
+
 function createEvent(db, b) {
   if (!b.title) throw new HttpError(400, '대회 이름이 필요합니다');
   const id = b.id || nid();
@@ -527,6 +558,11 @@ function routes(db) {
           return json(res, 201, createEvent(db, await body(req)));
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)$/))) {
+          if (req.method === 'PATCH') {
+            needAdmin(db, m[1], key);
+            editEvent(db, m[1], await body(req));
+            return json(res, 200, getEvent(db, m[1]));
+          }
           if (req.method === 'GET') {
             const e = getEvent(db, m[1]);
             e.admin = isAdmin(db, m[1], key);
@@ -626,6 +662,9 @@ function routes(db) {
           db.prepare('UPDATE events SET due=? WHERE id=?').run(txt, m[1]);
           return json(res, 200, { due: txt, minutes: mins });
         }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/more$/)) && req.method === 'POST')
+          return json(res, 200, moreTeam(db, +m[1], await body(req)));
+
         if ((m = p.match(/^\/api\/teams\/(\d+)\/checkin$/)) && req.method === 'POST') {
           /* 등록 데스크에서 누른다. 다시 누르면 취소 — 잘못 누르는 일이 실제로 생긴다. */
           const t = db.prepare('SELECT came, event FROM teams WHERE id=?').get(+m[1]);
@@ -687,6 +726,9 @@ function selftest() {
   const evR = createEvent(db, { title: '첫 대회', host: '유재원', starts: '2026-10-01', prize: 1000000 });
   const ev = evR.id, okey = evR.okey;
   ok(getEvent(db, ev).title === '첫 대회', '대회 개설');
+  editEvent(db, ev, { prize: 500000, due: '2026-11-07T17:00' });
+  ok(getEvent(db, ev).prize === 500000 && getEvent(db, ev).due === '2026-11-07T17:00',
+     '만든 뒤에 나머지를 채운다');
   ok(/^[0-9a-f]{10}$/.test(okey), '운영자 열쇠가 발급된다');
   ok(!('okey' in getEvent(db, ev)), '열쇠는 안 내려보낸다');
   ok(board(db, ev, true).rows.length === 0, '빈 대회');
@@ -699,6 +741,14 @@ function selftest() {
 
   bad = false; try { joinTeam(db, ev, { name: '동의안함' }); } catch { bad = true; }
   ok(bad, '개인정보 동의 없이는 신청이 안 된다');
+
+  // 문간에 발 담그기 — 이름과 동의만으로 신청되고, 나머지는 나중에 채운다
+  const lite = joinTeam(db, ev, { name: '최소팀', agree: true });
+  ok(!!lite, '이름과 동의만으로 신청된다');
+  ok(moreTeam(db, lite, { contact: 'a@b.c', role: '기획' }).filled === 2, '나중에 두 칸을 채운다');
+  ok(moreTeam(db, lite, { contact: '덮어쓰기' }).filled === 0, '이미 적은 것은 안 덮어쓴다');
+  ok(board(db, ev, true).rows.find(r => r.id === lite).contact === 'a@b.c', '채운 값이 남는다');
+  db.prepare('DELETE FROM teams WHERE id=?').run(lite);
 
   const t1 = joinTeam(db, ev, { name: '가팀', agree: true, photo: true });
   const t2 = joinTeam(db, ev, { name: '나팀', agree: true });
@@ -862,6 +912,6 @@ if (require.main === module) {
     }
   });
 }
-module.exports = { open, createEvent, joinTeam, submit, score, board, outcomes,
+module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, score, board, outcomes,
                    card, support, assign, spread, judgeView, judgePlan, lanIPs,
                    dump, backup, isAdmin };

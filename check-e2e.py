@@ -99,12 +99,9 @@ with sync_playwright() as p:
     # ── 2. 개인이 5분 안에 대회를 연다 (기획안 1번 기능) ────
     pg.click('nav button[data-t="make"]')
     pg.wait_for_selector("#f-title")
+    A(pg.query_selector("#f-host") is None and pg.query_selector("#f-prize") is None,
+      "대회 열기 화면이 이름 말고 다른 것을 묻는다")
     pg.fill("#f-title", "우리 동네 문제 해결 해커톤")
-    pg.fill("#f-host", "유재원")
-    pg.fill("#f-topic", "생활 불편")
-    pg.fill("#f-starts", "2026-10-11")
-    pg.fill("#f-ends", "2026-10-12")
-    pg.fill("#f-prize", "3000000")
     # 심사위원 수 계산 — MLH 가이드 공식대로 나오는가
     pg.fill("#pl-t", "175")
     pg.fill("#pl-m", "120")
@@ -117,27 +114,38 @@ with sync_playwright() as p:
     A("너무 많이" in pg.inner_text("#pl-out"), "한 사람이 과하게 보는데 경고가 없다")
     ok("심사위원 수 계산 — 175팀 2시간이면 18명, 과부하면 경고")
 
-    due = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
-    pg.fill("#f-due", due)
     pg.click("#f-save")
-    pg.wait_for_timeout(700)
+    pg.wait_for_timeout(900)
     evs = api("/api/events")
     A(len(evs) == 1, f"대회가 1개여야 하는데 {len(evs)}")
     ev = evs[0]["id"]
     OK = pg.evaluate("localStorage.getItem('hackon.okey.' + cur)")
     A(OK and len(OK) == 10, f"운영자 열쇠가 저장되지 않았다: {OK}")
     A(evs[0]["title"] == "우리 동네 문제 해결 해커톤", f"화면이 보낸 값이 안 들어갔다: {evs[0]}")
+    ok("대회 이름 하나로 개설 — 나머지는 안 묻는다")
+
+    # 만든 뒤에 나머지를 채운다
+    due = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+    pg.wait_for_selector("#e-save")
+    pg.fill("#e-starts", "2026-10-11")
+    pg.fill("#e-ends", "2026-10-12")
+    pg.fill("#e-prize", "3000000")
+    pg.fill("#e-topic", "생활 불편")
+    pg.fill("#e-due", due)
+    pg.click("#e-save")
+    pg.wait_for_timeout(900)
+    ee = api(f"/api/events/{ev}")
+    A(ee["prize"] == 3000000 and ee["due"] == due and ee["topic"] == "생활 불편",
+      f"나중에 채운 것이 안 들어갔다: {ee}")
     A(pg.evaluate("cur") == ev, "만든 뒤 그 대회로 안 옮겨 갔다")
     A(len(api(f"/api/events/{ev}")["rubric"]) == 4, "심사 기본값이 안 깔렸다")
     ok(f"대회 개설 — {ev} · 심사 기준 기본값 4항목")
 
     # ── 3. 참가 신청이 서버에 저장되는가 ────────────────────
     pg.wait_for_selector("#t-name")
+    A(pg.query_selector("#t-contact") is None and pg.query_selector("#t-found") is None,
+      "신청 화면이 처음부터 연락처와 유입 경로를 묻는다")
     pg.fill("#t-name", "하나팀")
-    pg.fill("#t-contact", "one@example.com")
-    pg.select_option("#t-role", "만들기")
-    pg.select_option("#t-found", "캠퍼스픽")
-    pg.fill("#t-note", "골목 보행 불편을 풀고 싶습니다")
 
     # 동의를 안 하면 신청이 안 된다. 화면이 먼저 막고 서버도 막는다.
     pg.click("#t-join")
@@ -150,14 +158,19 @@ with sync_playwright() as p:
     # 실패 안내가 뜨면서 화면이 다시 그려져 칸이 비워진다. 다시 채운다.
     pg.wait_for_selector("#t-name")
     pg.fill("#t-name", "하나팀")
-    pg.fill("#t-contact", "one@example.com")
-    pg.select_option("#t-role", "만들기")
-    pg.select_option("#t-found", "캠퍼스픽")
-    pg.fill("#t-note", "골목 보행 불편을 풀고 싶습니다")
     pg.check("#t-agree")
-    pg.check("#t-photo")
     pg.click("#t-join")
-    pg.wait_for_timeout(700)
+    pg.wait_for_timeout(1000)
+
+    # 신청하고 나면 두 번째 칸이 뜬다. 여기서 진짜 정보를 받는다.
+    pg.wait_for_selector("#m-save", timeout=8000)
+    pg.fill("#m-contact", "one@example.com")
+    pg.select_option("#m-role", "만들기")
+    pg.select_option("#m-found", "캠퍼스픽")
+    pg.fill("#m-note", "골목 보행 불편을 풀고 싶습니다")
+    pg.check("#m-photo")
+    pg.click("#m-save")
+    pg.wait_for_timeout(900)
     A(post(f"/api/events/{ev}/teams", {"name": "가나다팀", "agree": True})[0] == 201, "둘째 팀이 안 들어갔다")
     rows = api(f"/api/events/{ev}/board", OK)["rows"]
     A(len(rows) == 2, f"참가팀이 2여야 하는데 {len(rows)}")
@@ -166,6 +179,7 @@ with sync_playwright() as p:
     A(one["role"] == "만들기" and one["found"] == "캠퍼스픽",
       f"신청 칸이 안 저장됐다: {one}")
     A(one["agreed"] and one["photo"] == 1, f"동의 기록이 안 남았다: {one}")
+    ok("문간에 발 담그기 — 이름·동의로 신청하고 나머지는 그다음 칸에서 받는다")
     ok("참가 신청 저장 — 2팀 · 역할과 유입 경로까지")
 
     A(post(f"/api/events/{ev}/teams", {"name": "하나팀", "agree": True})[0] == 409,
@@ -267,16 +281,33 @@ with sync_playwright() as p:
     jc2.close()
     ok("심사 눈높이가 심사위원에게는 안 보인다")
 
+    # 로고를 누르면 처음으로 — 어디서 헤매도 여기로 돌아온다
+    visit(f"/#{ev}")
+    pg.click('nav button[data-t="spon"]')
+    pg.wait_for_timeout(500)
+    pg.click("#b-home")
+    pg.wait_for_timeout(600)
+    A(pg.evaluate("tab") == "home", f"로고를 눌렀는데 처음으로 안 간다: {pg.evaluate('tab')}")
+    A("열린 대회" in pg.inner_text("#view"), "처음 화면이 아니다")
+    ok("로고를 누르면 처음 화면으로")
+
     # ── 등록 데스크 — 당일 아침에 쓰는 화면 ─────────────────
     visit(f"/#{ev}")
     A("등록 데스크" in pg.inner_text("#view"), "등록 데스크가 없다")
+    # 지금 안 쓰는 것은 접혀 있다. 당일 아침에 펼친다.
+    def openFold(name):
+        pg.click(f"summary:has-text('{name}')")
+        pg.wait_for_timeout(300)
+    openFold("등록 데스크")
     pg.click("[data-came]")
     pg.wait_for_timeout(700)
     o1 = api(f"/api/events/{ev}/outcomes", OK)
     A(o1["came"] == 1, f"체크인이 안 됐다: {o1['came']}")
+    openFold("등록 데스크")
     pg.click("[data-came]")           # 잘못 눌렀을 때 되돌린다
     pg.wait_for_timeout(700)
     A(api(f"/api/events/{ev}/outcomes", OK)["came"] == 0, "체크인 취소가 안 된다")
+    openFold("등록 데스크")
     pg.click("[data-came]")
     pg.wait_for_timeout(700)
     ok("등록 데스크 체크인 — 눌렀다 다시 누르면 취소")
@@ -445,11 +476,16 @@ with sync_playwright() as p:
     ok(f"성과 기록 — 완주율 {o['finishRate']}% · 면접 {o['interview']}건")
 
     # ── 사후 지원 — 이게 '보장' 이다. 기록만 하는 표로는 약속이 안 된다 ──
+    pg.click("summary:has-text('사후 지원')")
+    pg.wait_for_timeout(300)
     pg.fill("#h-name", "박실무")
     pg.fill("#h-org", "어느회사")
     pg.fill("#h-can", "도입 검토를 같이 봐 줍니다")
     pg.click("#h-add")
     pg.wait_for_timeout(800)
+    if not pg.is_visible("#a-add"):
+        pg.click("summary:has-text('사후 지원')")
+        pg.wait_for_timeout(300)
     pg.wait_for_selector("#a-add")
     pg.click("#a-add")
     pg.wait_for_timeout(800)
@@ -462,6 +498,9 @@ with sync_playwright() as p:
        f"({sup['rows'][0]['due']}까지)")
 
     # 했음을 누르면 지킨 것으로 넘어간다
+    if not pg.is_visible("[data-done]"):
+        pg.click("summary:has-text('사후 지원')")
+        pg.wait_for_timeout(300)
     pg.click("[data-done]")
     pg.wait_for_timeout(800)
     sup = api(f"/api/events/{ev}/support", OK)
@@ -499,13 +538,18 @@ with sync_playwright() as p:
     # 모집 글에 이 주소를 쓴다. 여기서 바로 신청이 돼야 한다.
     before = len(api(f"/api/events/{ev}/board", OK)["rows"])
     pub.fill("#t-name", "공개링크팀")
-    pub.select_option("#t-found", "위비티")
     pub.check("#t-agree")
     pub.click("#t-join")
-    pub.wait_for_timeout(800)
+    pub.wait_for_timeout(1000)
     after = api(f"/api/events/{ev}/board", OK)["rows"]
     A(len(after) == before + 1, f"공개 링크에서 신청이 안 됐다: {before} → {len(after)}")
-    A([r for r in after if r["name"] == "공개링크팀"][0]["found"] == "위비티", "유입 경로가 안 붙었다")
+    # 공개 링크에서도 두 번째 칸이 뜬다
+    pub.wait_for_selector("#m-save", timeout=8000)
+    pub.select_option("#m-found", "위비티")
+    pub.click("#m-save")
+    pub.wait_for_timeout(900)
+    A([r for r in api(f"/api/events/{ev}/board", OK)["rows"]
+       if r["name"] == "공개링크팀"][0]["found"] == "위비티", "두 번째 칸이 저장되지 않았다")
     ok("공개 링크에서 바로 참가 신청 — 모집 글에 이 주소를 쓴다")
 
     # ── 결과 보고서 — 협찬사에게 보내는 물건. 링크 하나가 곧 보고서다 ──
