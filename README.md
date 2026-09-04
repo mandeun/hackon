@@ -8,6 +8,7 @@
 | 찾는 것 | 파일 |
 |---|---|
 | **어떻게 키울 것인가 · 협찬 받는 순서** | [PLAN.md](PLAN.md) |
+| **대회를 실제로 어떻게 여나** | [GUIDE.md](GUIDE.md) |
 | 화면 | `hack-on.html` |
 | 서버 | `server.js` |
 
