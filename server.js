@@ -51,6 +51,10 @@ function open(file) {
       event  TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
       name   TEXT NOT NULL,
       contact TEXT NOT NULL DEFAULT '',
+      role   TEXT NOT NULL DEFAULT '',    -- 만들기 | 기획 | 디자인. 팀을 짜 줄 때 쓴다
+      solo   INTEGER NOT NULL DEFAULT 0,  -- 혼자 왔나. 시작할 때 팀 짜기의 근거
+      found  TEXT NOT NULL DEFAULT '',    -- 어디서 봤나. 2회차 홍보비를 여기다 쓴다
+      note   TEXT NOT NULL DEFAULT '',
       joined TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(event, name)
     );
@@ -95,6 +99,9 @@ function open(file) {
   `);
   /* 이미 쓰던 DB 에도 칸을 붙인다. 있으면 에러가 나는데 그건 그냥 넘긴다. */
   try { db.exec("ALTER TABLE events ADD COLUMN due TEXT NOT NULL DEFAULT ''"); } catch {}
+  for (const c of ['role', 'found', 'note'])
+    try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
+  try { db.exec('ALTER TABLE teams ADD COLUMN solo INTEGER NOT NULL DEFAULT 0'); } catch {}
   return db;
 }
 /* #endregion reuse:db-open */
@@ -138,8 +145,10 @@ function joinTeam(db, event, b) {
   if (!b.name) throw new HttpError(400, '팀 이름이 필요합니다');
   if (e.cap && e.teams >= e.cap) throw new HttpError(409, '정원이 찼습니다');
   try {
-    const r = db.prepare('INSERT INTO teams(event,name,contact) VALUES(?,?,?)')
-      .run(event, b.name, b.contact || '');
+    const r = db.prepare(`INSERT INTO teams(event,name,contact,role,solo,found,note)
+                          VALUES(?,?,?,?,?,?,?)`)
+      .run(event, b.name, b.contact || '', b.role || '', b.solo ? 1 : 0,
+           b.found || '', b.note || '');
     return Number(r.lastInsertRowid);
   } catch {
     throw new HttpError(409, '같은 이름의 팀이 있습니다');
@@ -182,7 +191,8 @@ function score(db, team, b) {
 function board(db, event) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
-    SELECT t.id, t.name, t.contact, s.url, s.note
+    SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply,
+           s.url, s.note
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
   const rows = teams.map(t => {
@@ -214,9 +224,14 @@ function outcomes(db, event) {
   const by = {};
   for (const r of db.prepare('SELECT kind, COUNT(*) c FROM outcomes WHERE event=? GROUP BY kind').all(event))
     by[r.kind] = r.c;
+  const found = db.prepare(`SELECT CASE WHEN found = '' THEN '안 적음' ELSE found END AS k,
+                                   COUNT(*) c FROM teams WHERE event = ?
+                            GROUP BY k ORDER BY c DESC`).all(event);
   return {
     teams: t,
     finished: done,
+    found,
+    solo: db.prepare('SELECT COUNT(*) c FROM teams WHERE event=? AND solo=1').get(event).c,
     finishRate: t ? Math.round(done / t * 1000) / 10 : 0,   // 완주율 %
     interview: by['면접'] || 0,
     adoption: by['도입검토'] || 0,
@@ -376,6 +391,17 @@ function selftest() {
   const b2 = board(db, ev);
   ok(b2.judges.length === 2, '심사위원 명단이 모인다 (' + b2.judges.join() + ')');
   ok(b2.rows.find(r => r.name === '가팀').by.length === 1, '팀별로 누가 봤는지 나온다');
+
+  // 신청 칸은 따로 연 대회에서 본다. 여기에 팀을 더하면 아래 완주율 검사가 흔들린다.
+  const ev2 = createEvent(db, { title: '신청폼시험' });
+  const s1 = joinTeam(db, ev2, { name: '다팀', role: '기획', solo: true, found: '캠퍼스픽' });
+  joinTeam(db, ev2, { name: '라팀', role: '만들기', found: '캠퍼스픽' });
+  joinTeam(db, ev2, { name: '마팀' });
+  ok(board(db, ev2).rows.find(r => r.id === s1).role === '기획', '신청 칸이 저장된다');
+  const o0 = outcomes(db, ev2);
+  ok(o0.solo === 1, '혼자 온 사람이 세어진다 (' + o0.solo + ')');
+  ok(o0.found[0].k === '캠퍼스픽' && o0.found[0].c === 2,
+     '유입 경로가 많은 순으로 집계된다 (' + JSON.stringify(o0.found) + ')');
 
   // 마감 — 지났으면 서버가 막고, 미루면 다시 받는다
   const past = createEvent(db, { title: '마감지남', due: '2020-01-01T10:00' });

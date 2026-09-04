@@ -163,6 +163,30 @@ function tickDue() {
 }
 setInterval(tickDue, 1000);
 const dueBox = e => e.due ? `<div class="due" data-due="${esc(e.due)}"></div>` : '';
+
+/* 참가 신청 칸. 운영 화면과 공개 화면이 같은 것을 쓴다 — 두 벌로 두면 한쪽만 고치게 된다.
+   '어디서 보셨나' 가 이 폼의 핵심이다. 2회차 홍보를 어디에 할지 이 한 칸이 정한다. */
+const FOUND = ['캠퍼스픽', '위비티', '이벤터스', '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
+function applyForm() {
+  return `<label>팀 이름 <span class="pill">필수</span></label>
+    <input id="t-name" placeholder="혼자 오시면 본인 이름을 적으세요">
+    <label>연락처</label><input id="t-contact" placeholder="이메일 또는 전화">
+    <div class="row">
+      <div><label>주로 하는 것</label>
+        <select id="t-role"><option value="">고르기</option>
+          <option>만들기</option><option>기획</option><option>디자인</option></select></div>
+      <div><label>혼자 오시나요</label>
+        <select id="t-solo"><option value="">아니요, 팀이 있습니다</option>
+          <option value="1">네, 혼자 옵니다</option></select></div>
+    </div>
+    <label>어디서 보셨나요</label>
+    <select id="t-found"><option value="">고르기</option>
+      ${FOUND.map(f => `<option>${f}</option>`).join('')}</select>
+    <label>하고 싶은 것 (선택)</label>
+    <textarea id="t-note" rows="2" placeholder="어떤 불편을 풀고 싶은지 한 줄"></textarea>
+    <div style="height:10px"></div>
+    <button class="btn sm" id="t-join">참가 신청</button>`;
+}
 let msg = null;
 
 function flash(text, bad) { msg = { text, bad }; render(); setTimeout(() => { msg = null; render(); }, 2600); }
@@ -242,12 +266,7 @@ const SCREEN = {
           <button class="btn sec sm" id="b-copy">복사</button>
         </div>
       </div>
-      <div class="card">
-        <label>팀 이름</label><input id="t-name" placeholder="팀 이름">
-        <label>연락처 (선택)</label><input id="t-contact" placeholder="이메일 또는 전화">
-        <div style="height:10px"></div>
-        <button class="btn sm" id="t-join">참가 신청</button>
-      </div>
+      <div class="card"><h3>참가 신청</h3>${applyForm()}</div>
       <table><tr><th>순위</th><th>팀</th><th class="n">점수</th><th class="n">심사</th></tr>
       ${d.rows.map(r => `<tr data-team="${r.id ?? ''}" style="cursor:pointer"><td>${r.rank}</td>
         <td>${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
@@ -287,6 +306,11 @@ const SCREEN = {
           ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
           ${r.url ? `<div class="share">${esc(r.url)}</div>` : ''}</div>`).join('')}
         ` : ''}
+
+      ${statusOf(e).k === '모집중'
+        ? `<div class="card"><h3>참가 신청</h3>
+             <div class="meta">이 페이지에서 바로 신청합니다.</div>${applyForm()}</div>`
+        : ''}
 
       <p class="sub" style="margin-top:14px">심사 기준 ·
         ${e.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}</p>`;
@@ -347,6 +371,14 @@ const SCREEN = {
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
         <div><b>${o.hired}</b><span>채용</span></div>
       </div>
+      ${(o.found || []).length ? `<div class="card">
+        <h3>어디서 왔나</h3>
+        <div class="meta">2회차 홍보를 어디에 할지 이 표가 정합니다.
+          혼자 온 사람 ${o.solo || 0}명.</div>
+        <table><tr><th>경로</th><th class="n">신청</th></tr>
+        ${o.found.map(f => `<tr><td>${esc(f.k)}</td><td class="n">${f.c}팀</td></tr>`).join('')}</table>
+      </div>` : ''}
+
       <div class="card">
         <h3>협찬사</h3>
         <div class="meta">여기 넣은 곳이 공개 페이지 ‘함께한 곳’에 뜹니다.</div>
@@ -405,7 +437,9 @@ function wire() {
     if (!name) return flash('팀 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
     try {
-      await api(`/events/${cur}/teams`, { method: 'POST', body: { name, contact: $('#t-contact').value } });
+      await api(`/events/${cur}/teams`, { method: 'POST', body: {
+        name, contact: $('#t-contact').value, role: $('#t-role').value,
+        solo: !!$('#t-solo').value, found: $('#t-found').value, note: $('#t-note').value } });
       flash('참가 신청이 됐습니다');
     } catch (e) { flash(e.message, true); }
   };

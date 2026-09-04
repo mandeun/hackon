@@ -103,13 +103,19 @@ with sync_playwright() as p:
     pg.wait_for_selector("#t-name")
     pg.fill("#t-name", "하나팀")
     pg.fill("#t-contact", "one@example.com")
+    pg.select_option("#t-role", "만들기")
+    pg.select_option("#t-found", "캠퍼스픽")
+    pg.fill("#t-note", "골목 보행 불편을 풀고 싶습니다")
     pg.click("#t-join")
     pg.wait_for_timeout(700)
     A(post(f"/api/events/{ev}/teams", {"name": "가나다팀"})[0] == 201, "둘째 팀이 안 들어갔다")
     rows = api(f"/api/events/{ev}/board")["rows"]
     A(len(rows) == 2, f"참가팀이 2여야 하는데 {len(rows)}")
     A(all(r["score"] == 0 and not r["done"] for r in rows), "심사 전인데 점수가 있다")
-    ok("참가 신청 저장 — 2팀 · 심사 전 0점")
+    one = [r for r in rows if r["name"] == "하나팀"][0]
+    A(one["role"] == "만들기" and one["found"] == "캠퍼스픽",
+      f"신청 칸이 안 저장됐다: {one}")
+    ok("참가 신청 저장 — 2팀 · 역할과 유입 경로까지")
 
     A(post(f"/api/events/{ev}/teams", {"name": "하나팀"})[0] == 409, "같은 팀 이름이 두 번 들어갔다")
     ok("같은 팀 이름 차단 (409)")
@@ -221,6 +227,12 @@ with sync_playwright() as p:
     A("50%" in pg.content() and "완주율" in pg.content(), "화면에 숫자가 안 나온다")
     ok(f"성과 기록 — 완주율 {o['finishRate']}% · 면접 {o['interview']}건")
 
+    # 유입 경로 집계 — 2회차 홍보비를 어디에 쓸지 정하는 근거다
+    sp_txt = pg.inner_text("#view")
+    A("어디서 왔나" in sp_txt and "캠퍼스픽" in sp_txt, f"유입 경로가 안 보인다: {sp_txt[:150]}")
+    A(o["found"][0]["k"] == "캠퍼스픽", f"집계가 틀렸다: {o['found']}")
+    ok("유입 경로 집계 — 캠퍼스픽 1팀")
+
     # ── 7. 공개 링크는 로그인 없이 열리고, 아무것도 못 고치는가 ──
     ctx = b.new_context(viewport={"width": 460, "height": 1100})   # 처음 온 사람을 흉내 낸다
     pub = ctx.new_page()
@@ -228,16 +240,30 @@ with sync_playwright() as p:
     pub.goto(f"{BASE}/e/{ev}")
     pub.wait_for_selector("body[data-ready='1']", timeout=8000)
     A(pub.evaluate("document.querySelector('nav').style.display") == "none", "공개 화면에 아래 탭이 보인다")
-    # 아래 탭은 위에서 감춘 걸 확인했으니, 본문에 손댈 수 있는 칸이 없는지만 센다
-    A(len(pub.query_selector_all("#view input, #view textarea, #view select, #view button")) == 0,
-      "공개 화면 본문에 편집 칸이 있다")
+    # 공개 화면에는 참가 신청 칸만 있어야 한다. 제출·심사·협찬·성과는 손댈 수 없다.
+    for bad_id in ["#s-save", "#j-save", "#p-add", "#o-add", "#b-ext", "#f-save"]:
+        A(pub.query_selector(bad_id) is None, f"공개 화면에 {bad_id} 가 있다")
+    ids = [el.get_attribute("id") for el in
+           pub.query_selector_all("#view input, #view textarea, #view select, #view button")]
+    A(all(i and i.startswith("t-") for i in ids), f"공개 화면에 신청 말고 다른 칸이 있다: {ids}")
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
                  "함께한 곳", "오픈에이아이"]:
         A(must in txt, f"공개 화면에 '{must}' 가 없다")
     A("example.com/walk" in txt, "제출작 링크가 공개 화면에 없다")
+    ok("공개 링크 /e/<대회id> — 로그인 없이 열리고 신청 칸만 있다")
+
+    # 모집 글에 이 주소를 쓴다. 여기서 바로 신청이 돼야 한다.
+    before = len(api(f"/api/events/{ev}/board")["rows"])
+    pub.fill("#t-name", "공개링크팀")
+    pub.select_option("#t-found", "위비티")
+    pub.click("#t-join")
+    pub.wait_for_timeout(800)
+    after = api(f"/api/events/{ev}/board")["rows"]
+    A(len(after) == before + 1, f"공개 링크에서 신청이 안 됐다: {before} → {len(after)}")
+    A([r for r in after if r["name"] == "공개링크팀"][0]["found"] == "위비티", "유입 경로가 안 붙었다")
     ctx.close()
-    ok("공개 링크 /e/<대회id> — 로그인 없이 열리고 편집 칸 0개")
+    ok("공개 링크에서 바로 참가 신청 — 모집 글에 이 주소를 쓴다")
 
     # ── 8. file:// 데모 모드가 안 깨졌는가 (캡처·발표가 이걸로 돈다) ──
     pg.goto("about:blank")
