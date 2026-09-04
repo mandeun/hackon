@@ -317,6 +317,15 @@ function moreForm(t) {
         <select id="m-solo"><option value="">팀이 있습니다</option>
           <option value="1">혼자 옵니다</option></select></div>
     </div>` : ''}
+    <div class="row">
+      <div><label>지금 몇 명이신가요</label>
+        <input id="m-size" type="number" min="1" max="9" value="${t.size || 1}"></div>
+      <div><label>사람을 더 찾으시나요</label>
+        <select id="m-want-on"><option value="">아니요</option>
+          <option value="1">네, 찾습니다</option></select></div>
+    </div>
+    ${!t.want ? `<label>어떤 분을 찾으시나요</label>
+      <input id="m-want" placeholder="예) 화면 만드는 분 한 분">` : ''}
     ${!t.found ? `<label>어디서 보셨나요</label>
       <select id="m-found"><option value="">고르기</option>
         ${FOUND.map(f => `<option>${f}</option>`).join('')}</select>` : ''}
@@ -564,6 +573,7 @@ const SCREEN = {
     /* 이 브라우저로 신청한 팀. 있으면 두 번째 칸을 보여 준다. */
     const myId = localStorage.getItem('hackon.team.' + cur);
     const mine = myId ? d.rows.find(r => String(r.id) === String(myId)) : null;
+    const cw = await api(`/events/${cur}/crew`);
     return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
         ${e.topic ? '· 주제 ' + esc(e.topic) : ''}<br>상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
@@ -596,6 +606,25 @@ const SCREEN = {
           ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
           ${r.url ? `<div class="share">${esc(r.url)}</div>` : ''}</div>`).join('')}
         ` : ''}
+
+      ${(cw.solo.length || cw.looking.length) ? `<div class="card">
+        <h3>같이 할 사람 찾기</h3>
+        <div class="meta">연락처는 공개하지 않습니다.
+          <b>당일 팀 짜는 시간에 이 목록을 보고 얼굴 보며 정합니다.</b>
+          혼자 오셔도 팀이 생깁니다.</div>
+        ${cw.solo.length ? `<div style="margin-top:12px">
+          <b style="font-size:13px">혼자 오시는 분 ${cw.solo.length}명</b>
+          <table>${cw.solo.map(r => `<tr>
+            <td style="width:7em">${esc(r.name)}</td>
+            <td>${r.role ? `<span class="pill">${esc(r.role)}</span> ` : ''}${esc(r.note || '')}</td>
+          </tr>`).join('')}</table></div>` : ''}
+        ${cw.looking.length ? `<div style="margin-top:12px">
+          <b style="font-size:13px">사람을 찾는 팀 ${cw.looking.length}팀</b>
+          <table>${cw.looking.map(r => `<tr>
+            <td style="width:7em">${esc(r.name)}<br><span class="meta">${r.size}명</span></td>
+            <td>${esc(r.want)}${r.note ? `<br><span class="meta">${esc(r.note)}</span>` : ''}</td>
+          </tr>`).join('')}</table></div>` : ''}
+      </div>` : ''}
 
       ${(e.plan || []).length ? `<div class="card"><h3>진행 순서</h3>
         <table>${e.plan.map(r => `<tr><td style="width:5.5em">${esc(r.at)}</td>
@@ -632,6 +661,24 @@ const SCREEN = {
         <div class="tvtitle">${esc(d.title)}</div>
         <div class="tvhost">${esc(d.host)}</div>
       </div>
+
+      ${(cur1 && /팀 짜기|팀짜기/.test(cur1.what) && (d.crew.solo.length || d.crew.looking.length))
+        ? `<div class="tvmid"><div class="tvnow" style="flex:1;overflow:hidden">
+             <div class="tvlabel">같이 할 사람</div>
+             <div style="display:flex;gap:2vw;margin-top:1vh">
+               <div style="flex:1">
+                 <div class="tvsub" style="color:#8E97B5">혼자 오신 분</div>
+                 ${d.crew.solo.slice(0, 8).map(r => `<div class="tvsub">
+                   <em>${esc(r.name)}</em> ${esc(r.role || '')}</div>`).join('')}
+               </div>
+               <div style="flex:1">
+                 <div class="tvsub" style="color:#8E97B5">사람 찾는 팀</div>
+                 ${d.crew.looking.slice(0, 8).map(r => `<div class="tvsub">
+                   <em>${esc(r.name)}</em> ${r.size}명 · ${esc(r.want)}</div>`).join('')}
+               </div>
+             </div>
+           </div></div>`
+        : ''}
 
       <div class="tvmid">
         <div class="tvbig">
@@ -987,6 +1034,8 @@ function wire() {
       const r = await api(`/teams/${id}/more`, { method: 'POST', body: {
         contact: g('#m-contact'), role: g('#m-role'), found: g('#m-found'), note: g('#m-note'),
         solo: $('#m-solo') ? !!$('#m-solo').value : undefined,
+        size: g('#m-size'),
+        want: ($('#m-want-on') && $('#m-want-on').value) ? g('#m-want') : undefined,
         photo: $('#m-photo') ? $('#m-photo').checked : undefined } });
       flash(r.filled ? '고맙습니다. 저장했습니다' : '이미 다 주셨습니다');
     } catch (e) { flash(e.message, true); }

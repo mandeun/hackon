@@ -16,7 +16,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # 윈도우 콘솔이 cp949 라 한글이 깨진다
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")   # 윈도우 콘솔이 cp949 라 한글이 깨진다
 
 from playwright.sync_api import sync_playwright
 
@@ -291,6 +292,32 @@ with sync_playwright() as p:
     A("열린 대회" in pg.inner_text("#view"), "처음 화면이 아니다")
     ok("로고를 누르면 처음 화면으로")
 
+    # ── 같이 할 사람 찾기 — 혼자 온 사람이 돌아가지 않게 ────
+    # 혼자 온 사람 하나와 사람 찾는 팀 하나를 만든다
+    _, so = post(f"/api/events/{ev}/teams", {"name": "혼자온사람", "agree": True})
+    A(post(f"/api/teams/{so['id']}/more",
+           {"solo": True, "role": "기획", "note": "골목 지도를 만들고 싶습니다"})[0] == 200,
+      "혼자 온 사람 정보가 안 들어갔다")
+    A(post(f"/api/teams/{top['id']}/more", {"want": "화면 만드는 분 한 분", "size": 2})[0] == 200,
+      "찾는 사람이 안 들어갔다")
+    cw = api(f"/api/events/{ev}/crew")
+    A(len(cw["solo"]) == 1 and cw["solo"][0]["name"] == "혼자온사람", f"혼자 온 사람이 안 잡힌다: {cw}")
+    A(len(cw["looking"]) == 1 and cw["looking"][0]["size"] == 2, f"사람 찾는 팀이 안 잡힌다: {cw}")
+    A("contact" not in json.dumps(cw), "팀 짜기 자료에 연락처가 실렸다")
+    ok(f"같이 할 사람 — 혼자 {len(cw['solo'])}명 · 찾는 팀 {len(cw['looking'])}팀 (연락처 안 실림)")
+
+    # 공개 페이지에서 보이는가
+    cctx = b.new_context()
+    cp = cctx.new_page()
+    cp.goto(f"{BASE}/e/{ev}")
+    cp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    ctxt = cp.inner_text("#view")
+    A("같이 할 사람 찾기" in ctxt and "혼자온사람" in ctxt and "화면 만드는 분" in ctxt,
+      f"공개 페이지에 팀 짜기가 없다: {ctxt[:200]}")
+    A("one@example.com" not in ctxt, "공개 페이지에 연락처가 샜다")
+    cctx.close()
+    ok("공개 페이지에서 같이 할 사람이 보인다")
+
     # ── 현장 화면 — 벽에 걸어 두는 것 ───────────────────────
     tctx = b.new_context(viewport={"width": 1280, "height": 720})
     tp = tctx.new_page()
@@ -412,7 +439,9 @@ with sync_playwright() as p:
     jp.click("#jn-go")
     jp.wait_for_timeout(700)
     jtxt = jp.inner_text("#view")
-    A("아직 안 본 팀 2팀" in jtxt, f"남은 팀 수가 틀렸다: {jtxt[:120]}")
+    # 팀 수를 박아 두지 않는다. 앞 단계에서 팀이 늘면 바뀐다.
+    nteams = len(api(f"/api/events/{ev}/judge")["teams"])
+    A(f"아직 안 본 팀 {nteams}팀" in jtxt, f"남은 팀 수가 틀렸다(={nteams}): {jtxt[:120]}")
 
     # 새면 안 되는 것들. 화면에서 감추는 게 아니라 서버가 안 준다.
     for leak in ["완주율", "협찬", "면접 연결", "명단 내려받기", "88.8"]:
@@ -427,7 +456,7 @@ with sync_playwright() as p:
     jp.click(f'[data-jsave="{first}"]')
     jp.wait_for_timeout(800)
     jv = api(f"/api/events/{ev}/judge?judge=" + urllib.parse.quote("박심사"))
-    A(jv["left"] == 1, f"남은 팀이 안 줄었다: {jv['left']}")
+    A(jv["left"] == nteams - 1, f"남은 팀이 안 줄었다: {jv['left']} (팀 {nteams})")
     scored = [t for t in jv["teams"] if str(t["id"]) == first][0]
     A(scored["mine"]["idea"] == 60, f"내 점수가 안 저장됐다: {scored['mine']}")
     ok(f"심사 링크에서 점수 저장 — 남은 팀 {jv['left']}팀")
@@ -506,9 +535,11 @@ with sync_playwright() as p:
     pg.click("#o-add")
     pg.wait_for_timeout(700)
     o = api(f"/api/events/{ev}/outcomes", OK)
-    A(o["finishRate"] == 50.0, f"완주율이 50 이어야 하는데 {o['finishRate']}")
+    # 숫자를 박아 두지 않는다. 앞 단계에서 팀이 늘면 완주율이 바뀐다.
+    want = round(o["finished"] / o["teams"] * 1000) / 10
+    A(o["finishRate"] == want, f"완주율 계산이 틀렸다: {o['finishRate']} != {want}")
     A(o["interview"] == 1, f"면접 연결이 1 이어야 하는데 {o['interview']}")
-    A("50%" in pg.content() and "완주율" in pg.content(), "화면에 숫자가 안 나온다")
+    A(f"{o['finishRate']}%" in pg.content() and "완주율" in pg.content(), "화면에 숫자가 안 나온다")
     ok(f"성과 기록 — 완주율 {o['finishRate']}% · 면접 {o['interview']}건")
 
     # ── 사후 지원 — 이게 '보장' 이다. 기록만 하는 표로는 약속이 안 된다 ──
@@ -546,8 +577,10 @@ with sync_playwright() as p:
     # 유입 경로 집계 — 2회차 홍보비를 어디에 쓸지 정하는 근거다
     sp_txt = pg.inner_text("#view")
     A("어디서 왔나" in sp_txt and "캠퍼스픽" in sp_txt, f"유입 경로가 안 보인다: {sp_txt[:150]}")
-    A(o["found"][0]["k"] == "캠퍼스픽", f"집계가 틀렸다: {o['found']}")
-    ok("유입 경로 집계 — 캠퍼스픽 1팀")
+    # '안 적음' 이 섞여도 실제 경로가 잡히면 된다
+    got = {f["k"]: f["c"] for f in o["found"]}
+    A(got.get("캠퍼스픽") == 1, f"집계가 틀렸다: {o['found']}")
+    ok(f"유입 경로 집계 — 캠퍼스픽 {got['캠퍼스픽']}팀 (안 적은 팀 {got.get('안 적음', 0)})")
 
     # ── 7. 공개 링크는 로그인 없이 열리고, 아무것도 못 고치는가 ──
     ctx = b.new_context(viewport={"width": 460, "height": 1100})   # 처음 온 사람을 흉내 낸다

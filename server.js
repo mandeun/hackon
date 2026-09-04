@@ -62,6 +62,8 @@ function open(file) {
       agreed TEXT NOT NULL DEFAULT '',    -- 개인정보 수집·이용에 동의한 시각. 이게 증거다
       photo  INTEGER NOT NULL DEFAULT 0,  -- 촬영·사진 공개 동의 (선택)
       came   TEXT NOT NULL DEFAULT '',    -- 당일 체크인한 시각
+      size   INTEGER NOT NULL DEFAULT 1,  -- 지금 몇 명인가
+      want   TEXT NOT NULL DEFAULT '',    -- 어떤 사람을 찾나. 비면 안 찾는 것
       joined TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(event, name)
     );
@@ -145,7 +147,8 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN okey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
-  for (const c of ['role', 'found', 'note', 'agreed', 'came'])
+  try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
+  for (const c of ['role', 'found', 'note', 'agreed', 'came', 'want'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN solo INTEGER NOT NULL DEFAULT 0'); } catch {}
   return db;
@@ -215,13 +218,15 @@ function moreTeam(db, id, b) {
   const t = db.prepare('SELECT * FROM teams WHERE id=?').get(id);
   if (!t) throw new HttpError(404, '없는 팀입니다');
   const set = [], val = [];
-  for (const k of ['contact', 'role', 'found', 'note']) {
+  for (const k of ['contact', 'role', 'found', 'note', 'want']) {
     if (b[k] === undefined || !String(b[k]).trim()) continue;
     if (t[k]) continue;                       // 이미 적힌 것은 안 건드린다
     set.push(`${k}=?`); val.push(String(b[k]).slice(0, 300));
   }
   if (b.solo !== undefined && !t.solo) { set.push('solo=?'); val.push(b.solo ? 1 : 0); }
   if (b.photo !== undefined && !t.photo) { set.push('photo=?'); val.push(b.photo ? 1 : 0); }
+  /* 인원은 바뀌는 값이라 덮어쓰기를 허용한다. 한 명 들어오면 고쳐야 한다. */
+  if (b.size !== undefined) { set.push('size=?'); val.push(Math.min(Math.max(+b.size || 1, 1), 9)); }
   if (!set.length) return { filled: 0 };
   db.prepare(`UPDATE teams SET ${set.join(',')} WHERE id=?`).run(...val, id);
   return { filled: set.length };
@@ -353,7 +358,7 @@ function board(db, event, admin = false) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply,
-           t.agreed, t.photo, t.came,
+           t.agreed, t.photo, t.came, t.size, t.want,
            s.url, s.note
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
@@ -413,6 +418,22 @@ function spread(db, event) {
   return { rows, gap, warn: gap >= 15, top: rows[0].judge, bottom: rows[rows.length - 1].judge };
 }
 
+/** 팀 짜기 시간에 쓰는 한 장.
+    혼자 온 사람과 자리 남은 팀을 나란히 놓는다.
+    연락처는 안 담는다 — 오프라인이라 얼굴 보고 짜면 되고, 그게 더 잘 된다.
+    온라인 매칭은 실패한 사례가 많다(팀은 많은데 전부 '비공개·초대 필요'). */
+function crew(db, event) {
+  const rows = db.prepare(`SELECT id, name, role, solo, size, want, note
+                           FROM teams WHERE event = ? ORDER BY id`).all(event);
+  return {
+    solo: rows.filter(r => r.solo).map(r => ({
+      id: r.id, name: r.name, role: r.role, note: r.note })),
+    looking: rows.filter(r => !r.solo && r.want).map(r => ({
+      id: r.id, name: r.name, size: r.size, want: r.want, note: r.note })),
+    teams: rows.length,
+  };
+}
+
 /** 행사장 큰 화면이 쓰는 것. 열쇠가 없다 — 벽에 걸어 두는 화면이라
     연락처 같은 건 애초에 안 담는다. */
 function tv(db, event) {
@@ -431,6 +452,7 @@ function tv(db, event) {
     /* 심사가 시작되기 전에는 순위를 안 보낸다. 벽에 붙은 화면으로 순위가 새면
        심사위원이 그걸 보고 점수를 맞춘다. */
     ranks: judged ? b.rows.slice(0, 5).map(r => ({ rank: r.rank, name: r.name, score: r.score })) : [],
+    crew: crew(db, event),
   };
 }
 
@@ -633,6 +655,9 @@ function routes(db) {
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
           return json(res, 201, { ok: true });
         }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/crew$/)) && req.method === 'GET')
+          return json(res, 200, crew(db, m[1]));
+
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/tv$/)) && req.method === 'GET')
           return json(res, 200, tv(db, m[1]));
 
@@ -857,6 +882,17 @@ function selftest() {
   ok(!('judge' in cd.reviews[0]), '심사평에 이름이 안 붙는다');
   db.prepare('UPDATE events SET opened=0 WHERE id=?').run(ev);
 
+  // 팀 짜기 — 혼자 온 사람과 자리 남은 팀
+  const soloTeam = joinTeam(db, ev, { name: '혼자온사람', agree: true, solo: true, role: '기획' });
+  moreTeam(db, t2, { want: '만드는 사람 한 분' });
+  db.prepare('UPDATE teams SET size=2 WHERE id=?').run(t2);
+  const cw = crew(db, ev);
+  ok(cw.solo.length === 1 && cw.solo[0].name === '혼자온사람', '혼자 온 사람이 잡힌다');
+  ok(cw.looking.length === 1 && cw.looking[0].size === 2, '사람 찾는 팀이 잡힌다');
+  ok(!('contact' in cw.solo[0]), '팀 짜기 화면에 연락처가 안 실린다');
+  db.prepare('DELETE FROM teams WHERE id=?').run(soloTeam);
+  db.prepare("UPDATE teams SET want='' WHERE id=?").run(t2);
+
   // 현장 화면 — 일정은 한 곳에만 둔다
   ok(getEvent(db, ev).plan.length === 9, '기본 진행표가 깔린다 (' + getEvent(db, ev).plan.length + '줄)');
   const tv0 = tv(db, ev);
@@ -972,5 +1008,5 @@ if (require.main === module) {
   });
 }
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, score, board, outcomes,
-                   card, support, assign, spread, judgeView, judgePlan, lanIPs, tv,
+                   card, support, assign, spread, judgeView, judgePlan, lanIPs, tv, crew,
                    dump, backup, isAdmin };
