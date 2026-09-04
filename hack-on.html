@@ -117,7 +117,7 @@ const DEMO = {
   outcomes: { teams:3, finished:2, finishRate:66.7, interview:2, adoption:1, hired:0, followup:1, list:[] },
 };
 
-let tab = 'home', cur = localStorage.getItem('hackon.event') || '';
+let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '';
 const $ = s => document.querySelector(s);
 const view = $('#view');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -130,7 +130,9 @@ function head() { return msg ? `<div class="${msg.bad ? 'err' : 'ok-msg'}">${esc
 async function render() {
   $('#mode').textContent = LIVE ? '서버 연결됨' : '데모';
   $('#mode').className = 'chip' + (LIVE ? ' live' : '');
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  // 팀 화면은 순위에서 들어가는 곳이라 아래 탭은 '순위'를 켜 둔다
+  const navOn = tab === 'team' ? 'board' : tab;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === navOn));
   // innerHTML 을 쓰되 서버에서 온 값은 전부 esc() 를 거친다. 화면 조립이 문자열 한 곳에
   // 모여 있어야 라켓온처럼 "서버 호출이 사라졌는지"를 검사로 셀 수 있다.
   try { view.innerHTML = head() + await SCREEN[tab](); }
@@ -186,10 +188,41 @@ const SCREEN = {
         <button class="btn sm" id="t-join">참가 신청</button>
       </div>
       <table><tr><th>순위</th><th>팀</th><th class="n">점수</th><th class="n">심사</th></tr>
-      ${d.rows.map(r => `<tr><td>${r.rank}</td>
+      ${d.rows.map(r => `<tr data-team="${r.id ?? ''}" style="cursor:pointer"><td>${r.rank}</td>
         <td>${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
         <td class="n">${r.score}</td><td class="n">${r.judges}명</td></tr>`).join('')}</table>
-      <p class="sub" style="margin-top:12px">심사위원은 팀을 눌러 점수를 넣습니다. (다음 판에서 화면 추가)</p>`;
+      <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.</p>`;
+  },
+
+  /* 팀 한 곳 — 참가팀은 제출하고, 심사위원은 점수를 넣는다. 같은 화면을 둘이 나눠 쓴다. */
+  async team() {
+    const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
+    const t = d.rows.find(r => String(r.id) === String(curTeam)) || d.rows[0];
+    if (!t) return `<h2>팀이 없습니다</h2>`;
+    return `<button class="btn sec sm" data-go="board">← 순위로</button>
+      <h2 style="margin-top:12px">${esc(t.name)}</h2>
+      <p class="sub">${t.rank}위 · ${t.score}점 · 심사 ${t.judges}명</p>
+
+      <div class="card">
+        <h3>결과물 제출</h3>
+        <div class="meta">참가팀이 씁니다. 다시 내면 덮어써집니다.</div>
+        <label>링크</label><input id="s-url" value="${esc(t.url || '')}" placeholder="https://...">
+        <label>설명</label><textarea id="s-note" rows="3" placeholder="무엇을 만들었는지 짧게">${esc(t.note || '')}</textarea>
+        <div style="height:10px"></div>
+        <button class="btn sm" id="s-save">제출하기</button>
+      </div>
+
+      <div class="card">
+        <h3>심사</h3>
+        <div class="meta">심사위원이 씁니다. 이름이 같으면 이전 점수를 고칩니다.</div>
+        <label>심사위원 이름</label>
+        <input id="j-name" value="${esc(localStorage.getItem('hackon.judge') || '')}" placeholder="이름">
+        ${d.event.rubric.map(r => `
+          <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
+          <input class="j-v" data-key="${esc(r.key)}" type="number" min="0" max="100" value="70">`).join('')}
+        <div style="height:10px"></div>
+        <button class="btn sm" id="j-save">점수 저장</button>
+      </div>`;
   },
 
   async spon() {
@@ -248,6 +281,35 @@ function wire() {
     try {
       await api(`/events/${cur}/teams`, { method: 'POST', body: { name, contact: $('#t-contact').value } });
       flash('참가 신청이 됐습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+
+  document.querySelectorAll('[data-team]').forEach(tr => tr.onclick = () => {
+    if (!tr.dataset.team) return flash('데모에서는 팀 화면을 못 엽니다', true);
+    curTeam = tr.dataset.team; tab = 'team'; render();
+  });
+
+  const ssave = $('#s-save');
+  if (ssave) ssave.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    try {
+      await api(`/teams/${curTeam}/submit`, { method: 'POST',
+        body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim() } });
+      flash('제출했습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+
+  const jsave = $('#j-save');
+  if (jsave) jsave.onclick = async () => {
+    const judge = $('#j-name').value.trim();
+    if (!judge) return flash('심사위원 이름을 넣어 주세요', true);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    const values = {};
+    document.querySelectorAll('.j-v').forEach(i => { values[i.dataset.key] = +i.value; });
+    try {
+      await api(`/teams/${curTeam}/score`, { method: 'POST', body: { judge, values } });
+      localStorage.setItem('hackon.judge', judge);
+      flash('점수를 저장했습니다');
     } catch (e) { flash(e.message, true); }
   };
 
