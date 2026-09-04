@@ -72,6 +72,10 @@ nav .i{font-size:17px}
 .due.hot{color:var(--acc);border-color:#F6CFC2;background:#FDF3EF}
 .due.over{color:var(--bad);border-color:#F0D6D6;background:#FCF1F1}
 .late{color:var(--bad);font-weight:700}
+.agree{border:1px solid var(--rule);border-radius:9px;padding:11px;background:var(--bg2);margin-top:12px}
+.agree .meta{line-height:1.6}
+.ck{display:flex;gap:8px;align-items:flex-start;margin-top:9px;font-size:13px;font-weight:600}
+.ck input{width:16px;height:16px;flex:none;margin-top:2px}
 .shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
 .shrow .share{flex:1;margin-top:0}
 @media print{
@@ -192,6 +196,17 @@ function applyForm() {
       ${FOUND.map(f => `<option>${f}</option>`).join('')}</select>
     <label>하고 싶은 것 (선택)</label>
     <textarea id="t-note" rows="2" placeholder="어떤 불편을 풀고 싶은지 한 줄"></textarea>
+    <div class="agree">
+      <div class="meta"><b>개인정보 수집·이용 안내</b><br>
+        수집 항목 · 이름(팀 이름) · 연락처 · 참가 정보<br>
+        이용 목적 · 대회 운영 · 참가 확인 · 결과 안내 · 상금 지급<br>
+        보유 기간 · 대회 종료 후 <b>6개월</b>. 그 뒤 지웁니다<br>
+        동의하지 않으시면 참가 신청을 받을 수 없습니다.</div>
+      <label class="ck"><input type="checkbox" id="t-agree">
+        <span>개인정보 수집·이용에 동의합니다 <span class="pill">필수</span></span></label>
+      <label class="ck"><input type="checkbox" id="t-photo">
+        <span>행사 사진·영상 촬영과 공개에 동의합니다 <span class="pill ok">선택</span></span></label>
+    </div>
     <div style="height:10px"></div>
     <button class="btn sm" id="t-join">참가 신청</button>`;
 }
@@ -286,6 +301,20 @@ const SCREEN = {
         <td>${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
         <td class="n">${r.score}</td><td class="n">${r.judges}명</td></tr>`).join('')}</table>
       <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.</p>
+      <div class="card">
+        <h3>등록 데스크</h3>
+        <div class="meta">당일 아침에 이 칸만 보면 됩니다. 온 팀을 누르세요. 잘못 눌렀으면 다시 누릅니다.</div>
+        <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
+        ${d.rows.map(r => `<tr>
+          <td>${esc(r.name)}</td>
+          <td class="meta">${esc(r.contact || '—')}</td>
+          <td>${r.photo ? '<span class="pill ok">동의</span>' : '<span class="pill">비동의</span>'}</td>
+          <td><button class="btn ${r.came ? 'sec' : ''} sm" data-came="${r.id}">${
+            r.came ? '왔음' : '체크인'}</button></td>
+        </tr>`).join('')}</table>
+        <div class="meta" style="margin-top:8px">촬영에 동의하지 않은 팀은 사진에서 빼 주세요.</div>
+      </div>
+
       <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>
       <button class="btn sec sm" id="b-report">결과 보고서 보기</button>`;
   },
@@ -507,9 +536,10 @@ const SCREEN = {
       <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다. 아래 넷으로 정산합니다.</p>
       <div class="stat">
         <div><b>${o.finishRate}%</b><span>완주율</span></div>
-        <div><b>${o.interview}</b><span>면접 연결</span></div>
+        <div><b>${o.came ?? 0}/${o.teams}</b><span>온 팀</span></div>
       </div>
       <div class="stat">
+        <div><b>${o.interview}</b><span>면접 연결</span></div>
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
         <div><b>${o.hired}</b><span>채용</span></div>
       </div>
@@ -619,11 +649,13 @@ function wire() {
   if (join) join.onclick = async () => {
     const name = $('#t-name').value.trim();
     if (!name) return flash('팀 이름을 넣어 주세요', true);
+    if (!$('#t-agree').checked) return flash('개인정보 수집·이용에 동의해 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
     try {
       await api(`/events/${cur}/teams`, { method: 'POST', body: {
         name, contact: $('#t-contact').value, role: $('#t-role').value,
-        solo: !!$('#t-solo').value, found: $('#t-found').value, note: $('#t-note').value } });
+        solo: !!$('#t-solo').value, found: $('#t-found').value, note: $('#t-note').value,
+        agree: true, photo: $('#t-photo').checked } });
       flash('참가 신청이 됐습니다');
     } catch (e) { flash(e.message, true); }
   };
@@ -676,6 +708,12 @@ function wire() {
       flash(`${r.due} 까지 봐 주기로 했습니다`);
     } catch (e) { flash(e.message, true); }
   };
+
+  document.querySelectorAll('[data-came]').forEach(b => b.onclick = async () => {
+    try { const r = await api(`/teams/${b.dataset.came}/checkin`, { method: 'POST', body: {} });
+          flash(r.came ? '체크인했습니다' : '체크인을 취소했습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
 
   document.querySelectorAll('[data-done]').forEach(b => b.onclick = async () => {
     try { await api(`/assignments/${b.dataset.done}/done`, { method: 'POST', body: {} });
@@ -740,10 +778,13 @@ function wire() {
   if (csv) csv.onclick = async () => {
     if (!LIVE) return flash('데모에서는 못 내려받습니다', true);
     const d = await api(`/events/${cur}/board`);
-    const head = ['순위', '팀', '연락처', '제출', '링크', '설명', '점수', '심사'];
+    const head = ['순위', '팀', '연락처', '역할', '유입', '개인정보동의', '촬영동의', '왔음',
+                  '제출', '링크', '설명', '점수', '심사'];
     const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;   // 쉼표·줄바꿈이 든 칸을 지킨다
     const body = d.rows.map(r =>
-      [r.rank, r.name, r.contact, r.done ? '제출' : '미제출', r.url, r.note, r.score, r.judges].map(q).join(','));
+      [r.rank, r.name, r.contact, r.role, r.found,
+       r.agreed ? '동의' : '', r.photo ? '동의' : '', r.came ? '왔음' : '',
+       r.done ? '제출' : '미제출', r.url, r.note, r.score, r.judges].map(q).join(','));
     // 엑셀은 BOM 이 없으면 한글을 깬다. 줄바꿈은 CRLF 로 준다.
     // 이스케이프 대신 문자코드를 쓴다 — 이 파일이 스크립트로 여러 번 고쳐지는데
     // 역슬래시가 한 겹씩 먹혀서 한 번 깨진 적이 있다.

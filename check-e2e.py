@@ -107,18 +107,38 @@ with sync_playwright() as p:
     pg.select_option("#t-role", "만들기")
     pg.select_option("#t-found", "캠퍼스픽")
     pg.fill("#t-note", "골목 보행 불편을 풀고 싶습니다")
+
+    # 동의를 안 하면 신청이 안 된다. 화면이 먼저 막고 서버도 막는다.
+    pg.click("#t-join")
+    pg.wait_for_timeout(500)
+    A(len(api("/api/events/" + ev + "/board")["rows"]) == 0, "동의 없이 신청이 됐다")
+    A(post(f"/api/events/{ev}/teams", {"name": "서버우회팀"})[0] == 400,
+      "서버가 동의 없는 신청을 받았다")
+    ok("개인정보 동의 없이는 신청 불가 (화면·서버 둘 다)")
+
+    # 실패 안내가 뜨면서 화면이 다시 그려져 칸이 비워진다. 다시 채운다.
+    pg.wait_for_selector("#t-name")
+    pg.fill("#t-name", "하나팀")
+    pg.fill("#t-contact", "one@example.com")
+    pg.select_option("#t-role", "만들기")
+    pg.select_option("#t-found", "캠퍼스픽")
+    pg.fill("#t-note", "골목 보행 불편을 풀고 싶습니다")
+    pg.check("#t-agree")
+    pg.check("#t-photo")
     pg.click("#t-join")
     pg.wait_for_timeout(700)
-    A(post(f"/api/events/{ev}/teams", {"name": "가나다팀"})[0] == 201, "둘째 팀이 안 들어갔다")
+    A(post(f"/api/events/{ev}/teams", {"name": "가나다팀", "agree": True})[0] == 201, "둘째 팀이 안 들어갔다")
     rows = api(f"/api/events/{ev}/board")["rows"]
     A(len(rows) == 2, f"참가팀이 2여야 하는데 {len(rows)}")
     A(all(r["score"] == 0 and not r["done"] for r in rows), "심사 전인데 점수가 있다")
     one = [r for r in rows if r["name"] == "하나팀"][0]
     A(one["role"] == "만들기" and one["found"] == "캠퍼스픽",
       f"신청 칸이 안 저장됐다: {one}")
+    A(one["agreed"] and one["photo"] == 1, f"동의 기록이 안 남았다: {one}")
     ok("참가 신청 저장 — 2팀 · 역할과 유입 경로까지")
 
-    A(post(f"/api/events/{ev}/teams", {"name": "하나팀"})[0] == 409, "같은 팀 이름이 두 번 들어갔다")
+    A(post(f"/api/events/{ev}/teams", {"name": "하나팀", "agree": True})[0] == 409,
+      "같은 팀 이름이 두 번 들어갔다")
     ok("같은 팀 이름 차단 (409)")
 
     # ── 4. 참가팀이 제출하고, 심사위원이 점수를 넣는가 ──────
@@ -156,6 +176,20 @@ with sync_playwright() as p:
     A("본 사람 심사1" in tt, f"누가 봤는지 안 나온다: {tt[:120]}")
     ok("상태 배지 · 심사 진행 현황 (전원이 다 본 팀 1/2)")
 
+    # ── 등록 데스크 — 당일 아침에 쓰는 화면 ─────────────────
+    visit(f"/#{ev}")
+    A("등록 데스크" in pg.inner_text("#view"), "등록 데스크가 없다")
+    pg.click("[data-came]")
+    pg.wait_for_timeout(700)
+    o1 = api(f"/api/events/{ev}/outcomes")
+    A(o1["came"] == 1, f"체크인이 안 됐다: {o1['came']}")
+    pg.click("[data-came]")           # 잘못 눌렀을 때 되돌린다
+    pg.wait_for_timeout(700)
+    A(api(f"/api/events/{ev}/outcomes")["came"] == 0, "체크인 취소가 안 된다")
+    pg.click("[data-came]")
+    pg.wait_for_timeout(700)
+    ok("등록 데스크 체크인 — 눌렀다 다시 누르면 취소")
+
     # ── 마감 — 남은 시간이 뜨고, 지나면 서버가 막는가 ──────
     visit(f"/#{ev}")
     txt = pg.inner_text("#view")
@@ -166,7 +200,7 @@ with sync_playwright() as p:
     # 화면만 잠그면 주소를 아는 사람은 그냥 낸다. 그래서 서버를 때려서 확인한다.
     gone = (datetime.now() - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M')
     _, late = post('/api/events', {'title': '마감지난대회', 'due': gone})
-    _, lt = post(f"/api/events/{late['id']}/teams", {'name': '늦은팀'})
+    _, lt = post(f"/api/events/{late['id']}/teams", {'name': '늦은팀', 'agree': True})
     A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'})[0] == 409,
       '마감이 지났는데 제출이 됐다')
     ok('마감 뒤 제출 차단 (409)')
@@ -229,8 +263,10 @@ with sync_playwright() as p:
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")
-    A(post(f"/api/events/{small['id']}/teams", {"name": "첫팀"})[0] == 201, "첫 팀이 못 들어갔다")
-    A(post(f"/api/events/{small['id']}/teams", {"name": "둘째팀"})[0] == 409, "정원 찬 대회에 들어가졌다")
+    A(post(f"/api/events/{small['id']}/teams", {"name": "첫팀", "agree": True})[0] == 201,
+      "첫 팀이 못 들어갔다")
+    A(post(f"/api/events/{small['id']}/teams", {"name": "둘째팀", "agree": True})[0] == 409,
+      "정원 찬 대회에 들어가졌다")
     ok("정원 초과 차단 (409)")
 
     # ── 6. 협찬사에게 줄 숫자가 쌓이는가 (이 서비스의 차별점) ──
@@ -315,6 +351,7 @@ with sync_playwright() as p:
     before = len(api(f"/api/events/{ev}/board")["rows"])
     pub.fill("#t-name", "공개링크팀")
     pub.select_option("#t-found", "위비티")
+    pub.check("#t-agree")
     pub.click("#t-join")
     pub.wait_for_timeout(800)
     after = api(f"/api/events/{ev}/board")["rows"]

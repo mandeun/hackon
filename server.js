@@ -55,6 +55,9 @@ function open(file) {
       solo   INTEGER NOT NULL DEFAULT 0,  -- 혼자 왔나. 시작할 때 팀 짜기의 근거
       found  TEXT NOT NULL DEFAULT '',    -- 어디서 봤나. 2회차 홍보비를 여기다 쓴다
       note   TEXT NOT NULL DEFAULT '',
+      agreed TEXT NOT NULL DEFAULT '',    -- 개인정보 수집·이용에 동의한 시각. 이게 증거다
+      photo  INTEGER NOT NULL DEFAULT 0,  -- 촬영·사진 공개 동의 (선택)
+      came   TEXT NOT NULL DEFAULT '',    -- 당일 체크인한 시각
       joined TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(event, name)
     );
@@ -122,7 +125,8 @@ function open(file) {
   `);
   /* 이미 쓰던 DB 에도 칸을 붙인다. 있으면 에러가 나는데 그건 그냥 넘긴다. */
   try { db.exec("ALTER TABLE events ADD COLUMN due TEXT NOT NULL DEFAULT ''"); } catch {}
-  for (const c of ['role', 'found', 'note'])
+  try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
+  for (const c of ['role', 'found', 'note', 'agreed', 'came'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN solo INTEGER NOT NULL DEFAULT 0'); } catch {}
   return db;
@@ -166,12 +170,14 @@ function getEvent(db, id) {
 function joinTeam(db, event, b) {
   const e = getEvent(db, event);
   if (!b.name) throw new HttpError(400, '팀 이름이 필요합니다');
+  /* 동의 없이 연락처를 받지 않는다. 화면에서 체크박스를 지워도 여기서 막힌다. */
+  if (!b.agree) throw new HttpError(400, '개인정보 수집·이용에 동의해 주세요');
   if (e.cap && e.teams >= e.cap) throw new HttpError(409, '정원이 찼습니다');
   try {
-    const r = db.prepare(`INSERT INTO teams(event,name,contact,role,solo,found,note)
-                          VALUES(?,?,?,?,?,?,?)`)
+    const r = db.prepare(`INSERT INTO teams(event,name,contact,role,solo,found,note,agreed,photo)
+                          VALUES(?,?,?,?,?,?,?,?,?)`)
       .run(event, b.name, b.contact || '', b.role || '', b.solo ? 1 : 0,
-           b.found || '', b.note || '');
+           b.found || '', b.note || '', new Date().toISOString(), b.photo ? 1 : 0);
     return Number(r.lastInsertRowid);
   } catch {
     throw new HttpError(409, '같은 이름의 팀이 있습니다');
@@ -215,6 +221,7 @@ function board(db, event) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply,
+           t.agreed, t.photo, t.came,
            s.url, s.note
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
@@ -280,6 +287,8 @@ function outcomes(db, event) {
     found,
     solo: db.prepare('SELECT COUNT(*) c FROM teams WHERE event=? AND solo=1').get(event).c,
     finishRate: t ? Math.round(done / t * 1000) / 10 : 0,   // 완주율 %
+    came: db.prepare("SELECT COUNT(*) c FROM teams WHERE event=? AND came<>''").get(event).c,
+    photo: db.prepare('SELECT COUNT(*) c FROM teams WHERE event=? AND photo=1').get(event).c,
     interview: by['면접'] || 0,
     adoption: by['도입검토'] || 0,
     hired: by['채용'] || 0,
@@ -430,6 +439,14 @@ function routes(db) {
           db.prepare('UPDATE events SET due=? WHERE id=?').run(txt, m[1]);
           return json(res, 200, { due: txt, minutes: mins });
         }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/checkin$/)) && req.method === 'POST') {
+          /* 등록 데스크에서 누른다. 다시 누르면 취소 — 잘못 누르는 일이 실제로 생긴다. */
+          const t = db.prepare('SELECT came FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          const came = t.came ? '' : new Date().toISOString();
+          db.prepare('UPDATE teams SET came=? WHERE id=?').run(came, +m[1]);
+          return json(res, 200, { came });
+        }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/submit$/)) && req.method === 'POST') {
           submit(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
@@ -478,10 +495,14 @@ function selftest() {
   catch { bad = true; }
   ok(bad, '배점 합이 100 이 아니면 막는다');
 
-  const t1 = joinTeam(db, ev, { name: '가팀' });
-  const t2 = joinTeam(db, ev, { name: '나팀' });
-  bad = false; try { joinTeam(db, ev, { name: '가팀' }); } catch { bad = true; }
+  bad = false; try { joinTeam(db, ev, { name: '동의안함' }); } catch { bad = true; }
+  ok(bad, '개인정보 동의 없이는 신청이 안 된다');
+
+  const t1 = joinTeam(db, ev, { name: '가팀', agree: true, photo: true });
+  const t2 = joinTeam(db, ev, { name: '나팀', agree: true });
+  bad = false; try { joinTeam(db, ev, { name: '가팀', agree: true }); } catch { bad = true; }
   ok(bad, '같은 팀 이름은 못 넣는다');
+  ok(!!board(db, ev).rows.find(r => r.id === t1).agreed, '동의한 시각이 남는다');
 
   submit(db, t1, { url: 'https://example.com/a' });
   score(db, t1, { judge: '심사1', values: { idea: 90, make: 80, use: 70, tell: 60 } });
@@ -500,9 +521,9 @@ function selftest() {
 
   // 신청 칸은 따로 연 대회에서 본다. 여기에 팀을 더하면 아래 완주율 검사가 흔들린다.
   const ev2 = createEvent(db, { title: '신청폼시험' });
-  const s1 = joinTeam(db, ev2, { name: '다팀', role: '기획', solo: true, found: '캠퍼스픽' });
-  joinTeam(db, ev2, { name: '라팀', role: '만들기', found: '캠퍼스픽' });
-  joinTeam(db, ev2, { name: '마팀' });
+  const s1 = joinTeam(db, ev2, { name: '다팀', role: '기획', solo: true, found: '캠퍼스픽', agree: true });
+  joinTeam(db, ev2, { name: '라팀', role: '만들기', found: '캠퍼스픽', agree: true });
+  joinTeam(db, ev2, { name: '마팀', agree: true });
   ok(board(db, ev2).rows.find(r => r.id === s1).role === '기획', '신청 칸이 저장된다');
   const o0 = outcomes(db, ev2);
   ok(o0.solo === 1, '혼자 온 사람이 세어진다 (' + o0.solo + ')');
@@ -511,7 +532,7 @@ function selftest() {
 
   // 마감 — 지났으면 서버가 막고, 미루면 다시 받는다
   const past = createEvent(db, { title: '마감지남', due: '2020-01-01T10:00' });
-  const pt = joinTeam(db, past, { name: '늦은팀' });
+  const pt = joinTeam(db, past, { name: '늦은팀', agree: true });
   bad = false; try { submit(db, pt, { url: 'x' }); } catch { bad = true; }
   ok(bad, '마감이 지나면 제출을 막는다');
   db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T10:00', past);
@@ -546,6 +567,10 @@ function selftest() {
   db.prepare("UPDATE assignments SET done=date('now')").run();
   const sup = support(db, ev);
   ok(sup.late === 0 && sup.done === 1, '하면 늦음에서 빠진다');
+
+  db.prepare("UPDATE teams SET came=datetime('now') WHERE id=?").run(t1);
+  ok(outcomes(db, ev).came === 1, '체크인이 세어진다');
+  ok(outcomes(db, ev).photo === 1, '촬영 동의가 세어진다');
 
   db.prepare('INSERT INTO outcomes(event,team,kind,who) VALUES(?,?,?,?)').run(ev, t1, '면접', '어느회사');
   const o = outcomes(db, ev);
