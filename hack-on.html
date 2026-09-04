@@ -1294,7 +1294,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b
    손님을 남의 운영 화면으로 떨어뜨리지 않는다. */
 const home = document.getElementById('b-home');
 if (home) home.onclick = () => {
-  if (location.pathname !== '/') { location.href = '/'; return; }
+  if (location.pathname !== '/app') { location.href = '/app'; return; }
   tab = 'home'; curTeam = ''; render();
 };
 

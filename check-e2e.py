@@ -86,10 +86,24 @@ with sync_playwright() as p:
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.on("console", on_console)
 
-    def visit(path="/"):
+    def visit(path="/app"):
         pg.goto("about:blank")
         pg.goto(BASE + path)
         pg.wait_for_selector("body[data-ready='1']", timeout=8000)
+
+    # ── 0. 첫 화면 — 플랫폼 소개와 열린 대회 목록 ──────────
+    pg.goto(BASE + "/")
+    # 목록이 비면 grid 가 높이 0 이라 '보인다' 가 안 된다. 개수 표시가 채워지길 기다린다.
+    pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
+    htxt = pg.inner_text("body")
+    for must in ["대회 찾기", "열린 대회", "대회 열기", "협찬"]:
+        A(must in htxt, f"첫 화면에 '{must}' 메뉴가 없다")
+    A(pg.query_selector("#q") is not None, "검색 칸이 없다")
+    A(len(pg.query_selector_all("[data-filter]")) == 4, "필터가 4개가 아니다")
+    A(pg.query_selector("#sort") is not None, "정렬이 없다")
+    A("아직 열린 대회가 없습니다" in htxt, f"빈 목록 안내가 없다: {htxt[:200]}")
+    A(pg.get_attribute("a.btn.sm", "href") == "/app", "대회 열기가 앱으로 안 간다")
+    ok("첫 화면 — 메뉴·검색·필터·정렬·빈 목록 안내")
 
     # ── 1. 화면이 서버에 붙었는가 ───────────────────────────
     visit()
@@ -188,7 +202,7 @@ with sync_playwright() as p:
     ok("같은 팀 이름 차단 (409)")
 
     # ── 4. 참가팀이 제출하고, 심사위원이 점수를 넣는가 ──────
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     pg.click("tr[data-team]")
     pg.wait_for_selector("#s-url")
     pg.fill("#s-url", "https://example.com/walk")
@@ -211,7 +225,7 @@ with sync_playwright() as p:
     ok(f"제출 · 심사 저장 — 1등 {top['name']} {top['score']}점 (가중 평균)")
 
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     txt = pg.inner_text("#view")
     A("모집중" in txt, f"대회 상태 배지가 없다: {txt[:80]}")
     A("심사 진행" in txt and "심사위원 1명" in txt, "심사 진행 현황이 안 보인다")
@@ -248,7 +262,7 @@ with sync_playwright() as p:
     ok(f"성적표 — {len(cd['items'])}개 항목 분해 + 심사평 {len(cd['reviews'])}건 (이름 없이)")
 
     # 팀 화면에서 실제로 보이는가
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     pg.click("tr[data-team]")
     pg.wait_for_timeout(800)
     ctxt = pg.inner_text("#view")
@@ -265,7 +279,7 @@ with sync_playwright() as p:
     sp = api(f"/api/events/{ev}/spread", OK)
     A(sp["gap"] >= 15 and sp["warn"], f"차이가 큰데 경고가 없다: {sp}")
     A(sp["top"] == "심사1" and sp["bottom"] == "짠심사", f"후한/짠 사람이 틀렸다: {sp}")
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     stxt = pg.inner_text("#view")
     A("심사 눈높이" in stxt and "차이가 큽니다" in stxt, f"경고가 화면에 없다: {stxt[:200]}")
     ok(f"심사 눈높이 — 차이 {sp['gap']}점, 캘리브레이션 권고")
@@ -283,7 +297,7 @@ with sync_playwright() as p:
     ok("심사 눈높이가 심사위원에게는 안 보인다")
 
     # 로고를 누르면 처음으로 — 어디서 헤매도 여기로 돌아온다
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     pg.click('nav button[data-t="spon"]')
     pg.wait_for_timeout(500)
     pg.click("#b-home")
@@ -340,7 +354,7 @@ with sync_playwright() as p:
 
     # 진행 순서 — 기본값이 깔리고 고칠 수 있다
     A(len(tvd["plan"]) == 9, f"기본 진행표가 안 깔렸다: {len(tvd['plan'])}")
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     if not pg.is_visible("#e-plan"):
         pg.click("summary:has-text('고치기')")
         pg.wait_for_timeout(300)
@@ -355,7 +369,7 @@ with sync_playwright() as p:
     ok("진행 순서 — 기본 9줄이 깔리고 운영자가 고친다")
 
     # ── 등록 데스크 — 당일 아침에 쓰는 화면 ─────────────────
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     A("등록 데스크" in pg.inner_text("#view"), "등록 데스크가 없다")
     # 지금 안 쓰는 것은 접혀 있다. 당일 아침에 펼친다.
     def openFold(name):
@@ -376,7 +390,7 @@ with sync_playwright() as p:
     ok("등록 데스크 체크인 — 눌렀다 다시 누르면 취소")
 
     # ── 마감 — 남은 시간이 뜨고, 지나면 서버가 막는가 ──────
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     txt = pg.inner_text("#view")
     A("제출 마감까지" in txt, f"남은 시간이 안 보인다: {txt[:100]}")
     ok("마감까지 남은 시간이 뜬다")
@@ -514,7 +528,7 @@ with sync_playwright() as p:
     ok("정원 초과 차단 (409)")
 
     # ── 6. 협찬사에게 줄 숫자가 쌓이는가 (이 서비스의 차별점) ──
-    visit(f"/#{ev}")
+    visit(f"/app#{ev}")
     pg.click('nav button[data-t="spon"]')
 
     # 협찬사 등록 — 서버에는 있었는데 화면이 없어서 공개 페이지가 영영 비어 있던 자리다

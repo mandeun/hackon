@@ -1,7 +1,7 @@
 {
   "name": "HACK:ON — 누구나 여는 해커톤",
   "short_name": "HACK:ON",
-  "start_url": "/",
+  "start_url": "/app",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#151A34",

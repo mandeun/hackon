@@ -3,7 +3,7 @@
 FROM node:24-alpine
 
 WORKDIR /app
-COPY server.js hack-on.html sw.js manifest.webmanifest icon.svg logo.svg package.json ./
+COPY server.js home.html hack-on.html sw.js manifest.webmanifest icon.svg logo.svg package.json ./
 
 # DB 와 백업은 볼륨에 둔다. 기계가 꺼졌다 켜져도 대회가 남아야 한다.
 ENV DB=/data/hackon.db
