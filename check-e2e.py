@@ -176,6 +176,31 @@ with sync_playwright() as p:
     A("본 사람 심사1" in tt, f"누가 봤는지 안 나온다: {tt[:120]}")
     ok("상태 배지 · 심사 진행 현황 (전원이 다 본 팀 1/2)")
 
+    # ── 심사 눈높이 — 운영자만 본다 ─────────────────────────
+    # 짜게 주는 심사위원을 하나 더 넣어 차이를 만든다
+    A(post(f"/api/teams/{top['id']}/score",
+           {"judge": "짠심사", "values": {"idea": 55, "make": 55, "use": 55, "tell": 55}})[0] == 200,
+      "둘째 심사위원이 못 넣었다")
+    sp = api(f"/api/events/{ev}/spread")
+    A(sp["gap"] >= 15 and sp["warn"], f"차이가 큰데 경고가 없다: {sp}")
+    A(sp["top"] == "심사1" and sp["bottom"] == "짠심사", f"후한/짠 사람이 틀렸다: {sp}")
+    visit(f"/#{ev}")
+    stxt = pg.inner_text("#view")
+    A("심사 눈높이" in stxt and "차이가 큽니다" in stxt, f"경고가 화면에 없다: {stxt[:200]}")
+    ok(f"심사 눈높이 — 차이 {sp['gap']}점, 캘리브레이션 권고")
+
+    # 심사위원에게는 안 새야 한다. 서로 눈치를 보게 된다.
+    jc2 = b.new_context()
+    jp2 = jc2.new_page()
+    jp2.goto(f"{BASE}/j/{ev}")
+    jp2.wait_for_selector("body[data-ready='1']", timeout=8000)
+    jp2.fill("#jn", "최심사"); jp2.click("#jn-go"); jp2.wait_for_timeout(700)
+    j2 = jp2.inner_text("#view")
+    for leak in ["심사 눈높이", "짠심사", "심사1"]:
+        A(leak not in j2, f"심사 화면에 '{leak}' 가 샜다")
+    jc2.close()
+    ok("심사 눈높이가 심사위원에게는 안 보인다")
+
     # ── 등록 데스크 — 당일 아침에 쓰는 화면 ─────────────────
     visit(f"/#{ev}")
     A("등록 데스크" in pg.inner_text("#view"), "등록 데스크가 없다")
@@ -212,11 +237,14 @@ with sync_playwright() as p:
       '미뤘는데도 제출이 막힌다')
     ok(f"마감 60분 연장 → 다시 제출됨 (새 마감 {r['due']})")
 
-    # 심사위원 이름이 같으면 덮어쓴다. 두 번 눌러도 평균이 안 흔들려야 한다.
+    # 심사위원 이름이 같으면 덮어쓴다. 두 번 눌러도 사람 수가 안 늘어야 한다.
+    # 절대값을 박아 두지 않는다 — 앞 단계에서 심사위원이 늘면 그때 깨진다.
+    was = [r for r in api(f"/api/events/{ev}/board")["rows"] if r["id"] == top["id"]][0]["judges"]
     A(post(f"/api/teams/{top['id']}/score",
            {"judge": "심사1", "values": {"idea": 95, "make": 90, "use": 85, "tell": 80}})[0] == 200,
       "같은 심사위원이 다시 못 넣는다")
-    A(api(f"/api/events/{ev}/board")["rows"][0]["judges"] == 1, "같은 사람이 두 명으로 셌다")
+    now = [r for r in api(f"/api/events/{ev}/board")["rows"] if r["id"] == top["id"]][0]["judges"]
+    A(now == was, f"같은 사람이 두 명으로 셌다: {was} → {now}")
     ok("같은 심사위원 재저장 → 덮어쓰기 (중복 안 됨)")
 
     A(post(f"/api/teams/{top['id']}/score", {"judge": "심사2", "values": {"nope": 10}})[0] == 400,

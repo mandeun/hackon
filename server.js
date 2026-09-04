@@ -246,6 +246,20 @@ function board(db, event) {
   return { event: e, rows, judges };
 }
 
+/** 심사위원별 평균과 그 차이. 매뉴얼 7장의 캘리브레이션을 뒷받침한다.
+    누가 후하고 누가 짠지 모르면 눈높이를 맞출 수가 없다.
+    운영자만 본다 — 심사위원에게 보이면 서로 눈치를 본다. */
+function spread(db, event) {
+  const rows = db.prepare(`SELECT s.judge, AVG(s.value) avg, COUNT(DISTINCT s.team) teams
+                           FROM scores s JOIN teams t ON t.id = s.team
+                           WHERE t.event = ? GROUP BY s.judge ORDER BY avg DESC`).all(event);
+  for (const r of rows) r.avg = Math.round(r.avg * 10) / 10;
+  if (rows.length < 2) return { rows, gap: 0, warn: false };
+  const gap = Math.round((rows[0].avg - rows[rows.length - 1].avg) * 10) / 10;
+  /* 15점이면 한 항목이 아니라 순위가 뒤집힌다. 그때부터 캘리브레이션을 권한다. */
+  return { rows, gap, warn: gap >= 15, top: rows[0].judge, bottom: rows[rows.length - 1].judge };
+}
+
 /** 심사위원이 보는 것. 남의 점수도 순위도 안 내려보낸다 —
     화면에서 감추는 게 아니라 서버가 안 준다. 심사 중에 순위를 보면 점수가 끌려간다. */
 function judgeView(db, event, judge) {
@@ -391,6 +405,9 @@ function routes(db) {
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
           return json(res, 201, { ok: true });
         }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/spread$/)) && req.method === 'GET')
+          return json(res, 200, spread(db, m[1]));
+
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/judge$/)) && req.method === 'GET')
           return json(res, 200, judgeView(db, m[1], q.judge || ''));
 
@@ -538,6 +555,18 @@ function selftest() {
   db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T10:00', past);
   submit(db, pt, { url: 'https://example.com/late' });
   ok(!!db.prepare('SELECT url FROM submissions WHERE team=?').get(pt), '마감을 미루면 다시 받는다');
+
+  // 심사 편차 — 후한 사람과 짠 사람의 차이
+  const sp0 = spread(db, ev);
+  ok(sp0.rows.length === 2, '심사위원별 평균이 나온다 (' + JSON.stringify(sp0.rows) + ')');
+  ok(sp0.rows[0].avg > sp0.rows[1].avg, '후한 사람이 위로 온다');
+  const ev3 = createEvent(db, { title: '편차시험' });
+  const q1 = joinTeam(db, ev3, { name: '한팀', agree: true });
+  score(db, q1, { judge: '후한사람', values: { idea: 95, make: 95, use: 95, tell: 95 } });
+  score(db, q1, { judge: '짠사람', values: { idea: 60, make: 60, use: 60, tell: 60 } });
+  const sp1 = spread(db, ev3);
+  ok(sp1.gap === 35 && sp1.warn, '차이가 크면 경고한다 (' + sp1.gap + '점)');
+  ok(sp1.top === '후한사람' && sp1.bottom === '짠사람', '누가 후하고 짠지 나온다');
 
   // 심사 화면 — 남의 점수와 순위가 안 새어 나가는가
   const jv = judgeView(db, ev, '심사1');

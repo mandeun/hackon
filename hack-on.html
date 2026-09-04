@@ -270,6 +270,7 @@ const SCREEN = {
     if (!cur) return `<h2>대회를 먼저 고르세요</h2><p class="sub">‘대회’ 탭에서 하나 누르면 됩니다.</p>`;
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const e = d.event;
+    const sp = LIVE ? await api(`/events/${cur}/spread`) : { rows: [], gap: 0 };
     const js = d.judges || [];
     const full = d.rows.filter(r => (r.judges || 0) >= js.length && js.length).length;
     return `<h2>${esc(e.title)} ${badge(e)}</h2>
@@ -281,6 +282,16 @@ const SCREEN = {
         <div class="meta"><b>심사 진행</b> · 심사위원 ${js.length}명 (${js.map(esc).join(', ')})<br>
           전원이 다 본 팀 ${full}/${d.rows.length}팀${
             full < d.rows.length ? ' — 아직 남았습니다' : ' — 다 봤습니다'}</div>
+      </div>` : ''}
+
+      ${sp.rows.length > 1 ? `<div class="card" style="padding:11px 13px">
+        <div class="meta"><b>심사 눈높이</b> · 운영자만 보입니다<br>
+          ${sp.rows.map(r => esc(r.judge) + ' ' + r.avg + '점').join(' · ')}<br>
+          가장 후한 분과 짠 분의 차이 <b class="${sp.warn ? 'late' : ''}">${sp.gap}점</b>
+          ${sp.warn
+            ? `<br><span class="late">차이가 큽니다.</span> 한 팀을 같이 채점해 보고
+               눈높이를 맞춘 뒤 이어 가시길 권합니다. (${esc(sp.top)} ↔ ${esc(sp.bottom)})`
+            : '<br>눈높이가 맞는 편입니다.'}</div>
       </div>` : ''}
       <div class="card" style="padding:11px 13px">
         <div class="meta">아래 주소를 그대로 보내면 로그인 없이 열립니다. 협찬사·참가자용.</div>
@@ -412,6 +423,7 @@ const SCREEN = {
     const d = await api(`/events/${cur}/board`);
     const o = await api(`/events/${cur}/outcomes`);
     const sup = await api(`/events/${cur}/support`);
+    const sp = await api(`/events/${cur}/spread`);
     const e = d.event;
     const done = d.rows.filter(r => r.done);
     const money = e.sponsors.reduce((a, s) => a + (+s.amount || 0), 0);
@@ -476,7 +488,10 @@ const SCREEN = {
             ${r.url ? `<div class="share">${esc(r.url)}</div>` : ''}</div>`).join('')
         : '<p class="sub">제출작이 없습니다.</p>'}
       <p class="sub">심사 기준 · ${e.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}
-        · 심사위원 ${(d.judges || []).length}명</p>
+        · 심사위원 ${(d.judges || []).length}명
+        ${sp.rows.length > 1
+          ? `<br>심사위원 사이 평균 차이 ${sp.gap}점${sp.warn ? '' : ' — 눈높이가 맞았습니다'}.`
+          : ''}</p>
 
       <h3>일곱. 다음 회차</h3>
       <p class="sub">이번 숫자를 그대로 다음 제안서의 첫 줄로 씁니다.
