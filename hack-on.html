@@ -1,0 +1,271 @@
+<!doctype html>
+<!-- ┌─ 편집 구역 ────────────────────────────────────────────────┐
+     │ AGENT-EDIT : 화면 마크업 · CSS · 렌더 함수 · 예시 데이터    │
+     │ ASK-FIRST  : api() 와 LIVE 분기 — 승인 없이 지우지 않는다   │
+     └───────────────────────────────────────────────────────────┘
+     라켓온과 같은 규칙. 파일을 통째로 새로 짜면 서버 호출이 소리 없이 사라진다. -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1E2A5E">
+<link rel="manifest" href="manifest.webmanifest">
+<title>HACK:ON — 누구나 5분 만에 대회를 연다</title>
+<style>
+:root{
+  --navy:#1E2A5E; --navy-d:#16204A; --navy-l:#F3F5FB;
+  --ok:#1F6F5C; --ok-l:#EAF5F1; --warn:#A8631B; --warn-l:#FDF4E5; --bad:#9B2C2C;
+  --ink:#1A1E1D; --ink2:#4A5250; --ink3:#828986; --rule:#E4E7E9; --bg:#fff; --bg2:#F7F9FA;
+  --kr:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif; --r:12px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:var(--kr);background:#EBEEF1;color:var(--ink);font-size:15px;
+     display:flex;justify-content:center;min-height:100vh}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;border:0;background:none}
+button{cursor:pointer}
+input,select,textarea{border:1px solid var(--rule);border-radius:9px;padding:9px 11px;width:100%;background:#fff}
+:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+#app{width:100%;max-width:460px;background:var(--bg);min-height:100vh;
+     box-shadow:0 8px 40px rgba(20,30,60,.12);display:flex;flex-direction:column}
+
+header{padding:14px 16px 0;border-bottom:1px solid var(--rule);flex:none}
+.hrow{display:flex;align-items:center;gap:8px;padding-bottom:12px}
+.logo{font-size:18px;font-weight:800;letter-spacing:-.03em}
+.logo b{color:var(--navy)}
+.chip{margin-left:auto;font-size:11px;padding:3px 8px;border-radius:99px;background:var(--bg2);color:var(--ink3)}
+.chip.live{background:var(--ok-l);color:var(--ok);font-weight:700}
+
+main{flex:1;overflow:auto;padding:16px}
+h2{font-size:16px;margin:0 0 4px}
+.sub{color:var(--ink2);font-size:13px;margin-bottom:14px;line-height:1.65}
+.card{border:1px solid var(--rule);border-radius:var(--r);padding:13px;margin-bottom:10px;background:#fff}
+.card h3{font-size:15px;margin-bottom:3px}
+.meta{font-size:12.5px;color:var(--ink3)}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+label{display:block;font-size:12.5px;color:var(--ink2);margin:10px 0 4px;font-weight:600}
+.btn{background:var(--navy);color:#fff;border-radius:10px;padding:11px 14px;font-weight:700;width:100%;text-align:center}
+.btn.sec{background:var(--bg2);color:var(--ink);border:1px solid var(--rule)}
+.btn.sm{padding:7px 11px;font-size:13px;width:auto;border-radius:8px}
+.pill{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--navy-l);color:var(--navy);font-weight:700}
+.pill.ok{background:var(--ok-l);color:var(--ok)}
+.pill.warn{background:var(--warn-l);color:var(--warn)}
+.stat{display:flex;gap:8px;margin:12px 0}
+.stat div{flex:1;border:1px solid var(--rule);border-radius:10px;padding:9px 10px;background:var(--bg2)}
+.stat b{display:block;font-size:19px;color:var(--navy);line-height:1.2}
+.stat span{font-size:11.5px;color:var(--ink3)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{border-bottom:1px solid var(--rule);padding:8px 6px;text-align:left}
+th{color:var(--ink3);font-weight:700;font-size:12px}
+td.n,th.n{text-align:right}
+.err{background:#FCF1F1;color:var(--bad);border:1px solid #F0D6D6;border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:13px}
+.ok-msg{background:var(--ok-l);color:var(--ok);border:1px solid #CDE6DD;border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:13px}
+nav{display:flex;border-top:1px solid var(--rule);flex:none;background:#fff}
+nav button{flex:1;padding:11px 0 13px;font-size:11.5px;color:var(--ink3);display:flex;flex-direction:column;align-items:center;gap:3px}
+nav button.on{color:var(--navy);font-weight:700}
+nav .i{font-size:17px}
+.share{font-family:Consolas,monospace;font-size:12px;background:var(--bg2);border:1px solid var(--rule);
+       border-radius:8px;padding:8px 10px;word-break:break-all;margin-top:8px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="hrow">
+      <div class="logo">HACK<b>:ON</b></div>
+      <span class="chip" id="mode">데모</span>
+    </div>
+  </header>
+  <main id="view"></main>
+  <nav>
+    <button data-t="home" class="on"><span class="i">◎</span>대회</button>
+    <button data-t="make"><span class="i">＋</span>열기</button>
+    <button data-t="board"><span class="i">▤</span>순위</button>
+    <button data-t="spon"><span class="i">◆</span>협찬 성과</button>
+  </nav>
+</div>
+
+<script>
+/* ═══════ ASK-FIRST : 서버 연결부 ═══════
+   라켓온과 같은 두 갈래. file:// 로 열면 데모 데이터, http:// 면 진짜 서버. */
+const LIVE = location.protocol.startsWith('http');
+async function api(path, opt) {
+  const r = await fetch('/api' + path, {
+    method: opt?.method || 'GET',
+    headers: { 'content-type': 'application/json' },
+    body: opt?.body ? JSON.stringify(opt.body) : undefined,
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || '서버 오류');
+  return d;
+}
+/* ═══════ ASK-FIRST 끝 ═══════ */
+
+/* 데모 데이터 — 서버 없이 화면을 확인할 때만 쓴다 */
+const DEMO = {
+  events: [{ id: 'demo01', title: '우리 동네 문제 해결 해커톤', host: '유재원',
+             starts: '2026-10-11', ends: '2026-10-12', prize: 3000000 }],
+  event: { id: 'demo01', title: '우리 동네 문제 해결 해커톤', host: '유재원', topic: '생활 불편',
+           starts: '2026-10-11', ends: '2026-10-12', prize: 3000000, cap: 20, teams: 3,
+           rubric: [{key:'idea',label:'독창성',weight:30},{key:'make',label:'완성도',weight:30},
+                    {key:'use',label:'실용성',weight:25},{key:'tell',label:'전달력',weight:15}],
+           sponsors: [{ name: '오픈에이아이', kind: '크레딧', amount: 2000000 },
+                      { name: '동네카페', kind: '상품', amount: 300000 }] },
+  board: [{ rank:1, name:'가나다팀', score:82.5, judges:2, done:true },
+          { rank:2, name:'하나팀', score:71.0, judges:2, done:true },
+          { rank:3, name:'셋팀', score:0, judges:0, done:false }],
+  outcomes: { teams:3, finished:2, finishRate:66.7, interview:2, adoption:1, hired:0, followup:1, list:[] },
+};
+
+let tab = 'home', cur = localStorage.getItem('hackon.event') || '';
+const $ = s => document.querySelector(s);
+const view = $('#view');
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const won = n => (+n || 0).toLocaleString('ko-KR') + '원';
+let msg = null;
+
+function flash(text, bad) { msg = { text, bad }; render(); setTimeout(() => { msg = null; render(); }, 2600); }
+function head() { return msg ? `<div class="${msg.bad ? 'err' : 'ok-msg'}">${esc(msg.text)}</div>` : ''; }
+
+async function render() {
+  $('#mode').textContent = LIVE ? '서버 연결됨' : '데모';
+  $('#mode').className = 'chip' + (LIVE ? ' live' : '');
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  // innerHTML 을 쓰되 서버에서 온 값은 전부 esc() 를 거친다. 화면 조립이 문자열 한 곳에
+  // 모여 있어야 라켓온처럼 "서버 호출이 사라졌는지"를 검사로 셀 수 있다.
+  try { view.innerHTML = head() + await SCREEN[tab](); }
+  catch (e) { view.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  wire();
+}
+
+const SCREEN = {
+  async home() {
+    const list = LIVE ? await api('/events') : DEMO.events;
+    if (!list.length) return `<h2>아직 열린 대회가 없습니다</h2>
+      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>`;
+    return `<h2>열린 대회</h2><p class="sub">누르면 참가 신청과 순위를 볼 수 있습니다.</p>` +
+      list.map(e => `<div class="card" data-open="${esc(e.id)}">
+        <h3>${esc(e.title)}</h3>
+        <div class="meta">${esc(e.host)} · ${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)}</div>
+      </div>`).join('') +
+      (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '');
+  },
+
+  async make() {
+    return `<h2>대회 열기</h2>
+      <p class="sub">개인도 엽니다. 이름·날짜만 넣으면 되고, 심사 기준은 기본값이 들어갑니다.</p>
+      <label>대회 이름</label><input id="f-title" placeholder="예) 우리 동네 문제 해결 해커톤">
+      <label>여는 사람</label><input id="f-host" placeholder="이름 또는 단체">
+      <label>주제 (선택)</label><input id="f-topic" placeholder="예) 생활 불편">
+      <div class="row">
+        <div><label>시작</label><input id="f-starts" type="date"></div>
+        <div><label>끝</label><input id="f-ends" type="date"></div>
+      </div>
+      <div class="row">
+        <div><label>상금(원)</label><input id="f-prize" type="number" value="0"></div>
+        <div><label>팀 정원 (0=무제한)</label><input id="f-cap" type="number" value="0"></div>
+      </div>
+      <label>심사 기준</label>
+      <div class="card"><div class="meta">독창성 30 · 완성도 30 · 실용성 25 · 전달력 15
+        <br>합이 100이어야 저장됩니다. 지금은 기본값을 씁니다.</div></div>
+      <button class="btn" id="f-save">대회 만들기</button>`;
+  },
+
+  async board() {
+    if (!cur && !LIVE) cur = 'demo01';
+    if (!cur) return `<h2>대회를 먼저 고르세요</h2><p class="sub">‘대회’ 탭에서 하나 누르면 됩니다.</p>`;
+    const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
+    const e = d.event;
+    return `<h2>${esc(e.title)}</h2>
+      <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
+      <div class="share">${LIVE ? location.origin : 'http://localhost:8788'}/#${esc(e.id)}</div>
+      <div class="card">
+        <label>팀 이름</label><input id="t-name" placeholder="팀 이름">
+        <label>연락처 (선택)</label><input id="t-contact" placeholder="이메일 또는 전화">
+        <div style="height:10px"></div>
+        <button class="btn sm" id="t-join">참가 신청</button>
+      </div>
+      <table><tr><th>순위</th><th>팀</th><th class="n">점수</th><th class="n">심사</th></tr>
+      ${d.rows.map(r => `<tr><td>${r.rank}</td>
+        <td>${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
+        <td class="n">${r.score}</td><td class="n">${r.judges}명</td></tr>`).join('')}</table>
+      <p class="sub" style="margin-top:12px">심사위원은 팀을 눌러 점수를 넣습니다. (다음 판에서 화면 추가)</p>`;
+  },
+
+  async spon() {
+    if (!cur && !LIVE) cur = 'demo01';
+    if (!cur) return `<h2>대회를 먼저 고르세요</h2>`;
+    const o = LIVE ? await api(`/events/${cur}/outcomes`) : DEMO.outcomes;
+    return `<h2>협찬사에게 주는 숫자</h2>
+      <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다. 아래 넷으로 정산합니다.</p>
+      <div class="stat">
+        <div><b>${o.finishRate}%</b><span>완주율</span></div>
+        <div><b>${o.interview}</b><span>면접 연결</span></div>
+      </div>
+      <div class="stat">
+        <div><b>${o.adoption}</b><span>도입 검토</span></div>
+        <div><b>${o.hired}</b><span>채용</span></div>
+      </div>
+      <div class="card">
+        <h3>성과 기록하기</h3>
+        <div class="meta">행사 뒤 2주 동안 여기에 쌓습니다. 이게 다음 해 제안서의 근거가 됩니다.</div>
+        <label>무엇</label>
+        <select id="o-kind"><option>면접</option><option>도입검토</option><option>채용</option><option>후속미팅</option></select>
+        <label>어느 회사</label><input id="o-who" placeholder="회사 이름">
+        <div style="height:10px"></div>
+        <button class="btn sm" id="o-add">기록 추가</button>
+      </div>`;
+  },
+};
+
+function wire() {
+  document.querySelectorAll('[data-open]').forEach(el => el.onclick = () => {
+    cur = el.dataset.open; localStorage.setItem('hackon.event', cur); tab = 'board'; render();
+  });
+  const go = $('[data-go]'); if (go) go.onclick = () => { tab = go.dataset.go; render(); };
+
+  const save = $('#f-save');
+  if (save) save.onclick = async () => {
+    const b = {
+      title: $('#f-title').value.trim(), host: $('#f-host').value.trim(),
+      topic: $('#f-topic').value.trim(), starts: $('#f-starts').value,
+      ends: $('#f-ends').value, prize: $('#f-prize').value, cap: $('#f-cap').value,
+    };
+    if (!b.title) return flash('대회 이름을 넣어 주세요', true);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
+    try {
+      const r = await api('/events', { method: 'POST', body: b });
+      cur = r.id; localStorage.setItem('hackon.event', cur); tab = 'board';
+      flash('대회를 만들었습니다. 링크를 공유하세요');
+    } catch (e) { flash(e.message, true); }
+  };
+
+  const join = $('#t-join');
+  if (join) join.onclick = async () => {
+    const name = $('#t-name').value.trim();
+    if (!name) return flash('팀 이름을 넣어 주세요', true);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    try {
+      await api(`/events/${cur}/teams`, { method: 'POST', body: { name, contact: $('#t-contact').value } });
+      flash('참가 신청이 됐습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+
+  const oadd = $('#o-add');
+  if (oadd) oadd.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    try {
+      await api(`/events/${cur}/outcomes`, { method: 'POST',
+        body: { kind: $('#o-kind').value, who: $('#o-who').value } });
+      flash('기록했습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+}
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.t; render(); });
+if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
+render();
+if (LIVE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>

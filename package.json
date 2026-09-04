@@ -1,0 +1,12 @@
+{
+  "name": "hackon",
+  "version": "0.1.0",
+  "description": "누구나 5분 만에 여는 해커톤 — 대회 개설·참가·심사·협찬 성과",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node server.js --test"
+  },
+  "license": "MIT",
+  "private": true
+}
