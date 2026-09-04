@@ -4,3 +4,4 @@ node_modules/
 *.db-wal
 *.db-shm
 작업로그.md
+__pycache__/
