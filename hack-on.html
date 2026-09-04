@@ -74,6 +74,13 @@ nav .i{font-size:17px}
 .late{color:var(--bad);font-weight:700}
 .shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
 .shrow .share{flex:1;margin-top:0}
+@media print{
+  body{background:#fff}
+  #app{max-width:none;box-shadow:none;min-height:0}
+  header,nav,.noprint{display:none!important}
+  main{overflow:visible;padding:0}
+  .card,table{break-inside:avoid}
+}
 </style>
 </head>
 <body>
@@ -273,7 +280,8 @@ const SCREEN = {
         <td>${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
         <td class="n">${r.score}</td><td class="n">${r.judges}명</td></tr>`).join('')}</table>
       <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.</p>
-      <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>`;
+      <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>
+      <button class="btn sec sm" id="b-report">결과 보고서 보기</button>`;
   },
 
   /* 공개 화면 — 로그인 없이 링크만으로 보는 읽기 전용. 협찬사와 참가자에게 뿌리는 주소다. */
@@ -323,6 +331,85 @@ const SCREEN = {
 
       <p class="sub" style="margin-top:14px">심사 기준 ·
         ${e.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}</p>`;
+  },
+
+  /* 결과 보고서 — 협찬사에게 보내는 물건. 인쇄하면 그대로 PDF 가 된다.
+     빈칸이 생기지 않게 앞의 세 기능(마감·신청·사후지원)을 먼저 만들었다. */
+  async report() {
+    const d = await api(`/events/${cur}/board`);
+    const o = await api(`/events/${cur}/outcomes`);
+    const sup = await api(`/events/${cur}/support`);
+    const e = d.event;
+    const done = d.rows.filter(r => r.done);
+    const money = e.sponsors.reduce((a, s) => a + (+s.amount || 0), 0);
+    return `<div class="noprint" style="margin-bottom:14px">
+        <button class="btn sm" id="b-print">인쇄 · PDF 로 저장</button>
+        <div class="meta" style="margin-top:6px">이 주소를 그대로 보내셔도 됩니다.</div>
+      </div>
+
+      <h2>${esc(e.title)} 결과 보고서</h2>
+      <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
+        ${e.topic ? '· 주제 ' + esc(e.topic) : ''}</p>
+
+      <h3>하나. 무엇을 했나</h3>
+      <div class="stat">
+        <div><b>${e.teams}</b><span>참가 팀</span></div>
+        <div><b>${o.finishRate}%</b><span>완주율</span></div>
+        <div><b>${sup.people.length}</b><span>봐 준 사람</span></div>
+      </div>
+      <p class="sub">참가 ${e.teams}팀 중 ${o.finished}팀이 끝까지 결과물을 냈습니다.
+        ${o.solo ? `혼자 오신 분이 ${o.solo}명이었고 현장에서 팀을 짰습니다.` : ''}</p>
+
+      ${(o.found || []).length ? `<h3>둘. 어디서 왔나</h3>
+        <table><tr><th>경로</th><th class="n">신청</th></tr>
+        ${o.found.map(f => `<tr><td>${esc(f.k)}</td><td class="n">${f.c}팀</td></tr>`).join('')}</table>
+        <p class="sub">다음 회차 홍보는 위쪽 경로에 집중합니다.</p>` : ''}
+
+      <h3>셋. 협찬해 주신 곳</h3>
+      ${e.sponsors.length
+        ? `<table><tr><th>회사</th><th>무엇을</th><th class="n">규모</th></tr>
+           ${e.sponsors.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.kind)}</td>
+             <td class="n">${s.amount ? won(s.amount) : '—'}</td></tr>`).join('')}</table>
+           ${money ? `<p class="sub">합계 ${won(money)} 상당.</p>` : ''}`
+        : '<p class="sub">이번 회차는 협찬 없이 진행했습니다.</p>'}
+
+      <h3>넷. 돌려드리는 숫자</h3>
+      <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다. 아래 넷으로 정산합니다.</p>
+      <table>
+        <tr><th>항목</th><th class="n">건수</th></tr>
+        <tr><td>완주 (끝까지 결과물을 낸 팀)</td><td class="n">${o.finished}/${o.teams}</td></tr>
+        <tr><td>면접 연결</td><td class="n">${o.interview}</td></tr>
+        <tr><td>도입 검토</td><td class="n">${o.adoption}</td></tr>
+        <tr><td>채용</td><td class="n">${o.hired}</td></tr>
+      </table>
+
+      <h3>다섯. 끝난 뒤에 한 일</h3>
+      ${sup.rows.length
+        ? `<p class="sub">약속 ${sup.promised}건 중 ${sup.done}건을 지켰습니다.${
+             sup.late ? ` <span class="late">${sup.late}건이 기한을 넘겼습니다.</span>` : ''}</p>
+           <table><tr><th>팀</th><th>봐 준 사람</th><th>기한</th><th></th></tr>
+           ${sup.rows.map(r => `<tr><td>${esc(r.team_name)}</td>
+             <td>${esc(r.helper_name)}${r.org ? ' · ' + esc(r.org) : ''}</td>
+             <td>${esc(r.due)}</td>
+             <td>${r.done ? '<span class="pill ok">완료</span>'
+                          : `<span class="pill ${r.late ? 'warn' : ''}">${r.late ? '늦음' : '진행'}</span>`}</td>
+           </tr>`).join('')}</table>`
+        : '<p class="sub">이번 회차는 사후 지원을 배정하지 않았습니다.</p>'}
+
+      <h3>여섯. 결과물</h3>
+      ${done.length
+        ? done.map(r => `<div class="card"><h3>${r.rank}위 · ${esc(r.name)}</h3>
+            ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
+            ${r.url ? `<div class="share">${esc(r.url)}</div>` : ''}</div>`).join('')
+        : '<p class="sub">제출작이 없습니다.</p>'}
+      <p class="sub">심사 기준 · ${e.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}
+        · 심사위원 ${(d.judges || []).length}명</p>
+
+      <h3>일곱. 다음 회차</h3>
+      <p class="sub">이번 숫자를 그대로 다음 제안서의 첫 줄로 씁니다.
+        완주율 ${o.finishRate}% · 면접 ${o.interview}건 · 도입 검토 ${o.adoption}건.
+        같은 조건으로 한 번 더 하실 의향이 있으시면 알려 주십시오.</p>
+      <p class="meta">${esc(e.title)} · 작성 ${new Date().toISOString().slice(0, 10)}</p>`;
   },
 
   /* 팀 한 곳 — 참가팀은 제출하고, 심사위원은 점수를 넣는다. 같은 화면을 둘이 나눠 쓴다. */
@@ -552,6 +639,15 @@ function wire() {
     catch (e) { flash(e.message, true); }
   });
 
+  const pr = $('#b-print');
+  if (pr) pr.onclick = () => window.print();
+
+  const rep2 = $('#b-report');
+  if (rep2) rep2.onclick = () => {
+    if (LIVE) location.href = `/e/${cur}/report`;
+    else { tab = 'report'; render(); }
+  };
+
   const ext = $('#b-ext');
   if (ext) ext.onclick = async () => {
     if (!LIVE) return flash('데모에서는 안 됩니다', true);
@@ -620,8 +716,12 @@ function wire() {
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.t; render(); });
 
 /* 주소가 /e/<대회id> 면 읽기 전용 공개 화면으로 연다. 아래 탭과 편집 칸을 감춘다. */
-const PUB = location.pathname.match(/^\/e\/([a-z0-9]+)$/);
-if (PUB) { cur = PUB[1]; tab = 'pub'; document.querySelector('nav').style.display = 'none'; }
+const PUB = location.pathname.match(/^\/e\/([a-z0-9]+)(\/report)?$/);
+if (PUB) {
+  cur = PUB[1];
+  tab = PUB[2] ? 'report' : 'pub';
+  document.querySelector('nav').style.display = 'none';
+}
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
 render();
 if (LIVE && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

@@ -420,7 +420,7 @@ function routes(db) {
 
       /* 공개 링크. /e/<대회id> 는 화면 파일을 그대로 내려보내고, 화면이 주소를 보고
          읽기 전용으로 그린다. 서버에 화면을 하나 더 두지 않는 게 요점이다. */
-      const pub = p.match(/^\/e\/[a-z0-9]+$/);
+      const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/);
 
       /* #region reuse:static — 경로 탈출 방지 + MIME + 스트림. 그대로 복사해 쓴다 */
       const f = path.join(ROOT, (p === '/' || pub) ? 'hack-on.html' : decodeURIComponent(p));

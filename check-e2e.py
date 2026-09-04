@@ -287,8 +287,39 @@ with sync_playwright() as p:
     after = api(f"/api/events/{ev}/board")["rows"]
     A(len(after) == before + 1, f"공개 링크에서 신청이 안 됐다: {before} → {len(after)}")
     A([r for r in after if r["name"] == "공개링크팀"][0]["found"] == "위비티", "유입 경로가 안 붙었다")
-    ctx.close()
     ok("공개 링크에서 바로 참가 신청 — 모집 글에 이 주소를 쓴다")
+
+    # ── 결과 보고서 — 협찬사에게 보내는 물건. 링크 하나가 곧 보고서다 ──
+    rp = ctx.new_page()
+    rp.on("pageerror", lambda e: errs.append("보고서:" + str(e)))
+    rp.goto(f"{BASE}/e/{ev}/report")
+    rp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    rtxt = rp.inner_text("#view")
+    must = {
+        "결과 보고서": "제목",
+        "하나. 무엇을 했나": "개요",
+        "어디서 왔나": "유입 경로",
+        "협찬해 주신 곳": "협찬사",
+        "오픈에이아이": "협찬사 이름",
+        "돌려드리는 숫자": "성과 네 숫자",
+        "끝난 뒤에 한 일": "사후 지원",
+        "박실무": "봐 준 사람 이름",
+        "결과물": "제출작",
+        "example.com/walk": "제출 링크",
+        "다음 회차": "마무리",
+    }
+    for k, why in must.items():
+        A(k in rtxt, f"보고서에 {why} 가 없다 ({k})")
+    # 빈칸이 있으면 안 보내느니만 못하다. 숫자를 박아 두지 말고 서버 값과 대조한다.
+    o2 = api(f"/api/events/{ev}/outcomes")
+    A(f"{o2['finishRate']}%" in rtxt,
+      f"완주율이 서버 값과 다르다 (서버 {o2['finishRate']}%)")
+    A(f"{o2['finished']}/{o2['teams']}" in rtxt, "완주 건수가 안 채워졌다")
+    A("약속 1건 중 1건" in rtxt, "사후 지원 이행이 안 채워졌다")
+    A(rp.query_selector("nav") is None or
+      rp.evaluate("document.querySelector('nav').style.display") == "none", "보고서에 아래 탭이 보인다")
+    ctx.close()
+    ok("결과 보고서 /e/<대회id>/report — 11개 항목이 실제 데이터로 채워짐")
 
     # ── 8. file:// 데모 모드가 안 깨졌는가 (캡처·발표가 이걸로 돈다) ──
     pg.goto("about:blank")
