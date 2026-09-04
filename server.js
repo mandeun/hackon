@@ -290,8 +290,12 @@ function routes(db) {
         throw new HttpError(404, '없는 주소입니다');
       }
 
+      /* 공개 링크. /e/<대회id> 는 화면 파일을 그대로 내려보내고, 화면이 주소를 보고
+         읽기 전용으로 그린다. 서버에 화면을 하나 더 두지 않는 게 요점이다. */
+      const pub = p.match(/^\/e\/[a-z0-9]+$/);
+
       /* #region reuse:static — 경로 탈출 방지 + MIME + 스트림. 그대로 복사해 쓴다 */
-      const f = path.join(ROOT, p === '/' ? 'hack-on.html' : decodeURIComponent(p));
+      const f = path.join(ROOT, (p === '/' || pub) ? 'hack-on.html' : decodeURIComponent(p));
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
       if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) throw new HttpError(404, '없습니다');
       res.writeHead(200, { 'content-type': MIME[path.extname(f)] || 'application/octet-stream' });

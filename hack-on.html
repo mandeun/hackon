@@ -9,7 +9,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#1E2A5E">
-<link rel="manifest" href="manifest.webmanifest">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>HACK:ON — 누구나 5분 만에 대회를 연다</title>
 <style>
 :root{
@@ -180,7 +180,10 @@ const SCREEN = {
     const e = d.event;
     return `<h2>${esc(e.title)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
-      <div class="share">${LIVE ? location.origin : 'http://localhost:8788'}/#${esc(e.id)}</div>
+      <div class="card" style="padding:11px 13px">
+        <div class="meta">아래 주소를 그대로 보내면 로그인 없이 열립니다. 협찬사·참가자용.</div>
+        <div class="share">${LIVE ? location.origin : 'http://localhost:8788'}/e/${esc(e.id)}</div>
+      </div>
       <div class="card">
         <label>팀 이름</label><input id="t-name" placeholder="팀 이름">
         <label>연락처 (선택)</label><input id="t-contact" placeholder="이메일 또는 전화">
@@ -192,6 +195,41 @@ const SCREEN = {
         <td>${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
         <td class="n">${r.score}</td><td class="n">${r.judges}명</td></tr>`).join('')}</table>
       <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.</p>`;
+  },
+
+  /* 공개 화면 — 로그인 없이 링크만으로 보는 읽기 전용. 협찬사와 참가자에게 뿌리는 주소다. */
+  async pub() {
+    const d = await api(`/events/${cur}/board`);
+    const o = await api(`/events/${cur}/outcomes`);
+    const e = d.event;
+    const done = d.rows.filter(r => r.done);
+    return `<h2>${esc(e.title)}</h2>
+      <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
+        ${e.topic ? '· 주제 ' + esc(e.topic) : ''}<br>상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
+
+      ${e.sponsors.length ? `<div class="card"><h3>함께한 곳</h3>
+        <div class="meta">${e.sponsors.map(s => esc(s.name) + ' <span class="pill">' + esc(s.kind) + '</span>').join(' · ')}</div>
+      </div>` : ''}
+
+      <div class="stat">
+        <div><b>${o.finishRate}%</b><span>완주율</span></div>
+        <div><b>${o.interview}</b><span>면접 연결</span></div>
+        <div><b>${o.adoption}</b><span>도입 검토</span></div>
+      </div>
+
+      <h3 style="margin-top:16px">순위</h3>
+      <table><tr><th>순위</th><th>팀</th><th class="n">점수</th></tr>
+      ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${esc(r.name)}</td>
+        <td class="n">${r.score}</td></tr>`).join('')}</table>
+
+      ${done.length ? `<h3 style="margin-top:16px">제출작</h3>
+        ${done.map(r => `<div class="card"><h3>${esc(r.name)}</h3>
+          ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
+          ${r.url ? `<div class="share">${esc(r.url)}</div>` : ''}</div>`).join('')}
+        ` : ''}
+
+      <p class="sub" style="margin-top:14px">심사 기준 ·
+        ${e.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}</p>`;
   },
 
   /* 팀 한 곳 — 참가팀은 제출하고, 심사위원은 점수를 넣는다. 같은 화면을 둘이 나눠 쓴다. */
@@ -325,9 +363,13 @@ function wire() {
 }
 
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.t; render(); });
-if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
+
+/* 주소가 /e/<대회id> 면 읽기 전용 공개 화면으로 연다. 아래 탭과 편집 칸을 감춘다. */
+const PUB = location.pathname.match(/^\/e\/([a-z0-9]+)$/);
+if (PUB) { cur = PUB[1]; tab = 'pub'; document.querySelector('nav').style.display = 'none'; }
+else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
 render();
-if (LIVE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if (LIVE && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 </script>
 </body>
 </html>
