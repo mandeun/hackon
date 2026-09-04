@@ -39,15 +39,32 @@ def ok(msg):
     print(f"ok {step:2d}  {msg}")
 
 
-def api(path):
-    with urllib.request.urlopen(BASE + path) as r:
+def api(path, key=None):
+    req = urllib.request.Request(BASE + path)
+    if key:
+        req.add_header("x-okey", key)
+    with urllib.request.urlopen(req) as r:
         return json.load(r)
 
 
-def post(path, payload):
+def code_of(path, key=None):
+    """GET 을 해 보고 상태 코드만 돌려준다. 막혔는지 확인할 때 쓴다."""
+    req = urllib.request.Request(BASE + path)
+    if key:
+        req.add_header("x-okey", key)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def post(path, payload, key=None):
+    h = {"content-type": "application/json"}
+    if key:
+        h["x-okey"] = key
     req = urllib.request.Request(
-        BASE + path, method="POST", data=json.dumps(payload).encode(),
-        headers={"content-type": "application/json"})
+        BASE + path, method="POST", data=json.dumps(payload).encode(), headers=h)
     try:
         with urllib.request.urlopen(req) as r:
             return r.status, json.load(r)
@@ -107,6 +124,8 @@ with sync_playwright() as p:
     evs = api("/api/events")
     A(len(evs) == 1, f"대회가 1개여야 하는데 {len(evs)}")
     ev = evs[0]["id"]
+    OK = pg.evaluate("localStorage.getItem('hackon.okey.' + cur)")
+    A(OK and len(OK) == 10, f"운영자 열쇠가 저장되지 않았다: {OK}")
     A(evs[0]["title"] == "우리 동네 문제 해결 해커톤", f"화면이 보낸 값이 안 들어갔다: {evs[0]}")
     A(pg.evaluate("cur") == ev, "만든 뒤 그 대회로 안 옮겨 갔다")
     A(len(api(f"/api/events/{ev}")["rubric"]) == 4, "심사 기본값이 안 깔렸다")
@@ -140,7 +159,7 @@ with sync_playwright() as p:
     pg.click("#t-join")
     pg.wait_for_timeout(700)
     A(post(f"/api/events/{ev}/teams", {"name": "가나다팀", "agree": True})[0] == 201, "둘째 팀이 안 들어갔다")
-    rows = api(f"/api/events/{ev}/board")["rows"]
+    rows = api(f"/api/events/{ev}/board", OK)["rows"]
     A(len(rows) == 2, f"참가팀이 2여야 하는데 {len(rows)}")
     A(all(r["score"] == 0 and not r["done"] for r in rows), "심사 전인데 점수가 있다")
     one = [r for r in rows if r["name"] == "하나팀"][0]
@@ -167,7 +186,7 @@ with sync_playwright() as p:
     pg.click("#j-save")
     pg.wait_for_timeout(700)
 
-    rows = api(f"/api/events/{ev}/board")["rows"]
+    rows = api(f"/api/events/{ev}/board", OK)["rows"]
     top = rows[0]
     A(top["done"] and top["url"] == "https://example.com/walk", f"제출이 안 붙었다: {top}")
     A(top["judges"] == 1, f"심사위원 수가 1이어야 하는데 {top['judges']}")
@@ -204,7 +223,7 @@ with sync_playwright() as p:
     # 공개하기 전에는 팀도 못 본다
     cd = api(f"/api/teams/{tid}/card")
     A(cd["opened"] is False, f"공개 전인데 성적표가 열렸다: {cd}")
-    A(post(f"/api/events/{ev}/open", {"open": True})[0] == 200, "결과 공개 실패")
+    A(post(f"/api/events/{ev}/open", {"open": True}, OK)[0] == 200, "결과 공개 실패")
     cd = api(f"/api/teams/{tid}/card")
     A(cd["opened"] is True and len(cd["items"]) == 4, f"성적표가 안 열렸다: {cd}")
     A(cd["reviews"] and "문제를" in cd["reviews"][0]["good"], f"심사평이 없다: {cd['reviews']}")
@@ -221,14 +240,14 @@ with sync_playwright() as p:
     A("내 점수" in ctxt and "심사평" in ctxt and "문제를 잘 골랐습니다" in ctxt,
       f"팀 화면에 성적표가 안 보인다: {ctxt[:200]}")
     ok("팀이 자기 점수 분해와 심사평을 본다")
-    post(f"/api/events/{ev}/open", {"open": False})
+    post(f"/api/events/{ev}/open", {"open": False}, OK)
 
     # ── 심사 눈높이 — 운영자만 본다 ─────────────────────────
     # 짜게 주는 심사위원을 하나 더 넣어 차이를 만든다
     A(post(f"/api/teams/{top['id']}/score",
            {"judge": "짠심사", "values": {"idea": 55, "make": 55, "use": 55, "tell": 55}})[0] == 200,
       "둘째 심사위원이 못 넣었다")
-    sp = api(f"/api/events/{ev}/spread")
+    sp = api(f"/api/events/{ev}/spread", OK)
     A(sp["gap"] >= 15 and sp["warn"], f"차이가 큰데 경고가 없다: {sp}")
     A(sp["top"] == "심사1" and sp["bottom"] == "짠심사", f"후한/짠 사람이 틀렸다: {sp}")
     visit(f"/#{ev}")
@@ -253,11 +272,11 @@ with sync_playwright() as p:
     A("등록 데스크" in pg.inner_text("#view"), "등록 데스크가 없다")
     pg.click("[data-came]")
     pg.wait_for_timeout(700)
-    o1 = api(f"/api/events/{ev}/outcomes")
+    o1 = api(f"/api/events/{ev}/outcomes", OK)
     A(o1["came"] == 1, f"체크인이 안 됐다: {o1['came']}")
     pg.click("[data-came]")           # 잘못 눌렀을 때 되돌린다
     pg.wait_for_timeout(700)
-    A(api(f"/api/events/{ev}/outcomes")["came"] == 0, "체크인 취소가 안 된다")
+    A(api(f"/api/events/{ev}/outcomes", OK)["came"] == 0, "체크인 취소가 안 된다")
     pg.click("[data-came]")
     pg.wait_for_timeout(700)
     ok("등록 데스크 체크인 — 눌렀다 다시 누르면 취소")
@@ -289,7 +308,8 @@ with sync_playwright() as p:
     ok('마감 뒤 제출 차단 (409)')
 
     # 인터넷이 터졌을 때 진행자가 미룬다. 미룬 뒤에는 다시 받아야 한다.
-    code, r = post(f"/api/events/{late['id']}/extend", {'minutes': 60})
+    LK = late['okey']
+    code, r = post(f"/api/events/{late['id']}/extend", {'minutes': 60}, LK)
     A(code == 200, f'연장 실패 {code}')
     A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'})[0] == 200,
       '미뤘는데도 제출이 막힌다')
@@ -297,11 +317,11 @@ with sync_playwright() as p:
 
     # 심사위원 이름이 같으면 덮어쓴다. 두 번 눌러도 사람 수가 안 늘어야 한다.
     # 절대값을 박아 두지 않는다 — 앞 단계에서 심사위원이 늘면 그때 깨진다.
-    was = [r for r in api(f"/api/events/{ev}/board")["rows"] if r["id"] == top["id"]][0]["judges"]
+    was = [r for r in api(f"/api/events/{ev}/board", OK)["rows"] if r["id"] == top["id"]][0]["judges"]
     A(post(f"/api/teams/{top['id']}/score",
            {"judge": "심사1", "values": {"idea": 95, "make": 90, "use": 85, "tell": 80}})[0] == 200,
       "같은 심사위원이 다시 못 넣는다")
-    now = [r for r in api(f"/api/events/{ev}/board")["rows"] if r["id"] == top["id"]][0]["judges"]
+    now = [r for r in api(f"/api/events/{ev}/board", OK)["rows"] if r["id"] == top["id"]][0]["judges"]
     A(now == was, f"같은 사람이 두 명으로 셌다: {was} → {now}")
     ok("같은 심사위원 재저장 → 덮어쓰기 (중복 안 됨)")
 
@@ -346,6 +366,41 @@ with sync_playwright() as p:
     ok(f"심사 링크에서 점수 저장 — 남은 팀 {jv['left']}팀")
     jctx.close()
 
+    # ── 운영자 열쇠 — 개발자 스물네 명에게 공개 링크를 뿌린다 ──
+    # 열쇠 없이 되면 안 되는 것들
+    A(code_of(f"/api/events/{ev}/spread") == 403, "열쇠 없이 심사 눈높이가 보인다")
+    guest = api(f"/api/events/{ev}/board")
+    A(all("contact" not in r for r in guest["rows"]), "열쇠 없이 연락처가 나온다")
+    A(all("came" not in r for r in guest["rows"]), "열쇠 없이 체크인 정보가 나온다")
+    go = api(f"/api/events/{ev}/outcomes")
+    A("found" not in go and "list" not in go, "열쇠 없이 유입 경로·성과 명단이 나온다")
+    for path, body_ in [(f"/api/events/{ev}/sponsors", {"name": "몰래"}),
+                        (f"/api/events/{ev}/outcomes", {"kind": "면접"}),
+                        (f"/api/events/{ev}/support", {"name": "몰래"}),
+                        (f"/api/events/{ev}/open", {"open": True}),
+                        (f"/api/events/{ev}/extend", {"minutes": 30})]:
+        A(post(path, body_)[0] == 403, f"열쇠 없이 {path} 가 됐다")
+    A(post(f"/api/teams/{top['id']}/checkin", {})[0] == 403, "열쇠 없이 체크인이 됐다")
+
+    # 대회 삭제 — 이게 제일 위험하다
+    dreq = urllib.request.Request(f"{BASE}/api/events/{ev}", method="DELETE")
+    try:
+        urllib.request.urlopen(dreq)
+        A(False, "열쇠 없이 대회가 지워졌다")
+    except urllib.error.HTTPError as e:
+        A(e.code == 403, f"403 이어야 하는데 {e.code}")
+    A(len(api("/api/events")) >= 1, "대회가 사라졌다")
+
+    # 틀린 열쇠도 막힌다
+    A(code_of(f"/api/events/{ev}/spread", "0000000000") == 403, "틀린 열쇠가 통과했다")
+    A(code_of(f"/api/events/{ev}/spread", OK) == 200, "맞는 열쇠가 막혔다")
+    ok("운영자 열쇠 — 삭제·연락처·성과·체크인이 전부 막힌다 (403)")
+
+    # 참가자가 해야 하는 일은 열쇠 없이도 된다
+    A(code_of(f"/api/events/{ev}/judge") == 200, "심사 화면이 막혔다")
+    A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")
+    ok("신청·제출·심사·공개 페이지는 열쇠 없이 그대로 열린다")
+
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")
@@ -376,7 +431,7 @@ with sync_playwright() as p:
     pg.fill("#o-who", "어느회사")
     pg.click("#o-add")
     pg.wait_for_timeout(700)
-    o = api(f"/api/events/{ev}/outcomes")
+    o = api(f"/api/events/{ev}/outcomes", OK)
     A(o["finishRate"] == 50.0, f"완주율이 50 이어야 하는데 {o['finishRate']}")
     A(o["interview"] == 1, f"면접 연결이 1 이어야 하는데 {o['interview']}")
     A("50%" in pg.content() and "완주율" in pg.content(), "화면에 숫자가 안 나온다")
@@ -391,7 +446,7 @@ with sync_playwright() as p:
     pg.wait_for_selector("#a-add")
     pg.click("#a-add")
     pg.wait_for_timeout(800)
-    sup = api(f"/api/events/{ev}/support")
+    sup = api(f"/api/events/{ev}/support", OK)
     A(sup["promised"] == 1, f"배정이 안 됐다: {sup}")
     # 기한을 안 주면 대회 끝나고 14일. 대회가 10/12 에 끝나니 10/26 이어야 한다.
     A(sup["rows"][0]["due"] == "2026-10-26", f"기본 기한이 틀렸다: {sup['rows'][0]['due']}")
@@ -402,7 +457,7 @@ with sync_playwright() as p:
     # 했음을 누르면 지킨 것으로 넘어간다
     pg.click("[data-done]")
     pg.wait_for_timeout(800)
-    sup = api(f"/api/events/{ev}/support")
+    sup = api(f"/api/events/{ev}/support", OK)
     A(sup["done"] == 1, f"완료 표시가 안 됐다: {sup}")
     ok("사후 지원 완료 표시 — 약속 1건 중 1건 지킴")
 
@@ -435,20 +490,20 @@ with sync_playwright() as p:
     ok("공개 링크 — 규칙(결과물 권리·AI 허용·행동강령)이 함께 보인다")
 
     # 모집 글에 이 주소를 쓴다. 여기서 바로 신청이 돼야 한다.
-    before = len(api(f"/api/events/{ev}/board")["rows"])
+    before = len(api(f"/api/events/{ev}/board", OK)["rows"])
     pub.fill("#t-name", "공개링크팀")
     pub.select_option("#t-found", "위비티")
     pub.check("#t-agree")
     pub.click("#t-join")
     pub.wait_for_timeout(800)
-    after = api(f"/api/events/{ev}/board")["rows"]
+    after = api(f"/api/events/{ev}/board", OK)["rows"]
     A(len(after) == before + 1, f"공개 링크에서 신청이 안 됐다: {before} → {len(after)}")
     A([r for r in after if r["name"] == "공개링크팀"][0]["found"] == "위비티", "유입 경로가 안 붙었다")
     ok("공개 링크에서 바로 참가 신청 — 모집 글에 이 주소를 쓴다")
 
     # ── 결과 보고서 — 협찬사에게 보내는 물건. 링크 하나가 곧 보고서다 ──
-    rp = ctx.new_page()
-    rp.on("pageerror", lambda e: errs.append("보고서:" + str(e)))
+    # 운영자 브라우저에서 연다. 열쇠가 거기 있어서 전체가 나온다.
+    rp = pg
     rp.goto(f"{BASE}/e/{ev}/report")
     rp.wait_for_selector("body[data-ready='1']", timeout=8000)
     rtxt = rp.inner_text("#view")
@@ -468,13 +523,22 @@ with sync_playwright() as p:
     for k, why in must.items():
         A(k in rtxt, f"보고서에 {why} 가 없다 ({k})")
     # 빈칸이 있으면 안 보내느니만 못하다. 숫자를 박아 두지 말고 서버 값과 대조한다.
-    o2 = api(f"/api/events/{ev}/outcomes")
+    o2 = api(f"/api/events/{ev}/outcomes", OK)
     A(f"{o2['finishRate']}%" in rtxt,
       f"완주율이 서버 값과 다르다 (서버 {o2['finishRate']}%)")
     A(f"{o2['finished']}/{o2['teams']}" in rtxt, "완주 건수가 안 채워졌다")
     A("약속 1건 중 1건" in rtxt, "사후 지원 이행이 안 채워졌다")
     A(rp.query_selector("nav") is None or
       rp.evaluate("document.querySelector('nav').style.display") == "none", "보고서에 아래 탭이 보인다")
+
+    # 손님에게도 깨지지 않고 열려야 한다. 심사 눈높이 같은 운영자 것만 빠진다.
+    gp = ctx.new_page()
+    gp.on("pageerror", lambda e: errs.append("보고서손님:" + str(e)))
+    gp.goto(f"{BASE}/e/{ev}/report")
+    gp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    gtxt = gp.inner_text("#view")
+    A("결과 보고서" in gtxt and "돌려드리는 숫자" in gtxt, f"손님 보고서가 깨졌다: {gtxt[:150]}")
+    A("어디서 왔나" not in gtxt, "손님에게 유입 경로가 샜다")
     ctx.close()
     ok("결과 보고서 /e/<대회id>/report — 11개 항목이 실제 데이터로 채워짐")
 

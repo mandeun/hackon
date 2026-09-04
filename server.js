@@ -44,6 +44,7 @@ function open(file) {
       cap      INTEGER NOT NULL DEFAULT 0,   -- 0 = 제한 없음
       due      TEXT NOT NULL DEFAULT '',      -- 제출 마감 'YYYY-MM-DDTHH:MM'. 비면 안 막는다
       opened   INTEGER NOT NULL DEFAULT 0,   -- 결과 공개. 켜면 팀이 자기 점수와 심사평을 본다
+      okey     TEXT NOT NULL DEFAULT '',      -- 운영자 열쇠. 이걸 아는 사람만 운영 화면을 연다
       rubric   TEXT NOT NULL DEFAULT '[]',   -- [{key,label,weight}]
       created  TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -140,6 +141,7 @@ function open(file) {
   /* 이미 쓰던 DB 에도 칸을 붙인다. 있으면 에러가 나는데 그건 그냥 넘긴다. */
   try { db.exec("ALTER TABLE events ADD COLUMN due TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE events ADD COLUMN opened INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE events ADD COLUMN okey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
   for (const c of ['role', 'found', 'note', 'agreed', 'came'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
@@ -174,6 +176,7 @@ const DEFAULT_RUBRIC = [
 function createEvent(db, b) {
   if (!b.title) throw new HttpError(400, '대회 이름이 필요합니다');
   const id = b.id || nid();
+  const okey = crypto.randomBytes(5).toString('hex');   // 운영자 열쇠. 만든 사람만 받는다
   const rubric = Array.isArray(b.rubric) && b.rubric.length ? b.rubric : DEFAULT_RUBRIC;
   const sum = rubric.reduce((a, r) => a + Number(r.weight || 0), 0);
   if (sum !== 100) throw new HttpError(400, `심사 배점 합이 ${sum} 입니다. 100 이어야 합니다`);
@@ -182,12 +185,26 @@ function createEvent(db, b) {
     .run(id, b.title, b.host || '주최자', b.topic || '',
          b.starts || today(), b.ends || b.starts || today(),
          +b.prize || 0, +b.cap || 0, JSON.stringify(rubric), b.due || '');
-  return id;
+  db.prepare('UPDATE events SET okey=? WHERE id=?').run(okey, id);
+  return { id, okey };
 }
+
+/** 운영자인가. 열쇠는 헤더나 쿼리로 온다. 없으면 손님이다.
+    로그인은 안 만든다 — 하루짜리 행사에 계정 관리를 붙이는 건 과하다. */
+function isAdmin(db, event, key) {
+  const e = db.prepare('SELECT okey FROM events WHERE id=?').get(event);
+  if (!e) return false;
+  if (!e.okey) return true;          // 열쇠가 생기기 전에 만든 대회는 그대로 열어 둔다
+  return !!key && key === e.okey;
+}
+const needAdmin = (db, event, key) => {
+  if (!isAdmin(db, event, key)) throw new HttpError(403, '운영자 열쇠가 필요합니다');
+};
 
 function getEvent(db, id) {
   const e = db.prepare('SELECT * FROM events WHERE id=?').get(id);
   if (!e) throw new HttpError(404, '없는 대회입니다');
+  delete e.okey;                     // 열쇠는 절대 안 내려보낸다
   e.rubric = JSON.parse(e.rubric);
   e.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(id).c;
   e.sponsors = db.prepare('SELECT * FROM sponsors WHERE event=? ORDER BY amount DESC').all(id);
@@ -276,7 +293,7 @@ function score(db, team, b) {
 }
 
 /** 순위 — 항목별 가중 평균. 심사위원 수가 달라도 평균이라 흔들리지 않는다. */
-function board(db, event) {
+function board(db, event, admin = false) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply,
@@ -293,11 +310,16 @@ function board(db, event) {
     }
     for (const j of db.prepare('SELECT DISTINCT judge FROM scores WHERE team=?').all(t.id))
       judged.add(j.judge);
-    return { ...t, score: Math.round(total * 10) / 10, judges: judged.size,
-             by: [...judged].sort(), done: !!t.url };
+    const row = { ...t, score: Math.round(total * 10) / 10, judges: judged.size,
+                  by: [...judged].sort(), done: !!t.url };
+    /* 개인정보는 운영자에게만. 화면에서 감추면 브라우저 콘솔에서 다 보인다. */
+    if (!admin) { delete row.contact; delete row.found; delete row.agreed;
+                  delete row.photo; delete row.came; delete row.apply; }
+    return row;
   });
   rows.sort((a, b) => b.score - a.score);
   rows.forEach((r, i) => { r.rank = i + 1; });
+  e.admin = admin;   // 화면이 운영 칸을 그릴지 말지 이걸로 정한다
   /* 이 대회에 한 번이라도 점수를 넣은 사람 전부. 화면이 '아직 안 본 사람' 을 계산하는 근거다. */
   const judges = db.prepare(`SELECT DISTINCT s.judge FROM scores s
                              JOIN teams t ON t.id = s.team
@@ -462,12 +484,19 @@ function routes(db) {
           return json(res, 200, db.prepare(
             'SELECT id,title,host,starts,ends,prize FROM events ORDER BY created DESC LIMIT 50').all());
 
+        const key = req.headers['x-okey'] || q.k || '';
+
         if (p === '/api/events' && req.method === 'POST')
-          return json(res, 201, { id: createEvent(db, await body(req)) });
+          return json(res, 201, createEvent(db, await body(req)));
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)$/))) {
-          if (req.method === 'GET') return json(res, 200, getEvent(db, m[1]));
+          if (req.method === 'GET') {
+            const e = getEvent(db, m[1]);
+            e.admin = isAdmin(db, m[1], key);
+            return json(res, 200, e);
+          }
           if (req.method === 'DELETE') {
+            needAdmin(db, m[1], key);
             db.prepare('DELETE FROM events WHERE id=?').run(m[1]);
             return json(res, 200, { ok: true });
           }
@@ -476,9 +505,10 @@ function routes(db) {
           return json(res, 201, { id: joinTeam(db, m[1], await body(req)) });
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/board$/)))
-          return json(res, 200, board(db, m[1]));
+          return json(res, 200, board(db, m[1], isAdmin(db, m[1], key)));
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/sponsors$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key);
           const b = await body(req);
           db.prepare('INSERT INTO sponsors(event,name,kind,amount,note) VALUES(?,?,?,?,?)')
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
@@ -491,12 +521,15 @@ function routes(db) {
           return json(res, 200, card(db, +m[1]));
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/open$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key);
           const b = await body(req);
           db.prepare('UPDATE events SET opened=? WHERE id=?').run(b.open === false ? 0 : 1, m[1]);
           return json(res, 200, { opened: b.open === false ? 0 : 1 });
         }
-        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/spread$/)) && req.method === 'GET')
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/spread$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key);   // 심사위원에게 보이면 서로 눈치를 본다
           return json(res, 200, spread(db, m[1]));
+        }
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/judge$/)) && req.method === 'GET')
           return json(res, 200, judgeView(db, m[1], q.judge || ''));
@@ -504,6 +537,7 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/support$/))) {
           if (req.method === 'GET') return json(res, 200, support(db, m[1]));
           if (req.method === 'POST') {
+            needAdmin(db, m[1], key);
             const b = await body(req);
             if (!b.name) throw new HttpError(400, '이름이 필요합니다');
             try {
@@ -513,8 +547,10 @@ function routes(db) {
             return json(res, 201, { ok: true });
           }
         }
-        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/assign$/)) && req.method === 'POST')
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/assign$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key);
           return json(res, 201, { due: assign(db, m[1], await body(req)) });
+        }
 
         if ((m = p.match(/^\/api\/assignments\/(\d+)\/done$/)) && req.method === 'POST') {
           const b = await body(req);
@@ -523,8 +559,14 @@ function routes(db) {
           return json(res, 200, { ok: true });
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/outcomes$/))) {
-          if (req.method === 'GET') return json(res, 200, outcomes(db, m[1]));
+          if (req.method === 'GET') {
+            const o = outcomes(db, m[1]);
+            /* 완주율은 공개 페이지가 쓴다. 유입 경로와 명단은 운영자 것이다. */
+            if (!isAdmin(db, m[1], key)) { delete o.found; delete o.list; delete o.came; }
+            return json(res, 200, o);
+          }
           if (req.method === 'POST') {
+            needAdmin(db, m[1], key);
             const b = await body(req);
             db.prepare('INSERT INTO outcomes(event,team,kind,who,note) VALUES(?,?,?,?,?)')
               .run(m[1], b.team || null, b.kind, b.who || '', b.note || '');
@@ -532,6 +574,7 @@ function routes(db) {
           }
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/extend$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key);
           /* 인터넷이 터지면 마감을 미룰 수 있어야 한다 (매뉴얼 3장).
              진행자가 그 자리에서 누른다. */
           const b = await body(req);
@@ -548,8 +591,9 @@ function routes(db) {
         }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/checkin$/)) && req.method === 'POST') {
           /* 등록 데스크에서 누른다. 다시 누르면 취소 — 잘못 누르는 일이 실제로 생긴다. */
-          const t = db.prepare('SELECT came FROM teams WHERE id=?').get(+m[1]);
+          const t = db.prepare('SELECT came, event FROM teams WHERE id=?').get(+m[1]);
           if (!t) throw new HttpError(404, '없는 팀입니다');
+          needAdmin(db, t.event, key);
           const came = t.came ? '' : new Date().toISOString();
           db.prepare('UPDATE teams SET came=? WHERE id=?').run(came, +m[1]);
           return json(res, 200, { came });
@@ -595,8 +639,13 @@ function selftest() {
   const db = open(tmp);
   let n = 0; const ok = (c, m) => { if (!c) throw new Error('실패: ' + m); n++; };
 
-  const ev = createEvent(db, { title: '첫 대회', host: '유재원', starts: '2026-10-01', prize: 1000000 });
+  const evR = createEvent(db, { title: '첫 대회', host: '유재원', starts: '2026-10-01', prize: 1000000 });
+  const ev = evR.id, okey = evR.okey;
   ok(getEvent(db, ev).title === '첫 대회', '대회 개설');
+  ok(/^[0-9a-f]{10}$/.test(okey), '운영자 열쇠가 발급된다');
+  ok(!('okey' in getEvent(db, ev)), '열쇠는 안 내려보낸다');
+  ok(board(db, ev, true).rows.length === 0, '빈 대회');
+  ok(isAdmin(db, ev, okey) && !isAdmin(db, ev, 'x'), '열쇠가 맞아야 운영자다');
 
   let bad = false;
   try { createEvent(db, { title: 'x', rubric: [{ key: 'a', label: 'a', weight: 50 }] }); }
@@ -610,7 +659,7 @@ function selftest() {
   const t2 = joinTeam(db, ev, { name: '나팀', agree: true });
   bad = false; try { joinTeam(db, ev, { name: '가팀', agree: true }); } catch { bad = true; }
   ok(bad, '같은 팀 이름은 못 넣는다');
-  ok(!!board(db, ev).rows.find(r => r.id === t1).agreed, '동의한 시각이 남는다');
+  ok(!!board(db, ev, true).rows.find(r => r.id === t1).agreed, '동의한 시각이 남는다');
 
   submit(db, t1, { url: 'https://example.com/a' });
   score(db, t1, { judge: '심사1', values: { idea: 90, make: 80, use: 70, tell: 60 } });
@@ -628,7 +677,7 @@ function selftest() {
   ok(b2.rows.find(r => r.name === '가팀').by.length === 1, '팀별로 누가 봤는지 나온다');
 
   // 신청 칸은 따로 연 대회에서 본다. 여기에 팀을 더하면 아래 완주율 검사가 흔들린다.
-  const ev2 = createEvent(db, { title: '신청폼시험' });
+  const ev2 = createEvent(db, { title: '신청폼시험' }).id;
   const s1 = joinTeam(db, ev2, { name: '다팀', role: '기획', solo: true, found: '캠퍼스픽', agree: true });
   joinTeam(db, ev2, { name: '라팀', role: '만들기', found: '캠퍼스픽', agree: true });
   joinTeam(db, ev2, { name: '마팀', agree: true });
@@ -639,13 +688,17 @@ function selftest() {
      '유입 경로가 많은 순으로 집계된다 (' + JSON.stringify(o0.found) + ')');
 
   // 마감 — 지났으면 서버가 막고, 미루면 다시 받는다
-  const past = createEvent(db, { title: '마감지남', due: '2020-01-01T10:00' });
+  const past = createEvent(db, { title: '마감지남', due: '2020-01-01T10:00' }).id;
   const pt = joinTeam(db, past, { name: '늦은팀', agree: true });
   bad = false; try { submit(db, pt, { url: 'x' }); } catch { bad = true; }
   ok(bad, '마감이 지나면 제출을 막는다');
   db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T10:00', past);
   submit(db, pt, { url: 'https://example.com/late' });
   ok(!!db.prepare('SELECT url FROM submissions WHERE team=?').get(pt), '마감을 미루면 다시 받는다');
+
+  ok(board(db, ev, true).rows[0].contact !== undefined, '운영자는 연락처를 본다');
+  ok(board(db, ev, false).rows[0].contact === undefined, '손님에게는 연락처가 안 간다');
+  ok(board(db, ev, false).rows[0].came === undefined, '손님에게는 체크인이 안 간다');
 
   // 성적표 — 공개하기 전에는 팀도 못 본다
   score(db, t1, { judge: '심사1', values: { idea: 90, make: 80, use: 70, tell: 60 },
@@ -663,7 +716,7 @@ function selftest() {
   const sp0 = spread(db, ev);
   ok(sp0.rows.length === 2, '심사위원별 평균이 나온다 (' + JSON.stringify(sp0.rows) + ')');
   ok(sp0.rows[0].avg > sp0.rows[1].avg, '후한 사람이 위로 온다');
-  const ev3 = createEvent(db, { title: '편차시험' });
+  const ev3 = createEvent(db, { title: '편차시험' }).id;
   const q1 = joinTeam(db, ev3, { name: '한팀', agree: true });
   score(db, q1, { judge: '후한사람', values: { idea: 95, make: 95, use: 95, tell: 95 } });
   score(db, q1, { judge: '짠사람', values: { idea: 60, make: 60, use: 60, tell: 60 } });

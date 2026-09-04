@@ -117,10 +117,12 @@ nav .i{font-size:17px}
 /* ═══════ ASK-FIRST : 서버 연결부 ═══════
    라켓온과 같은 두 갈래. file:// 로 열면 데모 데이터, http:// 면 진짜 서버. */
 const LIVE = location.protocol.startsWith('http');
+const okeyOf = id => localStorage.getItem('hackon.okey.' + id) || '';
 async function api(path, opt) {
   const r = await fetch('/api' + path, {
     method: opt?.method || 'GET',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json',
+               ...(cur && okeyOf(cur) ? { 'x-okey': okeyOf(cur) } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
   const d = await r.json();
@@ -319,6 +321,22 @@ const SCREEN = {
     if (!cur) return `<h2>대회를 먼저 고르세요</h2><p class="sub">‘대회’ 탭에서 하나 누르면 됩니다.</p>`;
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const e = d.event;
+    /* 열쇠가 없으면 순위와 공유 주소까지만 보여 준다. 연락처는 서버가 이미 안 준다. */
+    if (LIVE && !e.admin) return `<h2>${esc(e.title)} ${badge(e)}</h2>
+      <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 참가 ${e.teams}팀</p>
+      ${dueBox(e)}
+      <div class="card">
+        <h3>운영자 열쇠</h3>
+        <div class="meta">이 대회를 만든 브라우저가 아닙니다.
+          운영 화면(참가자 연락처·등록 데스크·협찬·성과)은 열쇠가 있어야 열립니다.<br>
+          열쇠는 대회를 만들 때 한 번 나옵니다. 만든 기기의 ‘순위’ 화면 아래에 있습니다.</div>
+        <label>열쇠</label><input id="ok-in" placeholder="영문과 숫자 10자">
+        <div style="height:10px"></div>
+        <button class="btn sm" id="ok-go">열기</button>
+      </div>
+      <p class="sub">참가자와 협찬사에게 보낼 주소</p>
+      <div class="share">${shareBase()}/e/${esc(e.id)}</div>`;
+
     const sp = LIVE ? await api(`/events/${cur}/spread`) : { rows: [], gap: 0 };
     const js = d.judges || [];
     const full = d.rows.filter(r => (r.judges || 0) >= js.length && js.length).length;
@@ -354,6 +372,11 @@ const SCREEN = {
         <div class="shrow">
           <div class="share">${shareBase()}/e/${esc(e.id)}</div>
           <button class="btn sec sm" id="b-copy">복사</button>
+        </div>
+        <div class="meta" style="margin-top:10px">
+          <b>운영자 열쇠</b> — 다른 기기에서 운영 화면을 열 때 씁니다.
+          <b>참가자에게는 주지 마세요.</b><br>
+          <code>${esc(okeyOf(e.id) || '이 기기에 없음')}</code>
         </div>
         <div class="meta" style="margin-top:10px">심사위원에게는 아래 주소를 보냅니다.
           점수만 넣을 수 있고 순위는 안 보입니다.</div>
@@ -499,7 +522,10 @@ const SCREEN = {
     const d = await api(`/events/${cur}/board`);
     const o = await api(`/events/${cur}/outcomes`);
     const sup = await api(`/events/${cur}/support`);
-    const sp = await api(`/events/${cur}/spread`);
+    /* 심사 눈높이는 운영자 것이라 손님에게는 403 이 온다. 보고서는 나눠 주는 물건이라
+       없는 부분은 빼고 그린다. 여기서 안 잡으면 보고서 전체가 안 뜬다. */
+    let sp = { rows: [], gap: 0 };
+    try { sp = await api(`/events/${cur}/spread`); } catch {}
     const e = d.event;
     const done = d.rows.filter(r => r.done);
     const money = e.sponsors.reduce((a, s) => a + (+s.amount || 0), 0);
@@ -749,6 +775,19 @@ function wire() {
                : ' 무리 없는 양입니다.');
   };
 
+  const okgo = $('#ok-go');
+  if (okgo) okgo.onclick = async () => {
+    const v = $('#ok-in').value.trim();
+    if (!v) return flash('열쇠를 넣어 주세요', true);
+    localStorage.setItem('hackon.okey.' + cur, v);
+    try {
+      const e = await api(`/events/${cur}`);
+      if (!e.admin) { localStorage.removeItem('hackon.okey.' + cur);
+                      return flash('열쇠가 맞지 않습니다', true); }
+      flash('열었습니다'); render();
+    } catch (e) { flash(e.message, true); }
+  };
+
   const save = $('#f-save');
   if (save) save.onclick = async () => {
     const b = {
@@ -761,7 +800,10 @@ function wire() {
     if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
     try {
       const r = await api('/events', { method: 'POST', body: b });
-      cur = r.id; localStorage.setItem('hackon.event', cur); tab = 'board';
+      cur = r.id;
+      localStorage.setItem('hackon.event', cur);
+      localStorage.setItem('hackon.okey.' + r.id, r.okey);   // 운영자 열쇠
+      tab = 'board';
       flash('대회를 만들었습니다. 링크를 공유하세요');
     } catch (e) { flash(e.message, true); }
   };
