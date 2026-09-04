@@ -26,8 +26,13 @@
 
 ```bash
 npm start        # 서버 + 화면 → http://localhost:8788
-npm test         # 자체 점검 8가지
+npm test         # 자체 점검 8가지 (함수만 본다)
+npm run check:e2e   # 완주 테스트 11단계 (브라우저로 처음부터 끝까지)
 ```
+
+`check:e2e` 는 **빈 DB 와 임시 포트로 서버를 스스로 띄운다.** 켜 둔 서버와 `data/hackon.db` 는
+건드리지 않는다 — 검사가 개발용 DB 위에서 돌면 몇 번째 실행이냐에 따라 결과가 달라지기 때문이다.
+대회 개설 → 참가 → 제출 → 심사 → 성과 → 공개 링크 → 데모 모드까지를 브라우저로 한 번에 지나간다.
 
 Node 22 이상. **설치할 패키지가 없다** — DB(`node:sqlite`)와 HTTP(`node:http`) 모두 Node 안에 있다.
 

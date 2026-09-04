@@ -138,6 +138,7 @@ async function render() {
   try { view.innerHTML = head() + await SCREEN[tab](); }
   catch (e) { view.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   wire();
+  document.body.dataset.ready = '1';   // 완주 테스트가 이 표시를 기다린다
 }
 
 const SCREEN = {

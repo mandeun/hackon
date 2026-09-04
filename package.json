@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node server.js --test"
+    "test": "node server.js --test",
+    "check:e2e": "uv run --with playwright python check-e2e.py"
   },
   "license": "MIT",
   "private": true
