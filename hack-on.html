@@ -8,12 +8,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#1E2A5E">
+<meta name="theme-color" content="#151A34">
 <link rel="manifest" href="/manifest.webmanifest">
 <title>HACK:ON — 누구나 5분 만에 대회를 연다</title>
 <style>
 :root{
   --navy:#1E2A5E; --navy-d:#16204A; --navy-l:#F3F5FB;
+  --acc:#E8552D;   /* 콜론의 켜진 점. 브랜드 강조색 */
   --ok:#1F6F5C; --ok-l:#EAF5F1; --warn:#A8631B; --warn-l:#FDF4E5; --bad:#9B2C2C;
   --ink:#1A1E1D; --ink2:#4A5250; --ink3:#828986; --rule:#E4E7E9; --bg:#fff; --bg2:#F7F9FA;
   --kr:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif; --r:12px;
@@ -30,8 +31,8 @@ input,select,textarea{border:1px solid var(--rule);border-radius:9px;padding:9px
 
 header{padding:14px 16px 0;border-bottom:1px solid var(--rule);flex:none}
 .hrow{display:flex;align-items:center;gap:8px;padding-bottom:12px}
-.logo{font-size:18px;font-weight:800;letter-spacing:-.03em}
-.logo b{color:var(--navy)}
+.logo{color:var(--navy);display:flex}
+.logo svg{height:19px;display:block}
 .chip{margin-left:auto;font-size:11px;padding:3px 8px;border-radius:99px;background:var(--bg2);color:var(--ink3)}
 .chip.live{background:var(--ok-l);color:var(--ok);font-weight:700}
 
@@ -66,13 +67,21 @@ nav button.on{color:var(--navy);font-weight:700}
 nav .i{font-size:17px}
 .share{font-family:Consolas,monospace;font-size:12px;background:var(--bg2);border:1px solid var(--rule);
        border-radius:8px;padding:8px 10px;word-break:break-all;margin-top:8px}
+.shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
+.shrow .share{flex:1;margin-top:0}
 </style>
 </head>
 <body>
 <div id="app">
   <header>
     <div class="hrow">
-      <div class="logo">HACK<b>:ON</b></div>
+      <div class="logo"><svg viewBox="0 0 316 64" role="img" aria-label="HACK:ON">
+        <g fill="currentColor" font-family="Segoe UI,Pretendard,sans-serif"
+           font-size="44" font-weight="800" letter-spacing="-1.5">
+          <text x="0" y="46">HACK</text><text x="160" y="46">ON</text></g>
+        <circle cx="136" cy="25" r="6.5" fill="none" stroke="currentColor" stroke-width="3.2" opacity=".45"/>
+        <circle cx="136" cy="42" r="6.5" fill="var(--acc)"/>
+      </svg></div>
       <span class="chip" id="mode">데모</span>
     </div>
   </header>
@@ -183,7 +192,10 @@ const SCREEN = {
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
       <div class="card" style="padding:11px 13px">
         <div class="meta">아래 주소를 그대로 보내면 로그인 없이 열립니다. 협찬사·참가자용.</div>
-        <div class="share">${LIVE ? location.origin : 'http://localhost:8788'}/e/${esc(e.id)}</div>
+        <div class="shrow">
+          <div class="share">${LIVE ? location.origin : 'http://localhost:8788'}/e/${esc(e.id)}</div>
+          <button class="btn sec sm" id="b-copy">복사</button>
+        </div>
       </div>
       <div class="card">
         <label>팀 이름</label><input id="t-name" placeholder="팀 이름">
@@ -195,7 +207,8 @@ const SCREEN = {
       ${d.rows.map(r => `<tr data-team="${r.id ?? ''}" style="cursor:pointer"><td>${r.rank}</td>
         <td>${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
         <td class="n">${r.score}</td><td class="n">${r.judges}명</td></tr>`).join('')}</table>
-      <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.</p>`;
+      <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.</p>
+      <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>`;
   },
 
   /* 공개 화면 — 로그인 없이 링크만으로 보는 읽기 전용. 협찬사와 참가자에게 뿌리는 주소다. */
@@ -268,6 +281,7 @@ const SCREEN = {
     if (!cur && !LIVE) cur = 'demo01';
     if (!cur) return `<h2>대회를 먼저 고르세요</h2>`;
     const o = LIVE ? await api(`/events/${cur}/outcomes`) : DEMO.outcomes;
+    const ev = LIVE ? await api(`/events/${cur}`) : DEMO.event;
     return `<h2>협찬사에게 주는 숫자</h2>
       <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다. 아래 넷으로 정산합니다.</p>
       <div class="stat">
@@ -278,6 +292,23 @@ const SCREEN = {
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
         <div><b>${o.hired}</b><span>채용</span></div>
       </div>
+      <div class="card">
+        <h3>협찬사</h3>
+        <div class="meta">여기 넣은 곳이 공개 페이지 ‘함께한 곳’에 뜹니다.</div>
+        ${ev.sponsors.length
+          ? `<div class="meta" style="margin-top:8px">${ev.sponsors.map(s =>
+              esc(s.name) + ' <span class="pill">' + esc(s.kind) + '</span>').join(' · ')}</div>`
+          : `<div class="meta" style="margin-top:8px">아직 없습니다.</div>`}
+        <label>회사 이름</label><input id="p-name" placeholder="예) 오픈에이아이">
+        <div class="row">
+          <div><label>무엇을 받았나</label>
+            <select id="p-kind"><option>크레딧</option><option>상품</option><option>멘토</option><option>현금</option></select></div>
+          <div><label>금액(원)</label><input id="p-amt" type="number" value="0"></div>
+        </div>
+        <div style="height:10px"></div>
+        <button class="btn sm" id="p-add">협찬사 추가</button>
+      </div>
+
       <div class="card">
         <h3>성과 기록하기</h3>
         <div class="meta">행사 뒤 2주 동안 여기에 쌓습니다. 이게 다음 해 제안서의 근거가 됩니다.</div>
@@ -349,6 +380,51 @@ function wire() {
       await api(`/teams/${curTeam}/score`, { method: 'POST', body: { judge, values } });
       localStorage.setItem('hackon.judge', judge);
       flash('점수를 저장했습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+
+  const copy = $('#b-copy');
+  if (copy) copy.onclick = async () => {
+    const t = $('.share').textContent.trim();
+    // 보안 문맥이 아니면 clipboard 가 없다. 그때는 옛날 방식으로 떨어진다
+    try { await navigator.clipboard.writeText(t); }
+    catch {
+      const ta = document.createElement('textarea');
+      ta.value = t; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove();
+    }
+    flash('주소를 복사했습니다');
+  };
+
+  const csv = $('#b-csv');
+  if (csv) csv.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 못 내려받습니다', true);
+    const d = await api(`/events/${cur}/board`);
+    const head = ['순위', '팀', '연락처', '제출', '링크', '설명', '점수', '심사'];
+    const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;   // 쉼표·줄바꿈이 든 칸을 지킨다
+    const body = d.rows.map(r =>
+      [r.rank, r.name, r.contact, r.done ? '제출' : '미제출', r.url, r.note, r.score, r.judges].map(q).join(','));
+    // 엑셀은 BOM 이 없으면 한글을 깬다. 줄바꿈은 CRLF 로 준다.
+    // 이스케이프 대신 문자코드를 쓴다 — 이 파일이 스크립트로 여러 번 고쳐지는데
+    // 역슬래시가 한 겹씩 먹혀서 한 번 깨진 적이 있다.
+    const BOM = String.fromCharCode(0xFEFF), NL = String.fromCharCode(13, 10);
+    const blob = new Blob([BOM + [head.map(q).join(','), ...body].join(NL)],
+                          { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${d.event.title}_명단.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  const padd = $('#p-add');
+  if (padd) padd.onclick = async () => {
+    const name = $('#p-name').value.trim();
+    if (!name) return flash('회사 이름을 넣어 주세요', true);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    try {
+      await api(`/events/${cur}/sponsors`, { method: 'POST',
+        body: { name, kind: $('#p-kind').value, amount: $('#p-amt').value } });
+      flash('협찬사를 넣었습니다');
     } catch (e) { flash(e.message, true); }
   };
 

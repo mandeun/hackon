@@ -159,6 +159,19 @@ with sync_playwright() as p:
     # ── 6. 협찬사에게 줄 숫자가 쌓이는가 (이 서비스의 차별점) ──
     visit(f"/#{ev}")
     pg.click('nav button[data-t="spon"]')
+
+    # 협찬사 등록 — 서버에는 있었는데 화면이 없어서 공개 페이지가 영영 비어 있던 자리다
+    pg.wait_for_selector("#p-name")
+    pg.fill("#p-name", "오픈에이아이")
+    pg.select_option("#p-kind", "크레딧")
+    pg.fill("#p-amt", "2000000")
+    pg.click("#p-add")
+    pg.wait_for_timeout(700)
+    sp = api(f"/api/events/{ev}")["sponsors"]
+    A(len(sp) == 1 and sp[0]["name"] == "오픈에이아이" and sp[0]["kind"] == "크레딧",
+      f"협찬사가 안 들어갔다: {sp}")
+    ok(f"협찬사 등록 — {sp[0]['name']} ({sp[0]['kind']})")
+
     pg.wait_for_selector("#o-add")
     pg.select_option("#o-kind", "면접")
     pg.fill("#o-who", "어느회사")
@@ -181,7 +194,8 @@ with sync_playwright() as p:
     A(len(pub.query_selector_all("#view input, #view textarea, #view select, #view button")) == 0,
       "공개 화면 본문에 편집 칸이 있다")
     txt = pub.inner_text("#view")
-    for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준"]:
+    for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
+                 "함께한 곳", "오픈에이아이"]:
         A(must in txt, f"공개 화면에 '{must}' 가 없다")
     A("example.com/walk" in txt, "제출작 링크가 공개 화면에 없다")
     ctx.close()

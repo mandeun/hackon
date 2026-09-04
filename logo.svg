@@ -1,0 +1,11 @@
+<!-- HACK:ON 워드마크. 콜론이 마크다 — 위는 빈 점(꺼짐), 아래는 찬 점(켜짐).
+     글자색은 currentColor 라 어디에 넣어도 그 자리 색을 따라간다. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 316 64" role="img" aria-label="HACK:ON">
+  <g fill="currentColor" font-family="Segoe UI,Pretendard,sans-serif"
+     font-size="44" font-weight="800" letter-spacing="-1.5">
+    <text x="0" y="46">HACK</text>
+    <text x="160" y="46">ON</text>
+  </g>
+  <circle cx="136" cy="25" r="6.5" fill="none" stroke="currentColor" stroke-width="3.2" opacity=".45"/>
+  <circle cx="136" cy="42" r="6.5" fill="#E8552D"/>
+</svg>
