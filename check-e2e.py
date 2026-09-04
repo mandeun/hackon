@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # 윈도우 콘솔이 cp949 라 한글이 깨진다
@@ -192,6 +193,38 @@ with sync_playwright() as p:
                            "rubric": [{"key": "a", "label": "가", "weight": 50}]})[0] == 400,
       "배점 합 100 이 아닌데 대회가 만들어졌다")
     ok("심사 항목·점수 범위·배점 합 차단 (400)")
+
+    # ── 심사위원 전용 링크 — 점수만 넣고 순위는 못 본다 ─────
+    jctx = b.new_context(viewport={"width": 460, "height": 1100})
+    jp = jctx.new_page()
+    jp.on("pageerror", lambda e: errs.append("심사:" + str(e)))
+    jp.goto(f"{BASE}/j/{ev}")
+    jp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    A(jp.evaluate("document.querySelector('nav').style.display") == "none", "심사 화면에 아래 탭이 보인다")
+    jp.fill("#jn", "박심사")
+    jp.click("#jn-go")
+    jp.wait_for_timeout(700)
+    jtxt = jp.inner_text("#view")
+    A("아직 안 본 팀 2팀" in jtxt, f"남은 팀 수가 틀렸다: {jtxt[:120]}")
+
+    # 새면 안 되는 것들. 화면에서 감추는 게 아니라 서버가 안 준다.
+    for leak in ["완주율", "협찬", "면접 연결", "명단 내려받기", "88.8"]:
+        A(leak not in jtxt, f"심사 화면에 '{leak}' 가 샜다")
+    for bad_id in ["#b-csv", "#p-add", "#o-add", "#h-add", "#b-ext", "#b-report", "#t-join"]:
+        A(jp.query_selector(bad_id) is None, f"심사 화면에 {bad_id} 가 있다")
+    ok("심사 링크 /j/<대회id> — 순위·협찬·성과가 안 샌다")
+
+    # 점수를 넣으면 저장되고, 남은 팀이 줄어든다
+    first = jp.query_selector("[data-jsave]").get_attribute("data-jsave")
+    jp.evaluate("(id) => document.querySelectorAll('.jv-' + id).forEach((i, n) => { i.value = [60,65,70,75][n] })", first)
+    jp.click(f'[data-jsave="{first}"]')
+    jp.wait_for_timeout(800)
+    jv = api(f"/api/events/{ev}/judge?judge=" + urllib.parse.quote("박심사"))
+    A(jv["left"] == 1, f"남은 팀이 안 줄었다: {jv['left']}")
+    scored = [t for t in jv["teams"] if str(t["id"]) == first][0]
+    A(scored["mine"]["idea"] == 60, f"내 점수가 안 저장됐다: {scored['mine']}")
+    ok(f"심사 링크에서 점수 저장 — 남은 팀 {jv['left']}팀")
+    jctx.close()
 
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})

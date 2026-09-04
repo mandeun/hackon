@@ -273,6 +273,12 @@ const SCREEN = {
           <div class="share">${LIVE ? location.origin : 'http://localhost:8788'}/e/${esc(e.id)}</div>
           <button class="btn sec sm" id="b-copy">복사</button>
         </div>
+        <div class="meta" style="margin-top:10px">심사위원에게는 아래 주소를 보냅니다.
+          점수만 넣을 수 있고 순위는 안 보입니다.</div>
+        <div class="shrow">
+          <div class="share" id="jlink">${LIVE ? location.origin : 'http://localhost:8788'}/j/${esc(e.id)}</div>
+          <button class="btn sec sm" id="b-copyj">복사</button>
+        </div>
       </div>
       <div class="card"><h3>참가 신청</h3>${applyForm()}</div>
       <table><tr><th>순위</th><th>팀</th><th class="n">점수</th><th class="n">심사</th></tr>
@@ -331,6 +337,44 @@ const SCREEN = {
 
       <p class="sub" style="margin-top:14px">심사 기준 ·
         ${e.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}</p>`;
+  },
+
+  /* 심사위원 화면 — /j/<대회id> 로 연다. 점수만 넣는다.
+     남의 점수와 순위는 서버가 아예 안 준다. 심사 중에 순위를 보면 점수가 끌려간다. */
+  async judge() {
+    const who = localStorage.getItem('hackon.judge') || '';
+    if (!who) {
+      const e = await api(`/events/${cur}/judge`);
+      return `<h2>${esc(e.event.title)}</h2>
+        <p class="sub">심사위원 화면입니다. 이름을 넣으면 시작합니다.<br>
+          같은 이름으로 다시 들어오면 넣던 점수를 이어서 고칠 수 있습니다.</p>
+        <label>심사위원 이름</label><input id="jn" placeholder="이름">
+        <div style="height:10px"></div>
+        <button class="btn" id="jn-go">시작</button>`;
+    }
+    const d = await api(`/events/${cur}/judge?judge=${encodeURIComponent(who)}`);
+    return `<h2>${esc(d.event.title)}</h2>
+      <p class="sub">${esc(who)} 님 · 아직 안 본 팀 <b>${d.left}팀</b> / ${d.teams.length}팀
+        <button class="btn sec sm" id="jn-out" style="margin-left:6px">이름 바꾸기</button></p>
+      ${dueBox(d.event)}
+      <div class="card" style="padding:11px 13px"><div class="meta">
+        심사 기준 · ${d.event.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}<br>
+        시작한 뒤에는 기준이 바뀌지 않습니다. 다른 분 점수와 순위는 보이지 않습니다.
+      </div></div>
+
+      ${d.teams.map(t => `<div class="card">
+        <h3>${esc(t.name)} ${t.doneByMe ? '<span class="pill ok">냈음</span>'
+                                        : '<span class="pill warn">아직</span>'}</h3>
+        ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ''}
+        ${t.url ? `<div class="share">${esc(t.url)}</div>`
+                : '<div class="meta">아직 제출하지 않았습니다.</div>'}
+        ${d.event.rubric.map(r => `
+          <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
+          <input class="jv-${esc(t.id)}" data-key="${esc(r.key)}" type="number" min="0" max="100"
+                 value="${t.mine[r.key] ?? 70}">`).join('')}
+        <div style="height:10px"></div>
+        <button class="btn sm" data-jsave="${esc(t.id)}">${t.doneByMe ? '점수 고치기' : '점수 저장'}</button>
+      </div>`).join('')}`;
   },
 
   /* 결과 보고서 — 협찬사에게 보내는 물건. 인쇄하면 그대로 PDF 가 된다.
@@ -639,6 +683,25 @@ function wire() {
     catch (e) { flash(e.message, true); }
   });
 
+  const jgo = $('#jn-go');
+  if (jgo) jgo.onclick = () => {
+    const v = $('#jn').value.trim();
+    if (!v) return flash('이름을 넣어 주세요', true);
+    localStorage.setItem('hackon.judge', v); render();
+  };
+  const jout = $('#jn-out');
+  if (jout) jout.onclick = () => { localStorage.removeItem('hackon.judge'); render(); };
+
+  document.querySelectorAll('[data-jsave]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.jsave, values = {};
+    document.querySelectorAll('.jv-' + id).forEach(i => { values[i.dataset.key] = +i.value; });
+    try {
+      await api(`/teams/${id}/score`, { method: 'POST',
+        body: { judge: localStorage.getItem('hackon.judge'), values } });
+      flash('저장했습니다');
+    } catch (e) { flash(e.message, true); }
+  });
+
   const pr = $('#b-print');
   if (pr) pr.onclick = () => window.print();
 
@@ -657,9 +720,8 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
 
-  const copy = $('#b-copy');
-  if (copy) copy.onclick = async () => {
-    const t = $('.share').textContent.trim();
+  const copyAny = async (sel, msg) => {
+    const t = $(sel).textContent.trim();
     // 보안 문맥이 아니면 clipboard 가 없다. 그때는 옛날 방식으로 떨어진다
     try { await navigator.clipboard.writeText(t); }
     catch {
@@ -667,8 +729,12 @@ function wire() {
       ta.value = t; document.body.appendChild(ta); ta.select();
       document.execCommand('copy'); ta.remove();
     }
-    flash('주소를 복사했습니다');
+    flash(msg);
   };
+  const copy = $('#b-copy');
+  if (copy) copy.onclick = () => copyAny('.share', '공개 주소를 복사했습니다');
+  const copyj = $('#b-copyj');
+  if (copyj) copyj.onclick = () => copyAny('#jlink', '심사 주소를 복사했습니다');
 
   const csv = $('#b-csv');
   if (csv) csv.onclick = async () => {
@@ -717,9 +783,10 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b
 
 /* 주소가 /e/<대회id> 면 읽기 전용 공개 화면으로 연다. 아래 탭과 편집 칸을 감춘다. */
 const PUB = location.pathname.match(/^\/e\/([a-z0-9]+)(\/report)?$/);
-if (PUB) {
-  cur = PUB[1];
-  tab = PUB[2] ? 'report' : 'pub';
+const JUD = location.pathname.match(/^\/j\/([a-z0-9]+)$/);
+if (PUB || JUD) {
+  cur = (PUB || JUD)[1];
+  tab = JUD ? 'judge' : (PUB[2] ? 'report' : 'pub');
   document.querySelector('nav').style.display = 'none';
 }
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }

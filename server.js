@@ -239,6 +239,30 @@ function board(db, event) {
   return { event: e, rows, judges };
 }
 
+/** 심사위원이 보는 것. 남의 점수도 순위도 안 내려보낸다 —
+    화면에서 감추는 게 아니라 서버가 안 준다. 심사 중에 순위를 보면 점수가 끌려간다. */
+function judgeView(db, event, judge) {
+  const e = getEvent(db, event);
+  const teams = db.prepare(`SELECT t.id, t.name, s.url, s.note
+                            FROM teams t LEFT JOIN submissions s ON s.team = t.id
+                            WHERE t.event = ? ORDER BY t.id`).all(event);
+  for (const t of teams) {
+    t.mine = {};
+    if (judge)
+      for (const r of db.prepare('SELECT key, value FROM scores WHERE team=? AND judge=?')
+                        .all(t.id, judge)) t.mine[r.key] = r.value;
+    t.doneByMe = Object.keys(t.mine).length > 0;
+  }
+  // 아직 안 본 팀을 위로. 심사위원이 스스로 남은 것을 안다.
+  teams.sort((a, b) => (a.doneByMe ? 1 : 0) - (b.doneByMe ? 1 : 0));
+  return {
+    event: { id: e.id, title: e.title, rubric: e.rubric, due: e.due,
+             starts: e.starts, ends: e.ends },
+    teams,
+    left: teams.filter(t => !t.doneByMe).length,
+  };
+}
+
 /** 협찬사에게 주는 성과 요약. 노출 수가 아니라 이 셋으로 정산한다. */
 function outcomes(db, event) {
   const t = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(event).c;
@@ -358,6 +382,9 @@ function routes(db) {
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
           return json(res, 201, { ok: true });
         }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/judge$/)) && req.method === 'GET')
+          return json(res, 200, judgeView(db, m[1], q.judge || ''));
+
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/support$/))) {
           if (req.method === 'GET') return json(res, 200, support(db, m[1]));
           if (req.method === 'POST') {
@@ -420,7 +447,7 @@ function routes(db) {
 
       /* 공개 링크. /e/<대회id> 는 화면 파일을 그대로 내려보내고, 화면이 주소를 보고
          읽기 전용으로 그린다. 서버에 화면을 하나 더 두지 않는 게 요점이다. */
-      const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/);
+      const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/) || p.match(/^\/j\/[a-z0-9]+$/);
 
       /* #region reuse:static — 경로 탈출 방지 + MIME + 스트림. 그대로 복사해 쓴다 */
       const f = path.join(ROOT, (p === '/' || pub) ? 'hack-on.html' : decodeURIComponent(p));
@@ -490,6 +517,21 @@ function selftest() {
   db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T10:00', past);
   submit(db, pt, { url: 'https://example.com/late' });
   ok(!!db.prepare('SELECT url FROM submissions WHERE team=?').get(pt), '마감을 미루면 다시 받는다');
+
+  // 심사 화면 — 남의 점수와 순위가 안 새어 나가는가
+  const jv = judgeView(db, ev, '심사1');
+  ok(jv.teams.every(t => !('score' in t) && !('rank' in t) && !('contact' in t)),
+     '심사 화면에 점수·순위·연락처가 안 실린다');
+  ok(!('teams' in jv.event) && !('sponsors' in jv.event), '심사 화면에 협찬사가 안 실린다');
+  ok(Object.keys(jv.teams.find(t => t.id === t1).mine).length === 4, '내가 낸 점수는 보인다');
+  ok(jv.left === 0, '심사1 은 다 봤다');
+
+  // 한 팀만 본 심사위원에게는 안 본 팀이 위로 와야 한다
+  score(db, t1, { judge: '심사9', values: { idea: 50, make: 50, use: 50, tell: 50 } });
+  const jv9 = judgeView(db, ev, '심사9');
+  ok(jv9.teams[0].id === t2 && jv9.left === 1, '아직 안 본 팀이 위로 온다');
+  ok(Object.keys(jv9.teams.find(t => t.id === t1).mine).idea === undefined
+     || jv9.teams.find(t => t.id === t1).mine.idea === 50, '심사위원마다 자기 점수만 본다');
 
   // 사후 지원 — 약속하고, 기한을 넘기면 늦음으로 잡히고, 하면 지운다
   db.prepare('INSERT INTO supporters(event,name,org,can) VALUES(?,?,?,?)')
