@@ -9,6 +9,7 @@
 """
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -133,6 +134,18 @@ with sync_playwright() as p:
     A(rows[1]["score"] == 0, "심사 안 한 팀이 점수를 받았다")
     ok(f"제출 · 심사 저장 — 1등 {top['name']} {top['score']}점 (가중 평균)")
 
+    # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
+    visit(f"/#{ev}")
+    txt = pg.inner_text("#view")
+    A("모집중" in txt, f"대회 상태 배지가 없다: {txt[:80]}")
+    A("심사 진행" in txt and "심사위원 1명" in txt, "심사 진행 현황이 안 보인다")
+    A("전원이 다 본 팀 1/2팀" in txt, f"다 본 팀 수가 틀렸다: {txt}")
+    pg.click("tr[data-team]")
+    pg.wait_for_selector("#s-url")
+    tt = pg.inner_text("#view")
+    A("본 사람 심사1" in tt, f"누가 봤는지 안 나온다: {tt[:120]}")
+    ok("상태 배지 · 심사 진행 현황 (전원이 다 본 팀 1/2)")
+
     # 심사위원 이름이 같으면 덮어쓴다. 두 번 눌러도 평균이 안 흔들려야 한다.
     A(post(f"/api/teams/{top['id']}/score",
            {"judge": "심사1", "values": {"idea": 95, "make": 90, "use": 85, "tell": 80}})[0] == 200,
@@ -211,6 +224,16 @@ with sync_playwright() as p:
     ok("file:// 데모 모드 정상 (캡처가 안 깨진다)")
 
     b.close()
+
+# ── 9. 윈도우 프로그램이 켤 준비가 되어 있는가 ──────────
+# 창을 실제로 띄우지는 않는다. --check 는 브라우저·포트·화면 파일만 확인하고 끝난다.
+r = subprocess.run(['node', 'desktop.js', '--check'],
+                   cwd=os.path.dirname(os.path.abspath(__file__)),
+                   capture_output=True, text=True, encoding='utf-8')
+A(r.returncode == 0, 'desktop.js --check 실패: ' + (r.stderr or ''))
+A('못 찾음' not in r.stdout, '앱 창을 띄울 브라우저가 없다: ' + r.stdout)
+A('화면 파일  있음' in r.stdout, '화면 파일을 못 찾는다: ' + r.stdout)
+ok('윈도우 프로그램 준비됨 (앱 창 브라우저 · 포트 · 화면 파일)')
 
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

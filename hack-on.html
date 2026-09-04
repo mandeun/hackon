@@ -131,6 +131,15 @@ const $ = s => document.querySelector(s);
 const view = $('#view');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 const won = n => (+n || 0).toLocaleString('ko-KR') + '원';
+
+/* 대회 상태는 날짜에서 바로 나온다. 서버에 칸을 하나 더 두지 않는다. */
+function statusOf(e) {
+  const t = new Date().toISOString().slice(0, 10);
+  if (t < e.starts) return { k: '모집중', c: 'ok' };
+  if (t > e.ends) return { k: '끝남', c: '' };
+  return { k: '진행 중', c: 'warn' };
+}
+const badge = e => { const s = statusOf(e); return `<span class="pill ${s.c}">${s.k}</span>`; };
 let msg = null;
 
 function flash(text, bad) { msg = { text, bad }; render(); setTimeout(() => { msg = null; render(); }, 2600); }
@@ -157,7 +166,7 @@ const SCREEN = {
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>`;
     return `<h2>열린 대회</h2><p class="sub">누르면 참가 신청과 순위를 볼 수 있습니다.</p>` +
       list.map(e => `<div class="card" data-open="${esc(e.id)}">
-        <h3>${esc(e.title)}</h3>
+        <h3>${esc(e.title)} ${badge(e)}</h3>
         <div class="meta">${esc(e.host)} · ${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)}</div>
       </div>`).join('') +
       (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '');
@@ -188,8 +197,15 @@ const SCREEN = {
     if (!cur) return `<h2>대회를 먼저 고르세요</h2><p class="sub">‘대회’ 탭에서 하나 누르면 됩니다.</p>`;
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const e = d.event;
-    return `<h2>${esc(e.title)}</h2>
+    const js = d.judges || [];
+    const full = d.rows.filter(r => (r.judges || 0) >= js.length && js.length).length;
+    return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
+      ${js.length ? `<div class="card" style="padding:11px 13px">
+        <div class="meta"><b>심사 진행</b> · 심사위원 ${js.length}명 (${js.map(esc).join(', ')})<br>
+          전원이 다 본 팀 ${full}/${d.rows.length}팀${
+            full < d.rows.length ? ' — 아직 남았습니다' : ' — 다 봤습니다'}</div>
+      </div>` : ''}
       <div class="card" style="padding:11px 13px">
         <div class="meta">아래 주소를 그대로 보내면 로그인 없이 열립니다. 협찬사·참가자용.</div>
         <div class="shrow">
@@ -217,7 +233,7 @@ const SCREEN = {
     const o = await api(`/events/${cur}/outcomes`);
     const e = d.event;
     const done = d.rows.filter(r => r.done);
-    return `<h2>${esc(e.title)}</h2>
+    return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
         ${e.topic ? '· 주제 ' + esc(e.topic) : ''}<br>상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
 
@@ -254,6 +270,11 @@ const SCREEN = {
     return `<button class="btn sec sm" data-go="board">← 순위로</button>
       <h2 style="margin-top:12px">${esc(t.name)}</h2>
       <p class="sub">${t.rank}위 · ${t.score}점 · 심사 ${t.judges}명</p>
+      ${(d.judges || []).length ? `<div class="meta" style="margin:-8px 0 12px">
+        본 사람 ${(t.by || []).map(esc).join(', ') || '없음'}${
+          (() => { const no = (d.judges || []).filter(j => !(t.by || []).includes(j));
+                   return no.length ? ' · 안 본 사람 ' + no.map(esc).join(', ') : ''; })()}
+      </div>` : ''}
 
       <div class="card">
         <h3>결과물 제출</h3>

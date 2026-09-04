@@ -1,7 +1,8 @@
 @echo off
 rem ─────────────────────────────────────────────────────────────
-rem  HACK:ON — 윈도우에서 더블클릭 한 번으로 켜는 프로그램
-rem  하는 일: 서버를 띄우고 기본 브라우저로 화면을 연다. 창을 닫으면 꺼진다.
+rem  HACK:ON — 더블클릭 한 번. 주소창 없는 앱 창으로 뜬다.
+rem  창을 닫으면 서버도 같이 꺼진다.
+rem  콘솔까지 안 보이게 하려면 HACKON.vbs 를 쓴다.
 rem ─────────────────────────────────────────────────────────────
 setlocal
 cd /d "%~dp0"
@@ -18,11 +19,4 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo.
-echo   HACK:ON 을 켭니다.  창을 닫으면 꺼집니다.
-echo   주소: http://localhost:8788
-echo.
-
-start "" http://localhost:8788
-node server.js
-pause
+node desktop.js

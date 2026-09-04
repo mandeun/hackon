@@ -180,11 +180,16 @@ function board(db, event) {
     }
     for (const j of db.prepare('SELECT DISTINCT judge FROM scores WHERE team=?').all(t.id))
       judged.add(j.judge);
-    return { ...t, score: Math.round(total * 10) / 10, judges: judged.size, done: !!t.url };
+    return { ...t, score: Math.round(total * 10) / 10, judges: judged.size,
+             by: [...judged].sort(), done: !!t.url };
   });
   rows.sort((a, b) => b.score - a.score);
   rows.forEach((r, i) => { r.rank = i + 1; });
-  return { event: e, rows };
+  /* 이 대회에 한 번이라도 점수를 넣은 사람 전부. 화면이 '아직 안 본 사람' 을 계산하는 근거다. */
+  const judges = db.prepare(`SELECT DISTINCT s.judge FROM scores s
+                             JOIN teams t ON t.id = s.team
+                             WHERE t.event = ? ORDER BY s.judge`).all(event).map(r => r.judge);
+  return { event: e, rows, judges };
 }
 
 /** 협찬사에게 주는 성과 요약. 노출 수가 아니라 이 셋으로 정산한다. */
@@ -337,6 +342,11 @@ function selftest() {
 
   bad = false; try { score(db, t1, { judge: 'x', values: { nope: 10 } }); } catch { bad = true; }
   ok(bad, '없는 심사 항목은 막는다');
+
+  score(db, t2, { judge: '심사2', values: { idea: 60, make: 60, use: 60, tell: 60 } });
+  const b2 = board(db, ev);
+  ok(b2.judges.length === 2, '심사위원 명단이 모인다 (' + b2.judges.join() + ')');
+  ok(b2.rows.find(r => r.name === '가팀').by.length === 1, '팀별로 누가 봤는지 나온다');
 
   db.prepare('INSERT INTO outcomes(event,team,kind,who) VALUES(?,?,?,?)').run(ev, t1, '면접', '어느회사');
   const o = outcomes(db, ev);
