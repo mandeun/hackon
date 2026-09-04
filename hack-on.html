@@ -71,6 +71,7 @@ nav .i{font-size:17px}
      border:1px solid var(--rule);border-radius:9px;padding:8px 11px;margin-bottom:10px}
 .due.hot{color:var(--acc);border-color:#F6CFC2;background:#FDF3EF}
 .due.over{color:var(--bad);border-color:#F0D6D6;background:#FCF1F1}
+.late{color:var(--bad);font-weight:700}
 .shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
 .shrow .share{flex:1;margin-top:0}
 </style>
@@ -281,6 +282,7 @@ const SCREEN = {
     const o = await api(`/events/${cur}/outcomes`);
     const e = d.event;
     const done = d.rows.filter(r => r.done);
+    const sup = await api(`/events/${cur}/support`);
     return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
         ${e.topic ? '· 주제 ' + esc(e.topic) : ''}<br>상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
@@ -300,6 +302,13 @@ const SCREEN = {
       <table><tr><th>순위</th><th>팀</th><th class="n">점수</th></tr>
       ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${esc(r.name)}</td>
         <td class="n">${r.score}</td></tr>`).join('')}</table>
+
+      ${sup.rows.length ? `<h3 style="margin-top:16px">끝난 뒤에도 봐 드립니다</h3>
+        <p class="sub">대회가 끝나고 버려지지 않게, 팀마다 봐 줄 사람을 미리 정해 뒀습니다.</p>
+        <table><tr><th>팀</th><th>봐 줄 사람</th><th>언제까지</th></tr>
+        ${sup.rows.map(r => `<tr><td>${esc(r.team_name)}</td>
+          <td>${esc(r.helper_name)}${r.org ? ' · ' + esc(r.org) : ''}</td>
+          <td>${r.done ? '<span class="pill ok">완료</span>' : esc(r.due)}</td></tr>`).join('')}</table>` : ''}
 
       ${done.length ? `<h3 style="margin-top:16px">제출작</h3>
         ${done.map(r => `<div class="card"><h3>${esc(r.name)}</h3>
@@ -361,6 +370,8 @@ const SCREEN = {
     if (!cur) return `<h2>대회를 먼저 고르세요</h2>`;
     const o = LIVE ? await api(`/events/${cur}/outcomes`) : DEMO.outcomes;
     const ev = LIVE ? await api(`/events/${cur}`) : DEMO.event;
+    const sup = LIVE ? await api(`/events/${cur}/support`) : { people: [], rows: [] };
+    const d = LIVE ? await api(`/events/${cur}/board`) : { rows: DEMO.board };
     return `<h2>협찬사에게 주는 숫자</h2>
       <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다. 아래 넷으로 정산합니다.</p>
       <div class="stat">
@@ -395,6 +406,48 @@ const SCREEN = {
         <div style="height:10px"></div>
         <button class="btn sm" id="p-add">협찬사 추가</button>
       </div>
+
+      ${LIVE ? `<div class="card">
+        <h3>사후 지원</h3>
+        <div class="meta">끝나고 팀을 봐 줄 사람을 <b>행사 전에</b> 정해 둡니다.
+          끝나고 정하면 아무도 안 합니다.</div>
+        ${sup.rows.length ? `<div class="stat" style="margin:10px 0">
+            <div><b>${sup.promised}</b><span>약속</span></div>
+            <div><b>${sup.done}</b><span>지킴</span></div>
+            <div><b class="${sup.late ? 'late' : ''}">${sup.late}</b><span>늦음</span></div>
+          </div>
+          <table><tr><th>팀</th><th>봐 줄 사람</th><th>언제까지</th><th></th></tr>
+          ${sup.rows.map(r => `<tr>
+            <td>${esc(r.team_name)}</td>
+            <td>${esc(r.helper_name)}${r.org ? ' <span class="meta">' + esc(r.org) + '</span>' : ''}</td>
+            <td class="${r.late ? 'late' : ''}">${esc(r.due)}${r.late ? ' 늦음' : ''}</td>
+            <td>${r.done
+              ? '<span class="pill ok">완료</span>'
+              : `<button class="btn sec sm" data-done="${r.id}">했음</button>`}</td>
+          </tr>`).join('')}</table>` : '<div class="meta" style="margin-top:8px">아직 없습니다.</div>'}
+
+        <label>봐 줄 사람 추가</label>
+        <div class="row">
+          <div><input id="h-name" placeholder="이름"></div>
+          <div><input id="h-org" placeholder="소속 (선택)"></div>
+        </div>
+        <input id="h-can" placeholder="무엇을 도와줄 수 있나" style="margin-top:8px">
+        <div style="height:8px"></div>
+        <button class="btn sec sm" id="h-add">지원자 추가</button>
+
+        ${sup.people.length && d.rows.length ? `
+          <label style="margin-top:14px">팀에 짝지어 주기</label>
+          <div class="row">
+            <div><select id="a-team">${d.rows.map(r =>
+              `<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></div>
+            <div><select id="a-help">${sup.people.map(h =>
+              `<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select></div>
+          </div>
+          <label>언제까지 (비우면 대회 끝나고 14일)</label>
+          <input id="a-due" type="date">
+          <div style="height:8px"></div>
+          <button class="btn sm" id="a-add">짝지어 주기</button>` : ''}
+      </div>` : ''}
 
       <div class="card">
         <h3>성과 기록하기</h3>
@@ -472,6 +525,32 @@ function wire() {
       flash('점수를 저장했습니다');
     } catch (e) { flash(e.message, true); }
   };
+
+  const hadd = $('#h-add');
+  if (hadd) hadd.onclick = async () => {
+    const name = $('#h-name').value.trim();
+    if (!name) return flash('이름을 넣어 주세요', true);
+    try {
+      await api(`/events/${cur}/support`, { method: 'POST', body: {
+        name, org: $('#h-org').value, can: $('#h-can').value } });
+      flash('지원자를 넣었습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+
+  const aadd = $('#a-add');
+  if (aadd) aadd.onclick = async () => {
+    try {
+      const r = await api(`/events/${cur}/assign`, { method: 'POST', body: {
+        team: $('#a-team').value, helper: $('#a-help').value, due: $('#a-due').value } });
+      flash(`${r.due} 까지 봐 주기로 했습니다`);
+    } catch (e) { flash(e.message, true); }
+  };
+
+  document.querySelectorAll('[data-done]').forEach(b => b.onclick = async () => {
+    try { await api(`/assignments/${b.dataset.done}/done`, { method: 'POST', body: {} });
+          flash('완료로 표시했습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
 
   const ext = $('#b-ext');
   if (ext) ext.onclick = async () => {

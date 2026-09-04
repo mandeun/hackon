@@ -227,6 +227,30 @@ with sync_playwright() as p:
     A("50%" in pg.content() and "완주율" in pg.content(), "화면에 숫자가 안 나온다")
     ok(f"성과 기록 — 완주율 {o['finishRate']}% · 면접 {o['interview']}건")
 
+    # ── 사후 지원 — 이게 '보장' 이다. 기록만 하는 표로는 약속이 안 된다 ──
+    pg.fill("#h-name", "박실무")
+    pg.fill("#h-org", "어느회사")
+    pg.fill("#h-can", "도입 검토를 같이 봐 줍니다")
+    pg.click("#h-add")
+    pg.wait_for_timeout(800)
+    pg.wait_for_selector("#a-add")
+    pg.click("#a-add")
+    pg.wait_for_timeout(800)
+    sup = api(f"/api/events/{ev}/support")
+    A(sup["promised"] == 1, f"배정이 안 됐다: {sup}")
+    # 기한을 안 주면 대회 끝나고 14일. 대회가 10/12 에 끝나니 10/26 이어야 한다.
+    A(sup["rows"][0]["due"] == "2026-10-26", f"기본 기한이 틀렸다: {sup['rows'][0]['due']}")
+    A(sup["done"] == 0 and sup["late"] == 0, f"처음부터 지킴/늦음이 있다: {sup}")
+    ok(f"사후 지원 배정 — {sup['rows'][0]['team_name']} ← {sup['rows'][0]['helper_name']} "
+       f"({sup['rows'][0]['due']}까지)")
+
+    # 했음을 누르면 지킨 것으로 넘어간다
+    pg.click("[data-done]")
+    pg.wait_for_timeout(800)
+    sup = api(f"/api/events/{ev}/support")
+    A(sup["done"] == 1, f"완료 표시가 안 됐다: {sup}")
+    ok("사후 지원 완료 표시 — 약속 1건 중 1건 지킴")
+
     # 유입 경로 집계 — 2회차 홍보비를 어디에 쓸지 정하는 근거다
     sp_txt = pg.inner_text("#view")
     A("어디서 왔나" in sp_txt and "캠퍼스픽" in sp_txt, f"유입 경로가 안 보인다: {sp_txt[:150]}")
@@ -248,7 +272,8 @@ with sync_playwright() as p:
     A(all(i and i.startswith("t-") for i in ids), f"공개 화면에 신청 말고 다른 칸이 있다: {ids}")
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
-                 "함께한 곳", "오픈에이아이"]:
+                 "함께한 곳", "오픈에이아이",
+                 "끝난 뒤에도 봐 드립니다", "박실무"]:
         A(must in txt, f"공개 화면에 '{must}' 가 없다")
     A("example.com/walk" in txt, "제출작 링크가 공개 화면에 없다")
     ok("공개 링크 /e/<대회id> — 로그인 없이 열리고 신청 칸만 있다")

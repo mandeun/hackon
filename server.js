@@ -86,6 +86,29 @@ function open(file) {
       note   TEXT NOT NULL DEFAULT ''
     );
 
+    /* 대회가 끝난 뒤 팀을 봐 주기로 한 사람들. 행사 '전에' 채워 둔다 —
+       끝나고 정하면 아무도 안 한다 (매뉴얼 11장). */
+    CREATE TABLE IF NOT EXISTS supporters(
+      id      INTEGER PRIMARY KEY,
+      event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      name    TEXT NOT NULL,
+      org     TEXT NOT NULL DEFAULT '',   -- 소속. 협찬사에서 온 사람이면 그 회사
+      can     TEXT NOT NULL DEFAULT '',   -- 무엇을 도와줄 수 있나
+      contact TEXT NOT NULL DEFAULT '',
+      UNIQUE(event, name)
+    );
+
+    /* 어느 팀을 · 누가 · 언제까지. 기한이 없으면 약속이 아니라 인사말이다. */
+    CREATE TABLE IF NOT EXISTS assignments(
+      id      INTEGER PRIMARY KEY,
+      team    INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      helper  INTEGER NOT NULL REFERENCES supporters(id) ON DELETE CASCADE,
+      due     TEXT NOT NULL DEFAULT '',   -- YYYY-MM-DD
+      done    TEXT NOT NULL DEFAULT '',   -- 한 날. 비면 아직
+      note    TEXT NOT NULL DEFAULT '',
+      UNIQUE(team, helper)
+    );
+
     /* 협찬사에게 노출당 비용 대신 돌려주는 숫자. 이 표가 이 서비스의 차별점이다. */
     CREATE TABLE IF NOT EXISTS outcomes(
       id     INTEGER PRIMARY KEY,
@@ -243,6 +266,41 @@ function outcomes(db, event) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** 사후 지원 현황. 약속한 것 · 지킨 것 · 기한 넘긴 것. */
+function support(db, event) {
+  const people = db.prepare('SELECT * FROM supporters WHERE event=? ORDER BY id').all(event);
+  const rows = db.prepare(`SELECT a.*, s.name AS helper_name, s.org, t.name AS team_name
+                           FROM assignments a
+                           JOIN supporters s ON s.id = a.helper
+                           JOIN teams t ON t.id = a.team
+                           WHERE t.event = ? ORDER BY a.due, t.name`).all(event);
+  const t = today();
+  for (const r of rows) r.late = !r.done && !!r.due && r.due < t;
+  return {
+    people, rows,
+    promised: rows.length,
+    done: rows.filter(r => r.done).length,
+    late: rows.filter(r => r.late).length,
+  };
+}
+
+/** 배정. 기한을 안 주면 대회 끝나고 14일로 잡는다 (매뉴얼 11장의 '끝나고 2주'). */
+function assign(db, event, b) {
+  if (!b.team || !b.helper) throw new HttpError(400, '팀과 지원자를 골라 주세요');
+  const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+b.team);
+  if (!t || t.event !== event) throw new HttpError(404, '이 대회의 팀이 아닙니다');
+  let due = b.due;
+  if (!due) {
+    const e = db.prepare('SELECT ends FROM events WHERE id=?').get(event);
+    due = new Date(new Date(e.ends).getTime() + 14 * 86400000).toISOString().slice(0, 10);
+  }
+  try {
+    db.prepare('INSERT INTO assignments(team,helper,due,note) VALUES(?,?,?,?)')
+      .run(+b.team, +b.helper, due, b.note || '');
+  } catch { throw new HttpError(409, '이미 짝지어진 조합입니다'); }
+  return due;
+}
+
 /* ───────────────────── HTTP ───────────────────── */
 /* #region reuse:http-kit — HttpError·MIME·body()·json(). 이 네 개가 한 세트다 */
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
@@ -299,6 +357,27 @@ function routes(db) {
           db.prepare('INSERT INTO sponsors(event,name,kind,amount,note) VALUES(?,?,?,?,?)')
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
           return json(res, 201, { ok: true });
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/support$/))) {
+          if (req.method === 'GET') return json(res, 200, support(db, m[1]));
+          if (req.method === 'POST') {
+            const b = await body(req);
+            if (!b.name) throw new HttpError(400, '이름이 필요합니다');
+            try {
+              db.prepare('INSERT INTO supporters(event,name,org,can,contact) VALUES(?,?,?,?,?)')
+                .run(m[1], b.name, b.org || '', b.can || '', b.contact || '');
+            } catch { throw new HttpError(409, '같은 이름이 이미 있습니다'); }
+            return json(res, 201, { ok: true });
+          }
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/assign$/)) && req.method === 'POST')
+          return json(res, 201, { due: assign(db, m[1], await body(req)) });
+
+        if ((m = p.match(/^\/api\/assignments\/(\d+)\/done$/)) && req.method === 'POST') {
+          const b = await body(req);
+          db.prepare('UPDATE assignments SET done=?, note=? WHERE id=?')
+            .run(b.done === false ? '' : today(), b.note || '', +m[1]);
+          return json(res, 200, { ok: true });
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/outcomes$/))) {
           if (req.method === 'GET') return json(res, 200, outcomes(db, m[1]));
@@ -411,6 +490,20 @@ function selftest() {
   db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T10:00', past);
   submit(db, pt, { url: 'https://example.com/late' });
   ok(!!db.prepare('SELECT url FROM submissions WHERE team=?').get(pt), '마감을 미루면 다시 받는다');
+
+  // 사후 지원 — 약속하고, 기한을 넘기면 늦음으로 잡히고, 하면 지운다
+  db.prepare('INSERT INTO supporters(event,name,org,can) VALUES(?,?,?,?)')
+    .run(ev, '박실무', '어느회사', '도입 검토를 같이 봐 줍니다');
+  const helper = db.prepare('SELECT id FROM supporters WHERE event=?').get(ev).id;
+  const due = assign(db, ev, { team: t1, helper });
+  ok(due === '2026-10-15', '기한을 안 주면 대회 끝나고 14일 (' + due + ')');
+  bad = false; try { assign(db, ev, { team: t1, helper }); } catch { bad = true; }
+  ok(bad, '같은 짝을 두 번 넣지 않는다');
+  db.prepare("UPDATE assignments SET due='2020-01-01'").run();
+  ok(support(db, ev).late === 1, '기한이 지나면 늦음으로 잡힌다');
+  db.prepare("UPDATE assignments SET done=date('now')").run();
+  const sup = support(db, ev);
+  ok(sup.late === 0 && sup.done === 1, '하면 늦음에서 빠진다');
 
   db.prepare('INSERT INTO outcomes(event,team,kind,who) VALUES(?,?,?,?)').run(ev, t1, '면접', '어느회사');
   const o = outcomes(db, ev);
