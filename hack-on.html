@@ -408,6 +408,9 @@ const SCREEN = {
 
       <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>
       <button class="btn sec sm" id="b-report">결과 보고서 보기</button>
+      <button class="btn sec sm" id="b-dump">통째로 내려받기 (백업)</button>
+      <div class="meta" style="margin-top:6px">서버가 10분마다 알아서 백업합니다(<code>data/backup/</code>).
+        이 단추는 지금 것을 파일 하나로 받아 둡니다. 행사 전과 심사 뒤에 한 번씩 눌러 두세요.</div>
       <div class="card" style="margin-top:10px">
         <h3>결과 공개</h3>
         <div class="meta">켜면 각 팀이 <b>자기 점수 분해와 심사평</b>을 봅니다.
@@ -913,6 +916,19 @@ function wire() {
       const r = await api(`/events/${cur}/open`, { method: 'POST', body: { open: !now } });
       flash(r.opened ? '결과를 공개했습니다' : '결과 공개를 닫았습니다');
     } catch (e) { flash(e.message, true); }
+  };
+
+  const dmp = $('#b-dump');
+  if (dmp) dmp.onclick = () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    // 열쇠가 필요해서 헤더를 실어야 한다. 링크로는 못 받으니 받아서 저장한다.
+    fetch(`/api/events/${cur}/dump`, { headers: { 'x-okey': okeyOf(cur) } })
+      .then(r => r.ok ? r.blob() : Promise.reject(new Error('열쇠가 필요합니다')))
+      .then(bl => { const a = document.createElement('a');
+                    a.href = URL.createObjectURL(bl);
+                    a.download = `hackon-${cur}.json`; a.click(); URL.revokeObjectURL(a.href);
+                    flash('내려받았습니다'); })
+      .catch(e => flash(e.message, true));
   };
 
   const pr = $('#b-print');

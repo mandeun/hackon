@@ -401,6 +401,13 @@ with sync_playwright() as p:
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")
     ok("신청·제출·심사·공개 페이지는 열쇠 없이 그대로 열린다")
 
+    # 통째로 내려받기 — 노트북이 죽으면 이걸로 살린다. 열쇠가 있어야 한다.
+    A(code_of(f"/api/events/{ev}/dump") == 403, "열쇠 없이 백업이 받아졌다")
+    dp = api(f"/api/events/{ev}/dump", OK)
+    A(dp["teams"] and dp["scores"] and "okey" not in dp["event"],
+      f"백업 내용이 부실하다: {list(dp)}")
+    ok(f"통째로 내려받기 — 팀 {len(dp['teams'])} · 점수 {len(dp['scores'])}건, 열쇠는 안 담김")
+
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")

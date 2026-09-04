@@ -414,6 +414,43 @@ function outcomes(db, event) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** 대회 하나를 통째로 담는다. 노트북이 죽으면 이걸로 살린다. */
+function dump(db, event) {
+  const e = db.prepare('SELECT * FROM events WHERE id=?').get(event);
+  if (!e) throw new HttpError(404, '없는 대회입니다');
+  delete e.okey;   // 백업 파일에도 열쇠는 안 담는다
+  const teams = db.prepare('SELECT * FROM teams WHERE event=? ORDER BY id').all(event);
+  const ids = teams.map(t => t.id);
+  const inIds = ids.length ? `(${ids.join(',')})` : '(0)';
+  return {
+    saved: new Date().toISOString(),
+    event: e,
+    teams,
+    submissions: db.prepare(`SELECT * FROM submissions WHERE team IN ${inIds}`).all(),
+    scores: db.prepare(`SELECT * FROM scores WHERE team IN ${inIds}`).all(),
+    reviews: db.prepare(`SELECT * FROM reviews WHERE team IN ${inIds}`).all(),
+    sponsors: db.prepare('SELECT * FROM sponsors WHERE event=?').all(event),
+    outcomes: db.prepare('SELECT * FROM outcomes WHERE event=?').all(event),
+    supporters: db.prepare('SELECT * FROM supporters WHERE event=?').all(event),
+    assignments: db.prepare(`SELECT * FROM assignments WHERE team IN ${inIds}`).all(),
+  };
+}
+
+/** DB 파일을 통째로 복사해 둔다. 몇 벌만 남기고 오래된 것은 지운다.
+    sqlite 는 WAL 을 쓰므로 복사 전에 체크포인트를 돌려 본체에 밀어 넣는다. */
+function backup(db, file, keep = 12) {
+  const dir = path.join(path.dirname(file), 'backup');
+  fs.mkdirSync(dir, { recursive: true });
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const out = path.join(dir, `hackon-${stamp}.db`);
+  fs.copyFileSync(file, out);
+  const olds = fs.readdirSync(dir).filter(f => f.endsWith('.db')).sort();
+  for (const f of olds.slice(0, Math.max(0, olds.length - keep)))
+    fs.rmSync(path.join(dir, f), { force: true });
+  return out;
+}
+
 /** 사후 지원 현황. 약속한 것 · 지킨 것 · 기한 넘긴 것. */
 function support(db, event) {
   const people = db.prepare('SELECT * FROM supporters WHERE event=? ORDER BY id').all(event);
@@ -606,6 +643,14 @@ function routes(db) {
           score(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
         }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/dump$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key);
+          res.writeHead(200, {
+            'content-type': 'application/json; charset=utf-8',
+            'content-disposition': `attachment; filename="hackon-${m[1]}.json"`,
+          });
+          return res.end(JSON.stringify(dump(db, m[1]), null, 2));
+        }
         if (p === '/api/health') return json(res, 200, {
           ok: true, events: db.prepare('SELECT COUNT(*) c FROM events').get().c,
           teams: db.prepare('SELECT COUNT(*) c FROM teams').get().c,
@@ -762,9 +807,27 @@ function selftest() {
   ok(o.finishRate === 50, '완주율은 제출한 팀 비율 (' + o.finishRate + ')');
   ok(o.interview === 1, '면접 연결 수가 잡힌다');
 
+  // 내보내기 — 노트북이 죽어도 이걸로 살린다
+  const dp = dump(db, ev);
+  ok(dp.teams.length >= 2 && dp.scores.length > 0, '내보내기에 팀과 점수가 담긴다');
+  ok(dp.sponsors !== undefined && dp.supporters !== undefined && dp.assignments !== undefined,
+     '협찬사·지원자·배정도 담긴다');
+  ok(!('okey' in dp.event), '내보낸 파일에 열쇠는 안 담긴다');
+  ok(dp.reviews.length >= 1, '심사평도 담긴다');
+
+  // 백업 — 파일이 실제로 생기는가
+  const bfile = backup(db, tmp, 3);
+  ok(fs.existsSync(bfile) && fs.statSync(bfile).size > 0, '백업 파일이 생긴다');
+  for (let i = 0; i < 5; i++) backup(db, tmp, 3);
+  const kept = fs.readdirSync(path.join(path.dirname(tmp), 'backup')).filter(f => f.endsWith('.db'));
+  ok(kept.length <= 3, '오래된 백업은 지운다 (' + kept.length + '벌)');
+  fs.rmSync(path.join(path.dirname(tmp), 'backup'), { recursive: true, force: true });
+
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
+
+
 
   // 심사 계획 — MLH 가이드의 예시(175팀·2시간 → 18명)와 맞는지로 검산한다
   ok(judgePlan(175, 120).need === 18, '심사위원 수 공식이 MLH 예시와 맞는다 ('
@@ -780,6 +843,13 @@ function selftest() {
 if (require.main === module) {
   if (process.argv.includes('--test')) { selftest(); process.exit(0); }
   const db = open(DBFILE);
+
+  /* 10분마다 통째로 복사해 둔다. 심사 도중에 노트북이 죽는 일이 실제로 생긴다.
+     최근 12벌이면 두 시간 치다. 그 이상은 지운다. */
+  const tick = () => { try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); } };
+  tick();
+  setInterval(tick, 10 * 60 * 1000).unref();
+
   /* 0.0.0.0 으로 듣는다. 이걸 안 하면 같은 와이파이의 폰이 못 붙는다. */
   http.createServer(routes(db)).listen(PORT, '0.0.0.0', () => {
     console.log(`HACK:ON  →  http://localhost:${PORT}   (운영자용)`);
@@ -793,4 +863,5 @@ if (require.main === module) {
   });
 }
 module.exports = { open, createEvent, joinTeam, submit, score, board, outcomes,
-                   card, support, assign, spread, judgeView, judgePlan, lanIPs };
+                   card, support, assign, spread, judgeView, judgePlan, lanIPs,
+                   dump, backup, isAdmin };
