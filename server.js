@@ -24,6 +24,13 @@ const ROOT = __dirname;
 const PORT = process.env.PORT || 8788;
 const DBFILE = process.env.DB || path.join(ROOT, 'data', 'hackon.db');
 
+/* 카카오 로그인. 키가 없으면 통째로 꺼지고 지금처럼 열쇠로만 돈다.
+   키를 넣는 순간 켜진다 — 있는 사람은 로그인하고, 없는 사람은 열쇠를 그대로 쓴다.
+   닉네임만 받는다. 이메일을 받으면 비즈 앱 심사가 붙어서 바로 못 쓴다. */
+const KAKAO = process.env.KAKAO_KEY || '';
+const KAKAO_SECRET = process.env.KAKAO_SECRET || '';
+const SITE = (process.env.SITE || '').replace(/\/$/, '');
+
 /* ───────────────────────── DB ───────────────────────── */
 /* #region reuse:db-open — sqlite 열기(WAL+FK). 파일 경로만 바꾸면 어느 프로젝트든 그대로 쓴다 */
 function open(file) {
@@ -58,8 +65,10 @@ function open(file) {
     CREATE TABLE IF NOT EXISTS owners(
       id      TEXT PRIMARY KEY,
       name    TEXT NOT NULL DEFAULT '',
+      kakao   TEXT NOT NULL DEFAULT '',   -- 카카오 회원번호. 비면 열쇠만 쓰는 사람
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
     CREATE TABLE IF NOT EXISTS teams(
       id     INTEGER PRIMARY KEY,
@@ -160,6 +169,7 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN okey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'"); } catch {}
   try { db.exec('ALTER TABLE events ADD COLUMN listed INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE owners ADD COLUMN kakao TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}
   for (const c of ['aiuse', 'aidrop'])
     try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
@@ -173,6 +183,41 @@ function open(file) {
 /* #endregion reuse:db-open */
 
 const nid = () => crypto.randomBytes(4).toString('hex');
+
+/* 쿠키를 서명하는 열쇠. 서버가 꺼졌다 켜져도 로그인이 유지되게 DB 에 넣어 둔다. */
+function secretOf(db) {
+  let r = db.prepare("SELECT v FROM meta WHERE k='secret'").get();
+  if (!r) {
+    const v = crypto.randomBytes(32).toString('hex');
+    db.prepare("INSERT INTO meta(k,v) VALUES('secret',?)").run(v);
+    r = { v };
+  }
+  return r.v;
+}
+const sign = (db, id) =>
+  id + '.' + crypto.createHmac('sha256', secretOf(db)).update(id).digest('hex').slice(0, 32);
+function unsign(db, v) {
+  if (!v || v.indexOf('.') < 0) return '';
+  const id = v.slice(0, v.lastIndexOf('.'));
+  return sign(db, id) === v ? id : '';
+}
+function cookieOf(req, name) {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1));
+  }
+  return '';
+}
+
+/* 열쇠를 마구 넣어 보는 것을 막는다. 12자 열쇠라도 무한히 시도하면 언젠가 맞는다. */
+const tries = new Map();
+function tooMany(ip) {
+  const now = Date.now(), t = tries.get(ip) || { n: 0, at: now };
+  if (now - t.at > 600000) { t.n = 0; t.at = now; }
+  t.n++; tries.set(ip, t);
+  return t.n > 30;
+}
 
 /** 이 컴퓨터의 랜 주소. 참가자 폰은 localhost 로 못 온다.
     유선과 무선이 다를 수 있어서 찾은 것을 다 준다. */
@@ -713,12 +758,32 @@ function routes(db) {
              WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all());
 
         const key = req.headers['x-okey'] || q.k || '';
-        const owner = req.headers['x-owner'] || q.o || '';
+        /* 주최자를 알아내는 길이 둘이다.
+           로그인했으면 서명된 쿠키, 아니면 브라우저가 들고 있는 열쇠. */
+        const cookieOwner = unsign(db, cookieOf(req, 'hackon_s'));
+        const headOwner = req.headers['x-owner'] || q.o || '';
+        /* 틀린 열쇠를 넣은 경우에만 센다. 맞는 열쇠까지 세면
+           평소에 쓰는 사람이 먼저 막힌다 — 실제로 그렇게 만들었다가 검사에서 잡혔다. */
+        if (!cookieOwner && headOwner
+            && !db.prepare('SELECT 1 FROM owners WHERE id=?').get(headOwner)
+            && tooMany(req.socket.remoteAddress || ''))
+          throw new HttpError(429, '열쇠를 너무 여러 번 틀렸습니다. 잠시 뒤에 다시 해 주세요');
+        const owner = cookieOwner || headOwner;
 
         if (p === '/api/events' && req.method === 'POST') {
           const b = await body(req);
           if (owner) b.owner = owner;   // 이미 연 적이 있으면 그 사람 것으로 묶는다
           return json(res, 201, createEvent(db, b));
+        }
+        if (p === '/api/auth' && req.method === 'GET') {
+          const me2 = owner ? db.prepare('SELECT id,name,kakao FROM owners WHERE id=?').get(owner) : null;
+          return json(res, 200, {
+            kakao: !!KAKAO,                 // 카카오 로그인을 쓸 수 있는가
+            loggedIn: !!cookieOwner,        // 지금 로그인 상태인가
+            owner: me2 ? me2.id : '',
+            name: me2 ? me2.name : '',
+            linked: !!(me2 && me2.kakao),   // 카카오에 묶인 계정인가
+          });
         }
         if (p === '/api/mine' && req.method === 'GET') {
           if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
@@ -883,6 +948,70 @@ function routes(db) {
 
       /* 공개 링크. /e/<대회id> 는 화면 파일을 그대로 내려보내고, 화면이 주소를 보고
          읽기 전용으로 그린다. 서버에 화면을 하나 더 두지 않는 게 요점이다. */
+      /* ── 카카오 로그인 ────────────────────────────────
+         키가 없으면 이 자리는 통째로 없는 것과 같다. */
+      if (p === '/auth/kakao' && KAKAO) {
+        const back = SITE || `http://${req.headers.host}`;
+        const u = 'https://kauth.kakao.com/oauth/authorize'
+          + `?client_id=${encodeURIComponent(KAKAO)}`
+          + `&redirect_uri=${encodeURIComponent(back + '/auth/kakao/done')}`
+          + '&response_type=code&scope=profile_nickname';
+        res.writeHead(302, { location: u });
+        return res.end();
+      }
+      if (p === '/auth/kakao/done' && KAKAO) {
+        const back = SITE || `http://${req.headers.host}`;
+        const code = u.searchParams.get('code');
+        if (!code) { res.writeHead(302, { location: '/app' }); return res.end(); }
+        const form = new URLSearchParams({
+          grant_type: 'authorization_code', client_id: KAKAO,
+          redirect_uri: back + '/auth/kakao/done', code,
+        });
+        if (KAKAO_SECRET) form.set('client_secret', KAKAO_SECRET);
+        const tk = await (await fetch('https://kauth.kakao.com/oauth/token', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded;charset=utf-8' },
+          body: form.toString(),
+        })).json();
+        if (!tk.access_token) throw new HttpError(400, '카카오 로그인에 실패했습니다');
+        const me = await (await fetch('https://kapi.kakao.com/v2/user/me', {
+          headers: { authorization: 'Bearer ' + tk.access_token },
+        })).json();
+        const kid = String(me.id || '');
+        if (!kid) throw new HttpError(400, '카카오 사용자 정보를 못 받았습니다');
+        const nick = (me.properties && me.properties.nickname) || '';
+
+        /* 이미 이 카카오로 만든 주최자가 있으면 그걸 쓰고,
+           없으면 지금 브라우저가 들고 있던 열쇠를 그 카카오에 붙인다.
+           그래야 로그인 전에 연 대회를 잃지 않는다. */
+        let o = db.prepare('SELECT id FROM owners WHERE kakao=?').get(kid);
+        let oid = o && o.id;
+        if (!oid) {
+          const had = unsign(db, cookieOf(req, 'hackon_pre'));
+          if (had && db.prepare('SELECT 1 FROM owners WHERE id=?').get(had)) {
+            db.prepare('UPDATE owners SET kakao=?, name=COALESCE(NULLIF(name,\'\'),?) WHERE id=?')
+              .run(kid, nick, had);
+            oid = had;
+          } else {
+            oid = crypto.randomBytes(6).toString('hex');
+            db.prepare('INSERT INTO owners(id,name,kakao) VALUES(?,?,?)').run(oid, nick, kid);
+          }
+        }
+        res.writeHead(302, {
+          location: '/app',
+          'set-cookie': [
+            `hackon_s=${encodeURIComponent(sign(db, oid))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`
+            + (SITE.startsWith('https') ? '; Secure' : ''),
+            'hackon_pre=; Path=/; Max-Age=0',
+          ],
+        });
+        return res.end();
+      }
+      if (p === '/auth/logout') {
+        res.writeHead(302, { location: '/', 'set-cookie': 'hackon_s=; Path=/; Max-Age=0' });
+        return res.end();
+      }
+
       /* 주소가 셋 갈린다.
          /            첫 화면. 플랫폼 소개와 열린 대회 목록 (home.html)
          /app         대회를 열고 굴리는 곳 (hack-on.html)
@@ -924,6 +1053,11 @@ function selftest() {
   ok(board(db, ev, true).rows.length === 0, '빈 대회');
   ok(isAdmin(db, ev, okey) && !isAdmin(db, ev, 'x'), '열쇠가 맞아야 운영자다');
   ok(isAdmin(db, ev, '', evR.owner), '주최자 열쇠로도 열린다');
+  ok(typeof secretOf(db) === 'string' && secretOf(db).length === 64, '쿠키 서명 열쇠가 생긴다');
+  ok(secretOf(db) === secretOf(db), '서명 열쇠는 다시 만들지 않는다');
+  const signed = sign(db, evR.owner);
+  ok(unsign(db, signed) === evR.owner, '서명한 쿠키를 되읽는다');
+  ok(unsign(db, evR.owner + '.deadbeef') === '', '서명이 틀리면 안 읽힌다');
   ok(!isAdmin(db, ev, '', 'nope'), '남의 주최자 열쇠로는 안 열린다');
 
   let bad = false;

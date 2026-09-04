@@ -102,7 +102,7 @@ with sync_playwright() as p:
     A(len(pg.query_selector_all("[data-filter]")) == 4, "필터가 4개가 아니다")
     A(pg.query_selector("#sort") is not None, "정렬이 없다")
     A("아직 열린 대회가 없습니다" in htxt, f"빈 목록 안내가 없다: {htxt[:200]}")
-    A(pg.get_attribute("a.btn.sm", "href") == "/app", "대회 열기가 앱으로 안 간다")
+    A(pg.get_attribute("#nav-open", "href") == "/app", "대회 열기가 앱으로 안 간다")
     ok("첫 화면 — 메뉴·검색·필터·정렬·빈 목록 안내")
 
     # ── 1. 화면이 서버에 붙었는가 ───────────────────────────
@@ -519,6 +519,30 @@ with sync_playwright() as p:
     except urllib.error.HTTPError as e:
         A(e.code == 403, f"403 이어야 하는데 {e.code}")
     ok("남의 주최자 열쇠로는 안 열린다 (403)")
+
+    # 열쇠를 마구 넣어 보면 막힌다. 맞는 열쇠는 계속 통해야 한다.
+    blocked = False
+    for i in range(40):
+        r = urllib.request.Request(f"{BASE}/api/events/{ev}")
+        r.add_header("x-owner", f"{i:012d}")
+        try:
+            urllib.request.urlopen(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                blocked = True
+                break
+    A(blocked, "열쇠를 마흔 번 틀려도 안 막힌다")
+    good = urllib.request.Request(f"{BASE}/api/events/{ev}/spread")
+    good.add_header("x-owner", OWNER)
+    with urllib.request.urlopen(good) as r:
+        A(r.status == 200, "맞는 열쇠까지 같이 막혔다")
+    ok("틀린 열쇠 반복은 막고 맞는 열쇠는 통과 (429)")
+
+    # 카카오 로그인은 키가 없으면 꺼져 있다
+    au = api("/api/auth")
+    A(au["kakao"] is False and au["loggedIn"] is False,
+      f"카카오 키가 없는데 켜져 있다: {au}")
+    ok("카카오 로그인 — 키가 없으면 꺼지고 열쇠로만 돈다")
 
     # ── 운영자 열쇠 — 개발자 스물네 명에게 공개 링크를 뿌린다 ──
     # 열쇠 없이 되면 안 되는 것들

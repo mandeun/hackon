@@ -145,6 +145,13 @@ nav .i{font-size:17px}
 .bar i{display:block;height:100%;background:var(--navy)}
 .rv{border-left:3px solid var(--rule);padding:2px 0 2px 10px;margin:8px 0}
 .shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
+/* 카카오 노란색은 그쪽 규정 색이라 그대로 쓴다 */
+.kko{background:#FEE500;color:#191600;font-weight:800;border-radius:10px;padding:11px 16px;
+     display:inline-block;text-decoration:none;font-size:14.5px}
+.kko:hover{filter:brightness(.96)}
+/* 열쇠는 가려 둔다. 어깨너머로 보이면 그걸로 끝이다 */
+.hid{filter:blur(5px);transition:filter .15s;cursor:pointer;user-select:none}
+.hid.on{filter:none;user-select:text}
 .shrow .share{flex:1;margin-top:0}
 @media print{
   body{background:#fff}
@@ -168,6 +175,7 @@ nav .i{font-size:17px}
         <circle cx="136" cy="42" r="6.5" fill="var(--acc)"/>
       </svg></button>
       <span class="chip" id="mode">데모</span>
+      <span id="who"></span>
     </div>
   </header>
   <main id="view"></main>
@@ -222,6 +230,7 @@ const DEMO = {
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '';
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
+let AUTH = null;   // 카카오 로그인을 쓸 수 있는지, 지금 로그인했는지
 const $ = s => document.querySelector(s);
 const view = $('#view');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -367,8 +376,15 @@ function shareBase() {
 
 async function render() {
   if (LIVE && !NET) { try { NET = await api('/health'); } catch { NET = { net: [] }; } }
+  if (LIVE && !AUTH) { try { AUTH = await api('/auth'); } catch { AUTH = { kakao: false }; } }
   $('#mode').textContent = LIVE ? '서버 연결됨' : '데모';
   $('#mode').className = 'chip' + (LIVE ? ' live' : '');
+  const who = $('#who');
+  if (who) who.innerHTML = (AUTH && AUTH.kakao)
+    ? (AUTH.loggedIn
+        ? `<a href="/auth/logout" class="chip" style="margin-left:6px">${esc(AUTH.name || '로그인됨')} · 나가기</a>`
+        : `<a href="/auth/kakao" class="chip" style="margin-left:6px;background:#FEE500;color:#191600;font-weight:800">카카오 로그인</a>`)
+    : '';
   // 팀 화면은 순위에서 들어가는 곳이라 아래 탭은 '순위'를 켜 둔다
   const navOn = tab === 'team' ? 'board' : tab;
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === navOn));
@@ -399,10 +415,16 @@ const SCREEN = {
         <div class="meta">${esc(e.starts)}${e.ends !== e.starts ? '~' + esc(e.ends) : ''}
           · 상금 ${won(e.prize)}</div>
       </div>`).join('')}
-      <div class="card" style="padding:11px 13px"><div class="meta">
-        <b>주최자 열쇠</b> — 다른 기기에서 내 대회를 찾을 때 씁니다. 적어 두세요.<br>
-        <code>${esc(myKey())}</code>
-      </div></div>
+      ${AUTH && AUTH.linked ? `<div class="card" style="padding:11px 13px"><div class="meta">
+        <b>카카오로 로그인돼 있습니다.</b> 다른 기기에서도 카카오로 들어오면 이 대회들이 그대로 보입니다.
+        열쇠를 적어 둘 필요가 없습니다.
+      </div></div>` : `<div class="card" style="padding:11px 13px"><div class="meta">
+        <b>주최자 열쇠</b> — 다른 기기에서 내 대회를 찾을 때 씁니다. 눌러서 보고 적어 두세요.<br>
+        <code class="hid" data-reveal>${esc(myKey())}</code>
+        ${AUTH && AUTH.kakao ? `<br><br><b>잃어버릴 걱정을 없애려면</b> 카카오로 로그인해 두세요.
+          지금 열쇠가 그대로 그 계정에 묶입니다.<br>
+          <a class="kko" href="/auth/kakao" style="margin-top:8px">카카오로 로그인</a>` : ''}
+      </div></div>`}
       <div style="height:22px"></div>` : '';
 
     if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
@@ -411,6 +433,9 @@ const SCREEN = {
         <h3>전에 연 대회를 찾으시나요</h3>
         <div class="meta">주최자 열쇠를 넣으면 내가 연 대회가 다 나옵니다.
           로그인은 없습니다.</div>
+        ${AUTH && AUTH.kakao ? `<div style="height:8px"></div>
+          <a class="kko" href="/auth/kakao">카카오로 로그인</a>
+          <div class="meta" style="margin-top:8px">또는 열쇠로 찾기</div>` : ''}
         <label>주최자 열쇠</label><input id="ow-in" placeholder="영문과 숫자 12자">
         <div style="height:10px"></div>
         <button class="btn sm" id="ow-go">찾기</button>
@@ -564,7 +589,7 @@ const SCREEN = {
         <div class="meta" style="margin-top:10px">
           <b>운영자 열쇠</b> — 다른 기기에서 운영 화면을 열 때 씁니다.
           <b>참가자에게는 주지 마세요.</b><br>
-          <code>${esc(okeyOf(e.id) || '이 기기에 없음')}</code>
+          <code class="hid" data-reveal>${esc(okeyOf(e.id) || '이 기기에 없음')}</code>
         </div>
         <div class="meta" style="margin-top:10px">행사장 큰 화면에 띄울 주소입니다.
           노트북을 HDMI 로 꽂고 전체 화면으로 두세요.</div>
@@ -1135,6 +1160,11 @@ function wire() {
       flash('채웠습니다');
     } catch (e) { flash(e.message, true); }
   };
+
+  document.querySelectorAll('[data-reveal]').forEach(el => {
+    el.title = '눌러서 보기';
+    el.onclick = () => el.classList.toggle('on');
+  });
 
   const owgo = $('#ow-go');
   if (owgo) owgo.onclick = async () => {

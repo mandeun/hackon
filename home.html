@@ -141,7 +141,9 @@ var 첫대회  = '2026-11-07';        // 우리가 여는 1회차 날짜
       <a href="#sponsor">협찬</a>
       <a id="nav-manual" href="#">운영 매뉴얼</a>
     </div>
-    <a class="btn sm flex-none" href="/app">대회 열기</a>
+    <a class="btn sm flex-none" id="nav-login" href="/auth/kakao"
+       style="display:none;background:#FEE500;color:#191600;margin-right:6px">카카오 로그인</a>
+    <a class="btn sm flex-none" id="nav-open" href="/app">대회 열기</a>
   </div>
 </nav>
 
@@ -507,6 +509,14 @@ if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
 }
 
 document.getElementById('foot-note').textContent = '1회차 ' + 첫대회;
+
+/* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. 꺼져 있으면 없는 것과 같다. */
+fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
+  var el = document.getElementById('nav-login');
+  if (!a.kakao) return;
+  el.style.display = '';
+  if (a.loggedIn) { el.textContent = (a.name || '내 대회') + ' 보기'; el.href = '/app'; }
+}).catch(function(){});
 </script>
 </body>
 </html>
