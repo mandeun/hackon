@@ -291,6 +291,42 @@ with sync_playwright() as p:
     A("열린 대회" in pg.inner_text("#view"), "처음 화면이 아니다")
     ok("로고를 누르면 처음 화면으로")
 
+    # ── 현장 화면 — 벽에 걸어 두는 것 ───────────────────────
+    tctx = b.new_context(viewport={"width": 1280, "height": 720})
+    tp = tctx.new_page()
+    tp.on("pageerror", lambda e: errs.append("현장:" + str(e)))
+    tp.goto(f"{BASE}/tv/{ev}")
+    tp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    ttxt = tp.inner_text("#view")
+    A("우리 동네 문제 해결 해커톤" in ttxt, f"제목이 없다: {ttxt[:100]}")
+    A("지금" in ttxt and "제출" in ttxt, f"지금 순서와 제출 현황이 없다: {ttxt[:200]}")
+    A("/e/" + ev in ttxt.replace(" ", ""), f"접속 주소가 없다: {ttxt}")
+    A(tp.evaluate("document.body.classList.contains('tv')"), "큰 화면 모드가 아니다")
+    A(tp.evaluate("document.querySelector('nav').style.display") == "none", "현장 화면에 탭이 보인다")
+    # 벽에 거는 화면이라 개인정보가 실리면 안 된다
+    for leak in ["one@example.com", "연락처", "협찬", "심사 눈높이"]:
+        A(leak not in ttxt, f"현장 화면에 '{leak}' 가 샜다")
+    tvd = api(f"/api/events/{ev}/tv")
+    A(tvd["teams"] >= 2 and "waiting" in tvd, f"현장 자료가 부실하다: {tvd}")
+    A("contact" not in json.dumps(tvd), "현장 자료에 연락처가 실렸다")
+    ok(f"현장 화면 /tv/<대회id> — 제출 {tvd['done']}/{tvd['teams']}팀 · 개인정보 안 샘")
+
+    # 진행 순서 — 기본값이 깔리고 고칠 수 있다
+    A(len(tvd["plan"]) == 9, f"기본 진행표가 안 깔렸다: {len(tvd['plan'])}")
+    visit(f"/#{ev}")
+    if not pg.is_visible("#e-plan"):
+        pg.click("summary:has-text('고치기')")
+        pg.wait_for_timeout(300)
+    plan_text = chr(10).join(["09:00 모여요", "13:00 만들기", "18:00 발표"])
+    pg.fill("#e-plan", plan_text)
+    pg.click("#e-save")
+    pg.wait_for_timeout(900)
+    pl = api(f"/api/events/{ev}")["plan"]
+    A(len(pl) == 3 and pl[0]["at"] == "09:00" and pl[0]["what"] == "모여요",
+      f"진행 순서가 안 고쳐졌다: {pl}")
+    tctx.close()
+    ok("진행 순서 — 기본 9줄이 깔리고 운영자가 고친다")
+
     # ── 등록 데스크 — 당일 아침에 쓰는 화면 ─────────────────
     visit(f"/#{ev}")
     A("등록 데스크" in pg.inner_text("#view"), "등록 데스크가 없다")

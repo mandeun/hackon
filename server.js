@@ -45,6 +45,7 @@ function open(file) {
       due      TEXT NOT NULL DEFAULT '',      -- 제출 마감 'YYYY-MM-DDTHH:MM'. 비면 안 막는다
       opened   INTEGER NOT NULL DEFAULT 0,   -- 결과 공개. 켜면 팀이 자기 점수와 심사평을 본다
       okey     TEXT NOT NULL DEFAULT '',      -- 운영자 열쇠. 이걸 아는 사람만 운영 화면을 연다
+      plan     TEXT NOT NULL DEFAULT '[]',    -- 진행 순서 [{at,what}]. 일정은 여기 한 곳에만 둔다
       rubric   TEXT NOT NULL DEFAULT '[]',   -- [{key,label,weight}]
       created  TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -142,6 +143,7 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN due TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE events ADD COLUMN opened INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN okey TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE events ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
   for (const c of ['role', 'found', 'note', 'agreed', 'came'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
@@ -166,6 +168,20 @@ function lanIPs() {
 
 /* ───────────────────── 도메인 ───────────────────── */
 
+/* 하루 해커톤 기본 진행표. 매뉴얼 6장을 하루로 줄인 것이다.
+   운영자가 고치되, 아무것도 안 고쳐도 현장 화면이 돌아가게 기본값을 깐다. */
+const DEFAULT_PLAN = [
+  { at: '10:00', what: '등록 · 아이스브레이킹' },
+  { at: '10:30', what: '주제 안내 · 아이디어 발표' },
+  { at: '11:30', what: '팀 짜기' },
+  { at: '12:00', what: '점심' },
+  { at: '13:00', what: '만들기' },
+  { at: '15:00', what: '멘토 오피스아워' },
+  { at: '17:00', what: '제출 마감' },
+  { at: '17:30', what: '발표' },
+  { at: '19:30', what: '시상' },
+];
+
 const DEFAULT_RUBRIC = [
   { key: 'idea', label: '독창성', weight: 30 },
   { key: 'make', label: '완성도', weight: 30 },
@@ -181,6 +197,13 @@ function editEvent(db, id, b) {
     if (b[k] === undefined) continue;
     set.push(`${k}=?`);
     val.push(k === 'prize' || k === 'cap' ? (+b[k] || 0) : String(b[k]));
+  }
+  if (Array.isArray(b.plan)) {
+    set.push('plan=?');
+    /* 시각과 할 일만 남긴다. 화면이 그리는 것이라 다른 게 섞이면 안 된다. */
+    val.push(JSON.stringify(b.plan
+      .filter(r => r && r.at)
+      .map(r => ({ at: String(r.at).slice(0, 5), what: String(r.what || '').slice(0, 60) }))));
   }
   if (!set.length) return;
   db.prepare(`UPDATE events SET ${set.join(',')} WHERE id=?`).run(...val, id);
@@ -216,7 +239,8 @@ function createEvent(db, b) {
     .run(id, b.title, b.host || '주최자', b.topic || '',
          b.starts || today(), b.ends || b.starts || today(),
          +b.prize || 0, +b.cap || 0, JSON.stringify(rubric), b.due || '');
-  db.prepare('UPDATE events SET okey=? WHERE id=?').run(okey, id);
+  db.prepare('UPDATE events SET okey=?, plan=? WHERE id=?')
+    .run(okey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
   return { id, okey };
 }
 
@@ -237,6 +261,7 @@ function getEvent(db, id) {
   if (!e) throw new HttpError(404, '없는 대회입니다');
   delete e.okey;                     // 열쇠는 절대 안 내려보낸다
   e.rubric = JSON.parse(e.rubric);
+  try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
   e.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(id).c;
   e.sponsors = db.prepare('SELECT * FROM sponsors WHERE event=? ORDER BY amount DESC').all(id);
   return e;
@@ -386,6 +411,27 @@ function spread(db, event) {
   const gap = Math.round((rows[0].avg - rows[rows.length - 1].avg) * 10) / 10;
   /* 15점이면 한 항목이 아니라 순위가 뒤집힌다. 그때부터 캘리브레이션을 권한다. */
   return { rows, gap, warn: gap >= 15, top: rows[0].judge, bottom: rows[rows.length - 1].judge };
+}
+
+/** 행사장 큰 화면이 쓰는 것. 열쇠가 없다 — 벽에 걸어 두는 화면이라
+    연락처 같은 건 애초에 안 담는다. */
+function tv(db, event) {
+  const e = getEvent(db, event);
+  const rows = db.prepare(`SELECT t.name, s.url FROM teams t
+                           LEFT JOIN submissions s ON s.team = t.id
+                           WHERE t.event = ? ORDER BY t.id`).all(event);
+  const b = board(db, event, false);
+  const judged = b.rows.some(r => r.judges > 0);
+  return {
+    title: e.title, host: e.host, due: e.due, plan: e.plan,
+    starts: e.starts, ends: e.ends,
+    teams: rows.length,
+    done: rows.filter(r => r.url).length,
+    waiting: rows.filter(r => !r.url).map(r => r.name),
+    /* 심사가 시작되기 전에는 순위를 안 보낸다. 벽에 붙은 화면으로 순위가 새면
+       심사위원이 그걸 보고 점수를 맞춘다. */
+    ranks: judged ? b.rows.slice(0, 5).map(r => ({ rank: r.rank, name: r.name, score: r.score })) : [],
+  };
 }
 
 /** 심사위원이 보는 것. 남의 점수도 순위도 안 내려보낸다 —
@@ -587,6 +633,9 @@ function routes(db) {
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
           return json(res, 201, { ok: true });
         }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/tv$/)) && req.method === 'GET')
+          return json(res, 200, tv(db, m[1]));
+
         if (p === '/api/plan' && req.method === 'GET')
           return json(res, 200, judgePlan(q.teams, q.minutes, +q.per || 4, +q.rounds || 3));
 
@@ -700,7 +749,8 @@ function routes(db) {
 
       /* 공개 링크. /e/<대회id> 는 화면 파일을 그대로 내려보내고, 화면이 주소를 보고
          읽기 전용으로 그린다. 서버에 화면을 하나 더 두지 않는 게 요점이다. */
-      const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/) || p.match(/^\/j\/[a-z0-9]+$/);
+      const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/) || p.match(/^\/j\/[a-z0-9]+$/)
+               || p.match(/^\/tv\/[a-z0-9]+$/);
 
       /* #region reuse:static — 경로 탈출 방지 + MIME + 스트림. 그대로 복사해 쓴다 */
       const f = path.join(ROOT, (p === '/' || pub) ? 'hack-on.html' : decodeURIComponent(p));
@@ -806,6 +856,15 @@ function selftest() {
   ok(cd.reviews.length === 1 && cd.reviews[0].good.includes('문제를'), '심사평이 붙는다');
   ok(!('judge' in cd.reviews[0]), '심사평에 이름이 안 붙는다');
   db.prepare('UPDATE events SET opened=0 WHERE id=?').run(ev);
+
+  // 현장 화면 — 일정은 한 곳에만 둔다
+  ok(getEvent(db, ev).plan.length === 9, '기본 진행표가 깔린다 (' + getEvent(db, ev).plan.length + '줄)');
+  const tv0 = tv(db, ev);
+  ok(tv0.teams === 2 && tv0.done === 1, '제출 현황이 맞는다');
+  ok(tv0.waiting.includes('나팀'), '아직 안 낸 팀 이름이 나온다');
+  ok(!('contact' in tv0), '벽에 거는 화면에 연락처가 안 실린다');
+  editEvent(db, ev, { plan: [{ at: '09:00', what: '모임' }, { at: 'x', what: '' }] });
+  ok(getEvent(db, ev).plan.length === 2, '진행표를 고칠 수 있다');
 
   // 심사 편차 — 후한 사람과 짠 사람의 차이
   const sp0 = spread(db, ev);
@@ -913,5 +972,5 @@ if (require.main === module) {
   });
 }
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, score, board, outcomes,
-                   card, support, assign, spread, judgeView, judgePlan, lanIPs,
+                   card, support, assign, spread, judgeView, judgePlan, lanIPs, tv,
                    dump, backup, isAdmin };

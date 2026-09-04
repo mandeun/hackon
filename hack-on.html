@@ -68,6 +68,41 @@ details>summary:hover{color:var(--navy)}
 details .in{padding:0 14px 14px}
 details .in>.card{border:0;padding:0;margin:0;background:none}
 .when{font-size:11px;color:var(--ink3);font-weight:600;margin-left:2px}
+
+/* 행사장 큰 화면. 여기만 검은 바탕이고 글씨가 크다.
+   멀리서 보이는 것이 전부라 다른 화면의 규칙을 따르지 않는다. */
+body.tv{background:#0B0E1A;display:block}
+body.tv #app{max-width:none;background:#0B0E1A;box-shadow:none;color:#fff;
+             height:100vh;min-height:0}
+body.tv header,body.tv nav,body.tv #toast{display:none}
+/* main 에 height 를 또 주면 #app 이 100vh 보다 커져서 아래가 빈다. flex 로만 채운다. */
+body.tv main{padding:3.2vh 3vw;overflow:hidden;flex:1;min-height:0;
+             display:flex;flex-direction:column}
+.tvwrap{display:flex;flex-direction:column;height:100%;gap:2.4vh}
+.tvtop{display:flex;align-items:baseline;gap:1.4vw}
+.tvtitle{font-size:3.4vh;font-weight:800;letter-spacing:-.03em}
+.tvhost{font-size:1.9vh;color:#8E97B5}
+.tvmid{display:flex;gap:2.4vw;flex:1;min-height:0}
+.tvbig{flex:1.15;display:flex;flex-direction:column;justify-content:center}
+.tvlabel{font-size:2vh;color:#8E97B5;letter-spacing:.02em;margin-bottom:.6vh}
+.tvclock{font-size:15vh;font-weight:800;line-height:.95;letter-spacing:-.05em;
+         font-variant-numeric:tabular-nums}
+.tvclock.hot{color:#FF7A4D}
+.tvclock.over{color:#FF5A5A}
+.tvside{flex:1;display:flex;flex-direction:column;gap:1.6vh;min-width:0}
+.tvnow{background:#161B33;border-radius:1.4vh;padding:2vh 2vw}
+.tvnow b{display:block;font-size:4.2vh;font-weight:800;line-height:1.15;letter-spacing:-.03em}
+.tvnext{font-size:2vh;color:#8E97B5;margin-top:.8vh}
+.tvsub{font-size:2.6vh;line-height:1.5;color:#C7CDE4}
+.tvsub em{font-style:normal;color:#fff;font-weight:800}
+.tvbot{display:flex;align-items:center;gap:2vw;border-top:1px solid #232945;padding-top:2vh}
+.tvaddr{font-family:Consolas,monospace;font-size:3.4vh;font-weight:700;letter-spacing:-.02em}
+.tvaddr span{display:block;font-size:1.7vh;color:#8E97B5;font-family:var(--kr);
+             font-weight:600;letter-spacing:0}
+.tvrank{margin-left:auto;display:flex;gap:1.6vw}
+.tvrank div{text-align:right}
+.tvrank b{display:block;font-size:2.8vh;font-weight:800}
+.tvrank span{font-size:1.6vh;color:#8E97B5}
 .row{display:flex;gap:8px;align-items:center}
 .row>*{flex:1}
 label{display:block;font-size:12.5px;color:var(--ink2);margin:10px 0 4px;font-weight:600}
@@ -209,7 +244,13 @@ function tickDue() {
   document.querySelectorAll('[data-due]').forEach(el => {
     if (!el.dataset.due) return;
     const r = dueText(el.dataset.due);
-    el.textContent = r.t; el.className = 'due ' + r.c;
+    if (el.classList.contains('tvclock')) {
+      /* 큰 화면에서는 '제출 마감까지' 를 위에 따로 적어 두었으니 숫자만 남긴다. */
+      el.textContent = r.t.replace('제출 마감까지 ', '').replace('제출 마감이 지났습니다', '마감');
+      el.className = 'tvclock ' + r.c;
+    } else {
+      el.textContent = r.t; el.className = 'due ' + r.c;
+    }
   });
 }
 setInterval(tickDue, 1000);
@@ -403,8 +444,10 @@ const SCREEN = {
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
       ${dueBox(e)}
 
-      ${(!e.due || !e.prize || e.starts === e.ends && !e.topic) ? `<details open>
-        <summary>아직 안 정한 것 <span class="when">여는 중</span></summary><div class="in">
+      ${(() => { const todo = !e.due || !e.prize || (e.starts === e.ends && !e.topic);
+                 return `<details${todo ? ' open' : ''}>
+        <summary>${todo ? '아직 안 정한 것' : '대회 정보 고치기'}
+          <span class="when">${todo ? '여는 중' : '날짜 · 상금 · 진행 순서'}</span></summary><div class="in">
         <div class="meta">비워 둬도 대회는 돌아갑니다. 정해지는 대로 채우세요.</div>
         <div class="row">
           <div><label>시작</label><input id="e-starts" type="date" value="${esc(e.starts)}"></div>
@@ -416,9 +459,13 @@ const SCREEN = {
         </div>
         <label>주제</label><input id="e-topic" value="${esc(e.topic)}" placeholder="예) 생활 불편">
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
+        <label>진행 순서 <span class="pill">현장 화면과 공개 페이지가 같이 씁니다</span></label>
+        <textarea id="e-plan" rows="9" style="font-family:Consolas,monospace;font-size:12px"
+          >${esc((e.plan || []).map(r => r.at + ' ' + r.what).join('\n'))}</textarea>
+        <div class="meta">한 줄에 하나씩. <code>10:00 등록</code> 처럼 시각 뒤에 한 칸 띄우고 씁니다.</div>
         <div style="height:10px"></div>
         <button class="btn sm" id="e-save">채우기</button>
-      </div></details>` : ''}
+      </div></details>`; })()}
 
       ${e.due ? `<button class="btn sec sm" id="b-ext">마감 30분 미루기</button>
         <div class="meta" style="margin:6px 0 12px">인터넷이 터졌을 때 진행자가 누릅니다.</div>` : ''}
@@ -454,6 +501,12 @@ const SCREEN = {
           <b>운영자 열쇠</b> — 다른 기기에서 운영 화면을 열 때 씁니다.
           <b>참가자에게는 주지 마세요.</b><br>
           <code>${esc(okeyOf(e.id) || '이 기기에 없음')}</code>
+        </div>
+        <div class="meta" style="margin-top:10px">행사장 큰 화면에 띄울 주소입니다.
+          노트북을 HDMI 로 꽂고 전체 화면으로 두세요.</div>
+        <div class="shrow">
+          <div class="share" id="tvlink">${shareBase()}/tv/${esc(e.id)}</div>
+          <button class="btn sec sm" id="b-copyt">복사</button>
         </div>
         <div class="meta" style="margin-top:10px">심사위원에게는 아래 주소를 보냅니다.
           점수만 넣을 수 있고 순위는 안 보입니다.</div>
@@ -544,6 +597,10 @@ const SCREEN = {
           ${r.url ? `<div class="share">${esc(r.url)}</div>` : ''}</div>`).join('')}
         ` : ''}
 
+      ${(e.plan || []).length ? `<div class="card"><h3>진행 순서</h3>
+        <table>${e.plan.map(r => `<tr><td style="width:5.5em">${esc(r.at)}</td>
+          <td>${esc(r.what)}</td></tr>`).join('')}</table></div>` : ''}
+
       ${rulesBox()}
 
       ${statusOf(e).k !== '끝남'
@@ -556,6 +613,66 @@ const SCREEN = {
 
       <p class="sub" style="margin-top:14px">심사 기준 ·
         ${e.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}</p>`;
+  },
+
+  /* 행사장 큰 화면 — /tv/<대회id>. 노트북을 HDMI 로 꽂아 두는 용도다.
+     참가자가 제일 자주 묻는 것 세 개(언제까지·지금 뭐 하는 시간·주소)를 종일 띄워 둔다. */
+  async tv() {
+    const d = await api(`/events/${cur}/tv`);
+    const now = new Date();
+    const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    /* 지금 지난 것 중 마지막이 '지금', 그다음이 '다음'. 시각만 비교하면 된다. */
+    const plan = d.plan || [];
+    let at = -1;
+    plan.forEach((r, i) => { if (r.at <= hhmm) at = i; });
+    const cur1 = plan[at], nxt = plan[at + 1];
+
+    return `<div class="tvwrap">
+      <div class="tvtop">
+        <div class="tvtitle">${esc(d.title)}</div>
+        <div class="tvhost">${esc(d.host)}</div>
+      </div>
+
+      <div class="tvmid">
+        <div class="tvbig">
+          ${d.due
+            ? `<div class="tvlabel">제출 마감까지</div>
+               <div class="tvclock" data-due="${esc(d.due)}"></div>`
+            : `<div class="tvlabel">오늘</div>
+               <div class="tvclock" style="font-size:9vh">${esc(d.starts)}</div>`}
+          <div class="tvsub" style="margin-top:2.4vh">
+            제출 <em>${d.done}</em> / ${d.teams}팀
+            ${d.waiting.length && d.waiting.length <= 6
+              ? `<br><span style="font-size:2.1vh;color:#8E97B5">아직 —
+                 ${d.waiting.map(esc).join(' · ')}</span>` : ''}
+          </div>
+        </div>
+
+        <div class="tvside">
+          <div class="tvnow">
+            <div class="tvlabel">지금</div>
+            <b>${cur1 ? esc(cur1.what) : '시작 전'}</b>
+            ${nxt ? `<div class="tvnext">다음 · ${esc(nxt.at)} ${esc(nxt.what)}</div>` : ''}
+          </div>
+          ${d.ranks.length ? `<div class="tvnow" style="flex:1">
+            <div class="tvlabel">순위</div>
+            ${d.ranks.map(r => `<div class="tvsub" style="display:flex;gap:1vw">
+              <em style="width:2ch">${r.rank}</em>
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.name)}</span>
+              <em>${r.score}</em></div>`).join('')}
+          </div>` : ''}
+        </div>
+      </div>
+
+      <div class="tvbot">
+        <div class="tvaddr">${esc(shareBase().replace(/^https?:\/\//, ''))}/e/${esc(cur)}
+          <span>여기서 신청하고 제출합니다</span></div>
+        <div class="tvrank">
+          <div><b>${d.teams}</b><span>참가 팀</span></div>
+          <div><b>${d.done}</b><span>제출</span></div>
+        </div>
+      </div>
+    </div>`;
   },
 
   /* 심사위원 화면 — /j/<대회id> 로 연다. 점수만 넣는다.
@@ -879,10 +996,15 @@ function wire() {
   if (esave) esave.onclick = async () => {
     if (!LIVE) return flash('데모에서는 안 됩니다', true);
     try {
+      const plan = $('#e-plan').value.split('\n')
+        .map(l => l.trim()).filter(Boolean)
+        .map(l => { const i = l.indexOf(' ');
+                    return i < 0 ? { at: l, what: '' }
+                                 : { at: l.slice(0, i), what: l.slice(i + 1) }; });
       await api(`/events/${cur}`, { method: 'PATCH', body: {
         starts: $('#e-starts').value, ends: $('#e-ends').value,
         prize: $('#e-prize').value, cap: $('#e-cap').value,
-        topic: $('#e-topic').value, due: $('#e-due').value } });
+        topic: $('#e-topic').value, due: $('#e-due').value, plan } });
       flash('채웠습니다');
     } catch (e) { flash(e.message, true); }
   };
@@ -1068,6 +1190,8 @@ function wire() {
   if (copy) copy.onclick = () => copyAny('.share', '공개 주소를 복사했습니다');
   const copyj = $('#b-copyj');
   if (copyj) copyj.onclick = () => copyAny('#jlink', '심사 주소를 복사했습니다');
+  const copyt = $('#b-copyt');
+  if (copyt) copyt.onclick = () => copyAny('#tvlink', '현장 화면 주소를 복사했습니다');
 
   const csv = $('#b-csv');
   if (csv) csv.onclick = async () => {
@@ -1128,10 +1252,16 @@ if (home) home.onclick = () => {
 /* 주소가 /e/<대회id> 면 읽기 전용 공개 화면으로 연다. 아래 탭과 편집 칸을 감춘다. */
 const PUB = location.pathname.match(/^\/e\/([a-z0-9]+)(\/report)?$/);
 const JUD = location.pathname.match(/^\/j\/([a-z0-9]+)$/);
-if (PUB || JUD) {
-  cur = (PUB || JUD)[1];
-  tab = JUD ? 'judge' : (PUB[2] ? 'report' : 'pub');
+const TVM = location.pathname.match(/^\/tv\/([a-z0-9]+)$/);
+if (PUB || JUD || TVM) {
+  cur = (PUB || JUD || TVM)[1];
+  tab = TVM ? 'tv' : JUD ? 'judge' : (PUB[2] ? 'report' : 'pub');
   document.querySelector('nav').style.display = 'none';
+}
+if (TVM) {
+  document.body.classList.add('tv');
+  /* 아무도 안 만져도 되게. 10초마다 스스로 새로 받는다. */
+  setInterval(() => render(), 10000);
 }
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
 render();
