@@ -1,0 +1,10 @@
+data/
+shots/
+__pycache__/
+*.py
+*.md
+.git/
+.gitignore
+HACKON.bat
+HACKON.vbs
+desktop.js

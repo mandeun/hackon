@@ -1,0 +1,26 @@
+app = "hackon"
+primary_region = "nrt"
+
+[build]
+
+[env]
+  PORT = "8080"
+  DB = "/data/hackon.db"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # 평소엔 꺼 둔다. 첫 접속에 몇 초 걸리고 그동안 요금이 0 이다.
+  # 행사 당일에는 min_machines_running 을 1 로 올린다.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+# DB 와 백업이 사는 곳. 이게 없으면 기계가 꺼질 때 대회가 통째로 사라진다.
+[[mounts]]
+  source = "hackon_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
