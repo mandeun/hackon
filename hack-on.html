@@ -185,11 +185,16 @@ nav .i{font-size:17px}
    라켓온과 같은 두 갈래. file:// 로 열면 데모 데이터, http:// 면 진짜 서버. */
 const LIVE = location.protocol.startsWith('http');
 const okeyOf = id => localStorage.getItem('hackon.okey.' + id) || '';
+/* 주최자 열쇠. 대회 열쇠와 다르다 —
+   대회 열쇠는 그 대회 하나만 열고, 이건 내가 연 것 전부를 연다.
+   로그인 대신 이 열쇠 하나가 계정 노릇을 한다. */
+const myKey = () => localStorage.getItem('hackon.owner') || '';
 async function api(path, opt) {
   const r = await fetch('/api' + path, {
     method: opt?.method || 'GET',
     headers: { 'content-type': 'application/json',
-               ...(cur && okeyOf(cur) ? { 'x-okey': okeyOf(cur) } : {}) },
+               ...(cur && okeyOf(cur) ? { 'x-okey': okeyOf(cur) } : {}),
+               ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
   const d = await r.json();
@@ -379,9 +384,38 @@ async function render() {
 const SCREEN = {
   async home() {
     const list = LIVE ? await api('/events') : DEMO.events;
-    if (!list.length) return `<h2>아직 열린 대회가 없습니다</h2>
-      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>`;
-    return `<h2>열린 대회</h2><p class="sub">누르면 참가 신청과 순위를 볼 수 있습니다.</p>` +
+    let my = null;
+    if (LIVE && myKey()) { try { my = await api('/mine'); } catch { my = null; } }
+    const mineBox = my && my.events.length ? `
+      <h2>내가 연 대회</h2>
+      <p class="sub">이 브라우저의 주최자 열쇠로 찾은 것입니다.</p>
+      ${my.total.events > 1 ? `<div class="stat">
+        <div><b>${my.total.events}</b><span>연 대회</span></div>
+        <div><b>${my.total.finishRate}%</b><span>완주율</span></div>
+        <div><b>${my.total.promised ? my.total.keptRate + '%' : '—'}</b><span>약속 이행</span></div>
+      </div>` : ''}
+      ${my.events.map(e => `<div class="card" data-open="${esc(e.id)}">
+        <h3>${esc(e.title)} ${e.listed ? '' : '<span class="pill warn">초안</span>'}</h3>
+        <div class="meta">${esc(e.starts)}${e.ends !== e.starts ? '~' + esc(e.ends) : ''}
+          · 상금 ${won(e.prize)}</div>
+      </div>`).join('')}
+      <div class="card" style="padding:11px 13px"><div class="meta">
+        <b>주최자 열쇠</b> — 다른 기기에서 내 대회를 찾을 때 씁니다. 적어 두세요.<br>
+        <code>${esc(myKey())}</code>
+      </div></div>
+      <div style="height:22px"></div>` : '';
+
+    if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
+      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>
+      ${my ? '' : `<div class="card">
+        <h3>전에 연 대회를 찾으시나요</h3>
+        <div class="meta">주최자 열쇠를 넣으면 내가 연 대회가 다 나옵니다.
+          로그인은 없습니다.</div>
+        <label>주최자 열쇠</label><input id="ow-in" placeholder="영문과 숫자 12자">
+        <div style="height:10px"></div>
+        <button class="btn sm" id="ow-go">찾기</button>
+      </div>`}`;
+    return mineBox + `<h2>열린 대회</h2><p class="sub">누르면 참가 신청과 순위를 볼 수 있습니다.</p>` +
       list.map(e => `<div class="card" data-open="${esc(e.id)}">
         <h3>${esc(e.title)} ${badge(e)}</h3>
         <div class="meta">${esc(e.host)} · ${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)}</div>
@@ -396,7 +430,8 @@ const SCREEN = {
       <div style="height:12px"></div>
       <button class="btn" id="f-save">대회 만들기</button>
       <div class="meta" style="margin-top:8px">만들고 나면 링크가 바로 나옵니다.
-        날짜·상금·정원·마감은 그다음 화면에서 채우면 됩니다.</div>
+        날짜·상금·정원·마감은 그다음 화면에서 채우면 됩니다.
+        ${myKey() ? '<br>전에 연 대회와 같은 주최자로 묶입니다.' : ''}</div>
 
       <div style="height:22px"></div>
       <div class="card"><div class="meta">
@@ -594,6 +629,7 @@ const SCREEN = {
     const myId = localStorage.getItem('hackon.team.' + cur);
     const mine = myId ? d.rows.find(r => String(r.id) === String(myId)) : null;
     const cw = await api(`/events/${cur}/crew`);
+    const rec = await api(`/events/${cur}/record`).catch(() => null);
     return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
         ${e.topic ? '· 주제 ' + esc(e.topic) : ''}<br>상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
@@ -649,6 +685,16 @@ const SCREEN = {
       ${(e.plan || []).length ? `<div class="card"><h3>진행 순서</h3>
         <table>${e.plan.map(r => `<tr><td style="width:5.5em">${esc(r.at)}</td>
           <td>${esc(r.what)}</td></tr>`).join('')}</table></div>` : ''}
+
+      ${rec && rec.events ? `<div class="card" style="border-color:#BFE0D5;background:var(--ok-l)">
+        <h3>이 주최자가 지난번에</h3>
+        <div class="meta">지난 대회 ${rec.events}개 · 참가 ${rec.teams}팀 ·
+          완주율 <b>${rec.finishRate}%</b>${rec.promised
+            ? ` · 끝나고 한 약속 ${rec.promised}건 중 <b>${rec.keptRate}%</b>를 지켰습니다` : ''}
+        </div>
+        <div class="meta" style="margin-top:6px">
+          해커톤은 시상식에서 끝나지 않습니다. 이 숫자가 그 증거입니다.</div>
+      </div>` : ''}
 
       ${rulesBox()}
 
@@ -1090,6 +1136,17 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
 
+  const owgo = $('#ow-go');
+  if (owgo) owgo.onclick = async () => {
+    const v = $('#ow-in').value.trim();
+    if (!v) return flash('열쇠를 넣어 주세요', true);
+    localStorage.setItem('hackon.owner', v);
+    try {
+      const r = await api('/mine');
+      flash(`대회 ${r.events.length}개를 찾았습니다`); render();
+    } catch (e) { localStorage.removeItem('hackon.owner'); flash('열쇠가 맞지 않습니다', true); }
+  };
+
   const okgo = $('#ok-go');
   if (okgo) okgo.onclick = async () => {
     const v = $('#ok-in').value.trim();
@@ -1112,7 +1169,8 @@ function wire() {
       const r = await api('/events', { method: 'POST', body: b });
       cur = r.id;
       localStorage.setItem('hackon.event', cur);
-      localStorage.setItem('hackon.okey.' + r.id, r.okey);   // 운영자 열쇠
+      localStorage.setItem('hackon.okey.' + r.id, r.okey);   // 대회 열쇠
+      if (r.owner) localStorage.setItem('hackon.owner', r.owner);   // 주최자 열쇠
       tab = 'board';
       flash('대회를 만들었습니다. 링크를 공유하세요');
     } catch (e) { flash(e.message, true); }

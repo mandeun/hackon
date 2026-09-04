@@ -47,8 +47,18 @@ function open(file) {
       okey     TEXT NOT NULL DEFAULT '',      -- 운영자 열쇠. 이걸 아는 사람만 운영 화면을 연다
       plan     TEXT NOT NULL DEFAULT '[]',    -- 진행 순서 [{at,what}]. 일정은 여기 한 곳에만 둔다
       listed   INTEGER NOT NULL DEFAULT 0,    -- 첫 화면 목록에 띄울지. 빈 대회가 쌓이면 신뢰가 무너진다
+      owner    TEXT NOT NULL DEFAULT '',      -- 연 사람. 이게 있어야 지난 대회가 따라온다
       rubric   TEXT NOT NULL DEFAULT '[]',   -- [{key,label,weight}]
       created  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    /* 주최자. 로그인은 안 만든다 — 열쇠 하나가 곧 계정이다.
+       비밀번호도 메일 인증도 없다. 스포츠 대회 앱 스포넷이 평점 1.3점을 받은 이유가
+       전부 로그인이었다. 대신 열쇠를 잃으면 못 찾으니 크게 보여 주고 적으라고 한다. */
+    CREATE TABLE IF NOT EXISTS owners(
+      id      TEXT PRIMARY KEY,
+      name    TEXT NOT NULL DEFAULT '',
+      created TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS teams(
@@ -150,6 +160,7 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN okey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'"); } catch {}
   try { db.exec('ALTER TABLE events ADD COLUMN listed INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE events ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}
   for (const c of ['aiuse', 'aidrop'])
     try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
@@ -250,22 +261,80 @@ function createEvent(db, b) {
     .run(id, b.title, b.host || '주최자', b.topic || '',
          b.starts || today(), b.ends || b.starts || today(),
          +b.prize || 0, +b.cap || 0, JSON.stringify(rubric), b.due || '');
+  /* 연 사람을 붙인다. 열쇠를 안 갖고 왔으면 새로 하나 만들어 준다. */
+  let owner = String(b.owner || '').trim();
+  if (!owner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(owner)) {
+    owner = crypto.randomBytes(6).toString('hex');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(owner, b.host || '');
+  } else if (b.host) {
+    db.prepare("UPDATE owners SET name=? WHERE id=? AND name=''").run(b.host, owner);
+  }
+  db.prepare('UPDATE events SET owner=? WHERE id=?').run(owner, id);
   db.prepare('UPDATE events SET okey=?, plan=? WHERE id=?')
     .run(okey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
-  return { id, okey };
+  return { id, okey, owner };
 }
 
 /** 운영자인가. 열쇠는 헤더나 쿼리로 온다. 없으면 손님이다.
     로그인은 안 만든다 — 하루짜리 행사에 계정 관리를 붙이는 건 과하다. */
-function isAdmin(db, event, key) {
-  const e = db.prepare('SELECT okey FROM events WHERE id=?').get(event);
+function isAdmin(db, event, key, owner) {
+  const e = db.prepare('SELECT okey, owner FROM events WHERE id=?').get(event);
   if (!e) return false;
   if (!e.okey) return true;          // 열쇠가 생기기 전에 만든 대회는 그대로 열어 둔다
-  return !!key && key === e.okey;
+  /* 대회 열쇠는 그 대회 하나만 연다. 주최자 열쇠는 내가 연 것 전부를 연다.
+     둘 중 하나만 맞으면 된다 — 대회 하나를 남에게 넘길 때 대회 열쇠만 주면 된다. */
+  if (key && key === e.okey) return true;
+  return !!owner && !!e.owner && owner === e.owner;
 }
-const needAdmin = (db, event, key) => {
-  if (!isAdmin(db, event, key)) throw new HttpError(403, '운영자 열쇠가 필요합니다');
+const needAdmin = (db, event, key, owner) => {
+  if (!isAdmin(db, event, key, owner)) throw new HttpError(403, '운영자 열쇠가 필요합니다');
 };
+
+/** 이 사람이 연 대회들과 누적 성적.
+    "우리 동아리 해커톤은 끝난 뒤에도 팀의 82퍼센트가 약속된 피드백을 받았다" —
+    주최자가 다음 모집에 쓸 수 있는 것은 참가자 수가 아니라 이 숫자다. */
+function mine(db, owner) {
+  const o = db.prepare('SELECT * FROM owners WHERE id=?').get(owner);
+  if (!o) throw new HttpError(404, '없는 열쇠입니다');
+  const evs = db.prepare(`SELECT id,title,starts,ends,prize,listed,okey
+                          FROM events WHERE owner=? ORDER BY starts DESC`).all(owner);
+  let teams = 0, done = 0, promised = 0, kept = 0;
+  for (const e of evs) {
+    const o2 = outcomes(db, e.id);
+    teams += o2.teams; done += o2.finished;
+    const sp = support(db, e.id);
+    promised += sp.promised; kept += sp.done;
+  }
+  return {
+    owner: o.id, name: o.name, events: evs,
+    total: {
+      events: evs.length, teams, finished: done,
+      finishRate: teams ? Math.round(done / teams * 1000) / 10 : 0,
+      promised, kept,
+      keptRate: promised ? Math.round(kept / promised * 1000) / 10 : 0,
+    },
+  };
+}
+
+/** 공개 페이지에 붙는 주최자 이력. 지난 대회가 있어야 의미가 생긴다. */
+function record(db, event) {
+  const e = db.prepare('SELECT owner FROM events WHERE id=?').get(event);
+  if (!e || !e.owner) return null;
+  const past = db.prepare(`SELECT id FROM events WHERE owner=? AND id<>? AND ends < date('now')`)
+    .all(e.owner, event);
+  if (!past.length) return null;
+  let teams = 0, done = 0, promised = 0, kept = 0;
+  for (const r of past) {
+    const o = outcomes(db, r.id); teams += o.teams; done += o.finished;
+    const sp = support(db, r.id); promised += sp.promised; kept += sp.done;
+  }
+  return {
+    events: past.length, teams,
+    finishRate: teams ? Math.round(done / teams * 1000) / 10 : 0,
+    keptRate: promised ? Math.round(kept / promised * 1000) / 10 : 0,
+    promised,
+  };
+}
 
 function getEvent(db, id) {
   const e = db.prepare('SELECT * FROM events WHERE id=?').get(id);
@@ -644,23 +713,33 @@ function routes(db) {
              WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all());
 
         const key = req.headers['x-okey'] || q.k || '';
+        const owner = req.headers['x-owner'] || q.o || '';
 
-        if (p === '/api/events' && req.method === 'POST')
-          return json(res, 201, createEvent(db, await body(req)));
+        if (p === '/api/events' && req.method === 'POST') {
+          const b = await body(req);
+          if (owner) b.owner = owner;   // 이미 연 적이 있으면 그 사람 것으로 묶는다
+          return json(res, 201, createEvent(db, b));
+        }
+        if (p === '/api/mine' && req.method === 'GET') {
+          if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+          return json(res, 200, mine(db, owner));
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/record$/)) && req.method === 'GET')
+          return json(res, 200, record(db, m[1]) || {});
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)$/))) {
           if (req.method === 'PATCH') {
-            needAdmin(db, m[1], key);
+            needAdmin(db, m[1], key, owner);
             editEvent(db, m[1], await body(req));
             return json(res, 200, getEvent(db, m[1]));
           }
           if (req.method === 'GET') {
             const e = getEvent(db, m[1]);
-            e.admin = isAdmin(db, m[1], key);
+            e.admin = isAdmin(db, m[1], key, owner);
             return json(res, 200, e);
           }
           if (req.method === 'DELETE') {
-            needAdmin(db, m[1], key);
+            needAdmin(db, m[1], key, owner);
             db.prepare('DELETE FROM events WHERE id=?').run(m[1]);
             return json(res, 200, { ok: true });
           }
@@ -669,10 +748,10 @@ function routes(db) {
           return json(res, 201, { id: joinTeam(db, m[1], await body(req)) });
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/board$/)))
-          return json(res, 200, board(db, m[1], isAdmin(db, m[1], key)));
+          return json(res, 200, board(db, m[1], isAdmin(db, m[1], key, owner)));
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/sponsors$/)) && req.method === 'POST') {
-          needAdmin(db, m[1], key);
+          needAdmin(db, m[1], key, owner);
           const b = await body(req);
           db.prepare('INSERT INTO sponsors(event,name,kind,amount,note) VALUES(?,?,?,?,?)')
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
@@ -691,20 +770,20 @@ function routes(db) {
           return json(res, 200, card(db, +m[1]));
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/list$/)) && req.method === 'POST') {
-          needAdmin(db, m[1], key);
+          needAdmin(db, m[1], key, owner);
           const b = await body(req);
           db.prepare('UPDATE events SET listed=? WHERE id=?')
             .run(b.list === false ? 0 : 1, m[1]);
           return json(res, 200, getEvent(db, m[1]));
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/open$/)) && req.method === 'POST') {
-          needAdmin(db, m[1], key);
+          needAdmin(db, m[1], key, owner);
           const b = await body(req);
           db.prepare('UPDATE events SET opened=? WHERE id=?').run(b.open === false ? 0 : 1, m[1]);
           return json(res, 200, { opened: b.open === false ? 0 : 1 });
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/spread$/)) && req.method === 'GET') {
-          needAdmin(db, m[1], key);   // 심사위원에게 보이면 서로 눈치를 본다
+          needAdmin(db, m[1], key, owner);   // 심사위원에게 보이면 서로 눈치를 본다
           return json(res, 200, spread(db, m[1]));
         }
 
@@ -714,7 +793,7 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/support$/))) {
           if (req.method === 'GET') return json(res, 200, support(db, m[1]));
           if (req.method === 'POST') {
-            needAdmin(db, m[1], key);
+            needAdmin(db, m[1], key, owner);
             const b = await body(req);
             if (!b.name) throw new HttpError(400, '이름이 필요합니다');
             try {
@@ -725,7 +804,7 @@ function routes(db) {
           }
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/assign$/)) && req.method === 'POST') {
-          needAdmin(db, m[1], key);
+          needAdmin(db, m[1], key, owner);
           return json(res, 201, { due: assign(db, m[1], await body(req)) });
         }
 
@@ -739,11 +818,11 @@ function routes(db) {
           if (req.method === 'GET') {
             const o = outcomes(db, m[1]);
             /* 완주율은 공개 페이지가 쓴다. 유입 경로와 명단은 운영자 것이다. */
-            if (!isAdmin(db, m[1], key)) { delete o.found; delete o.list; delete o.came; }
+            if (!isAdmin(db, m[1], key, owner)) { delete o.found; delete o.list; delete o.came; }
             return json(res, 200, o);
           }
           if (req.method === 'POST') {
-            needAdmin(db, m[1], key);
+            needAdmin(db, m[1], key, owner);
             const b = await body(req);
             db.prepare('INSERT INTO outcomes(event,team,kind,who,note) VALUES(?,?,?,?,?)')
               .run(m[1], b.team || null, b.kind, b.who || '', b.note || '');
@@ -751,7 +830,7 @@ function routes(db) {
           }
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/extend$/)) && req.method === 'POST') {
-          needAdmin(db, m[1], key);
+          needAdmin(db, m[1], key, owner);
           /* 인터넷이 터지면 마감을 미룰 수 있어야 한다 (매뉴얼 3장).
              진행자가 그 자리에서 누른다. */
           const b = await body(req);
@@ -773,7 +852,7 @@ function routes(db) {
           /* 등록 데스크에서 누른다. 다시 누르면 취소 — 잘못 누르는 일이 실제로 생긴다. */
           const t = db.prepare('SELECT came, event FROM teams WHERE id=?').get(+m[1]);
           if (!t) throw new HttpError(404, '없는 팀입니다');
-          needAdmin(db, t.event, key);
+          needAdmin(db, t.event, key, owner);
           const came = t.came ? '' : new Date().toISOString();
           db.prepare('UPDATE teams SET came=? WHERE id=?').run(came, +m[1]);
           return json(res, 200, { came });
@@ -787,7 +866,7 @@ function routes(db) {
           return json(res, 200, { ok: true });
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/dump$/)) && req.method === 'GET') {
-          needAdmin(db, m[1], key);
+          needAdmin(db, m[1], key, owner);
           res.writeHead(200, {
             'content-type': 'application/json; charset=utf-8',
             'content-disposition': `attachment; filename="hackon-${m[1]}.json"`,
@@ -840,9 +919,12 @@ function selftest() {
   ok(getEvent(db, ev).prize === 500000 && getEvent(db, ev).due === '2026-11-07T17:00',
      '만든 뒤에 나머지를 채운다');
   ok(/^[0-9a-f]{10}$/.test(okey), '운영자 열쇠가 발급된다');
+  ok(/^[0-9a-f]{12}$/.test(evR.owner), '주최자 열쇠도 같이 발급된다');
   ok(!('okey' in getEvent(db, ev)), '열쇠는 안 내려보낸다');
   ok(board(db, ev, true).rows.length === 0, '빈 대회');
   ok(isAdmin(db, ev, okey) && !isAdmin(db, ev, 'x'), '열쇠가 맞아야 운영자다');
+  ok(isAdmin(db, ev, '', evR.owner), '주최자 열쇠로도 열린다');
+  ok(!isAdmin(db, ev, '', 'nope'), '남의 주최자 열쇠로는 안 열린다');
 
   let bad = false;
   try { createEvent(db, { title: 'x', rubric: [{ key: 'a', label: 'a', weight: 50 }] }); }
@@ -916,6 +998,15 @@ function selftest() {
   ok(cd.reviews.length === 1 && cd.reviews[0].good.includes('문제를'), '심사평이 붙는다');
   ok(!('judge' in cd.reviews[0]), '심사평에 이름이 안 붙는다');
   db.prepare('UPDATE events SET opened=0 WHERE id=?').run(ev);
+
+  // 주최자 열쇠 — 내가 연 대회가 따라온다
+  const ev4 = createEvent(db, { title: '같은사람두번째', owner: evR.owner });
+  ok(ev4.owner === evR.owner, '열쇠를 갖고 오면 같은 사람으로 묶인다');
+  const my = mine(db, evR.owner);
+  ok(my.events.length >= 2, '내가 연 대회가 모인다 (' + my.events.length + '개)');
+  ok(typeof my.total.keptRate === 'number', '누적 약속 이행률이 나온다');
+  ok(record(db, ev4.id) === null, '지난 대회가 없으면 이력이 없다');
+  db.prepare('DELETE FROM events WHERE id=?').run(ev4.id);
 
   // 목록 공개 — 이름만 넣은 대회는 첫 화면에 안 뜬다
   const bare = createEvent(db, { title: '이름만넣은대회' }).id;
@@ -1068,5 +1159,5 @@ if (require.main === module) {
   });
 }
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, score, board, outcomes,
-                   card, support, assign, spread, judgeView, judgePlan, lanIPs, tv, crew,
+                   card, support, assign, spread, judgeView, judgePlan, lanIPs, tv, crew, mine, record,
                    dump, backup, isAdmin };

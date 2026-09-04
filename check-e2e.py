@@ -136,6 +136,8 @@ with sync_playwright() as p:
     A(ev and len(ev) == 8, f"대회가 안 만들어졌다: {ev}")
     OK = pg.evaluate("localStorage.getItem('hackon.okey.' + cur)")
     A(OK and len(OK) == 10, f"운영자 열쇠가 저장되지 않았다: {OK}")
+    OWNER = pg.evaluate("localStorage.getItem('hackon.owner')")
+    A(OWNER and len(OWNER) == 12, f"주최자 열쇠가 저장되지 않았다: {OWNER}")
     A(api(f"/api/events/{ev}")["title"] == "우리 동네 문제 해결 해커톤", "화면이 보낸 값이 안 들어갔다")
     ok("대회 이름 하나로 개설 — 나머지는 안 묻는다")
 
@@ -489,6 +491,34 @@ with sync_playwright() as p:
     A(scored["mine"]["idea"] == 60, f"내 점수가 안 저장됐다: {scored['mine']}")
     ok(f"심사 링크에서 점수 저장 — 남은 팀 {jv['left']}팀")
     jctx.close()
+
+    # ── 주최자 열쇠 — 로그인 없이 내 대회를 따라오게 한다 ──
+    def api_owner(path):
+        req = urllib.request.Request(BASE + path)
+        req.add_header("x-owner", OWNER)
+        with urllib.request.urlopen(req) as r:
+            return json.load(r)
+
+    my = api_owner("/api/mine")
+    A(my["owner"] == OWNER and len(my["events"]) == 1, f"내 대회가 안 모인다: {my}")
+    A("keptRate" in my["total"], "누적 약속 이행률이 없다")
+
+    # 주최자 열쇠로도 운영 화면이 열려야 한다 (기기를 바꿨을 때)
+    ownreq = urllib.request.Request(f"{BASE}/api/events/{ev}/spread")
+    ownreq.add_header("x-owner", OWNER)
+    with urllib.request.urlopen(ownreq) as r:
+        A(r.status == 200, "주최자 열쇠로 운영 화면이 안 열린다")
+    A(code_of(f"/api/events/{ev}/spread") == 403, "열쇠 없이 열렸다")
+    ok(f"주최자 열쇠 — 내 대회 {len(my['events'])}개 · 다른 기기에서도 열린다")
+
+    # 남의 주최자 열쇠로는 안 열린다
+    bad = urllib.request.Request(f"{BASE}/api/events/{ev}/spread")
+    bad.add_header("x-owner", "000000000000")
+    try:
+        urllib.request.urlopen(bad); A(False, "남의 주최자 열쇠로 열렸다")
+    except urllib.error.HTTPError as e:
+        A(e.code == 403, f"403 이어야 하는데 {e.code}")
+    ok("남의 주최자 열쇠로는 안 열린다 (403)")
 
     # ── 운영자 열쇠 — 개발자 스물네 명에게 공개 링크를 뿌린다 ──
     # 열쇠 없이 되면 안 되는 것들
