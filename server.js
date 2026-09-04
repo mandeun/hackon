@@ -305,6 +305,22 @@ function board(db, event) {
   return { event: e, rows, judges };
 }
 
+/** 심사 계획을 대신 계산한다. 운영자가 제일 자주 틀리는 계산이다.
+    MLH 주최자 가이드의 공식: J = ceil(P * n * t / T)
+      P 팀 수 · n 한 팀을 보는 심사위원 수(권장 3) · t 팀당 분(권장 4) · T 심사에 쓸 분
+    팀당 4분은 시연 2 + 질문 1 + 채점과 이동 1 이다. */
+function judgePlan(teams, minutes, perTeam = 4, rounds = 3) {
+  const P = Math.max(0, +teams || 0), T = Math.max(1, +minutes || 60);
+  const need = Math.ceil((P * rounds * perTeam) / T);
+  return {
+    teams: P, minutes: T, perTeam, rounds,
+    need,
+    /* 한 사람이 보게 되는 팀 수. 12팀을 넘기면 뒤로 갈수록 점수가 흐려진다. */
+    perJudge: need ? Math.ceil((P * rounds) / need) : 0,
+    tight: need ? Math.ceil((P * rounds) / need) > 12 : false,
+  };
+}
+
 /** 심사위원별 평균과 그 차이. 매뉴얼 7장의 캘리브레이션을 뒷받침한다.
     누가 후하고 누가 짠지 모르면 눈높이를 맞출 수가 없다.
     운영자만 본다 — 심사위원에게 보이면 서로 눈치를 본다. */
@@ -468,6 +484,9 @@ function routes(db) {
             .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '');
           return json(res, 201, { ok: true });
         }
+        if (p === '/api/plan' && req.method === 'GET')
+          return json(res, 200, judgePlan(q.teams, q.minutes, +q.per || 4, +q.rounds || 3));
+
         if ((m = p.match(/^\/api\/teams\/(\d+)\/card$/)) && req.method === 'GET')
           return json(res, 200, card(db, +m[1]));
 
@@ -694,6 +713,13 @@ function selftest() {
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
 
+  // 심사 계획 — MLH 가이드의 예시(175팀·2시간 → 18명)와 맞는지로 검산한다
+  ok(judgePlan(175, 120).need === 18, '심사위원 수 공식이 MLH 예시와 맞는다 ('
+     + judgePlan(175, 120).need + '명)');
+  ok(judgePlan(6, 60).need === 2, '6팀 1시간이면 2명 (' + judgePlan(6, 60).need + ')');
+  ok(judgePlan(60, 60).tight, '한 사람이 너무 많이 보면 경고한다');
+
+
   console.log(`점검 통과 — ${n}가지`);
 }
 
@@ -713,4 +739,5 @@ if (require.main === module) {
     }
   });
 }
-module.exports = { open, createEvent, joinTeam, submit, score, board, outcomes };
+module.exports = { open, createEvent, joinTeam, submit, score, board, outcomes,
+                   card, support, assign, spread, judgeView, judgePlan, lanIPs };

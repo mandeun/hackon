@@ -88,6 +88,18 @@ with sync_playwright() as p:
     pg.fill("#f-starts", "2026-10-11")
     pg.fill("#f-ends", "2026-10-12")
     pg.fill("#f-prize", "3000000")
+    # 심사위원 수 계산 — MLH 가이드 공식대로 나오는가
+    pg.fill("#pl-t", "175")
+    pg.fill("#pl-m", "120")
+    pg.click("#pl-go")
+    pg.wait_for_timeout(600)
+    plout = pg.inner_text("#pl-out")
+    A("18명" in plout, f"MLH 예시(175팀 2시간 = 18명)와 다르다: {plout}")
+    pg.fill("#pl-t", "60"); pg.fill("#pl-m", "60")
+    pg.click("#pl-go"); pg.wait_for_timeout(600)
+    A("너무 많이" in pg.inner_text("#pl-out"), "한 사람이 과하게 보는데 경고가 없다")
+    ok("심사위원 수 계산 — 175팀 2시간이면 18명, 과부하면 경고")
+
     due = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
     pg.fill("#f-due", due)
     pg.click("#f-save")
@@ -416,10 +428,11 @@ with sync_playwright() as p:
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
                  "함께한 곳", "오픈에이아이",
-                 "끝난 뒤에도 봐 드립니다", "박실무"]:
+                 "끝난 뒤에도 봐 드립니다", "박실무",
+                 "만든 것은 팀의 것입니다", "생성형 AI", "행동강령"]:
         A(must in txt, f"공개 화면에 '{must}' 가 없다")
     A("example.com/walk" in txt, "제출작 링크가 공개 화면에 없다")
-    ok("공개 링크 /e/<대회id> — 로그인 없이 열리고 신청 칸만 있다")
+    ok("공개 링크 — 규칙(결과물 권리·AI 허용·행동강령)이 함께 보인다")
 
     # 모집 글에 이 주소를 쓴다. 여기서 바로 신청이 돼야 한다.
     before = len(api(f"/api/events/{ev}/board")["rows"])

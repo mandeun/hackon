@@ -183,6 +183,21 @@ const dueBox = e => e.due ? `<div class="due" data-due="${esc(e.due)}"></div>` :
 
 /* 참가 신청 칸. 운영 화면과 공개 화면이 같은 것을 쓴다 — 두 벌로 두면 한쪽만 고치게 된다.
    '어디서 보셨나' 가 이 폼의 핵심이다. 2회차 홍보를 어디에 할지 이 한 칸이 정한다. */
+/* 대회 규칙. 참가자가 가장 크게 데는 곳이 결과물 권리다.
+   해외에서 주최사가 결과물 권리를 통째로 가져가는 조항을 넣었다가 사과한 일이 있었다.
+   기본값을 참가자 쪽에 두고 그것을 눈에 보이게 적는다. */
+function rulesBox() {
+  return `<div class="card"><h3>규칙</h3><div class="meta">
+    <b>만든 것은 팀의 것입니다.</b> 주최 측은 결과물의 권리를 가져가지 않습니다.
+    홍보에 쓸 때도 먼저 물어봅니다.<br>
+    생성형 AI 를 써도 됩니다. 무엇을 썼는지만 적어 주세요.<br>
+    중간에 떨어뜨리는 라운드가 없습니다. 모든 팀이 같은 시간을 씁니다.<br>
+    심사 기준은 시작 전에 공개하고, 시작한 뒤에는 바꾸지 않습니다.<br>
+    멘토의 조언은 참고 사항입니다. 무엇을 만들지는 팀이 정합니다.<br>
+    행동강령은 참가자·멘토·스태프·심사위원·협찬사 모두에게 똑같이 적용됩니다.
+  </div></div>`;
+}
+
 const FOUND = ['캠퍼스픽', '위비티', '이벤터스', '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
 function applyForm() {
   return `<label>팀 이름 <span class="pill">필수</span></label>
@@ -274,9 +289,28 @@ const SCREEN = {
       </div>
       <label>제출 마감 (선택)</label><input id="f-due" type="datetime-local">
       <div class="meta">비워 두면 마감을 안 막습니다. 넣으면 그 시각부터 서버가 제출을 막습니다.</div>
+      <div class="card"><div class="meta">
+        <b>정원을 정할 때</b> — 무료 행사는 신청한 사람의 <b>절반쯤만 옵니다</b>.
+        스물네 명을 채우고 싶으면 마흔여덟 명까지 받으세요.
+        다만 목표의 두 배를 넘기지는 마세요. 넘치면 대기 명단을 쓰는 편이 안전합니다.
+      </div></div>
+
       <label>심사 기준</label>
       <div class="card"><div class="meta">독창성 30 · 완성도 30 · 실용성 25 · 전달력 15
         <br>합이 100이어야 저장됩니다. 지금은 기본값을 씁니다.</div></div>
+
+      <div class="card">
+        <h3>심사위원이 몇 명 필요한가</h3>
+        <div class="meta">운영자가 제일 자주 틀리는 계산입니다. 넣으면 대신 셉니다.<br>
+          한 팀을 세 명이 보고, 팀당 4분(시연 2 + 질문 1 + 채점과 이동 1)으로 잡습니다.</div>
+        <div class="row">
+          <div><label>참가 팀 수</label><input id="pl-t" type="number" value="6"></div>
+          <div><label>심사에 쓸 시간(분)</label><input id="pl-m" type="number" value="60"></div>
+        </div>
+        <div style="height:8px"></div>
+        <button class="btn sec sm" id="pl-go">계산</button>
+        <div id="pl-out" class="meta" style="margin-top:8px"></div>
+      </div>
       <button class="btn" id="f-save">대회 만들기</button>`;
   },
 
@@ -336,7 +370,8 @@ const SCREEN = {
       <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.</p>
       <div class="card">
         <h3>등록 데스크</h3>
-        <div class="meta">당일 아침에 이 칸만 보면 됩니다. 온 팀을 누르세요. 잘못 눌렀으면 다시 누릅니다.</div>
+        <div class="meta">당일 아침에 이 칸만 보면 됩니다. 온 팀을 누르세요. 잘못 눌렀으면 다시 누릅니다.<br>
+          무료 행사는 신청자의 절반쯤 옵니다. 절반이 안 왔어도 정상입니다.</div>
         <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
         ${d.rows.map(r => `<tr>
           <td>${esc(r.name)}</td>
@@ -400,6 +435,8 @@ const SCREEN = {
           ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
           ${r.url ? `<div class="share">${esc(r.url)}</div>` : ''}</div>`).join('')}
         ` : ''}
+
+      ${rulesBox()}
 
       ${statusOf(e).k === '모집중'
         ? `<div class="card"><h3>참가 신청</h3>
@@ -699,6 +736,18 @@ function wire() {
     cur = el.dataset.open; localStorage.setItem('hackon.event', cur); tab = 'board'; render();
   });
   const go = $('[data-go]'); if (go) go.onclick = () => { tab = go.dataset.go; render(); };
+
+  const plg = $('#pl-go');
+  if (plg) plg.onclick = async () => {
+    const t = $('#pl-t').value, m = $('#pl-m').value;
+    const r = LIVE ? await api(`/plan?teams=${t}&minutes=${m}`) : null;
+    if (!r) return flash('데모에서는 안 됩니다', true);
+    $('#pl-out').innerHTML = `심사위원 <b>${r.need}명</b>이 필요합니다.
+      한 분이 ${r.perJudge}팀을 봅니다.` +
+      (r.tight ? ` <span class="late">한 분이 너무 많이 봅니다.
+        뒤로 갈수록 점수가 흐려집니다. 사람을 더 부르거나 시간을 늘리세요.</span>`
+               : ' 무리 없는 양입니다.');
+  };
 
   const save = $('#f-save');
   if (save) save.onclick = async () => {
