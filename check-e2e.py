@@ -160,28 +160,34 @@ with sync_playwright() as p:
 
     # ── 3. 참가 신청이 서버에 저장되는가 ────────────────────
     pg.wait_for_selector("#t-name")
-    A(pg.query_selector("#t-contact") is None and pg.query_selector("#t-found") is None,
-      "신청 화면이 처음부터 연락처와 유입 경로를 묻는다")
+    A(pg.query_selector("#t-found") is None, "신청 화면이 처음부터 유입 경로를 묻는다")
+    A(pg.query_selector("#t-email") is not None, "신청 화면에 이메일 칸이 없다")
     pg.fill("#t-name", "하나팀")
+    pg.fill("#t-email", "one@example.com")
 
     # 동의를 안 하면 신청이 안 된다. 화면이 먼저 막고 서버도 막는다.
     pg.click("#t-join")
     pg.wait_for_timeout(500)
     A(len(api("/api/events/" + ev + "/board")["rows"]) == 0, "동의 없이 신청이 됐다")
-    A(post(f"/api/events/{ev}/teams", {"name": "서버우회팀"})[0] == 400,
+    A(post(f"/api/events/{ev}/teams", {"name": "서버우회팀", "email": "x@y.z"})[0] == 400,
       "서버가 동의 없는 신청을 받았다")
-    ok("개인정보 동의 없이는 신청 불가 (화면·서버 둘 다)")
+    # 이메일이 없어도 안 된다. 크레딧과 확정 안내가 갈 곳이 없다.
+    A(post(f"/api/events/{ev}/teams", {"name": "메일없는팀", "agree": True})[0] == 400,
+      "서버가 이메일 없는 신청을 받았다")
+    ok("개인정보 동의·이메일 없이는 신청 불가 (화면·서버 둘 다)")
 
     # 실패 안내가 뜨면서 화면이 다시 그려져 칸이 비워진다. 다시 채운다.
     pg.wait_for_selector("#t-name")
     pg.fill("#t-name", "하나팀")
+    pg.fill("#t-email", "one@example.com")
     pg.check("#t-agree")
+    pg.check("#t-share")
     pg.click("#t-join")
     pg.wait_for_timeout(1000)
 
-    # 신청하고 나면 두 번째 칸이 뜬다. 여기서 진짜 정보를 받는다.
+    # 신청하고 나면 두 번째 칸이 뜬다. 여기서 진짜 정보를 받는다. 연락처는 이미 받았으니 안 묻는다.
     pg.wait_for_selector("#m-save", timeout=8000)
-    pg.fill("#m-contact", "one@example.com")
+    A(pg.query_selector("#m-contact") is None, "이메일을 받았는데 두 번째 칸이 연락처를 또 묻는다")
     pg.select_option("#m-role", "만들기")
     pg.select_option("#m-found", "캠퍼스픽")
     pg.fill("#m-note", "골목 보행 불편을 풀고 싶습니다")
@@ -690,6 +696,7 @@ with sync_playwright() as p:
     # 모집 글에 이 주소를 쓴다. 여기서 바로 신청이 돼야 한다.
     before = len(api(f"/api/events/{ev}/board", OK)["rows"])
     pub.fill("#t-name", "공개링크팀")
+    pub.fill("#t-email", "pub@example.com")
     pub.check("#t-agree")
     pub.click("#t-join")
     pub.wait_for_timeout(1000)

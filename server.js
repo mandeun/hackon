@@ -168,6 +168,9 @@ function open(file) {
   try { db.exec('ALTER TABLE events ADD COLUMN opened INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN okey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'"); } catch {}
+  /* 후원사에 이메일을 넘겨도 된다고 동의한 시각. 수집 동의(agreed)와 별개다 —
+     제3자 제공은 따로 받아야 하고, 안 한 사람은 크레딧 명단에서 뺀다. */
+  try { db.exec("ALTER TABLE teams ADD COLUMN share TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE events ADD COLUMN listed INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE owners ADD COLUMN kakao TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -396,14 +399,19 @@ function getEvent(db, id) {
 function joinTeam(db, event, b) {
   const e = getEvent(db, event);
   if (!b.name) throw new HttpError(400, '팀 이름이 필요합니다');
+  /* 이메일은 처음부터 받는다. 확정 안내와 후원사 크레딧이 전부 여기로 간다.
+     형식만 본다 — 진짜인지는 확정 메일이 튕기면 안다. */
+  const email = String(b.email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, '이메일을 적어 주세요');
   /* 동의 없이 연락처를 받지 않는다. 화면에서 체크박스를 지워도 여기서 막힌다. */
   if (!b.agree) throw new HttpError(400, '개인정보 수집·이용에 동의해 주세요');
   if (e.cap && e.teams >= e.cap) throw new HttpError(409, '정원이 찼습니다');
   try {
-    const r = db.prepare(`INSERT INTO teams(event,name,contact,role,solo,found,note,agreed,photo)
-                          VALUES(?,?,?,?,?,?,?,?,?)`)
-      .run(event, b.name, b.contact || '', b.role || '', b.solo ? 1 : 0,
-           b.found || '', b.note || '', new Date().toISOString(), b.photo ? 1 : 0);
+    const now = new Date().toISOString();
+    const r = db.prepare(`INSERT INTO teams(event,name,contact,role,solo,found,note,agreed,photo,share)
+                          VALUES(?,?,?,?,?,?,?,?,?,?)`)
+      .run(event, b.name, email, b.role || '', b.solo ? 1 : 0,
+           b.found || '', b.note || '', now, b.photo ? 1 : 0, b.share ? now : '');
     return Number(r.lastInsertRowid);
   } catch {
     throw new HttpError(409, '같은 이름의 팀이 있습니다');
@@ -481,7 +489,7 @@ function board(db, event, admin = false) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply,
-           t.agreed, t.photo, t.came, t.size, t.want,
+           t.agreed, t.photo, t.share, t.came, t.size, t.want,
            s.url, s.note, s.aiuse, s.aidrop
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
@@ -495,10 +503,11 @@ function board(db, event, admin = false) {
     for (const j of db.prepare('SELECT DISTINCT judge FROM scores WHERE team=?').all(t.id))
       judged.add(j.judge);
     const row = { ...t, score: Math.round(total * 10) / 10, judges: judged.size,
-                  by: [...judged].sort(), done: !!t.url };
+                  by: [...judged].sort(), done: !!t.url,
+                  hasContact: !!t.contact };   // 값은 안 주고 «받았는지»만. 두 번째 칸이 또 묻지 않게
     /* 개인정보는 운영자에게만. 화면에서 감추면 브라우저 콘솔에서 다 보인다. */
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
-                  delete row.photo; delete row.came; delete row.apply; }
+                  delete row.photo; delete row.share; delete row.came; delete row.apply; }
     return row;
   });
   rows.sort((a, b) => b.score - a.score);
@@ -1065,22 +1074,31 @@ function selftest() {
   catch { bad = true; }
   ok(bad, '배점 합이 100 이 아니면 막는다');
 
-  bad = false; try { joinTeam(db, ev, { name: '동의안함' }); } catch { bad = true; }
+  const E = 'a@b.c';
+  bad = false; try { joinTeam(db, ev, { name: '동의안함', email: E }); } catch { bad = true; }
   ok(bad, '개인정보 동의 없이는 신청이 안 된다');
+  bad = false; try { joinTeam(db, ev, { name: '메일없음', agree: true }); } catch { bad = true; }
+  ok(bad, '이메일 없이는 신청이 안 된다');
+  bad = false; try { joinTeam(db, ev, { name: '메일이상', agree: true, email: 'not-mail' }); } catch { bad = true; }
+  ok(bad, '이메일 꼴이 아니면 막는다');
 
-  // 문간에 발 담그기 — 이름과 동의만으로 신청되고, 나머지는 나중에 채운다
-  const lite = joinTeam(db, ev, { name: '최소팀', agree: true });
-  ok(!!lite, '이름과 동의만으로 신청된다');
-  ok(moreTeam(db, lite, { contact: 'a@b.c', role: '기획' }).filled === 2, '나중에 두 칸을 채운다');
+  // 문간에 발 담그기 — 이름·이메일·동의만으로 신청되고, 나머지는 나중에 채운다
+  const lite = joinTeam(db, ev, { name: '최소팀', agree: true, email: ' A@B.C ' });
+  ok(!!lite, '이름·이메일·동의만으로 신청된다');
+  ok(board(db, ev, true).rows.find(r => r.id === lite).contact === E, '이메일은 소문자로 다듬어 연락처에 남는다');
+  ok(board(db, ev, true).rows.find(r => r.id === lite).share === '', '제공 동의를 안 하면 빈 채로 남는다');
+  ok(moreTeam(db, lite, { role: '기획', found: '기타' }).filled === 2, '나중에 두 칸을 채운다');
   ok(moreTeam(db, lite, { contact: '덮어쓰기' }).filled === 0, '이미 적은 것은 안 덮어쓴다');
-  ok(board(db, ev, true).rows.find(r => r.id === lite).contact === 'a@b.c', '채운 값이 남는다');
+  ok(board(db, ev, true).rows.find(r => r.id === lite).contact === E, '채운 값이 남는다');
   db.prepare('DELETE FROM teams WHERE id=?').run(lite);
 
-  const t1 = joinTeam(db, ev, { name: '가팀', agree: true, photo: true });
-  const t2 = joinTeam(db, ev, { name: '나팀', agree: true });
-  bad = false; try { joinTeam(db, ev, { name: '가팀', agree: true }); } catch { bad = true; }
+  const t1 = joinTeam(db, ev, { name: '가팀', agree: true, email: E, photo: true, share: true });
+  const t2 = joinTeam(db, ev, { name: '나팀', agree: true, email: E });
+  bad = false; try { joinTeam(db, ev, { name: '가팀', agree: true, email: E }); } catch { bad = true; }
   ok(bad, '같은 팀 이름은 못 넣는다');
   ok(!!board(db, ev, true).rows.find(r => r.id === t1).agreed, '동의한 시각이 남는다');
+  ok(!!board(db, ev, true).rows.find(r => r.id === t1).share, '후원사 제공 동의 시각이 따로 남는다');
+  ok(board(db, ev, false).rows.find(r => r.id === t1).share === undefined, '손님에게는 제공 동의 여부가 안 간다');
 
   submit(db, t1, { url: 'https://example.com/a' });
   score(db, t1, { judge: '심사1', values: { idea: 90, make: 80, use: 70, tell: 60 } });
@@ -1099,9 +1117,9 @@ function selftest() {
 
   // 신청 칸은 따로 연 대회에서 본다. 여기에 팀을 더하면 아래 완주율 검사가 흔들린다.
   const ev2 = createEvent(db, { title: '신청폼시험' }).id;
-  const s1 = joinTeam(db, ev2, { name: '다팀', role: '기획', solo: true, found: '캠퍼스픽', agree: true });
-  joinTeam(db, ev2, { name: '라팀', role: '만들기', found: '캠퍼스픽', agree: true });
-  joinTeam(db, ev2, { name: '마팀', agree: true });
+  const s1 = joinTeam(db, ev2, { name: '다팀', role: '기획', solo: true, found: '캠퍼스픽', agree: true, email: 't@b.c' });
+  joinTeam(db, ev2, { name: '라팀', role: '만들기', found: '캠퍼스픽', agree: true, email: 't@b.c' });
+  joinTeam(db, ev2, { name: '마팀', agree: true, email: 't@b.c' });
   ok(board(db, ev2).rows.find(r => r.id === s1).role === '기획', '신청 칸이 저장된다');
   const o0 = outcomes(db, ev2);
   ok(o0.solo === 1, '혼자 온 사람이 세어진다 (' + o0.solo + ')');
@@ -1110,7 +1128,7 @@ function selftest() {
 
   // 마감 — 지났으면 서버가 막고, 미루면 다시 받는다
   const past = createEvent(db, { title: '마감지남', due: '2020-01-01T10:00' }).id;
-  const pt = joinTeam(db, past, { name: '늦은팀', agree: true });
+  const pt = joinTeam(db, past, { name: '늦은팀', agree: true, email: 't@b.c' });
   bad = false; try { submit(db, pt, { url: 'x' }); } catch { bad = true; }
   ok(bad, '마감이 지나면 제출을 막는다');
   db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T10:00', past);
@@ -1119,6 +1137,7 @@ function selftest() {
 
   ok(board(db, ev, true).rows[0].contact !== undefined, '운영자는 연락처를 본다');
   ok(board(db, ev, false).rows[0].contact === undefined, '손님에게는 연락처가 안 간다');
+  ok(board(db, ev, false).rows[0].hasContact === true, '손님 화면에도 «연락처를 받았다»는 사실은 간다');
   ok(board(db, ev, false).rows[0].came === undefined, '손님에게는 체크인이 안 간다');
 
   // 성적표 — 공개하기 전에는 팀도 못 본다
@@ -1161,14 +1180,14 @@ function selftest() {
   // 제출할 때 AI 를 어떻게 썼는지 남긴다.
   // 따로 연 대회에서 본다 — 여기에 제출을 하나 더하면 아래 제출 현황 검사가 흔들린다.
   const evAI = createEvent(db, { title: 'AI기록시험' }).id;
-  const ta = joinTeam(db, evAI, { name: '기록팀', agree: true });
+  const ta = joinTeam(db, evAI, { name: '기록팀', agree: true, email: 't@b.c' });
   submit(db, ta, { url: 'https://example.com/b', aiuse: '화면 만들 때', aidrop: '추천 로직은 버렸다' });
   const sb = board(db, evAI, true).rows.find(r => r.id === ta);
   ok(sb.aiuse === '화면 만들 때' && sb.aidrop === '추천 로직은 버렸다', 'AI 사용 기록이 남는다');
   db.prepare('DELETE FROM events WHERE id=?').run(evAI);
 
   // 팀 짜기 — 혼자 온 사람과 자리 남은 팀
-  const soloTeam = joinTeam(db, ev, { name: '혼자온사람', agree: true, solo: true, role: '기획' });
+  const soloTeam = joinTeam(db, ev, { name: '혼자온사람', agree: true, email: 'solo@b.c', solo: true, role: '기획' });
   moreTeam(db, t2, { want: '만드는 사람 한 분' });
   db.prepare('UPDATE teams SET size=2 WHERE id=?').run(t2);
   const cw = crew(db, ev);
@@ -1192,7 +1211,7 @@ function selftest() {
   ok(sp0.rows.length === 2, '심사위원별 평균이 나온다 (' + JSON.stringify(sp0.rows) + ')');
   ok(sp0.rows[0].avg > sp0.rows[1].avg, '후한 사람이 위로 온다');
   const ev3 = createEvent(db, { title: '편차시험' }).id;
-  const q1 = joinTeam(db, ev3, { name: '한팀', agree: true });
+  const q1 = joinTeam(db, ev3, { name: '한팀', agree: true, email: 't@b.c' });
   score(db, q1, { judge: '후한사람', values: { idea: 95, make: 95, use: 95, tell: 95 } });
   score(db, q1, { judge: '짠사람', values: { idea: 60, make: 60, use: 60, tell: 60 } });
   const sp1 = spread(db, ev3);
