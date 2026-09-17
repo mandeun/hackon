@@ -478,24 +478,35 @@ function rulesBox() {
 }
 
 const FOUND = ['캠퍼스픽', '위비티', '이벤터스', '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
-/* 처음에는 두 칸만 받는다. 연락처도 안 묻는다.
-   신청하고 나면 그다음에 나머지를 묻는다 — 이미 발을 들인 뒤라 부담이 적다. */
+/* 처음에는 이름과 이메일만 받는다. 역할·유입 경로는 신청한 뒤에 묻는다.
+   이메일은 확정 안내와 후원사 크레딧이 전부 그리로 가서 처음부터 받는다.
+   후원사 제공은 수집 동의와 별개의 체크다(제3자 제공). */
 function applyForm() {
   return `<label>팀 이름 <span class="pill">필수</span></label>
     <input id="t-name" placeholder="혼자 오시면 본인 이름을 적으세요">
+    <label>이메일 <span class="pill">필수</span></label>
+    <input id="t-email" type="email" placeholder="확정 안내와 크레딧이 여기로 갑니다">
     <div class="agree">
       <div class="meta"><b>개인정보 수집·이용 안내</b><br>
-        수집 항목 · 이름(팀 이름) · 연락처 · 참가 정보<br>
+        수집 항목 · 이름(팀 이름) · 이메일 · 참가 정보<br>
         이용 목적 · 대회 운영 · 참가 확인 · 결과 안내 · 상금 지급<br>
         보유 기간 · 대회 종료 후 <b>6개월</b>. 그 뒤 지웁니다<br>
         동의하지 않으시면 참가 신청을 받을 수 없습니다.</div>
       <label class="ck"><input type="checkbox" id="t-agree">
         <span>개인정보 수집·이용에 동의합니다 <span class="pill">필수</span></span></label>
+      <div class="meta" style="margin-top:8px"><b>후원사 제공 안내</b><br>
+        받는 곳 · 이 대회 페이지에 표시된 협찬사<br>
+        제공 항목 · 이메일<br>
+        목적 · 참가자용 크레딧·쿠폰 발급, 행사 뒤 2주 사용 안내<br>
+        보유 기간 · 협찬사 정책에 따름<br>
+        동의하지 않아도 참가할 수 있습니다. 다만 크레딧은 받을 수 없습니다.</div>
+      <label class="ck"><input type="checkbox" id="t-share">
+        <span>협찬사에 이메일을 제공하는 데 동의합니다 <span class="pill ok">선택</span></span></label>
     </div>
     <div style="height:10px"></div>
     <button class="btn sm" id="t-join">참가 신청</button>
-    <div class="meta" style="margin-top:8px">지금은 이름만 받습니다.
-      연락처와 나머지는 신청한 뒤에 여쭙겠습니다.</div>`;
+    <div class="meta" style="margin-top:8px">지금은 이름과 이메일만 받습니다.
+      나머지는 신청한 뒤에 여쭙겠습니다.</div>`;
 }
 
 /* 신청을 마친 사람에게만 보이는 두 번째 칸. 여기서 진짜 정보를 받는다. */
@@ -2413,11 +2424,14 @@ function wire() {
   if (join) join.onclick = async () => {
     const name = $('#t-name').value.trim();
     if (!name) return flash('팀 이름을 넣어 주세요', true);
+    const email = ($('#t-email') ? $('#t-email').value : '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return flash('이메일을 적어 주세요', true);
     if (!$('#t-agree').checked) return flash('개인정보 수집·이용에 동의해 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
     try {
       const r = await api(`/events/${cur}/teams`, { method: 'POST', body: {
-        name,
+        name, email,
+        share: !!($('#t-share') && $('#t-share').checked),
         agree: true } });
       localStorage.setItem('hackon.team.' + cur, r.id);   // 두 번째 칸을 보여 주려고 기억한다
       /* 팀 열쇠. 이 브라우저가 그 팀 사람이라는 증거다 - 서버가 여기서 한 번만 준다.

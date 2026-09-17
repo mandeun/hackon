@@ -806,6 +806,10 @@ function open(file) {
   try { db.exec("ALTER TABLE sponsors ADD COLUMN proof TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN done TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN sponsor_ok INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* 협찬사 제공 동의를 한 시각. 동의 여부(sponsor_ok)와 함께 남겨 언제 동의했는지 보인다. 예전 배포판에 이미 있던 칸이다. */
+  try { db.exec("ALTER TABLE teams ADD COLUMN share TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 예전 배포판에서 share 로만 동의를 남긴 참가자도 크레딧 명단(sponsor_ok)에 들어가게 옮긴다. */
+  try { db.exec("UPDATE teams SET sponsor_ok=1 WHERE share<>'' AND sponsor_ok=0"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN tkey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN wifi TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN person TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -1246,6 +1250,13 @@ function joinTeam(db, event, b) {
   /* 동의 없이 연락처를 받지 않는다. 화면에서 체크박스를 지워도 여기서 막힌다. */
   if (!b.agree) throw new HttpError(400, '개인정보 수집·이용에 동의해 주세요');
   if (e.cap && e.teams >= e.cap) throw new HttpError(409, '정원이 찼습니다');
+  /* 신청 화면은 이메일을 처음부터 받는다 — 확정 안내와 후원사 크레딧이 전부 이메일로 간다.
+     꼴이 틀리면 막고, 맞으면 소문자로 다듬어 연락처로 쓴다. 협찬사 제공 동의(share)는 수집 동의와 별개 체크. */
+  if (b.email !== undefined) {
+    const em = String(b.email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) throw new HttpError(400, '이메일을 적어 주세요');
+    b.contact = em;
+  }
   try {
     /* 연락처가 있으면 사람으로 이어 붙인다. 다음 대회에서도 같은 사람으로 이어진다.
        연락처가 없으면 그냥 이 대회에만 있는 팀이다 - 그래도 대회는 돌아간다. */
@@ -1258,14 +1269,15 @@ function joinTeam(db, event, b) {
     }
     /* 팀 열쇠. 신청한 그 브라우저만 받는다.
        전에는 팀 번호(1, 2, 3...)가 곧 자격증명이었는데, 그건 남이 그냥 찍을 수 있다. */
+    const now = new Date().toISOString();
     const r = db.prepare(`INSERT INTO teams(event,name,contact,role,solo,found,note,agreed,photo,
-                                            person,size,members,tkey)
-                          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+                                            person,size,members,tkey,sponsor_ok,share)
+                          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(event, b.name, b.contact || '', b.role || '', b.solo ? 1 : 0,
-           b.found || '', b.note || '', new Date().toISOString(), b.photo ? 1 : 0,
+           b.found || '', b.note || '', now, b.photo ? 1 : 0,
            pid, Math.min(Math.max(+b.size || 1, 1), 9),
            JSON.stringify([{ n: String(b.name || '').slice(0, 20), g: false }]),
-           crypto.randomBytes(5).toString('hex'));
+           crypto.randomBytes(5).toString('hex'), b.share && b.contact ? 1 : 0, b.share && b.contact ? now : '');
     return Number(r.lastInsertRowid);
   } catch {
     throw new HttpError(409, '같은 이름의 팀이 있습니다');
@@ -2344,6 +2356,18 @@ function selftest() {
 
   bad = false; try { joinTeam(db, ev, { name: '동의안함' }); } catch { bad = true; }
   ok(bad, '개인정보 동의 없이는 신청이 안 된다');
+
+  // 신청 화면의 이메일 칸 — 꼴 검사, 소문자 다듬기, 협찬사 제공 동의는 따로
+  const withMail = joinTeam(db, ev, { name: '메일팀', agree: true, email: ' Mail@X.Test ', share: true });
+  const wm = db.prepare('SELECT contact, sponsor_ok, share FROM teams WHERE id=?').get(withMail);
+  ok(wm.contact === 'mail@x.test', '신청 이메일은 소문자로 다듬어 연락처가 된다');
+  ok(wm.sponsor_ok === 1 && wm.share !== '', '협찬사 제공 동의를 체크하면 동의와 시각이 남는다');
+  const noShare = joinTeam(db, ev, { name: '메일팀2', agree: true, email: 'b@x.test' });
+  ok(db.prepare('SELECT sponsor_ok FROM teams WHERE id=?').get(noShare).sponsor_ok === 0, '체크 안 하면 협찬사 제공 동의는 꺼져 있다');
+  let badMail = false; try { joinTeam(db, ev, { name: '메일이상2', agree: true, email: 'not-mail' }); } catch { badMail = true; }
+  ok(badMail, '이메일 꼴이 틀리면 신청을 막는다');
+  ok(!('contact' in board(db, ev, false).rows[0]), '신청 이메일은 공개 순위에 안 나간다');
+  db.prepare('DELETE FROM teams WHERE id IN (?,?)').run(withMail, noShare);
 
   // 문간에 발 담그기 — 이름과 동의만으로 신청되고, 나머지는 나중에 채운다
   const lite = joinTeam(db, ev, { name: '최소팀', agree: true });
