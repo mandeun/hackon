@@ -274,6 +274,25 @@ nav .i{font-size:17px}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .num,.tabnum{font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* 자리 점판 — BRAND.md 시그니처. 꺼짐=테두리, 기다림=노랑 테두리, 켜짐=파랑으로 찬 점 */
+.dots{background:var(--navy);color:#fff;border-radius:var(--r);padding:18px 18px 14px;margin:14px 0}
+.dots .top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.dots .top b{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.dots .top span{font-size:13px;color:#AEB6C8}
+.dots .dotrow{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 12px}
+.dot{flex:0 0 18px;width:18px;height:18px;border-radius:50%;border:2px solid #5A6275;box-sizing:border-box}
+.dot.wait{border-color:var(--warn)}
+.dot.on{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 4px rgba(35,80,245,.28)}
+.dot.pop{animation:dotpop .25s ease-out}
+@keyframes dotpop{0%{transform:scale(.6)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
+.dots .sum{font-size:13px;color:#C9D0DE;line-height:1.7}
+.dots .sum b{color:#fff;font-variant-numeric:tabular-nums}
+.dots .empty{font-size:13px;color:#AEB6C8;margin-top:8px}
+.btn,.tab,button{min-height:44px}
+.btn.sm{min-height:40px}
+.contact{font-size:13px;color:var(--ink2);margin-top:4px}
+.contact b{color:var(--ink)}
 </style>
 </head>
 <body>
@@ -359,6 +378,30 @@ const won = n => (+n || 0).toLocaleString('ko-KR') + '원';
 const NEED_KIND = { venue:'장소', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
 const needKind = k => NEED_KIND[k] || k || '기타';
 const needProgress = n => `${Math.min(+n.filled || 0, +n.qty || 0)}/${+n.qty || 0}`;
+/* 자리 점판. needs 의 qty 만큼 점을 그리고, 확인된 수만큼 켜고, 기다리는 수만큼 노랑 테두리. */
+function dotBoard(needs, title) {
+  let total = 0, on = 0, wait = 0; const dots = []; const per = {};
+  (needs || []).forEach(n => {
+    const q = Math.max(0, +n.qty || 0);
+    const f = Math.min(q, +n.filled || 0);
+    const w = Math.min(q - f, (n.pledges || []).filter(p => p.status === 'pending').length);
+    total += q; on += f; wait += w;
+    const k = needKind(n.kind); per[k] = per[k] || [0, 0]; per[k][0] += f; per[k][1] += q;
+    for (let i = 0; i < q; i++) dots.push(i < f ? 'on' : i < f + w ? 'wait' : '');
+  });
+  if (!total) return `<div class="dots"><div class="top"><b>${esc(title || '필요한 자리')}</b><span>0개</span></div>
+    <div class="empty">운영자가 아직 자리를 올리지 않았습니다.</div></div>`;
+  const prev = +(sessionStorage.getItem('hackon.dots.' + cur) || 0);
+  try { sessionStorage.setItem('hackon.dots.' + cur, on); } catch (_) {}
+  let lit = 0;
+  const html = dots.map(c => { if (c === 'on') lit++; const pop = c === 'on' && lit > prev ? ' pop' : '';
+    return `<i class="dot ${c}${pop}" aria-hidden="true"></i>`; }).join('');
+  const sum = Object.entries(per).map(([k, v]) => `${esc(k)} <b>${v[0]}/${v[1]}</b>`).join(' · ');
+  return `<div class="dots" role="img" aria-label="필요한 자리 ${total}개 중 ${on}개 채움, ${wait}개 확인 대기">
+    <div class="top"><b>${on}/${total} 켜짐</b><span>${on >= total ? '자리가 다 켜졌습니다' : (total - on) + '자리 남음'}${wait ? ' · 확인 대기 ' + wait : ''}</span></div>
+    <div class="dotrow">${html}</div><div class="sum">${sum}</div></div>`;
+}
+
 
 /* 오늘 날짜(YYYY-MM-DD). toISOString() 은 언제나 UTC 라서 한국 새벽 0~9시에 하루 전을 내놓는다 —
    하필 대회 당일 아침이 그 시간대다. 보는 사람의 현지 날짜로 만든다. */
@@ -1126,6 +1169,9 @@ const SCREEN = {
     const e = d.event;
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : DEMO.ledger;
+    /* 운영자 열쇠가 있을 때만 연락처가 붙은 명단을 받는다. 없으면 빈 배열. */
+    const pledgeInfo = {};
+    (LIVE ? await api(`/events/${cur}/pledges`).catch(() => []) : (DEMO.pledges || [])).forEach(p => { pledgeInfo[p.id] = p; });
     /* 열쇠가 없으면 순위와 공유 주소까지만 보여 준다. 연락처는 서버가 이미 안 준다. */
     if (LIVE && !e.admin) return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 참가 ${e.teams}팀</p>
@@ -1265,12 +1311,14 @@ const SCREEN = {
             : '<br>눈높이가 맞는 편입니다.'}</div>
       </div>` : ''}
       <details open><summary>필요한 자리 <span class="when">${needs.reduce((a,n) => a + Math.max(0,(+n.qty||0)-(+n.filled||0)),0)}자리 남음</span></summary><div class="in">
-        <div class="meta">장소·심사·상품·멘토·간식을 공개 페이지에 올립니다. 누가 맡겠다고 하면 여기서 확인하거나 거절합니다.</div>
+        ${dotBoard(needs, '내 대회의 자리')}
+        <div class="meta">장소·심사·상품·멘토·간식을 공개 페이지에 올립니다. 누가 맡겠다고 하면 여기서 연락처를 보고 확인하거나 거절합니다.</div>
         ${needs.length ? needs.map(n => `<div class="card" style="margin-top:9px">
           <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)}</span></h3>
           ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
           ${(n.pledges || []).length ? `<div style="margin-top:8px">${(n.pledges || []).map(p => `<div class="shrow" style="align-items:center">
-            <div class="meta" style="flex:1"><b>${esc(p.name)}</b>${p.org ? ' · ' + esc(p.org) : ''} · ${esc(p.status)}</div>
+            <div class="meta" style="flex:1"><b>${esc(p.name)}</b>${p.org ? ' · ' + esc(p.org) : ''} · ${esc({pending:'확인 대기',ok:'확인함',done:'완료',no:'거절'}[p.status] || p.status)}
+              ${pledgeInfo[p.id] && pledgeInfo[p.id].contact ? `<div class="contact">연락처 <b>${esc(pledgeInfo[p.id].contact)}</b>${pledgeInfo[p.id].note ? ' · ' + esc(pledgeInfo[p.id].note) : ''}</div>` : ''}</div>
             ${p.status === 'pending' ? `<button class="btn sm" data-pledge-status="${esc(p.id)}" data-status="ok">확인</button>
               <button class="btn sec sm" data-pledge-status="${esc(p.id)}" data-status="no">거절</button>` : ''}
           </div>`).join('')}</div>` : '<div class="meta" style="margin-top:7px">아직 맡겠다는 사람이 없습니다.</div>'}
@@ -1285,7 +1333,6 @@ const SCREEN = {
           <label>메모</label><input id="n-note" maxlength="160" placeholder="예) 콘센트 20개 · 와이파이">
           <div style="height:9px"></div><button class="btn sm" id="n-add">자리 올리기</button>
         </div>
-        <div class="meta">연락처는 운영자에게만 보여야 하지만, 현재 PLAN.md의 조회 API는 공개 응답에서 contact를 제외합니다. 이 화면은 약속된 API 범위 안에서 이름·소속·상태만 표시합니다.</div>
         ${ledger.length ? `<h3 style="margin-top:16px">확인된 공개 장부</h3><table><tr><th>자리</th><th>이름</th><th>소속</th></tr>
           ${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
       </div></details>
@@ -1392,6 +1439,7 @@ const SCREEN = {
     return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
         ${e.topic ? '· 주제 ' + esc(e.topic) : ''}<br>상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
+      ${dotBoard(needs, '이 대회를 함께 여는 자리')}
       ${e.notice ? `<div class="notice">${esc(e.notice)}</div>` : ''}
       ${dueBox(e)}
 
