@@ -1709,6 +1709,29 @@ function ledgerOf(db, event) {
                      ORDER BY n.id, p.id`).all(event);
 }
 
+/* 운영자 전용 신청 명단. 장소를 내준 사람에게 연락하려면 연락처가 필요하다.
+   공개 주소가 아니라 운영자 열쇠를 확인한 뒤에만 부른다 */
+function pledgesOf(db, event) {
+  return db.prepare(`SELECT p.id, p.need, n.kind, n.label, p.name, p.org, p.contact, p.note,
+                            p.status, p.created
+                     FROM pledges p JOIN needs n ON n.id = p.need
+                     WHERE p.event = ? ORDER BY n.id, p.id`).all(event);
+}
+
+/* 첫 화면 자리 점판용 공개 요약. needsOf 를 거쳐 만들므로 contact 는 애초에 없다 */
+function needsSummary(db, event) {
+  const kinds = [];
+  for (const n of needsOf(db, event)) {
+    const pending = n.pledges.filter(p => p.status === 'pending').length;
+    const k = kinds.find(x => x.kind === n.kind);
+    if (k) { k.qty += n.qty; k.filled += n.filled; k.pending += pending; }
+    else kinds.push({ kind: n.kind, qty: n.qty, filled: n.filled, pending });
+  }
+  return { total: kinds.reduce((s, k) => s + k.qty, 0),
+           filled: kinds.reduce((s, k) => s + k.filled, 0),
+           pending: kinds.reduce((s, k) => s + k.pending, 0), kinds };
+}
+
 /* 팀 열쇠나 신청 때 적은 연락처로만 쓴다. 둘 다 없으면 누구 팀의 답인지 모른다 */
 function addFollowup(db, event, b, req) {
   let team = null;
@@ -2162,6 +2185,13 @@ function routes(db) {
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/ledger$/)) && req.method === 'GET')
           return json(res, 200, ledgerOf(db, m[1]));
+        /* 운영자가 신청자 연락처를 보는 주소. 열쇠 없거나 남의 대회 열쇠면 needAdmin 이 403 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/pledges$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner);
+          return json(res, 200, pledgesOf(db, m[1]));
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/needs-summary$/)) && req.method === 'GET')
+          return json(res, 200, needsSummary(db, m[1]));
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/followup$/)) && req.method === 'POST')
           return json(res, 200, addFollowup(db, m[1], await body(req), req));
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/followup-summary$/)) && req.method === 'GET')
@@ -2898,6 +2928,40 @@ function selftest() {
   const sumTxt = JSON.stringify(sum);
   ok(!sumTxt.includes('후팀') && !sumTxt.includes('@') && !sumTxt.includes('계속'),
      '요약에 팀 이름·연락처·메모가 안 나간다');
+
+  /* 운영자가 신청자 연락처를 보는 명단. pending 가 하나 있어야 점판 숫자 검사도 공이니 하나 추가한다 */
+  addPledge(db, n1.id, nbEv.id, { name: '대기중인사람', contact: 'pen@x.test' });
+  let 열쇠없음 = false;
+  try { needAdmin(db, nbEv.id, '', ''); } catch { 열쇠없음 = true; }
+  ok(열쇠없음, '열쇠 없이는 신청 명단을 못 본다');
+  const 남의대회 = createEvent(db, { title: '남의대회' });
+  let 남의열쇠 = false;
+  try { needAdmin(db, nbEv.id, 남의대회.okey, ''); } catch { 남의열쇠 = true; }
+  ok(남의열쇠, '다른 대회 열쇠로도 신청 명단을 못 본다');
+  db.prepare('DELETE FROM events WHERE id=?').run(남의대회.id);
+  const pls = pledgesOf(db, nbEv.id);
+  ok(pls.some(p => p.id === pg1.id && p.contact === 'kim@x.test' && p.status === 'done'
+                  && p.kind === 'venue' && p.label === n1.label),
+     '맞는 열쇠로는 연락처가 포함된 명단을 본다');
+  ok(Object.keys(pls[0]).sort().join()
+     === 'contact,created,id,kind,label,name,need,note,org,status', '신청 명단 칸이 약속과 같다');
+
+  /* 자리 점판 — 숫자를 박지 않고 needs 목록에서 직접 세어 비교한다 */
+  const 점판 = needsSummary(db, nbEv.id);
+  const 직접 = { total: 0, filled: 0, pending: 0 }, 직접종류 = {};
+  for (const n of needsOf(db, nbEv.id)) {
+    const pen = n.pledges.filter(p => p.status === 'pending').length;
+    직접.total += n.qty; 직접.filled += n.filled; 직접.pending += pen;
+    const k = 직접종류[n.kind] || (직접종류[n.kind] = { qty: 0, filled: 0, pending: 0 });
+    k.qty += n.qty; k.filled += n.filled; k.pending += pen;
+  }
+  ok(점판.total === 직접.total && 점판.filled === 직접.filled && 점판.pending === 직접.pending
+     && 직접.total > 0 && 직접.pending > 0, '자리 점판 숫자가 needs 에서 직접 센 값과 같다');
+  ok(점판.kinds.length > 0 && 점판.kinds.every(k =>
+     k.qty === 직접종류[k.kind].qty && k.filled === 직접종류[k.kind].filled
+     && k.pending === 직접종류[k.kind].pending), '종류별 숫자도 직접 센 값과 같다');
+  ok(!JSON.stringify(점판).includes('@x.test'), '자리 점판 응답에 연락처가 안 실린다');
+
   db.prepare('DELETE FROM events WHERE id=?').run(nbEv.id);
   ok(!db.prepare('SELECT 1 FROM needs WHERE event=?').get(nbEv.id),
      '대회를 지우면 빈자리 판도 따라 지워진다');
@@ -2940,4 +3004,5 @@ if (require.main === module) {
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, score, board, outcomes,
                    card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
                    dump, backup, isAdmin,
-                   addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary };
+                   addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary,
+                   pledgesOf, needsSummary };
