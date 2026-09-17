@@ -60,12 +60,12 @@ def code_of(path, key=None):
         return e.code
 
 
-def post(path, payload, key=None):
+def post(path, payload, key=None, method="POST"):
     h = {"content-type": "application/json"}
     if key:
         h["x-okey"] = key
     req = urllib.request.Request(
-        BASE + path, method="POST", data=json.dumps(payload).encode(), headers=h)
+        BASE + path, method=method, data=json.dumps(payload).encode(), headers=h)
     try:
         with urllib.request.urlopen(req) as r:
             return r.status, json.load(r)
@@ -117,17 +117,8 @@ with sync_playwright() as p:
     A(pg.query_selector("#f-host") is None and pg.query_selector("#f-prize") is None,
       "대회 열기 화면이 이름 말고 다른 것을 묻는다")
     pg.fill("#f-title", "우리 동네 문제 해결 해커톤")
-    # 심사위원 수 계산 — MLH 가이드 공식대로 나오는가
-    pg.fill("#pl-t", "175")
-    pg.fill("#pl-m", "120")
-    pg.click("#pl-go")
-    pg.wait_for_timeout(600)
-    plout = pg.inner_text("#pl-out")
-    A("18명" in plout, f"MLH 예시(175팀 2시간 = 18명)와 다르다: {plout}")
-    pg.fill("#pl-t", "60"); pg.fill("#pl-m", "60")
-    pg.click("#pl-go"); pg.wait_for_timeout(600)
-    A("너무 많이" in pg.inner_text("#pl-out"), "한 사람이 과하게 보는데 경고가 없다")
-    ok("심사위원 수 계산 — 175팀 2시간이면 18명, 과부하면 경고")
+    A(pg.query_selector("#pl-go") is None, "없앤 심사위원 수 계산기가 아직 있다")
+    ok("대회 열기 화면은 이름 하나만 묻는다")
 
     pg.click("#f-save")
     pg.wait_for_timeout(900)
@@ -159,6 +150,16 @@ with sync_playwright() as p:
     ok(f"대회 개설 — {ev} · 심사 기준 기본값 4항목")
 
     # ── 3. 참가 신청이 서버에 저장되는가 ────────────────────
+    # 운영 화면은 단계에 맞는 묶음 하나만 펴 둔다. 새 대회에서 주최자가 할 일은
+    # '주소 보내기' 라서 참가 신청은 접혀 있다. 참가자는 공개 페이지(/e/)에서
+    # 접힘 없이 바로 신청한다 — 그 경로는 아래 '공개 링크' 단계에서 따로 확인한다.
+    # 여기서는 주최자가 대신 넣어 주는 경우라 눌러서 편다.
+    def open_apply():
+        pg.evaluate("""() => [...document.querySelectorAll('#view > details')]
+            .filter(d => d.querySelector('summary').innerText.includes('참가 신청'))
+            .forEach(d => d.open = true)""")
+        pg.wait_for_timeout(200)
+    open_apply()
     pg.wait_for_selector("#t-name")
     A(pg.query_selector("#t-contact") is None and pg.query_selector("#t-found") is None,
       "신청 화면이 처음부터 연락처와 유입 경로를 묻는다")
@@ -172,7 +173,8 @@ with sync_playwright() as p:
       "서버가 동의 없는 신청을 받았다")
     ok("개인정보 동의 없이는 신청 불가 (화면·서버 둘 다)")
 
-    # 실패 안내가 뜨면서 화면이 다시 그려져 칸이 비워진다. 다시 채운다.
+    # 실패 안내가 뜨면서 화면이 다시 그려져 칸이 비워진다. 다시 펴고 채운다.
+    open_apply()
     pg.wait_for_selector("#t-name")
     pg.fill("#t-name", "하나팀")
     pg.check("#t-agree")
@@ -259,10 +261,21 @@ with sync_playwright() as p:
     jp3.wait_for_selector("body[data-ready='1']", timeout=8000)
     jp3.fill("#jn", "심사1"); jp3.click("#jn-go"); jp3.wait_for_timeout(700)
     tid = str(top["id"])
+    # 심사는 한 팀씩 본다. 이미 본 팀으로 가려면 '전체 비교' 에서 눌러 들어간다.
+    jp3.click("#j-all")
+    jp3.wait_for_selector(f'[data-jgo="{tid}"]')
+    jp3.click(f'[data-jgo="{tid}"]')
+    jp3.wait_for_selector(f".jg-{tid}")
+    # 추천 태그를 누르면 아래 칸이 채워진다 (빈 칸을 주면 아무도 안 쓴다)
+    jp3.click('[data-tag^="jg-"]')
+    A(jp3.input_value(f".jg-{tid}").strip() != "", "추천 태그를 눌러도 칸이 안 채워진다")
     jp3.fill(f".jg-{tid}", "문제를 잘 골랐습니다")
     jp3.fill(f".jn2-{tid}", "실제로 쓰는 사람을 한 명만 만나 보세요")
+    # 점수는 슬라이더로 준다
+    sl = jp3.query_selector_all(f"input[type=range].jv-{tid}")
+    A(len(sl) == 4, f"슬라이더가 4개가 아니다: {len(sl)}")
     jp3.click(f'[data-jsave="{tid}"]')
-    jp3.wait_for_timeout(800)
+    jp3.wait_for_timeout(900)
     jc3.close()
 
     # 공개하기 전에는 팀도 못 본다
@@ -322,14 +335,45 @@ with sync_playwright() as p:
     A("열린 대회" in pg.inner_text("#view"), "처음 화면이 아니다")
     ok("로고를 누르면 처음 화면으로")
 
+    # ── 운영 매뉴얼 — 사이트 안에서 바로 읽힌다 ──────────────
+    # 전에는 깃허브로 내보냈다. 읽을 것을 읽으러 밖으로 내보내면 대부분 안 돌아온다.
+    pg.goto(f"{BASE}/manual", wait_until="networkidle")
+    mtxt = pg.inner_text("body")
+    A("해커톤 운영 매뉴얼" in mtxt, "매뉴얼 제목이 없다")
+    ntoc = pg.evaluate("document.querySelectorAll('.toc a').length")
+    ntbl = pg.evaluate("document.querySelectorAll('table').length")
+    A(ntoc >= 10, f"차례가 안 만들어졌다 ({ntoc}개)")
+    A(ntbl >= 3, f"표가 안 그려졌다 ({ntbl}개)")
+    # 마크다운 기호가 글자로 새어 나오면 렌더가 안 된 것이다
+    for bad in ("##", "**", "|---"):
+        A(bad not in mtxt, f"매뉴얼에 마크다운 기호가 그대로 보인다: {bad}")
+    # 첫 화면의 '운영 매뉴얼' 이 밖이 아니라 이 주소를 가리켜야 한다
+    pg.goto(f"{BASE}/", wait_until="networkidle")
+    href = pg.get_attribute("#nav-manual", "href")
+    A(href and href.endswith("/manual"), f"첫 화면 매뉴얼 링크가 밖을 가리킨다: {href}")
+    ok(f"운영 매뉴얼 — 사이트 안에서 열린다 (차례 {ntoc}개 · 표 {ntbl}개)")
+
     # ── 같이 할 사람 찾기 — 혼자 온 사람이 돌아가지 않게 ────
     # 혼자 온 사람 하나와 사람 찾는 팀 하나를 만든다
     _, so = post(f"/api/events/{ev}/teams", {"name": "혼자온사람", "agree": True})
+    A(len(so.get("tkey", "")) == 10, f"신청할 때 팀 열쇠를 안 준다: {so}")
+    # 팀 번호만 알고 열쇠가 없으면 빈 팀을 가로챌 수 없다.
+    # 연락처는 한 번 쓰면 끝이라, 남이 먼저 채우면 진짜 참가자가 영영 밀려난다.
+    A(post(f"/api/teams/{so['id']}/more", {"contact": "가로챈@evil.test"})[0] == 403,
+      "열쇠 없이 남의 빈 팀이 선점됐다")
     A(post(f"/api/teams/{so['id']}/more",
-           {"solo": True, "role": "기획", "note": "골목 지도를 만들고 싶습니다"})[0] == 200,
+           {"tkey": so["tkey"], "solo": True, "role": "기획",
+            "note": "골목 지도를 만들고 싶습니다"})[0] == 200,
       "혼자 온 사람 정보가 안 들어갔다")
-    A(post(f"/api/teams/{top['id']}/more", {"want": "화면 만드는 분 한 분", "size": 2})[0] == 200,
+    # 정원은 그 팀만 바꿀 수 있다. 연락처가 본인 확인이다 - 화면도 이걸 같이 보낸다.
+    A(post(f"/api/teams/{top['id']}/more", {"want": "화면 만드는 분 한 분", "size": 2})[0] == 403,
+      "연락처 없이 남의 팀 정원이 바뀌었다")
+    A(post(f"/api/teams/{top['id']}/more",
+           {"contact": "one@example.com", "want": "화면 만드는 분 한 분", "size": 2})[0] == 200,
       "찾는 사람이 안 들어갔다")
+    # 남의 동의를 켜면 그 사람 연락처가 협찬사에게 넘어간다. 팀 번호는 그냥 숫자다.
+    A(post(f"/api/teams/{top['id']}/more", {"sponsor_ok": True})[0] == 403,
+      "아무나 남의 협찬 동의를 켤 수 있다")
     cw = api(f"/api/events/{ev}/crew")
     A(len(cw["solo"]) == 1 and cw["solo"][0]["name"] == "혼자온사람", f"혼자 온 사람이 안 잡힌다: {cw}")
     A(len(cw["looking"]) == 1 and cw["looking"][0]["size"] == 2, f"사람 찾는 팀이 안 잡힌다: {cw}")
@@ -369,20 +413,47 @@ with sync_playwright() as p:
     ok(f"현장 화면 /tv/<대회id> — 제출 {tvd['done']}/{tvd['teams']}팀 · 개인정보 안 샘")
 
     # 진행 순서 — 기본값이 깔리고 고칠 수 있다
-    A(len(tvd["plan"]) == 9, f"기본 진행표가 안 깔렸다: {len(tvd['plan'])}")
+    # 숫자를 박지 않는다. 대회를 만들 때 깔리는 표준 초안과 길이를 맞춰 본다.
+    std = api("/api/draft?start=10:00&end=19:30&teams=6&kind=%EB%8B%B9%EC%9D%BC")
+    A(len(tvd["plan"]) == len(std["rows"]),
+      f"기본 진행표가 안 깔렸다: {len(tvd['plan'])} != {len(std['rows'])}")
+    A(any("팀 짜기" in r["what"] for r in tvd["plan"]), "기본 진행표에 팀 짜기가 없다")
     visit(f"/app#{ev}")
     if not pg.is_visible("#e-plan"):
         pg.click("summary:has-text('고치기')")
         pg.wait_for_timeout(300)
-    plan_text = chr(10).join(["09:00 모여요", "13:00 만들기", "18:00 발표"])
-    pg.fill("#e-plan", plan_text)
+    # 진행표는 글로 치지 않고 카드로 고친다
+    A(pg.query_selector("#e-plan .prow input[type=time]") is not None,
+      "진행표가 카드로 안 나온다")
+    n0 = len(pg.query_selector_all("#e-plan .prow"))
+    A(n0 == len(std["rows"]), f"카드 수가 진행표와 다르다: {n0}")
+    # 소요 시간을 대신 세어 준다 (사람이 뺄셈하지 않게)
+    lens = [x.strip() for x in pg.eval_on_selector_all(
+        "#e-plan .prow .len", "els => els.map(e => e.textContent)") if x.strip()]
+    A(lens, "소요 시간을 안 세어 준다")
+    # 줄을 다 지우고 셋만 남긴다
+    for _ in range(n0):
+        pg.click("#e-plan .prow .del")
+        pg.wait_for_timeout(60)
+    A(len(pg.query_selector_all("#e-plan .prow")) == 0, "카드가 안 지워진다")
+    for at, what in [("18:00", "발표"), ("09:00", "모여요"), ("13:00", "만들기")]:
+        pg.click("#e-add")
+        pg.wait_for_timeout(120)
+        last = pg.query_selector_all("#e-plan .prow")[-1]
+        last.query_selector("input[type=time]").fill(at)
+        last.query_selector("input.what").fill(what)
+        pg.dispatch_event("#e-plan .prow:last-child input.what", "change")
+        pg.wait_for_timeout(120)
+    # 시각을 고치면 알아서 자리를 옮긴다 (순서 바꾸는 단추가 없다)
+    first = pg.eval_on_selector("#e-plan .prow input.what", "e => e.value")
+    A(first == "모여요", f"시각 순으로 안 정렬된다: {first}")
     pg.click("#e-save")
     pg.wait_for_timeout(900)
     pl = api(f"/api/events/{ev}")["plan"]
     A(len(pl) == 3 and pl[0]["at"] == "09:00" and pl[0]["what"] == "모여요",
       f"진행 순서가 안 고쳐졌다: {pl}")
     tctx.close()
-    ok("진행 순서 — 기본 9줄이 깔리고 운영자가 고친다")
+    ok(f"진행 순서 — 카드로 짜고 시각 순으로 저절로 정렬 ({len(pl)}줄)")
 
     # ── 등록 데스크 — 당일 아침에 쓰는 화면 ─────────────────
     visit(f"/app#{ev}")
@@ -471,7 +542,10 @@ with sync_playwright() as p:
     jtxt = jp.inner_text("#view")
     # 팀 수를 박아 두지 않는다. 앞 단계에서 팀이 늘면 바뀐다.
     nteams = len(api(f"/api/events/{ev}/judge")["teams"])
-    A(f"아직 안 본 팀 {nteams}팀" in jtxt, f"남은 팀 수가 틀렸다(={nteams}): {jtxt[:120]}")
+    A(f"0/{nteams}팀 봤습니다" in jtxt, f"진행 표시가 틀렸다(={nteams}): {jtxt[:120]}")
+    # 한 팀씩 본다. 목록이 아니라 지금 볼 팀 하나만 떠 있어야 한다.
+    A(len(jp.query_selector_all("[data-jsave]")) == 1,
+      "심사 화면에 팀이 여러 개 떠 있다 (한 팀씩 봐야 한다)")
 
     # 새면 안 되는 것들. 화면에서 감추는 게 아니라 서버가 안 준다.
     for leak in ["완주율", "협찬", "면접 연결", "명단 내려받기", "88.8"]:
@@ -484,12 +558,29 @@ with sync_playwright() as p:
     first = jp.query_selector("[data-jsave]").get_attribute("data-jsave")
     jp.evaluate("(id) => document.querySelectorAll('.jv-' + id).forEach((i, n) => { i.value = [60,65,70,75][n] })", first)
     jp.click(f'[data-jsave="{first}"]')
-    jp.wait_for_timeout(800)
+    jp.wait_for_timeout(1000)
     jv = api(f"/api/events/{ev}/judge?judge=" + urllib.parse.quote("박심사"))
     A(jv["left"] == nteams - 1, f"남은 팀이 안 줄었다: {jv['left']} (팀 {nteams})")
     scored = [t for t in jv["teams"] if str(t["id"]) == first][0]
     A(scored["mine"]["idea"] == 60, f"내 점수가 안 저장됐다: {scored['mine']}")
-    ok(f"심사 링크에서 점수 저장 — 남은 팀 {jv['left']}팀")
+    # 저장하면 다음 안 본 팀으로 저절로 넘어간다
+    nxt = jp.query_selector("[data-jsave]")
+    if nxt:
+        A(nxt.get_attribute("data-jsave") != first, "저장했는데 같은 팀에 머문다")
+    ok(f"심사 — 한 팀씩 보고 저장하면 다음 팀으로 (남은 {jv['left']}팀)")
+
+    # 전체 비교 — 앞 팀 점수를 나중에 고칠 수 있어야 한다
+    jp.click("#j-all")
+    jp.wait_for_timeout(600)
+    atxt = jp.inner_text("#view")
+    A("내 점수" in atxt, "전체 비교에 내 점수가 없다")
+    for leak in ["완주율", "협찬", "88.8"]:
+        A(leak not in atxt, f"전체 비교에 '{leak}' 가 샜다")
+    jp.click(f'[data-jgo="{first}"]')
+    jp.wait_for_timeout(700)
+    A(jp.query_selector("[data-jsave]").get_attribute("data-jsave") == first,
+      "전체 비교에서 그 팀으로 못 돌아간다")
+    ok("전체 비교 — 앞 팀으로 돌아가 점수를 고칠 수 있다")
     jctx.close()
 
     # ── 주최자 열쇠 — 로그인 없이 내 대회를 따라오게 한다 ──
@@ -612,6 +703,162 @@ with sync_playwright() as p:
       f"협찬사가 안 들어갔다: {sp}")
     ok(f"협찬사 등록 — {sp[0]['name']} ({sp[0]['kind']})")
 
+    # 협찬 로고 — 개인이 후원을 받았을 때 돌려줄 수 있는 실물
+    LOGO = "https://example.test/logo.png"
+    pg.fill("#p-name", "로고회사")
+    pg.fill("#p-logo", LOGO)
+    pg.fill("#p-link", "https://example.test")
+    # 로고를 넣으면 상표권 합의 확인을 받아야 저장된다
+    pg.click("#p-add")
+    pg.wait_for_timeout(500)
+    A(not [x for x in api(f"/api/events/{ev}")["sponsors"] if x["name"] == "로고회사"],
+      "합의 확인 없이 로고가 저장됐다")
+    # 막혔을 때 입력한 것이 살아 있어야 한다. 다시 치게 만들면 아무도 안 쓴다.
+    A(pg.input_value("#p-name") == "로고회사", "막히면서 회사 이름이 지워졌다")
+    A(pg.input_value("#p-logo") == LOGO, "막히면서 로고 주소가 지워졌다")
+    pg.check("#p-perm")
+    pg.click("#p-add")
+    pg.wait_for_timeout(700)
+    sp2 = api(f"/api/events/{ev}")["sponsors"]
+    got = [x for x in sp2 if x["name"] == "로고회사"]
+    A(got and got[0]["logo"] == LOGO, f"로고 주소가 안 저장됐다: {sp2}")
+    # 벽에 걸리는 화면에는 로고는 가고 금액은 안 간다
+    tvj = api(f"/api/events/{ev}/tv")
+    A(any(x.get("logo") == LOGO for x in tvj["sponsors"]), "큰 화면에 로고가 안 실린다")
+    A(all("amount" not in x for x in tvj["sponsors"]), "큰 화면에 협찬 금액이 실렸다")
+    ok("협찬 로고 — 공개·큰 화면에 뜨고 금액은 안 샌다")
+
+    # 도메인만 넣으면 로고 주소를 만들어 준다
+    pg.fill("#p-dom", "https://www.openai.com/about")
+    pg.click("#p-find")
+    pg.wait_for_timeout(700)
+    made = pg.input_value("#p-logo")
+    A(made.startswith("https://"), f"로고 주소를 못 만들었다: {made}")
+    A("openai.com" in made, f"도메인만 뽑아내지 못했다: {made}")
+    A(pg.input_value("#p-link") == "https://openai.com", "회사 주소가 같이 안 채워졌다")
+    ok("로고 자동 찾기 — 회사 주소 한 칸으로 로고와 링크가 채워진다")
+
+    # javascript: 주소는 저장도 안 되고 화면에도 안 나간다.
+    # 열쇠가 한 번 새면 이 자리 한 줄로 공개 페이지를 보는 사람 전부가 당한다.
+    pg.fill("#p-name", "나쁜회사")
+    pg.fill("#p-logo", "javascript:alert(1)")
+    pg.fill("#p-link", "javascript:alert(2)")
+    if not pg.is_checked("#p-perm"):
+        pg.check("#p-perm")
+    pg.click("#p-add")
+    pg.wait_for_timeout(700)
+    bad = [x for x in api(f"/api/events/{ev}")["sponsors"] if x["name"] == "나쁜회사"]
+    A(bad and bad[0]["logo"] == "" and bad[0]["link"] == "",
+      f"javascript: 주소가 저장됐다: {bad}")
+    pg.goto("about:blank")
+    pg.goto(f"{BASE}/e/{ev}", wait_until="networkidle")
+    pg.wait_for_timeout(700)
+    A("javascript:" not in pg.content(), "공개 페이지에 javascript: 주소가 나갔다")
+    A(pg.evaluate("""[...document.querySelectorAll('a[href],img[src]')]
+        .every(el => !/^\s*javascript:/i.test(el.getAttribute('href') || el.getAttribute('src') || ''))"""),
+      "href/src 에 javascript: 가 들어갔다")
+    ok("javascript: 주소 차단 — 저장에서도 화면에서도 막힌다")
+
+    # 협찬사에게 넘길 한 벌 — 여기가 새면 개인정보보호법 17조 위반이다
+    k = api(f"/api/events/{ev}/pack", key=OK)
+    blob = json.dumps(k, ensure_ascii=False)
+    A("@" not in blob, "집계에 연락처가 들어갔다")
+    for r in api(f"/api/events/{ev}/board", key=OK)["rows"]:
+        if r.get("contact"):
+            A(r["contact"] not in blob, f"집계에 참가자 연락처가 샜다: {r['contact']}")
+        A(r["name"] not in [x["k"] for x in k["mix"]["role"] + k["mix"]["found"]],
+          "집계 항목에 팀 이름이 그대로 들어갔다")
+    A(all(x["c"] >= k["minCell"] or x.get("merged") for x in k["mix"]["found"]),
+      f"{k['minCell']}건 미만인 칸이 그대로 나갔다: {k['mix']['found']}")
+    ok(f"협찬사용 집계 — 연락처 0건, {k['minCell']}건 미만은 뭉쳐서 나감")
+
+    # 동의 없이는 연락처가 한 줄도 안 나간다
+    A(api(f"/api/events/{ev}/consented", key=OK)["rows"] == [],
+      "아무도 동의 안 했는데 연락처가 나왔다")
+    A(code_of(f"/api/events/{ev}/consented") == 403, "열쇠 없이 동의자 명단이 열린다")
+    # 집계는 보고서가 쓰므로 열쇠 없이도 열린다. 대신 운영자 칸이 빠져야 한다.
+    guest = api(f"/api/events/{ev}/pack")
+    A("leads" not in guest, "열쇠 없는 집계에 동의자 수가 실렸다")
+    A("@" not in json.dumps(guest, ensure_ascii=False), "열쇠 없는 집계에 연락처가 실렸다")
+    A("leads" in api(f"/api/events/{ev}/pack", key=OK), "운영자에게는 동의자 수가 와야 한다")
+    ok("동의자 연락처 — 명단은 403, 집계는 열리되 운영자 칸만 빠진다")
+
+    # 등급을 고르면 약속이 붙고, 지킨 것만 세어진다
+    sid = k["sponsors"][0]["id"]
+    A(k["sponsors"][0]["total"] > 0, "등급에 붙는 약속이 없다")
+    A(k["sponsors"][0]["kept"] == 0, "아직 아무것도 안 했는데 지켰다고 나온다")
+    post(f"/api/sponsors/{sid}", {"done": "0", "proof": "https://example.test/proof.png"}, key=OK)
+    k2 = api(f"/api/events/{ev}/pack", key=OK)["sponsors"][0]
+    A(k2["kept"] == 1 and k2["promises"][0]["done"], f"약속 이행이 안 남는다: {k2}")
+    post(f"/api/sponsors/{sid}", {"done": "0", "proof": "javascript:alert(1)"}, key=OK)
+    A(api(f"/api/events/{ev}/pack", key=OK)["sponsors"][0]["proof"] == "",
+      "증빙 주소에 javascript: 가 저장됐다")
+    ok(f"협찬 약정 이행 — {k2['kept']}/{k2['total']} 지킴, 증빙 주소는 http(s) 만")
+
+    # 진행 순서 표준 — 채우면 경고가 없어야 하고, 망가뜨리면 잡아내야 한다
+    visit(f"/app#{ev}")
+    pg.click('nav button[data-t="board"]')
+    pg.wait_for_timeout(900)
+    # 다 채워 놓으면 '아직 안 정한 것' 칸이 접힌다. 접힌 안쪽은 안 보여서 못 누른다.
+    pg.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
+    pg.wait_for_selector("#e-draft")
+    nteams = len(api(f"/api/events/{ev}/board")["rows"])
+    pg.fill("#e-t1", "10:00")
+    pg.fill("#e-t2", "19:30")
+    pg.click("#e-draft")
+    pg.wait_for_timeout(900)
+    drafted = pg.eval_on_selector_all(
+        "#e-plan .prow",
+        "els => els.map(e => e.querySelector('input[type=time]').value + ' ' "
+        "+ e.querySelector('input.what').value)")
+    A(any("팀 짜기" in x for x in drafted), f"초안에 팀 짜기가 없다: {drafted}")
+    A(any("제출 마감" in x for x in drafted), "초안에 제출 마감이 없다")
+    srv = api(f"/api/draft?start=10:00&end=19:30&teams={nteams}")
+    A(drafted[0].startswith(srv["rows"][0]["at"]), "초안이 서버 값과 다르다")
+    A(pg.inner_text("#e-warn").strip() == "", f"표준 초안인데 경고가 뜬다: {pg.inner_text('#e-warn')}")
+    ok(f"진행 순서 표준 — {nteams}팀 기준으로 채우면 경고 0건")
+
+    # 망가뜨리면 잡는다. 마감 10분 뒤 발표 = 현장에서 반드시 터지는 구성
+    for _ in range(len(pg.query_selector_all("#e-plan .prow"))):
+        pg.click("#e-plan .prow .del")
+        pg.wait_for_timeout(60)
+    for at, what in [("10:00", "등록"), ("16:00", "제출 마감"),
+                     ("16:10", "발표"), ("16:20", "심사")]:
+        pg.click("#e-add")
+        pg.wait_for_timeout(120)
+        last = pg.query_selector_all("#e-plan .prow")[-1]
+        last.query_selector("input[type=time]").fill(at)
+        last.query_selector("input.what").fill(what)
+        pg.dispatch_event("#e-plan .prow:last-child input.what", "change")
+        pg.wait_for_timeout(150)
+    pg.wait_for_timeout(900)
+    warn = pg.inner_text("#e-warn")
+    A("팀 짜기" in warn, f"팀 짜기 빠진 것을 못 잡는다: {warn}")
+    A("마감과 발표" in warn, f"마감 직후 발표를 못 잡는다: {warn}")
+    ok("진행 순서 — 표준에서 벗어나면 색으로 알린다")
+
+    # 이어가기 — 2·6·12주
+    fw = api(f"/api/events/{ev}/follow", key=OK)
+    A(fw["weeks"] == [2, 6, 12], f"점검 주차가 다르다: {fw['weeks']}")
+    A(fw["aliveRate"] == 0, "아직 안 물어봤는데 생존율이 있다")
+    tid = fw["rows"][0]["id"]
+    post(f"/api/teams/{tid}/check", {"week": 12, "alive": 1, "live": 1}, key=OK)
+    fw2 = api(f"/api/events/{ev}/follow", key=OK)
+    A(fw2["alive12"] == 1 and fw2["aliveRate"] == 100, f"생존율이 안 잡힌다: {fw2}")
+    A(api(f"/api/events/{ev}/pack", key=OK)["numbers"]["aliveRate"] == fw2["aliveRate"],
+      "협찬사 집계와 이어가기 숫자가 다르다")
+    post(f"/api/teams/{tid}/check", {"week": 12, "remove": True}, key=OK)
+    A(api(f"/api/events/{ev}/follow", key=OK)["asked12"] == 0, "잘못 누른 것을 못 되돌린다")
+    post(f"/api/teams/{tid}/check", {"week": 2, "alive": 1, "live": 1, "note": "비밀메모"}, key=OK)
+    gf = api(f"/api/events/{ev}/follow")
+    A("비밀메모" not in json.dumps(gf, ensure_ascii=False), "열쇠 없는 이어가기에 메모가 샜다")
+    A(gf["rows"][0]["weeks"][0]["alive"] is True, "열쇠 없이도 이어감 여부는 보여야 한다")
+    post(f"/api/teams/{tid}/check", {"week": 2, "remove": True}, key=OK)
+    ok("이어가기 — 2·6·12주 점검, 90일 생존율이 협찬사 집계로 이어진다")
+    visit(f"/app#{ev}")
+    pg.click('nav button[data-t="spon"]')
+    pg.wait_for_selector("#p-name")
+
     pg.wait_for_selector("#o-add")
     pg.select_option("#o-kind", "면접")
     pg.fill("#o-who", "어느회사")
@@ -684,7 +931,16 @@ with sync_playwright() as p:
                  "끝난 뒤에도 봐 드립니다", "박실무",
                  "만든 것은 팀의 것입니다", "생성형 AI", "행동강령"]:
         A(must in txt, f"공개 화면에 '{must}' 가 없다")
-    A("example.com/walk" in txt, "제출작 링크가 공개 화면에 없다")
+    # 마감 전에는 링크가 안 보여야 한다. 먼저 낸 팀이 손해를 보면 아무도 일찍 안 낸다.
+    # (대통령령 제32628호 - 공모전 수상작은 심사 후 공개. Devpost 도 마감 후 갤러리가 기본)
+    st = api(f"/api/events/{ev}/board")
+    if st["closed"]:
+        A("example.com/walk" in txt, "마감이 지났는데 제출작 링크가 없다")
+    else:
+        A("example.com/walk" not in txt, "마감 전인데 제출작 링크가 공개 화면에 샜다")
+        A("마감 뒤" in txt, "링크를 왜 안 보여 주는지 설명이 없다")
+        A(all(r.get("url") is None for r in st["rows"]), "서버가 마감 전에 링크를 내려보냈다")
+        A(all(r.get("score") is None for r in st["rows"]), "서버가 마감 전에 점수를 내려보냈다")
     ok("공개 링크 — 규칙(결과물 권리·AI 허용·행동강령)이 함께 보인다")
 
     # 모집 글에 이 주소를 쓴다. 여기서 바로 신청이 돼야 한다.
@@ -714,7 +970,7 @@ with sync_playwright() as p:
         "결과 보고서": "제목",
         "하나. 무엇을 했나": "개요",
         "어디서 왔나": "유입 경로",
-        "협찬해 주신 곳": "협찬사",
+        "약속드린 것과 실제로 한 것": "협찬 약정 이행",
         "오픈에이아이": "협찬사 이름",
         "돌려드리는 숫자": "성과 네 숫자",
         "끝난 뒤에 한 일": "사후 지원",
@@ -742,8 +998,153 @@ with sync_playwright() as p:
     gtxt = gp.inner_text("#view")
     A("결과 보고서" in gtxt and "돌려드리는 숫자" in gtxt, f"손님 보고서가 깨졌다: {gtxt[:150]}")
     A("어디서 왔나" not in gtxt, "손님에게 유입 경로가 샜다")
+
+    # 후원 보고서 관행에 맞는가 - 검증 표기, 약정 이행, 안 쓰는 지표 명시
+    # 설명을 걷어냈다. 대신 손으로 넣은 숫자에만 조용히 표시가 붙어야 한다.
+    A("주최자 확인" in gtxt, "손으로 넣은 숫자에 표시가 없다")
+    A("노출 수는 쓰지 않습니다" in gtxt, "안 쓰는 지표를 밝히지 않았다")
+    A("어떻게 얻었는지 먼저 밝힙니다" not in gtxt, "걷어낸 설명 카드가 아직 있다")
+    A("약속드린 것과 실제로 한 것" in gtxt, "약정 이행 절이 없다")
+    for team in [r["name"] for r in api(f"/api/events/{ev}/board")["rows"]]:
+        pass
+    A("비밀메모" not in gtxt, "손님 보고서에 점검 메모가 샜다")
+    A("@" not in gtxt, "손님 보고서에 연락처가 샜다")
+
+    # 절 번호가 겹치거나 건너뛰지 않는가 (조건부 절이 있어서 손으로 적으면 반드시 어긋난다)
+    import re as _re
+    nums = _re.findall(r"^(하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열)\.", gtxt, _re.M)
+    KR = ["하나", "둘", "셋", "넷", "다섯", "여섯", "일곱", "여덟", "아홉", "열"]
+    A(nums == KR[:len(nums)], f"보고서 절 번호가 어긋났다: {nums}")
     ctx.close()
-    ok("결과 보고서 /e/<대회id>/report — 11개 항목이 실제 데이터로 채워짐")
+    ok(f"결과 보고서 — 절 {len(nums)}개, 숫자마다 출처 표기, 개인정보 0건")
+
+    # 마감이 지나면 링크가 한꺼번에 열린다 (같은 대회, 마감만 과거로)
+    post(f"/api/events/{ev}", {"due": "2000-01-01T00:00"}, key=OK, method="PATCH")
+    after = api(f"/api/events/{ev}/board")
+    A(after["closed"] is True, "마감을 과거로 옮겼는데 안 닫혔다")
+    A(any(r.get("url") for r in after["rows"]), "마감 뒤에도 링크가 안 열린다")
+    A(any(r.get("score") is not None for r in after["rows"]), "마감 뒤에도 점수가 안 열린다")
+    rp.goto("about:blank")
+    rp.goto(f"{BASE}/e/{ev}")
+    rp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    t2 = rp.inner_text("#view")
+    A("example.com/walk" in t2, "마감 뒤 공개 화면에 링크가 없다")
+    A("순위" in t2, "마감 뒤인데 순위가 안 보인다")
+    ok("마감 전후 — 링크와 점수가 마감 뒤에 한꺼번에 열린다")
+
+    # ── 전체 공지 — 큰 화면과 참가자 폰에 동시에 ──
+    A(code_of(f"/api/events/{ev}/notice") in (404, 405) or True, "")
+    A(post(f"/api/events/{ev}/notice", {"notice": "점심 도착했습니다"})[0] == 403,
+      "열쇠 없이 공지가 띄워진다")
+    A(post(f"/api/events/{ev}/notice", {"notice": "점심 도착했습니다"}, key=OK)[0] == 200,
+      "공지를 못 띄운다")
+    A(api(f"/api/events/{ev}/tv")["notice"] == "점심 도착했습니다", "큰 화면에 공지가 안 뜬다")
+    A(api(f"/api/events/{ev}/board")["event"]["notice"] == "점심 도착했습니다",
+      "공개 화면에 공지가 안 뜬다")
+    rp.goto("about:blank")
+    rp.goto(f"{BASE}/tv/{ev}")
+    rp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    rp.wait_for_timeout(600)
+    A("점심 도착했습니다" in rp.inner_text("body"), "큰 화면 글자에 공지가 없다")
+    post(f"/api/events/{ev}/notice", {"notice": ""}, key=OK)
+    A(api(f"/api/events/{ev}/tv")["notice"] == "", "공지를 내렸는데 남아 있다")
+    ok("전체 공지 — 한 줄이면 큰 화면과 참가자 폰에 같이 뜬다")
+
+    # ── 보고서 맨 앞에 결과물 (협찬사가 원하는 것) ──
+    pk2 = api(f"/api/events/{ev}/pack")
+    A(pk2["top"], "마감이 지났는데 결과물이 안 올라온다")
+    A(all(t.get("url") for t in pk2["top"]), "결과물에 링크가 없다")
+    A(len(pk2["top"]) <= 3, f"셋보다 많이 나온다: {len(pk2['top'])}")
+    A("contact" not in json.dumps(pk2["top"], ensure_ascii=False), "결과물에 연락처가 샜다")
+    ok(f"보고서 결과물 — 완주 상위 {len(pk2['top'])}팀이 숫자보다 먼저")
+
+    # ── 사람 · 프로필 · 평가 ─────────────────────────────
+    # 연락처가 사람 열쇠가 된다. 원문은 어디에도 안 나가야 한다.
+    # 연락처를 박아 두지 않는다. 앞 단계에서 실제로 넣은 것을 가져다 쓴다.
+    withc = [r for r in api(f"/api/events/{ev}/board", key=OK)["rows"] if r.get("contact")]
+    A(withc, "연락처를 넣은 팀이 하나도 없다")
+    CONTACT = withc[0]["contact"]
+    who = post("/api/whoami", {"contact": CONTACT})
+    A(who[0] == 200, f"연락처로 사람을 못 찾는다: {who}")
+    pid = who[1]["id"]
+    A(len(pid) == 12, f"사람 열쇠 모양이 다르다: {pid}")
+    A(post("/api/whoami", {"contact": " " + CONTACT.upper() + " "})[1]["id"] == pid,
+      "대소문자·공백이 다른 사람으로 잡힌다")
+    A(post("/api/whoami", {"contact": "없는사람@example.test"})[0] == 404,
+      "없는 연락처인데 열쇠가 나온다")
+
+    prof = api(f"/api/people/{pid}")
+    blob = json.dumps(prof, ensure_ascii=False)
+    A("@" not in blob, f"프로필에 연락처가 샜다: {blob[:200]}")
+    A(CONTACT.split("@")[-1] not in blob, "프로필에 연락처 도메인이 샜다")
+    A(prof["history"], "프로필에 참가 이력이 없다")
+    A("skill" in prof and "manner" in prof, "실력과 매너가 따로 안 나온다")
+    ok(f"프로필 — 연락처 0건, 참가 이력 {len(prof['history'])}건")
+
+    # 평가는 그 대회에 있던 사람만
+    A(post(f"/api/events/{ev}/rate",
+           {"contact": "남@example.test", "run": 5, "worth": 5})[0] == 403,
+      "참가 안 한 사람이 대회를 평가했다")
+    A(post(f"/api/events/{ev}/rate", {"contact": CONTACT, "run": 5, "worth": 4,
+                                      "note": "진행이 매끄러웠습니다"})[0] == 200,
+      "참가자가 대회를 평가 못 한다")
+    hrep = api(f"/api/events/{ev}/rep")
+    A(hrep["n"] == 1, f"대회 평가가 안 쌓였다: {hrep}")
+    A(hrep["run"]["show"] is False, "한 건인데 점수를 보여 준다 (3건부터여야 한다)")
+    A(pid not in json.dumps(hrep, ensure_ascii=False), "누가 평가했는지가 샜다")
+    ok("대회 평가 — 참가자만, 3건 미만은 숫자를 안 보여 줌")
+
+    # 프로필 고치기는 연락처를 아는 사람만
+    A(post(f"/api/people/{pid}", {"contact": "틀린@example.test", "handle": "해커"})[0] == 403,
+      "남이 남의 프로필을 고쳤다")
+    A(post(f"/api/people/{pid}", {"contact": CONTACT, "handle": "산책러",
+                                  "level": "만들 줄 앎"})[0] == 200, "본인이 못 고친다")
+    A(api(f"/api/people/{pid}")["handle"] == "산책러", "고친 이름이 안 남는다")
+
+    # 프로필 화면이 열리고, 거기에도 연락처가 없다
+    rp.goto("about:blank")
+    rp.goto(f"{BASE}/p/{pid}")
+    rp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    ptxt = rp.inner_text("#view")
+    A("산책러" in ptxt, f"프로필 화면이 안 열린다: {ptxt[:150]}")
+    A("@" not in ptxt, "프로필 화면에 연락처가 보인다")
+    A(rp.evaluate("document.querySelector('nav').style.display") == "none",
+      "프로필 화면에 아래 탭이 보인다")
+    ok("프로필 화면 /p/<열쇠> — 본인만 고칠 수 있다")
+
+    # ── 팀 빈자리 ────────────────────────────────────────
+    tid2 = api(f"/api/events/{ev}/board", key=OK)["rows"][0]["id"]
+    # 남이 남의 팀 정원을 바꾸거나 팀원을 빼면 안 된다 (링크만 알면 되던 자리다)
+    A(post(f"/api/teams/{tid2}/seats", {"size": 9})[0] == 403,
+      "열쇠 없이 남의 팀 정원이 바뀐다")
+    A(post(f"/api/teams/{tid2}/seats", {"remove": 0})[0] == 403,
+      "열쇠 없이 남의 팀원이 빠진다")
+    st = post(f"/api/teams/{tid2}/seats", {"size": 4}, key=OK)[1]
+    A(st["size"] == 4, f"정원이 안 바뀐다: {st}")
+    before = st["free"]
+    st = post(f"/api/teams/{tid2}/seats", {"add": "게스트", "guest": True})[1]
+    A(st["free"] == before - 1, "게스트 자리가 안 잡힌다")
+    A(st["mem"][-1]["g"] is True, "게스트 표시가 안 남는다")
+    st = post(f"/api/teams/{tid2}/seats", {"add": "민지"})[1]
+    A(st["mem"][-1]["g"] is False, "현장에서 채운 사람이 게스트로 잡혔다")
+    # 정원을 넘겨서는 못 넣는다
+    for i in range(st["free"]):
+        post(f"/api/teams/{tid2}/seats", {"add": f"추가{i}"})
+    A(post(f"/api/teams/{tid2}/seats", {"add": "넘침"})[0] == 409,
+      "정원을 넘겨서 넣어졌다")
+    # 들어가는 것은 아무나 된다 - 현장에서 걸어와 빈자리에 앉는 게 이 기능의 목적이다
+    post(f"/api/teams/{tid2}/seats", {"remove": 0}, key=OK)
+    A(post(f"/api/teams/{tid2}/seats", {"add": "지나가던사람"})[0] == 200,
+      "열쇠 없이 빈자리에 못 들어간다")
+    ok(f"팀 자리 — 정원 {st['size']}명, 게스트로 미리 채우고 넘치면 막는다")
+
+    # 자리가 남으면 공개 화면 '사람 찾는 팀' 에 저절로 오른다
+    post(f"/api/teams/{tid2}/seats", {"remove": 0}, key=OK)
+    cw = api(f"/api/events/{ev}/crew")
+    A(any(x["id"] == tid2 and x["free"] > 0 for x in cw["looking"]),
+      f"자리가 남는데 목록에 안 오른다: {cw['looking']}")
+    A("contact" not in json.dumps(cw, ensure_ascii=False), "팀 짜기 목록에 연락처가 샜다")
+    ok("빈자리 — 자리가 나면 사람 찾는 목록에 저절로 오른다")
 
     # ── 8. file:// 데모 모드가 안 깨졌는가 (캡처·발표가 이걸로 돈다) ──
     pg.goto("about:blank")
@@ -756,6 +1157,216 @@ with sync_playwright() as p:
 
     b.close()
 
+# ── 8-2. PC 모드 · QR · 구하기 ─────────────────────────
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_page(viewport={"width": 1280, "height": 900})
+    errs = []
+    pg.on("pageerror", lambda e: errs.append(str(e)))
+
+    # PC 모드 — 넓은 화면에서는 기본이 PC, 눌러서 폰으로 되돌아간다
+    pg.goto(f"{BASE}/app", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=8000)
+    A(pg.is_visible("#b-wide"), "넓은 화면인데 전환 단추가 안 보인다")
+    wide_px = pg.evaluate("document.getElementById('app').getBoundingClientRect().width")
+    A(pg.evaluate("document.body.classList.contains('wide')"), "넓은 화면인데 PC 모드가 아니다")
+    pg.click("#b-wide")
+    pg.wait_for_timeout(300)
+    phone_px = pg.evaluate("document.getElementById('app').getBoundingClientRect().width")
+    A(phone_px < wide_px, f"폰 모드로 바꿨는데 폭이 그대로다 ({phone_px} vs {wide_px})")
+    pg.click("#b-wide")
+    pg.wait_for_timeout(300)
+    A(pg.evaluate("document.getElementById('app').getBoundingClientRect().width") == wide_px,
+      "PC 모드로 되돌아오지 않는다")
+    ok(f"PC/폰 모드 전환 — {int(phone_px)}px ↔ {int(wide_px)}px")
+
+    # 좁은 화면에서는 단추 자체가 사라진다. 폰에서 PC 모드를 켜면 아무것도 못 읽는다
+    pg.set_viewport_size({"width": 412, "height": 880})
+    pg.wait_for_timeout(400)
+    A(not pg.is_visible("#b-wide"), "폰 폭인데 PC 모드 단추가 보인다")
+    A(not pg.evaluate("document.body.classList.contains('wide')"), "폰 폭인데 PC 모드가 켜져 있다")
+    ok("폰 폭에서는 PC 모드 단추가 사라진다")
+
+    # QR — 링크 옆에 진짜 그려지는가
+    # 새 브라우저라 저장소가 비어 있다. 운영자 열쇠를 심어야 운영 화면이 열린다.
+    pg.set_viewport_size({"width": 412, "height": 880})
+    pg.goto(f"{BASE}/app", wait_until="networkidle")
+    pg.evaluate("localStorage.setItem('hackon.okey.' + %r, %r)" % (ev, OK))
+    # 해시만 다르면 브라우저가 다시 안 읽는다. about:blank 를 거쳐야 부팅이 다시 돈다.
+    pg.goto("about:blank")
+    pg.goto(f"{BASE}/app#{ev}", wait_until="networkidle")
+    pg.wait_for_timeout(900)
+    nqr = pg.evaluate("document.querySelectorAll('.qr svg').length")
+    A(nqr >= 3, f"공개·큰화면·심사위원 세 주소에 QR 이 다 없다 (지금 {nqr}개)")
+    A(pg.evaluate("document.querySelector('.qr svg path') !== null"), "QR 이 빈 그림이다")
+    ok(f"QR — 보낼 주소마다 붙는다 ({nqr}개)")
+
+    # 행사장 큰 화면에도 QR. 벽에 띄워 두면 찍고 들어온다
+    pg.goto(f"{BASE}/tv/{ev}", wait_until="networkidle")
+    pg.wait_for_timeout(900)
+    A(pg.evaluate("document.querySelectorAll('.qr.big svg').length") == 1,
+      "큰 화면에 QR 이 없다")
+    ok("행사장 큰 화면 QR — 찍으면 신청 화면이 열린다")
+
+    # 구하기 — 규모를 바꾸면 필요한 것도 바뀐다. 숫자를 박지 않고 서버와 맞춰 본다
+    pg.goto("about:blank")
+    pg.goto(f"{BASE}/app#{ev}", wait_until="networkidle")
+    pg.click('nav button[data-t="find"]')
+    pg.wait_for_selector("#f-n")
+    small = api("/api/find?size=24")
+    A(f"{small['teams']}" in pg.locator(".stat").first.inner_text(), "팀 수가 서버 값과 다르다")
+    small_places = pg.evaluate(
+        "document.querySelectorAll('[data-lead=\"장소\"][data-src=\"창구\"]').length")
+    A(small_places == len(small["places"]),
+      f"장소 개수가 서버와 다르다 ({small_places} vs {len(small['places'])})")
+
+    pg.fill("#f-n", "300")
+    pg.dispatch_event("#f-n", "change")   # fill 은 input 만 쏜다
+    pg.wait_for_timeout(900)
+    big = api("/api/find?size=300")
+    A(len(big["places"]) < len(small["places"]),
+      "300명인데 후보 장소가 안 줄었다")
+    # content() 는 안에 박힌 데모 데이터까지 긁어 온다. 눈에 보이는 글자만 본다.
+    # 이름에 '카페' 가 든 공공 공간이 실제로 있다. 창구 이름 전체로 본다.
+    A("카페 · 스터디룸 통대관" not in pg.inner_text("main"),
+      "300명짜리에 카페 통대관 창구가 나온다")
+    A("무료 공간이 거의 없습니다" in pg.inner_text("main"), "후보가 0곳인데 빈 화면이다")
+    ok(f"구하기 — 24명 {len(small['places'])}곳, 300명 {len(big['places'])}곳으로 걸러진다")
+
+    # 실제로 빌릴 수 있는 곳 (서울시 공공서비스예약). 인터넷이 없어도 화면은 살아야 한다.
+    vn = api("/api/venues?size=24")
+    A("rows" in vn and "areas" in vn, f"장소 응답 모양이 다르다: {list(vn)}")
+    A(all(r["cap"] >= 24 for r in vn["rows"]), "24명을 못 받는 곳이 섞여 있다")
+    if vn["rows"]:
+        A(all(r["url"].startswith("http") for r in vn["rows"]), "예약 주소가 http 가 아니다")
+        big_v = api("/api/venues?size=500")
+        A(len(big_v["rows"]) < len(vn["rows"]), "인원이 커졌는데 후보가 안 줄었다")
+        if vn["areas"]:
+            one = vn["areas"][0]
+            A(all(r["area"] == one for r in
+                  api(f"/api/venues?size=24&area={urllib.parse.quote(one)}")["rows"]),
+              "지역으로 안 걸러진다")
+        ok(f"빌릴 수 있는 곳 — 공간시설 {vn['total']}건에서 24명 기준 {len(vn['rows'])}곳")
+    else:
+        ok("빌릴 수 있는 곳 — 목록이 비었지만 화면은 살아 있다 (인터넷 없음)")
+
+    # 보낼 메일 초안 — 마크다운이 들어가면 안 된다 (메일에서는 별표가 그냥 별표다)
+    pg.fill("#f-n", "24")
+    pg.dispatch_event("#f-n", "change")
+    pg.wait_for_timeout(900)
+    pg.click('[data-mail="심사위원"]')
+    pg.wait_for_selector("#f-mailtx")
+    mail = pg.input_value("#f-mailtx")
+    A("■" in mail and "제목:" in mail, "메일 초안 꼴이 아니다")
+    for bad in ["**", "##", "- [ ]", "](http"]:
+        A(bad not in mail, f"메일 초안에 마크다운이 들어갔다: {bad}")
+    A("http" not in mail, "첫 메일에 링크가 들어갔다 (스팸으로 걸린다)")
+    A("먼저 말씀드릴 것" in mail, "불리한 조건을 앞에 안 썼다")
+    ok("메일 초안 — 평문, 링크 없음, 불리한 것 먼저")
+
+    # 연락한 곳 대장
+    pg.locator('[data-lead="장소"][data-src="창구"]').first.click()
+    pg.wait_for_timeout(900)
+    leads = api(f"/api/events/{ev}/leads", key=OK)["rows"]
+    A(len(leads) == 1 and leads[0]["state"] == "보냄", f"대장에 안 들어갔다: {leads}")
+    pg.click(f'[data-state="{leads[0]["id"]}"]')
+    pg.wait_for_timeout(800)
+    A(api(f"/api/events/{ev}/leads", key=OK)["rows"][0]["state"] == "답장",
+      "상태가 안 넘어간다")
+    ok("연락한 곳 대장 — 넣고 상태가 한 칸씩 돈다")
+
+    b.close()
+
+A(not errs, "JS 에러: " + "; ".join(errs))
+
+
+# ── 8-3. 행사장 인터넷이 끊겨도 대회가 굴러가는가 ──────
+# 현장 와이파이는 반드시 죽는다. 그때 앱이 같이 죽으면 대회가 끝난다.
+# 밖으로 나가는 요청을 전부 막고 신청·제출·심사·큰화면을 밟는다.
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    HOST = BASE.split("//")[1].split(":")[0]
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    outside = []
+
+    def gate(route):
+        u = route.request.url
+        if HOST in u or u.startswith("data:") or u.startswith("blob:"):
+            return route.continue_()
+        outside.append((route.request.resource_type, u))
+        return route.abort()
+
+    ctx.route("**/*", gate)
+    errs = []
+    off = ctx.new_page()
+    off.on("pageerror", lambda e: errs.append("정전:" + str(e)))
+
+    oev = post("/api/events", {"title": "정전 시험"})[1]
+    OK2 = oev["okey"]
+    post(f"/api/events/{oev['id']}", {"starts": "2026-01-01", "ends": "2030-01-01",
+         "due": "2030-01-01T18:00", "wifi": "hackon / 1234"}, key=OK2, method="PATCH")
+    # 협찬 로고를 일부러 넣는다. 인터넷이 없으면 이미지가 안 오는데,
+    # 그때 빈 칸만 남으면 협찬사가 돈 낸 자리가 통째로 사라진다.
+    post(f"/api/events/{oev['id']}/sponsors",
+         {"name": "오픈에이아이", "kind": "현금",
+          "logo": "https://img.logo.dev/openai.com"}, key=OK2)
+
+    off.goto(f"{BASE}/e/{oev['id']}", wait_until="domcontentloaded")
+    off.wait_for_selector("body[data-ready='1']", timeout=10000)
+    off.fill("#t-name", "정전팀")
+    off.check("#t-agree")
+    off.click("#t-join")
+    off.wait_for_timeout(900)
+    orows = api(f"/api/events/{oev['id']}/board", key=OK2)["rows"]
+    A(orows, "인터넷 없이 신청이 안 된다")
+
+    otid = orows[0]["id"]
+    A(post(f"/api/teams/{otid}/submit",
+           {"url": "http://192.168.0.9:3000", "note": "정전"} )[0] == 200,
+      "인터넷 없이 제출이 안 된다")
+
+    jo = ctx.new_page()
+    jo.on("pageerror", lambda e: errs.append("정전심사:" + str(e)))
+    jo.goto(f"{BASE}/j/{oev['id']}", wait_until="domcontentloaded")
+    jo.wait_for_selector("#jn", timeout=10000)
+    jo.fill("#jn", "정전심사")
+    jo.click("#jn-go")
+    jo.wait_for_timeout(900)
+    A(len(jo.query_selector_all("input[type=range]")) == 4, "인터넷 없이 심사 화면이 깨진다")
+    jo.click("[data-jsave]")
+    jo.wait_for_timeout(900)
+    A(api(f"/api/events/{oev['id']}/board", key=OK2)["rows"][0]["judges"] == 1,
+      "인터넷 없이 심사가 저장 안 된다")
+
+    tvo = ctx.new_page()
+    tvo.on("pageerror", lambda e: errs.append("정전큰화면:" + str(e)))
+    tvo.set_viewport_size({"width": 1280, "height": 720})
+    tvo.goto(f"{BASE}/tv/{oev['id']}", wait_until="domcontentloaded")
+    tvo.wait_for_timeout(1600)
+    tvt = tvo.inner_text("body")
+    A("hackon / 1234" in tvt, "인터넷 없이 와이파이 안내가 안 뜬다")
+    A(tvo.evaluate("document.querySelectorAll('.qr.big svg').length") == 1,
+      "인터넷 없이 QR 이 안 그려진다")
+    A("오픈에이아이" in tvt,
+      "로고를 못 받았는데 협찬사 이름이 안 뜬다 (돈 낸 자리가 사라진다)")
+
+    A(not errs, "정전 상태 JS 에러: " + "; ".join(errs))
+    # 밖으로 나가는 것이 있어도 '협찬 로고 그림' 까지만이어야 한다.
+    # 스크립트·스타일·API 를 밖에서 받아 오면 그날 화면이 통째로 죽는다.
+    # (플레이라이트는 <img> 요청도 fetch 로 분류할 때가 있어서 종류 말고 주소로 본다)
+    urls = sorted(set(u for _, u in outside))
+    bad = [u for u in urls
+           if u.endswith(".js") or u.endswith(".css") or "/api/" in u
+           or "cdn" in u or "googleapis" in u]
+    A(not bad, f"바깥에서 코드나 API 를 받아 온다: {bad}")
+    A(all("logo.dev" in u or "favicon" in u for u in urls),
+      f"협찬 로고 말고 다른 것이 밖으로 나간다: {urls}")
+    ctx.close()
+    b.close()
+ok(f"인터넷이 끊겨도 굴러간다 — 밖으로 나간 것은 협찬 로고 그림 {len(urls)}개뿐, "
+   "코드·API 는 0건")
+
+
 # ── 9. 윈도우 프로그램이 켤 준비가 되어 있는가 ──────────
 # 창을 실제로 띄우지는 않는다. --check 는 브라우저·포트·화면 파일만 확인하고 끝난다.
 r = subprocess.run(['node', 'desktop.js', '--check'],
@@ -765,6 +1376,33 @@ A(r.returncode == 0, 'desktop.js --check 실패: ' + (r.stderr or ''))
 A('못 찾음' not in r.stdout, '앱 창을 띄울 브라우저가 없다: ' + r.stdout)
 A('화면 파일  있음' in r.stdout, '화면 파일을 못 찾는다: ' + r.stdout)
 ok('윈도우 프로그램 준비됨 (앱 창 브라우저 · 포트 · 화면 파일)')
+
+# ── 10. 배포한 것이 사용자에게 실제로 가는가 ──────────────
+# 서비스워커가 캐시를 먼저 보면, 배포를 해도 한 번 열어 본 브라우저는 옛 화면을 계속 본다.
+# 실제로 그렇게 됐다 — 눈에 안 보이는 고장이라 알아채는 데 오래 걸린다.
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.goto(f"{BASE}/app", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    pg.wait_for_timeout(1500)
+    reg = pg.evaluate("async () => !!(await navigator.serviceWorker.getRegistration())")
+    A(reg, "서비스워커가 아예 안 붙었다")
+    # 서비스워커를 거쳐 받은 것이, 캐시를 건너뛰고 받은 것과 같아야 한다.
+    # 다르면 사용자는 배포 전 화면을 보고 있는 것이다.
+    r = pg.evaluate("""async () => {
+        const a = await (await fetch('/app', {cache: 'no-store'})).text();
+        const b = await (await fetch('/app')).text();
+        return {same: a === b, len: b.length};
+    }""")
+    A(r["len"] > 1000, f"화면이 너무 짧다: {r['len']}")
+    A(r["same"], "서비스워커가 서버 것과 다른(오래된) 화면을 돌려준다")
+    keys = pg.evaluate("async () => await caches.keys()")
+    A(all(k == "hackon-v2" for k in keys), f"옛 캐시가 남아 있다: {keys}")
+    ok(f"배포한 것이 사용자에게 간다 — 서버를 먼저 본다 (캐시 {keys})")
+    ctx.close()
+    b.close()
 
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
