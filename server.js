@@ -754,6 +754,45 @@ function open(file) {
       at     TEXT NOT NULL DEFAULT (datetime('now')),
       note   TEXT NOT NULL DEFAULT ''
     );
+
+    /* 빈자리 판. 운영자가 필요한 자리를 올린다 - 장소·심사·상품·멘토·간식 (PLAN.md §API).
+       kind 는 화면이 아이콘을 붙이는 데 쓴다. */
+    CREATE TABLE IF NOT EXISTS needs(
+      id      INTEGER PRIMARY KEY,
+      event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      kind    TEXT NOT NULL DEFAULT 'other',   -- venue|judge|prize|mentor|snack|other
+      label   TEXT NOT NULL,
+      qty     INTEGER NOT NULL DEFAULT 1,
+      note    TEXT NOT NULL DEFAULT '',
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    /* 공개 장부. 누구나 자리를 맡겠다고 신청하고(pending), 운영자가 확인하면(ok·done)
+       이름이 공개 장부에 남는다. contact 는 운영자만 보려고 저장한다 - 공개 응답에 절대 안 실린다. */
+    CREATE TABLE IF NOT EXISTS pledges(
+      id      INTEGER PRIMARY KEY,
+      need    INTEGER NOT NULL REFERENCES needs(id) ON DELETE CASCADE,
+      event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      name    TEXT NOT NULL,
+      org     TEXT NOT NULL DEFAULT '',
+      contact TEXT NOT NULL DEFAULT '',
+      note    TEXT NOT NULL DEFAULT '',
+      status  TEXT NOT NULL DEFAULT 'pending',   -- pending|ok|done|no
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    /* 2주 뒤 도구 확인. 한 팀의 답은 한 칸 - 다시 쓰면 덮어쓴다.
+       요약(followup-summary)에는 팀 이름도 연락처도 메모도 안 나간다. */
+    CREATE TABLE IF NOT EXISTS followups(
+      id          INTEGER PRIMARY KEY,
+      event       TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      team        INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      tool        TEXT NOT NULL DEFAULT '',
+      still_using INTEGER NOT NULL DEFAULT 0,   -- 1|0
+      note        TEXT NOT NULL DEFAULT '',
+      created     TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(event, team)
+    );
   `);
   /* 이미 쓰던 DB 에도 칸을 붙인다. 있으면 에러가 나는데 그건 그냥 넘긴다. */
   try { db.exec("ALTER TABLE events ADD COLUMN due TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -1615,6 +1654,95 @@ function assign(db, event, b) {
   return due;
 }
 
+/* ── 빈자리 판 · 공개 장부 · 2주 확인 (PLAN.md §API) ──
+   운영자가 필요한 자리를 올리고, 누구나 맡겠다고 신청하고, 운영자가 확인하면
+   이름이 공개 장부에 남는다. contact 는 어느 공개 응답에도 실리지 않는다. */
+const NEED_KINDS = ['venue', 'judge', 'prize', 'mentor', 'snack', 'other'];
+const PLEDGE_STATUS = ['pending', 'ok', 'done', 'no'];
+/* 꺾쇠는 저장 전에 뺀다. JSON 응답을 화면이 그대로 그려도 돌지 않게 - esc 를 잊어도 안전하다 */
+const plain = (s, n) => String(s == null ? '' : s).replace(/[<>]/g, '').trim().slice(0, n);
+
+function addNeed(db, event, b) {
+  const label = plain(b.label, 100);
+  if (!label) throw new HttpError(400, '무슨 자리인지 적어 주세요');
+  const qty = Math.min(Math.max(+b.qty || 1, 1), 99);
+  const kind = NEED_KINDS.includes(b.kind) ? b.kind : 'other';
+  const note = plain(b.note, 300);
+  const r = db.prepare('INSERT INTO needs(event,kind,label,qty,note) VALUES(?,?,?,?,?)')
+    .run(event, kind, label, qty, note);
+  return { id: Number(r.lastInsertRowid), kind, label, qty, note, filled: 0, pledges: [] };
+}
+
+function addPledge(db, need, event, b) {
+  const name = plain(b.name, 40);
+  if (!name) throw new HttpError(400, '이름을 적어 주세요');
+  const r = db.prepare('INSERT INTO pledges(need,event,name,org,contact,note) VALUES(?,?,?,?,?,?)')
+    .run(need, event, name, plain(b.org, 60), plain(b.contact, 100), plain(b.note, 300));
+  return { id: Number(r.lastInsertRowid), status: 'pending' };
+}
+
+function setPledge(db, id, b) {
+  if (!PLEDGE_STATUS.includes(b.status))
+    throw new HttpError(400, '상태는 pending·ok·done·no 중 하나입니다');
+  db.prepare('UPDATE pledges SET status=? WHERE id=?').run(b.status, id);
+  /* 운영자 전용 응답이라 contact 가 실린다 - 공개 주소가 아니다 */
+  return db.prepare('SELECT * FROM pledges WHERE id=?').get(id);
+}
+
+/* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
+function needsOf(db, event) {
+  const pl = db.prepare('SELECT id, need, name, org, status FROM pledges WHERE event=? ORDER BY id')
+    .all(event);
+  return db.prepare('SELECT * FROM needs WHERE event=? ORDER BY id').all(event)
+    .map(n => ({
+      id: n.id, kind: n.kind, label: n.label, qty: n.qty, note: n.note,
+      filled: pl.filter(p => p.need === n.id && (p.status === 'ok' || p.status === 'done')).length,
+      pledges: pl.filter(p => p.need === n.id)
+                 .map(p => ({ id: p.id, name: p.name, org: p.org, status: p.status })),
+    }));
+}
+
+function ledgerOf(db, event) {
+  return db.prepare(`SELECT n.kind, n.label, p.name, p.org, p.status, p.created AS at
+                     FROM pledges p JOIN needs n ON n.id = p.need
+                     WHERE p.event = ? AND p.status IN ('ok','done')
+                     ORDER BY n.id, p.id`).all(event);
+}
+
+/* 팀 열쇠나 신청 때 적은 연락처로만 쓴다. 둘 다 없으면 누구 팀의 답인지 모른다 */
+function addFollowup(db, event, b, req) {
+  let team = null;
+  const tk = String((req && req.headers && req.headers['x-tkey']) || b.tkey || '');
+  if (tk) team = db.prepare('SELECT id FROM teams WHERE event=? AND tkey=?').get(event, tk);
+  if (!team && b.contact) {
+    const pid = pidOf(db, b.contact);
+    if (pid) team = db.prepare('SELECT id FROM teams WHERE event=? AND person=? ORDER BY id').get(event, pid);
+  }
+  if (!team) throw new HttpError(403, '팀 열쇠나 신청 때 적은 연락처가 필요합니다');
+  const tool = plain(b.tool, 60);
+  if (!tool) throw new HttpError(400, '어떤 도구인지 적어 주세요');
+  db.prepare(`INSERT INTO followups(event,team,tool,still_using,note) VALUES(?,?,?,?,?)
+              ON CONFLICT(event,team) DO UPDATE SET tool=excluded.tool,
+                still_using=excluded.still_using, note=excluded.note, created=datetime('now')`)
+    .run(event, team.id, tool, b.still_using ? 1 : 0, plain(b.note, 300));
+  return { ok: true };
+}
+
+/* 공개 요약. 도구별 숫자만 나간다 - 팀 이름도 연락처도 메모도 없다.
+   세 팀 미만 도구를 그대로 내면 그 문자열로 한 팀이 드러나니 작은 칸은 뭉갠다. */
+function followSummary(db, event) {
+  const rows = db.prepare(`SELECT tool, COUNT(*) teams, SUM(still_using) still
+                           FROM followups WHERE event=? GROUP BY tool ORDER BY teams DESC, tool`).all(event);
+  const tools = [];
+  let small = 0, smallStill = 0, hidden = 0;
+  for (const r of rows) {
+    if (r.teams >= MIN_CELL) tools.push({ tool: r.tool, teams: r.teams, still_using: r.still });
+    else { small += r.teams; smallStill += r.still; hidden++; }
+  }
+  if (small) tools.push({ tool: `그 밖(${hidden}종)`, teams: small, still_using: smallStill, merged: true });
+  return { tools };
+}
+
 /* ───────────────────── HTTP ───────────────────── */
 /* #region reuse:http-kit — HttpError·MIME·body()·json(). 이 네 개가 한 세트다 */
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
@@ -2013,6 +2141,32 @@ function routes(db) {
           });
           return res.end(JSON.stringify(dump(db, m[1]), null, 2));
         }
+        /* ── 빈자리 판 · 공개 장부 · 2주 확인 (PLAN.md §API) ── */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/needs$/))) {
+          if (req.method === 'GET') return json(res, 200, needsOf(db, m[1]));
+          if (req.method === 'POST') {
+            needAdmin(db, m[1], key, owner);
+            return json(res, 201, addNeed(db, m[1], await body(req)));
+          }
+        }
+        if ((m = p.match(/^\/api\/needs\/(\d+)\/pledge$/)) && req.method === 'POST') {
+          const n = db.prepare('SELECT event FROM needs WHERE id=?').get(+m[1]);
+          if (!n) throw new HttpError(404, '없는 자리입니다');
+          return json(res, 201, addPledge(db, +m[1], n.event, await body(req)));
+        }
+        if ((m = p.match(/^\/api\/pledges\/(\d+)\/status$/)) && req.method === 'POST') {
+          const r = db.prepare('SELECT event FROM pledges WHERE id=?').get(+m[1]);
+          if (!r) throw new HttpError(404, '없는 신청입니다');
+          needAdmin(db, r.event, key, owner);
+          return json(res, 200, setPledge(db, +m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/ledger$/)) && req.method === 'GET')
+          return json(res, 200, ledgerOf(db, m[1]));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/followup$/)) && req.method === 'POST')
+          return json(res, 200, addFollowup(db, m[1], await body(req), req));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/followup-summary$/)) && req.method === 'GET')
+          return json(res, 200, followSummary(db, m[1]));
+
         if (p === '/api/health') return json(res, 200, {
           ok: true, events: db.prepare('SELECT COUNT(*) c FROM events').get().c,
           teams: db.prepare('SELECT COUNT(*) c FROM teams').get().c,
@@ -2670,6 +2824,84 @@ function selftest() {
   ok(kept.length <= 3, '오래된 백업은 지운다 (' + kept.length + '벌)');
   fs.rmSync(path.join(path.dirname(tmp), 'backup'), { recursive: true, force: true });
 
+  // ── 빈자리 판 · 공개 장부 · 2주 확인 (PLAN.md §API) ──
+  const nbEv = createEvent(db, { title: '빈자리시험' });
+  /* 운영자 열쇠 없이는 자리를 못 올린다. needAdmin 이 막히면 뒤의 addNeed 는 안 간다 */
+  let 락 = false;
+  try { needAdmin(db, nbEv.id, '틀린열쇠', ''); addNeed(db, nbEv.id, { kind: 'venue', label: '장소' }); }
+  catch { 락 = true; }
+  ok(락, '운영자 열쇠 없이는 자리를 못 올린다');
+
+  const n1 = addNeed(db, nbEv.id, { kind: 'venue', label: '주말 대관 한 곳', qty: 2, note: '콘센트 많은 곳' });
+  ok(n1.kind === 'venue' && n1.filled === 0 && n1.pledges.length === 0 && n1.note === '콘센트 많은 곳',
+     '운영자가 자리를 올린다');
+  ok(addNeed(db, nbEv.id, { kind: 'party', label: '이상한 종류' }).kind === 'other',
+     '모르는 종류는 other 로 둔다');
+  addNeed(db, nbEv.id, { kind: 'snack', label: '<script>alert(1)</script>간식',
+                         note: '<img src=x onerror=alert(1)>' });
+  ok(!JSON.stringify(needsOf(db, nbEv.id)).includes('<'), '라벨·메모의 꺾쇠는 저장 전에 뺀다');
+
+  /* 누구나 신청한다. 연락처는 운영자가 볼 것 - 공개 응답 어디에도 안 실린다 */
+  const pg1 = addPledge(db, n1.id, nbEv.id,
+    { name: '김실무', org: '어느회사', contact: 'kim@x.test', note: '심사도 같이 봅니다' });
+  ok(pg1.status === 'pending', '신청은 pending 으로 시작한다');
+  ok(db.prepare('SELECT contact FROM pledges WHERE id=?').get(pg1.id).contact === 'kim@x.test',
+     '연락처는 저장된다 - 운영자가 본다');
+  const pubN = needsOf(db, nbEv.id).find(x => x.id === n1.id);
+  ok(pubN.pledges.length === 1 && pubN.pledges[0].name === '김실무'
+     && pubN.pledges[0].org === '어느회사' && pubN.pledges[0].status === 'pending',
+     '신청이 자리에 붙는다');
+  ok(!('contact' in pubN.pledges[0])
+     && !JSON.stringify(needsOf(db, nbEv.id)).includes('kim@x.test'),
+     '공개 needs 응답에 연락처가 안 실린다');
+  ok(pubN.filled === 0, 'pending 는 아직 채운 것이 아니다');
+  ok(!JSON.stringify(ledgerOf(db, nbEv.id)).includes('김실무'), 'pending 는 장부에도 안 나온다');
+
+  /* 운영자가 확인하면 공개 장부에 이름이 남는다 */
+  setPledge(db, pg1.id, { status: 'ok' });
+  const led = ledgerOf(db, nbEv.id);
+  ok(led.length === 1 && led[0].name === '김실무' && led[0].status === 'ok' && !!led[0].at,
+     '확인하면 공개 장부에 이름이 남는다');
+  ok(Object.keys(led[0]).sort().join() === 'at,kind,label,name,org,status', '장부 칸이 약속과 같다');
+  const pg2 = addPledge(db, n1.id, nbEv.id, { name: '아직인사람', contact: 'wait@x.test' });
+  ok(ledgerOf(db, nbEv.id).length === 1, '새 pending 는 장부에 안 나온다');
+  setPledge(db, pg2.id, { status: 'no' });
+  ok(ledgerOf(db, nbEv.id).length === 1, '거절한 신청도 장부에 안 나온다');
+  setPledge(db, pg1.id, { status: 'done' });
+  ok(needsOf(db, nbEv.id).find(x => x.id === n1.id).filled === 1,
+     'ok·done 은 자리를 채운 것으로 센다');
+  let 이상한상태 = false;
+  try { setPledge(db, pg1.id, { status: 'maybe' }); } catch { 이상한상태 = true; }
+  ok(이상한상태, '상태는 정해진 넷 중 하나다');
+
+  /* 2주 확인 - 팀 열쇠나 신청 때 적은 연락처로만 쓴다 */
+  let 막힘 = false;
+  try { addFollowup(db, nbEv.id, { tool: '뭔가' }, { headers: {} }); } catch { 막힘 = true; }
+  ok(막힘, '열쇠나 연락처 없이는 2주 확인을 못 쓴다');
+  const f1 = joinTeam(db, nbEv.id, { name: '후팀가', agree: true, contact: 'f1@x.test' });
+  const f2 = joinTeam(db, nbEv.id, { name: '후팀나', agree: true, contact: 'f2@x.test' });
+  const f3 = joinTeam(db, nbEv.id, { name: '후팀다', agree: true, contact: 'f3@x.test' });
+  const f4 = joinTeam(db, nbEv.id, { name: '후팀라', agree: true, contact: 'f4@x.test' });
+  addFollowup(db, nbEv.id, { tool: '핵온도구', still_using: 1, note: '계속 씁니다' },
+    { headers: { 'x-tkey': db.prepare('SELECT tkey FROM teams WHERE id=?').get(f1).tkey } });
+  addFollowup(db, nbEv.id, { tool: '핵온도구', still_using: 1, contact: 'f2@x.test' }, { headers: {} });
+  addFollowup(db, nbEv.id, { tool: '핵온도구', still_using: 0,
+    tkey: db.prepare('SELECT tkey FROM teams WHERE id=?').get(f3).tkey }, { headers: {} });
+  addFollowup(db, nbEv.id, { tool: '딴도구', still_using: 1, contact: 'f4@x.test' }, { headers: {} });
+  /* 다시 쓰면 팀이 늘지 않고 덮어쓴다 */
+  addFollowup(db, nbEv.id, { tool: '핵온도구', still_using: 0, contact: 'f2@x.test' }, { headers: {} });
+  const sum = followSummary(db, nbEv.id);
+  const ht = sum.tools.find(x => x.tool === '핵온도구');
+  ok(ht && ht.teams === 3 && ht.still_using === 1,
+     '도구별로 몇 팀이 아직 쓰는지 모은다 (다시 쓰면 덮어쓴다)');
+  ok(sum.tools.some(x => x.merged), '세 팀 미만 도구는 뭉쳐서 나간다');
+  const sumTxt = JSON.stringify(sum);
+  ok(!sumTxt.includes('후팀') && !sumTxt.includes('@') && !sumTxt.includes('계속'),
+     '요약에 팀 이름·연락처·메모가 안 나간다');
+  db.prepare('DELETE FROM events WHERE id=?').run(nbEv.id);
+  ok(!db.prepare('SELECT 1 FROM needs WHERE event=?').get(nbEv.id),
+     '대회를 지우면 빈자리 판도 따라 지워진다');
+
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
@@ -2707,4 +2939,5 @@ if (require.main === module) {
 }
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, score, board, outcomes,
                    card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
-                   dump, backup, isAdmin };
+                   dump, backup, isAdmin,
+                   addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary };
