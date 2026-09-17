@@ -8,23 +8,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#151A34">
+<meta name="theme-color" content="#141824">
 <link rel="manifest" href="/manifest.webmanifest">
 <title>HACK:ON — 누구나 5분 만에 대회를 연다</title>
 <style>
 :root{
   /* mandeun 색을 그대로 쓴다. 밝은 방에서 오래 보는 화면이라 크림 종이에 올리브 글자다.
      차가운 남색·회색은 다 걷어냈다 - 몇 시간 보면 눈이 시리다. */
-  --navy:#3B4537; --navy-d:#2B3328; --navy-l:#EFEEE2;   /* 이름은 그대로 두고 색만 올리브로 */
-  --acc:#C96442;   /* 콜론의 켜진 점. 크림 위에서 눈에 걸리는 유일한 따뜻한 색 */
-  --ok:#3F7D5F; --ok-l:#E8F1E9; --warn:#A5702B; --warn-l:#F8F0E0; --bad:#B05C5C;
-  --ink:#2B3328; --ink2:#5E6D56; --ink3:#8B9A80;
-  --rule:#DEDACB; --bg:#FBFAF4; --bg2:#F3F1E6;
+  --navy:#141824; --navy-d:#0C0F18; --navy-l:#E8EDFB;   /* 먹. 큰 화면 바탕과 제목 */
+  --acc:#2350F5;   /* 켜짐 파랑. 켜진 점·주 버튼·링크에만 쓴다 (BRAND.md) */
+  --ok:#12A36B; --ok-l:#E3F5EC; --warn:#E8A317; --warn-l:#FDF3DC; --bad:#D6453D;
+  --ink:#141824; --ink2:#4A5163; --ink3:#8A91A3;
+  --rule:#DDE2EC; --bg:#F4F6FA; --bg2:#EAEEF5;
   --kr:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif; --r:12px;
-  --paper:#F9F7EE;   /* 순백은 눈이 아프다. 크림 종이에 가깝게 */
+  --paper:#FFFFFF;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:var(--kr);background:#DCD9C9;color:var(--ink);font-size:15px;
+body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;
      display:flex;justify-content:center;min-height:100vh;
      -webkit-font-smoothing:antialiased}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;border:0;background:none}
@@ -270,6 +270,10 @@ nav .i{font-size:17px}
   main{overflow:visible;padding:0;columns:auto !important}
   .card,table{break-inside:avoid}
 }
+
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.num,.tabnum{font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
