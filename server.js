@@ -1236,6 +1236,7 @@ function getEvent(db, id) {
   const e = db.prepare('SELECT * FROM events WHERE id=?').get(id);
   if (!e) throw new HttpError(404, '없는 대회입니다');
   delete e.okey;                     // 열쇠는 절대 안 내려보낸다
+  delete e.owner;                    // 주최자 열쇠도 안 내려보낸다 — 계정 노릇을 하는 비밀이라 링크만 열어도 새면 통째로 털린다
   e.rubric = JSON.parse(e.rubric);
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
   e.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(id).c;
@@ -2089,7 +2090,12 @@ function routes(db) {
           return json(res, 200, judgeView(db, m[1], q.judge || ''));
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/support$/))) {
-          if (req.method === 'GET') return json(res, 200, support(db, m[1]));
+          if (req.method === 'GET') {
+            const s = support(db, m[1]);
+            /* 지원자 연락처는 운영자만. board() 가 팀 연락처를 지우는 것과 같은 이유다. */
+            if (!isAdmin(db, m[1], key, owner)) s.people = s.people.map(({ contact, ...r }) => r);
+            return json(res, 200, s);
+          }
           if (req.method === 'POST') {
             needAdmin(db, m[1], key, owner);
             const b = await body(req);
@@ -2107,6 +2113,11 @@ function routes(db) {
         }
 
         if ((m = p.match(/^\/api\/assignments\/(\d+)\/done$/)) && req.method === 'POST') {
+          /* 약속을 '지킴' 으로 바꾸는 것은 운영자 몫이다 — 보고서의 이행률 숫자가 여기서 나온다.
+             바로 위 checkin 처럼, 그 약속이 어느 대회 것인지 찾아 운영자 열쇠를 확인한다. */
+          const a = db.prepare(`SELECT t.event FROM assignments a JOIN teams t ON t.id=a.team WHERE a.id=?`).get(+m[1]);
+          if (!a) throw new HttpError(404, '없는 약속입니다');
+          needAdmin(db, a.event, key, owner);
           const b = await body(req);
           db.prepare('UPDATE assignments SET done=?, note=? WHERE id=?')
             .run(b.done === false ? '' : today(), b.note || '', +m[1]);

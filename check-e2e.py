@@ -643,6 +643,24 @@ with sync_playwright() as p:
     guest = api(f"/api/events/{ev}/board")
     A(all("contact" not in r for r in guest["rows"]), "열쇠 없이 연락처가 나온다")
     A(all("came" not in r for r in guest["rows"]), "열쇠 없이 체크인 정보가 나온다")
+    # 주최자 열쇠(owner)는 계정 노릇을 하는 비밀이다. 공개 링크만 열어도 새면 통째로 털린다.
+    # (GLM 레드팀 pwn-ownerkey — getEvent 가 okey 는 지우면서 owner 는 안 지웠다)
+    A("owner" not in guest["event"], "열쇠 없이 주최자 열쇠(owner)가 board 로 샜다")
+    A("owner" not in api(f"/api/events/{ev}"), "열쇠 없이 주최자 열쇠(owner)가 대회 정보로 샜다")
+    A("okey" not in guest["event"], "열쇠 없이 운영자 열쇠(okey)가 샜다")
+    # 지원자(봐 줄 사람) 연락처도 운영자만 — 팀 연락처를 지우는 것과 같은 이유 (pwn-support-contact).
+    # 본 대회 지원자 목록을 건드리면 뒤 배정 검사가 어긋나므로, 따로 대회를 하나 만들어 본다.
+    _, sev = post("/api/events", {"title": "지원자연락처시험"})
+    A(post(f"/api/events/{sev['id']}/support",
+           {"name": "봐줄사람", "contact": "helper-secret@example.com"}, key=sev["okey"])[0] == 201,
+      "지원자 등록 실패")
+    gsup = api(f"/api/events/{sev['id']}/support")
+    A(gsup.get("people"), "지원자를 넣었는데 support 에 안 보인다")
+    A("helper-secret" not in json.dumps(gsup, ensure_ascii=False),
+      "열쇠 없이 지원자 연락처가 support 로 샜다")
+    A(any(x.get("contact") == "helper-secret@example.com"
+          for x in api(f"/api/events/{sev['id']}/support", key=sev["okey"])["people"]),
+      "운영자에게도 지원자 연락처가 안 보인다")
     go = api(f"/api/events/{ev}/outcomes")
     A("found" not in go and "list" not in go, "열쇠 없이 유입 경로·성과 명단이 나온다")
     for path, body_ in [(f"/api/events/{ev}/sponsors", {"name": "몰래"}),
@@ -651,6 +669,9 @@ with sync_playwright() as p:
                         (f"/api/events/{ev}/open", {"open": True}),
                         (f"/api/events/{ev}/extend", {"minutes": 30})]:
         A(post(path, body_)[0] == 403, f"열쇠 없이 {path} 가 됐다")
+    # 사후지원 약속 '완료' 처리도 운영자만 — 보고서 이행률이 여기서 나온다 (pwn-assign-done)
+    A(post("/api/assignments/999999/done", {"done": True})[0] in (403, 404),
+      "열쇠 없이 약속 완료 처리가 됐다")
     A(post(f"/api/teams/{top['id']}/checkin", {})[0] == 403, "열쇠 없이 체크인이 됐다")
     A(post(f"/api/events/{ev}/list", {"list": False})[0] == 403, "열쇠 없이 목록 조작이 됐다")
 
