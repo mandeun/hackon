@@ -784,6 +784,21 @@ function open(file) {
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    /* 자리 밖 제안. 운영자가 안 올린 역할이라도 '이거 제가 할 수 있어요' 를 앱에서 바로 보낸다.
+       메일을 대신한다. 운영자가 확인하면 그 자리를 하나 만들어 확정 기여로 넘긴다.
+       contact 는 운영자만 본다 - 공개 응답엔 절대 안 실린다(pledges 와 같은 규칙). */
+    CREATE TABLE IF NOT EXISTS offers(
+      id      INTEGER PRIMARY KEY,
+      event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      kind    TEXT NOT NULL DEFAULT 'other',   -- venue|judge|prize|mentor|snack|other
+      name    TEXT NOT NULL,
+      org     TEXT NOT NULL DEFAULT '',
+      contact TEXT NOT NULL DEFAULT '',
+      note    TEXT NOT NULL DEFAULT '',
+      status  TEXT NOT NULL DEFAULT 'pending',  -- pending|ok|no
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     /* 2주 뒤 도구 확인. 한 팀의 답은 한 칸 - 다시 쓰면 덮어쓴다.
        요약(followup-summary)에는 팀 이름도 연락처도 메모도 안 나간다. */
     CREATE TABLE IF NOT EXISTS followups(
@@ -1726,6 +1741,39 @@ function setPledge(db, id, b) {
   return db.prepare('SELECT * FROM pledges WHERE id=?').get(id);
 }
 
+/* ── 자리 밖 제안(offer) — 메일 대신 앱에서 바로 ── */
+const OFFER_STATUS = ['pending', 'ok', 'no'];
+const OFFER_KIND_LABEL = { venue:'장소', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
+function addOffer(db, event, b) {
+  if (!db.prepare('SELECT 1 FROM events WHERE id=?').get(event)) throw new HttpError(404, '없는 대회입니다');
+  const name = plain(b.name, 40);
+  if (!name) throw new HttpError(400, '이름을 적어 주세요');
+  const kind = NEED_KINDS.includes(b.kind) ? b.kind : 'other';
+  const r = db.prepare('INSERT INTO offers(event,kind,name,org,contact,note) VALUES(?,?,?,?,?,?)')
+    .run(event, kind, name, plain(b.org, 60), plain(b.contact, 100), plain(b.note, 300));
+  return { id: Number(r.lastInsertRowid), status: 'pending' };
+}
+/* 운영자 전용 — contact 가 실린다 */
+function offersOf(db, event) {
+  return db.prepare("SELECT * FROM offers WHERE event=? AND status<>'no' ORDER BY id").all(event);
+}
+function setOffer(db, id, b) {
+  if (!OFFER_STATUS.includes(b.status)) throw new HttpError(400, '상태는 pending·ok·no 중 하나입니다');
+  const o = db.prepare('SELECT * FROM offers WHERE id=?').get(id);
+  if (!o) throw new HttpError(404, '없는 제안입니다');
+  /* 확인하면 그 종류의 자리를 하나 만들어 확정 기여로 넘긴다 — 공개 장부·점판이 그대로 쓴다.
+     한 제안을 두 번 확인해도 자리가 두 개 생기지 않게, 이미 ok 면 그냥 둔다. */
+  if (b.status === 'ok' && o.status !== 'ok') {
+    const label = plain(o.note, 80) || OFFER_KIND_LABEL[o.kind] || '기타';
+    const nr = db.prepare('INSERT INTO needs(event,kind,label,qty,note) VALUES(?,?,?,1,?)')
+      .run(o.event, o.kind, label, '제안으로 들어온 자리');
+    db.prepare("INSERT INTO pledges(need,event,name,org,contact,note,status) VALUES(?,?,?,?,?,?,'ok')")
+      .run(Number(nr.lastInsertRowid), o.event, o.name, o.org, o.contact, o.note);
+  }
+  db.prepare('UPDATE offers SET status=? WHERE id=?').run(b.status, id);
+  return { id, status: b.status };
+}
+
 /* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
 function needsOf(db, event) {
   const pl = db.prepare('SELECT id, need, name, org, status FROM pledges WHERE event=? ORDER BY id')
@@ -2260,6 +2308,18 @@ function routes(db) {
           if (!r) throw new HttpError(404, '없는 신청입니다');
           needAdmin(db, r.event, key, owner);
           return json(res, 200, setPledge(db, +m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/offer$/)) && req.method === 'POST')
+          return json(res, 201, addOffer(db, m[1], await body(req)));   // 공개 — 아무나 제안
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/offers$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner);                              // 운영자만 — 연락처 포함
+          return json(res, 200, offersOf(db, m[1]));
+        }
+        if ((m = p.match(/^\/api\/offers\/(\d+)\/status$/)) && req.method === 'POST') {
+          const o = db.prepare('SELECT event FROM offers WHERE id=?').get(+m[1]);
+          if (!o) throw new HttpError(404, '없는 제안입니다');
+          needAdmin(db, o.event, key, owner);
+          return json(res, 200, setOffer(db, +m[1], await body(req)));
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/ledger$/)) && req.method === 'GET')
           return json(res, 200, ledgerOf(db, m[1]));

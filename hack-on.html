@@ -593,6 +593,27 @@ const view = $('#view');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 const won = n => (+n || 0).toLocaleString('ko-KR') + '원';
 const NEED_KIND = { venue:'장소', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
+const kindOptions = (sel) => Object.entries(NEED_KIND)
+  .map(([k, v]) => `<option value="${k}"${k === sel ? ' selected' : ''}>${v}</option>`).join('');
+/* 자리 밖 제안 폼. 운영자가 안 올린 역할이라도 앱에서 바로 '제가 할 수 있어요'. 메일을 대신한다. */
+function offerForm(eid) {
+  return `<div class="card" id="help">
+    <h3>🙋 자리 밖에서도 돕고 싶으신가요</h3>
+    <div class="meta">운영자가 아직 안 올린 역할이라도 제안할 수 있습니다.
+      운영자가 확인하면 그 자리가 생기고 공개 장부에 올라갑니다. 메일 안 쓰셔도 됩니다.</div>
+    <label>무엇을 도울 수 있나요</label>
+    <select id="of-kind">${kindOptions('other')}</select>
+    <label>이름 <span class="pill">필수</span></label>
+    <input id="of-name" placeholder="이름 또는 팀/가게/회사 이름">
+    <label>소속 (선택)</label><input id="of-org" placeholder="선택">
+    <label>연락처 <span class="pill warn">운영자에게만 보입니다</span></label>
+    <input id="of-contact" placeholder="이메일 또는 전화">
+    <label>어떻게 도울 수 있나요 (선택)</label>
+    <input id="of-note" placeholder="예) 20명 들어갈 카페를 토요일에 빌려드릴 수 있어요">
+    <div style="height:14px"></div>
+    <button class="btn" id="of-send" data-of-event="${esc(eid)}">돕겠다고 보내기</button>
+  </div>`;
+}
 const needKind = k => NEED_KIND[k] || k || '기타';
 const needProgress = n => `${Math.min(+n.filled || 0, +n.qty || 0)}/${+n.qty || 0}`;
 /* 자리 점판. needs 의 qty 만큼 점을 그리고, 확인된 수만큼 켜고, 기다리는 수만큼 노랑 테두리. */
@@ -1466,6 +1487,8 @@ const SCREEN = {
     /* 운영자 열쇠가 있을 때만 연락처가 붙은 명단을 받는다. 없으면 빈 배열. */
     const pledgeInfo = {};
     (LIVE ? await api(`/events/${cur}/pledges`).catch(() => []) : (DEMO.pledges || [])).forEach(p => { pledgeInfo[p.id] = p; });
+    /* 자리 밖 제안. 아무나 메일 대신 앱에서 보낸 것. 운영자만 본다(연락처 포함). */
+    const offers = LIVE ? await api(`/events/${cur}/offers`).catch(() => []) : [];
     /* 열쇠가 없으면 순위와 공유 주소까지만 보여 준다. 연락처는 서버가 이미 안 준다. */
     if (LIVE && !e.admin) return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 참가 ${e.teams}팀</p>
@@ -1623,6 +1646,17 @@ const SCREEN = {
       <details open><summary>필요한 자리 <span class="when">${needs.reduce((a,n) => a + Math.max(0,(+n.qty||0)-(+n.filled||0)),0)}자리 남음</span></summary><div class="in">
         ${dotBoard(needs, '내 대회의 자리')}
         <div class="meta">장소·심사·상품·멘토·간식을 공개 페이지에 올립니다. 누가 맡겠다고 하면 여기서 연락처를 보고 확인하거나 거절합니다.</div>
+        ${offers.filter(o => o.status === 'pending').length ? `<div class="card" style="margin-top:10px;border-left:3px solid var(--acc)">
+          <h3>🙋 들어온 제안 <span class="pill">${offers.filter(o => o.status === 'pending').length}</span></h3>
+          <div class="meta">공개 페이지에서 '자리 밖에서도 돕고 싶어요' 로 온 것입니다. 확인하면 그 자리가 생겨 공개 장부에 올라갑니다.</div>
+          ${offers.filter(o => o.status === 'pending').map(o => `<div class="shrow" style="align-items:center;margin-top:9px">
+            <div class="meta" style="flex:1"><b>${esc(needKind(o.kind))}</b> · <b>${esc(o.name)}</b>${o.org ? ' · ' + esc(o.org) : ''}
+              ${o.note ? `<br>${esc(o.note)}` : ''}
+              <div class="contact">연락처 <b>${esc(o.contact || '—')}</b></div></div>
+            <button class="btn sm" data-offer-status="${esc(o.id)}" data-status="ok">확인</button>
+            <button class="btn sec sm" data-offer-status="${esc(o.id)}" data-status="no">내리기</button>
+          </div>`).join('')}
+        </div>` : ''}
         ${needs.length ? needs.map(n => `<div class="card" style="margin-top:9px">
           <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)}</span></h3>
           ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
@@ -1866,6 +1900,8 @@ const SCREEN = {
       ${ledger.length ? `<h3>공개 장부</h3>
       <p class="sub">운영자가 확인한 것만 이름과 함께 남습니다. 연락처는 공개하지 않습니다.</p>
       <table><tr><th>자리</th><th>이름</th><th>소속</th></tr>${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
+
+      ${!ended ? offerForm(e.id) : ''}
 
       ${(hrep && hrep.n) ? `<div class="card">
         <h3>참가하신 분들이 남긴 평가</h3>
@@ -2598,6 +2634,28 @@ function wire() {
         if (n) n.pledges.push({ id:'dp' + Date.now(), name, org:val('org'), status:'pending' });
       }
       flash('맡겠다는 뜻을 보냈습니다. 운영자가 확인하면 공개 장부에 이름이 뜹니다');
+    } catch (e) { flash(e.message, true); }
+  });
+
+  const ofsend = $('#of-send');
+  if (ofsend) ofsend.onclick = async () => {
+    const eid = ofsend.dataset.ofEvent;
+    const name = $('#of-name').value.trim(), contact = $('#of-contact').value.trim();
+    if (!name) return flash('이름을 넣어 주세요', true);
+    if (!contact) return flash('운영자가 연락할 연락처를 넣어 주세요', true);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    try {
+      await api(`/events/${eid}/offer`, { method:'POST', body:{
+        kind: $('#of-kind').value, name, org: $('#of-org').value.trim(),
+        contact, note: $('#of-note').value.trim() } });
+      flash('제안을 보냈습니다. 운영자가 확인하면 자리가 생깁니다');
+    } catch (e) { flash(e.message, true); }
+  };
+
+  document.querySelectorAll('[data-offer-status]').forEach(b => b.onclick = async () => {
+    try {
+      await api(`/offers/${b.dataset.offerStatus}/status`, { method:'POST', body:{ status:b.dataset.status } });
+      flash(b.dataset.status === 'ok' ? '자리를 만들었습니다. 공개 장부에 올라갑니다' : '제안을 내렸습니다');
     } catch (e) { flash(e.message, true); }
   });
 

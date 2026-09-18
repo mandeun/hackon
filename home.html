@@ -567,7 +567,7 @@ document.querySelectorAll('[data-mail]').forEach(function(a){ a.href = 메일주
 
 /* ── 열린 대회 목록. 진짜 서버에서 받아 온다. 파일로 열면 예시. ── */
 var 예시 = [{ id:'demo1', title:'우리 동네 생활 불편 해커톤 1회', host:'유재원', starts:첫대회, ends:첫대회, prize:300000, teams:6 }];
-var 대회들 = [], 필터 = 'all';
+var 대회들 = [], 필터 = 'all', 열린곧 = null;   // 열린곧 = 가장 가까운 모집중 대회 id (인앱 도움 링크가 쓴다)
 function 상태(e){
   var t = ymd();
   if (t < e.starts) return { k:'모집중', c:'open' };
@@ -610,12 +610,22 @@ function 그리기(){
   }).join('');
   /* 표제의 '참가 신청' 은 가장 가까운 모집중 대회로 바로 보낸다. 없으면 목록으로. */
   var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && e.id !== 'demo1'; })[0];
+  열린곧 = 곧 ? 곧.id : null;
   ['hero-join','give-time'].forEach(function(id){ var a = document.getElementById(id); if (a) a.href = 곧 ? '/e/' + 곧.id : '#list'; });
+  /* 협찬도 열린 대회가 있으면 앱 안에서 자리로 제안. 없으면 메일로 떨어진다. */
+  var ml = document.getElementById('mail-link');
+  if (ml && 곧) { ml.href = '/e/' + 곧.id + '#help'; ml.textContent = '앱에서 협찬 제안'; }
   if (곧) 로고띠(곧.id);
 }
 fetch('/api/events').then(function(r){ return r.json(); }).then(function(list){
   대회들 = list; document.getElementById('n-list').textContent = list.length || ''; 그리기();
 }).catch(function(){ 대회들 = 예시; 그리기(); });
+document.addEventListener('click', function(e){
+  var a = e.target.closest ? e.target.closest('.help-cta') : null;
+  if (!a) return;
+  e.preventDefault();
+  location.href = 열린곧 ? '/e/' + 열린곧 + '#help' : '#list';
+});
 document.getElementById('q').addEventListener('input', 그리기);
 document.getElementById('sort').addEventListener('change', 그리기);
 document.querySelectorAll('[data-filter]').forEach(function(b){
@@ -680,7 +690,7 @@ function 자리그리기(need){
       '<td class="k">' + esc(r.role) + '</td>' +
       '<td>' + esc(String(r.why).split('. ').slice(0, 2).join('. ')) + '</td>' +
       '<td class="n grey">' + esc(String(r.when).split('.')[0]) + '</td>' +
-      '<td><a class="btn s o" href="' + 메일주소(r.role, '제가 할게요') + '">제가 할게요</a></td>' +
+      '<td><a class="btn s o help-cta" href="#list">제가 할게요</a></td>' +
       '</tr>';
   }).join('');
   머리글();

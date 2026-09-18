@@ -742,6 +742,33 @@ with sync_playwright() as p:
     A(code_of(f"/api/events/{ev}/spread", OK) == 200, "맞는 열쇠가 막혔다")
     ok("운영자 열쇠 — 삭제·연락처·성과·체크인이 전부 막힌다 (403)")
 
+    # ── 자리 밖 제안(offer) — 메일 대신 앱에서 바로 (GLM 검토 대상) ──
+    # 손님이 제안을 보낸다 (열쇠 없이). 운영자가 확인하면 자리가 생겨 공개 장부에 오른다.
+    A(post(f"/api/events/{ev}/offer",
+           {"kind": "venue", "name": "동네카페", "org": "플로피",
+            "contact": "cafe-secret@example.com", "note": "토요일 20명 자리 빌려드려요"})[0] == 201,
+      "손님이 자리 제안을 못 보냈다")
+    # 손님은 남의 제안 목록(연락처 포함)을 못 본다 — 운영자 전용
+    A(code_of(f"/api/events/{ev}/offers") == 403, "제안 목록이 열쇠 없이 열린다")
+    offs = api(f"/api/events/{ev}/offers", key=OK)
+    A(offs and offs[-1]["contact"] == "cafe-secret@example.com", f"운영자가 제안 연락처를 못 본다: {offs}")
+    oid = offs[-1]["id"]
+    # 손님 공개 응답 어디에도 제안자 연락처가 없어야 한다
+    A("cafe-secret" not in json.dumps(api(f"/api/events/{ev}/ledger"), ensure_ascii=False),
+      "제안자 연락처가 공개 장부로 샜다")
+    # 열쇠 없이 확인 처리 못 한다
+    A(post(f"/api/offers/{oid}/status", {"status": "ok"})[0] == 403, "열쇠 없이 제안이 확정됐다")
+    # 운영자가 확인하면 그 종류의 자리가 생기고 확정 기여로 공개 장부에 오른다
+    before = len(api(f"/api/events/{ev}/ledger"))
+    A(post(f"/api/offers/{oid}/status", {"status": "ok"}, OK)[0] == 200, "제안 확인이 안 됐다")
+    led = api(f"/api/events/{ev}/ledger")
+    A(len(led) == before + 1 and any(x["name"] == "동네카페" for x in led),
+      f"확인한 제안이 공개 장부에 안 올랐다: {led}")
+    # 두 번 확인해도 자리가 두 개 생기지 않는다
+    post(f"/api/offers/{oid}/status", {"status": "ok"}, OK)
+    A(len(api(f"/api/events/{ev}/ledger")) == before + 1, "제안을 두 번 확인하니 자리가 둘로 늘었다")
+    ok("자리 밖 제안 — 손님이 앱에서 보내고, 운영자가 확인하면 공개 장부에 오른다 (연락처는 운영자만)")
+
     # 참가자가 해야 하는 일은 열쇠 없이도 된다
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")
     # 심사 화면은 이제 심사 열쇠가 있어야 열린다 — 공개 링크만으로 아무나 점수를 넣던 것을 막았다
@@ -1003,7 +1030,9 @@ with sync_playwright() as p:
         A(pub.query_selector(bad_id) is None, f"공개 화면에 {bad_id} 가 있다")
     ids = [el.get_attribute("id") for el in
            pub.query_selector_all("#view input, #view textarea, #view select, #view button")]
-    A(all(i and i.startswith("t-") for i in ids), f"공개 화면에 신청 말고 다른 칸이 있다: {ids}")
+    # 공개 화면 칸은 참가 신청(t-)과 자리 밖 제안(of-) 둘뿐. 운영 칸은 위 bad_id 로 이미 막았다.
+    A(all(i and (i.startswith("t-") or i.startswith("of-")) for i in ids),
+      f"공개 화면에 신청·제안 말고 다른 칸이 있다: {ids}")
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
                  "함께한 곳", "오픈에이아이",
