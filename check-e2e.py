@@ -1388,7 +1388,10 @@ r = subprocess.run(['node', 'desktop.js', '--check'],
                    cwd=os.path.dirname(os.path.abspath(__file__)),
                    capture_output=True, text=True, encoding='utf-8')
 A(r.returncode == 0, 'desktop.js --check 실패: ' + (r.stderr or ''))
-A('못 찾음' not in r.stdout, '앱 창을 띄울 브라우저가 없다: ' + r.stdout)
+# 앱 창용 브라우저(엣지·크롬 경로)는 윈도우 실행기 몫이다. 맥·리눅스에서는 늘 '못 찾음' 이라
+# 거기서까지 보면 검사가 늘 빨갛고, 늘 빨간 검사는 아무도 안 본다.
+if sys.platform == 'win32':
+    A('못 찾음' not in r.stdout, '앱 창을 띄울 브라우저가 없다: ' + r.stdout)
 A('화면 파일  있음' in r.stdout, '화면 파일을 못 찾는다: ' + r.stdout)
 ok('윈도우 프로그램 준비됨 (앱 창 브라우저 · 포트 · 화면 파일)')
 
