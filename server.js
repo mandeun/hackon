@@ -842,6 +842,7 @@ function open(file) {
   for (const c of ['role', 'found', 'note', 'agreed', 'came', 'want'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN solo INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE teams ADD COLUMN featured INTEGER NOT NULL DEFAULT 0'); } catch {}   // 운영자가 고른 추천작
   /* 열쇠가 없던 시절의 팀에도 열쇠를 하나씩 채워 둔다.
      빈 열쇠를 그냥 두면 '열쇠가 비면 아무나' 라는 구멍이 남는다.
      이 팀들의 브라우저에는 열쇠가 없지만, 연락처를 준 팀은 연락처로,
@@ -1407,7 +1408,7 @@ function closed(e) {
 function board(db, event, admin = false) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
-    SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply,
+    SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured,
            t.agreed, t.photo, t.came, t.size, t.want,
            s.url, s.note, s.aiuse, s.aidrop
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
@@ -1785,6 +1786,21 @@ function needsOf(db, event) {
       pledges: pl.filter(p => p.need === n.id)
                  .map(p => ({ id: p.id, name: p.name, org: p.org, status: p.status })),
     }));
+}
+
+/* 첫 화면 '지난 대회 우수작'. 운영자가 별표한 팀만. 목록에 올린 대회에서, 링크는 마감 뒤에만.
+   메일·연락처 같은 개인정보는 절대 안 싣는다 — 팀 이름·대회 제목·설명·제출 링크뿐. */
+function showcase(db) {
+  const rows = db.prepare(`SELECT t.name, t.event, e.title AS event_title, e.due, e.ends,
+                                  s.url, s.note
+                           FROM teams t JOIN events e ON e.id = t.event
+                           LEFT JOIN submissions s ON s.team = t.id
+                           WHERE t.featured=1 AND e.listed=1
+                           ORDER BY t.featured DESC, t.id DESC LIMIT 24`).all();
+  return rows
+    .filter(r => closed({ due: r.due, ends: r.ends }))   // 마감 전 링크 보호 규칙과 같은 선
+    .map(r => ({ name: r.name, event: r.event, eventTitle: r.event_title,
+                 url: r.url || '', note: r.note || '' }));
 }
 
 function ledgerOf(db, event) {
@@ -2272,6 +2288,15 @@ function routes(db) {
           submit(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
         }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/feature$/)) && req.method === 'POST') {
+          /* 추천작 표시. 운영자만. 공개 페이지·첫 화면 쇼케이스에 별표로 뜬다. */
+          const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          needAdmin(db, t.event, key, owner);
+          const on = (await body(req)).on ? 1 : 0;
+          db.prepare('UPDATE teams SET featured=? WHERE id=?').run(on, +m[1]);
+          return json(res, 200, { featured: !!on });
+        }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/score$/)) && req.method === 'POST') {
           /* 점수는 운영자나 심사 열쇠를 든 사람만 넣는다. 팀 번호가 순서라, 안 막으면
              공개 event id 만 알면 아무나 남의 점수를 0점으로 덮을 수 있었다(GLM 레드팀). */
@@ -2335,6 +2360,8 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/followup-summary$/)) && req.method === 'GET')
           return json(res, 200, followSummary(db, m[1]));
 
+        if (p === '/api/showcase' && req.method === 'GET')
+          return json(res, 200, showcase(db));
         if (p === '/api/health') return json(res, 200, {
           ok: true, events: db.prepare('SELECT COUNT(*) c FROM events').get().c,
           teams: db.prepare('SELECT COUNT(*) c FROM teams').get().c,

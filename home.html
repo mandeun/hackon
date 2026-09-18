@@ -383,6 +383,17 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   </div>
 </section>
 
+<!-- 01.5 지난 대회 우수작 (운영자가 별표한 것만) -->
+<section id="showcase" hidden>
+  <div class="wrap">
+    <div class="head"><div>
+      <h2>지난 대회 우수작</h2>
+      <p>운영자가 고른 팀만 올립니다. 시상식에서 끝나지 않게, 만든 것을 계속 보여 줍니다.</p>
+    </div></div>
+    <div id="showcase-grid" class="evs"></div>
+  </div>
+</section>
+
 <!-- 02 기여 -->
 <section id="give">
   <div class="wrap">
@@ -711,6 +722,20 @@ function 머리글(){
   });
 }
 머리글();
+
+/* ── 지난 대회 우수작 쇼케이스. 운영자가 별표한 팀만 서버가 준다. 없으면 통째로 감춘다. ── */
+fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list){
+  if (!list || !list.length) return;
+  document.getElementById('showcase').hidden = false;
+  document.getElementById('showcase-grid').innerHTML = list.map(function(w){
+    var inner = '<span class="st open">⭐ 추천작</span>' +
+      '<span><div class="t">' + esc(w.name) + '</div><div class="m">' +
+        esc(w.eventTitle) + (w.note ? ' · ' + esc(w.note) : '') + '</div></span>' +
+      '<span class="n grey">' + (w.url ? '링크' : '') + '</span>';
+    return w.url ? '<a class="ev" href="' + esc(w.url) + '" target="_blank" rel="noopener">' + inner + '</a>'
+                 : '<a class="ev" href="/e/' + esc(w.event) + '">' + inner + '</a>';
+  }).join('');
+}).catch(function(){});
 
 /* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){

@@ -769,6 +769,32 @@ with sync_playwright() as p:
     A(len(api(f"/api/events/{ev}/ledger")) == before + 1, "제안을 두 번 확인하니 자리가 둘로 늘었다")
     ok("자리 밖 제안 — 손님이 앱에서 보내고, 운영자가 확인하면 공개 장부에 오른다 (연락처는 운영자만)")
 
+    # ── 추천작 + 첫 화면 쇼케이스 (기능 3/3) ──
+    _, cev = post("/api/events", {"title": "쇼케이스시험"})
+    CID, CK = cev["id"], cev["okey"]
+    post(f"/api/events/{CID}", {"due": "2099-01-01T23:59"}, CK, method="PATCH")
+    post(f"/api/events/{CID}/list", {"list": True}, CK)
+    _, ct = post(f"/api/events/{CID}/teams", {"name": "쇼케이스팀", "email": "c@example.com", "agree": True})
+    post(f"/api/teams/{ct['id']}/submit", {"url": "https://showcase.example/app", "note": "보행지도"}, tkey=ct["tkey"])
+    # 별표는 운영자만
+    A(post(f"/api/teams/{ct['id']}/feature", {"on": 1})[0] == 403, "열쇠 없이 추천작 표시가 됐다")
+    A(post(f"/api/teams/{ct['id']}/feature", {"on": 1}, CK)[0] == 200, "운영자가 추천작 표시를 못 했다")
+    # 마감 전엔 쇼케이스에 이 팀의 링크가 안 나간다 (선제출 팀 보호와 같은 선)
+    A(not any(w["event"] == CID for w in api("/api/showcase")),
+      "마감 전인데 추천작이 쇼케이스에 떴다")
+    # 마감 뒤엔 뜨고 링크도 함께
+    gone = (datetime.now() - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M')
+    post(f"/api/events/{CID}", {"due": gone}, CK, method="PATCH")
+    sc = [w for w in api("/api/showcase") if w["event"] == CID]
+    A(sc and sc[0]["name"] == "쇼케이스팀" and sc[0]["url"] == "https://showcase.example/app",
+      f"마감 뒤 추천작이 쇼케이스에 안 떴다: {sc}")
+    # 쇼케이스엔 개인정보가 없다 — 팀 이름·대회·링크·설명뿐
+    A("@" not in json.dumps(api("/api/showcase"), ensure_ascii=False), "쇼케이스에 연락처가 샜다")
+    # 별표를 내리면 사라진다
+    post(f"/api/teams/{ct['id']}/feature", {"on": 0}, CK)
+    A(not any(w["event"] == CID for w in api("/api/showcase")), "추천작을 내렸는데 쇼케이스에 남았다")
+    ok("추천작 — 운영자만 표시, 마감 뒤 첫 화면 쇼케이스에 뜨고, 내리면 사라진다 (개인정보 없음)")
+
     # 참가자가 해야 하는 일은 열쇠 없이도 된다
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")
     # 심사 화면은 이제 심사 열쇠가 있어야 열린다 — 공개 링크만으로 아무나 점수를 넣던 것을 막았다

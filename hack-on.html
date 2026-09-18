@@ -1724,9 +1724,12 @@ const SCREEN = {
         </summary><div class="in">${mine ? moreForm(mine) : applyForm()}</div></details>
       <table><tr><th>순위</th><th>팀</th><th class="n">점수</th><th class="n">심사</th></tr>
       ${d.rows.map(r => `<tr data-team="${r.id ?? ''}" style="cursor:pointer"><td>${r.rank}</td>
-        <td>${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
-        <td class="n">${r.score}</td><td class="n">${r.judges}명</td></tr>`).join('')}</table>
-      <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.</p>
+        <td>${r.featured ? '⭐ ' : ''}${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
+        <td class="n">${r.score}</td><td class="n">${r.judges}명</td>
+        <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
+          title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button></td></tr>`).join('')}</table>
+      <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.
+        <b>☆</b> 를 누르면 추천작으로 표시돼 공개 페이지와 첫 화면 우수작에 뜹니다.</p>
       <details${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
         <div class="meta">온 팀을 누르세요. 절반쯤 오는 게 정상입니다.</div>
         <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
@@ -1821,7 +1824,7 @@ const SCREEN = {
 
       ${d.closed ? `<h3>순위</h3>
         <table><tr><th>순위</th><th>팀</th><th class="n">점수</th></tr>
-        ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${esc(r.name)}</td>
+        ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${r.featured ? '⭐ ' : ''}${esc(r.name)}</td>
           <td class="n">${r.score}</td></tr>`).join('')}</table>`
       : d.rows.length ? `<h3>참가한 팀 <span style="color:var(--ink3);font-weight:600">${d.rows.length}</span></h3>
         <p class="sub">순위와 점수는 <b>제출 마감 뒤</b>에 함께 공개됩니다.</p>
@@ -1839,7 +1842,8 @@ const SCREEN = {
         return `<h3>${d.closed ? '제출작' : '무엇을 만들고 있나'}</h3>
           ${d.closed ? '' : `<p class="sub">링크는 <b>마감 뒤</b>에 한꺼번에 열립니다.
             먼저 낸 팀이 손해를 보지 않게 하기 위해서입니다.</p>`}
-          ${made.map(r => `<div class="card"><h3>${esc(r.name)}</h3>
+          ${made.map(r => `<div class="card"${r.featured ? ' style="border-left:3px solid var(--acc)"' : ''}>
+            <h3>${r.featured ? '⭐ ' : ''}${esc(r.name)}${r.featured ? ' <span class="pill">추천작</span>' : ''}</h3>
             ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
             ${r.url ? `<div class="share" style="margin-top:10px">${esc(r.url)}</div>` : ''}</div>`).join('')}`;
       })()}
@@ -2651,6 +2655,15 @@ function wire() {
       flash('제안을 보냈습니다. 운영자가 확인하면 자리가 생깁니다');
     } catch (e) { flash(e.message, true); }
   };
+
+  document.querySelectorAll('[data-feature]').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();   // 행 클릭(팀 화면 열기)이 같이 터지지 않게
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try {
+      const r = await api(`/teams/${b.dataset.feature}/feature`, { method:'POST', body:{ on:+b.dataset.on } });
+      flash(r.featured ? '추천작으로 표시했습니다' : '추천작에서 내렸습니다');
+    } catch (e) { flash(e.message, true); }
+  });
 
   document.querySelectorAll('[data-offer-status]').forEach(b => b.onclick = async () => {
     try {
