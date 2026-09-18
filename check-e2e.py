@@ -681,6 +681,19 @@ with sync_playwright() as p:
     A(any(x.get("contact") == "helper-secret@example.com"
           for x in api(f"/api/events/{sev['id']}/support", key=sev["okey"])["people"]),
       "운영자에게도 지원자 연락처가 안 보인다")
+    # 마감 전 제출 링크는 순위판만이 아니라 어디로도 안 샌다. follow·judge 가 board 를 우회해
+    # 손님에게 링크를 줬다 (GLM 레드팀 leak_pre_due). top 팀은 example.com/walk 를 이미 냈고 ev 는 마감 전.
+    A(all(not r.get("url") for r in api(f"/api/events/{ev}/follow")["rows"]),
+      "마감 전 손님에게 follow 로 제출 링크가 샜다")
+    A(all(not t.get("url") for t in api(f"/api/events/{ev}/judge")["teams"]),
+      "마감 전 손님에게 judge 로 제출 링크가 샜다")
+    # 운영자는 마감 전에도 봐야 심사·정리를 한다
+    A(any(r.get("url") == "https://example.com/walk"
+          for r in api(f"/api/events/{ev}/follow", key=OK)["rows"]),
+      "운영자 follow 에 제출 링크가 안 보인다")
+    A(any(t.get("url") == "https://example.com/walk"
+          for t in api(f"/api/events/{ev}/judge", key=OK)["teams"]),
+      "운영자 judge 에 제출 링크가 안 보인다")
     go = api(f"/api/events/{ev}/outcomes")
     A("found" not in go and "list" not in go, "열쇠 없이 유입 경로·성과 명단이 나온다")
     for path, body_ in [(f"/api/events/{ev}/sponsors", {"name": "몰래"}),

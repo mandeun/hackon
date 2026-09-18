@@ -247,15 +247,18 @@ function planWarn(plan, teams) {
 const WEEKS = [2, 6, 12];
 
 function follow(db, event, admin) {
-  const e = db.prepare('SELECT ends FROM events WHERE id=?').get(event);
+  const e = db.prepare('SELECT ends, due FROM events WHERE id=?').get(event);
   const base = e ? new Date(e.ends) : new Date();
+  /* 마감 전에는 손님에게 제출 링크를 안 준다 — board() 와 같은 규칙.
+     이걸 빼먹으면 순위판이 숨긴 링크가 여기로 새서 뒤에 내는 팀이 먼저 낸 팀 것을 본다. */
+  const hideUrl = !admin && !!e && !closed(e);
   const teams = db.prepare(`SELECT t.id, t.name, s.url FROM teams t
                             LEFT JOIN submissions s ON s.team = t.id
                             WHERE t.event=? ORDER BY t.id`).all(event);
   const all = db.prepare(`SELECT c.* FROM checks c JOIN teams t ON t.id=c.team
                           WHERE t.event=?`).all(event);
   const rows = teams.map(t => ({
-    id: t.id, name: t.name, url: t.url || '',
+    id: t.id, name: t.name, url: hideUrl ? '' : (t.url || ''),
     weeks: WEEKS.map(w => {
       const c = all.find(x => x.team === t.id && x.week === w);
       return {
@@ -1525,11 +1528,16 @@ function tv(db, event) {
 
 /** 심사위원이 보는 것. 남의 점수도 순위도 안 내려보낸다 —
     화면에서 감추는 게 아니라 서버가 안 준다. 심사 중에 순위를 보면 점수가 끌려간다. */
-function judgeView(db, event, judge) {
+function judgeView(db, event, judge, admin = false) {
   const e = getEvent(db, event);
+  /* 심사 주소는 무열쇠라 공개 event id 만 알면 누구나 연다. 마감 전에는 제출 링크를 숨긴다 —
+     board() 와 같은 규칙. 안 그러면 경쟁 팀이 /j/<id> 로 남의 링크를 미리 본다. 심사는 마감 뒤라
+     그때 링크가 열린다. 운영자(admin)는 언제든 본다. */
+  const hideUrl = !admin && !closed(e);
   const teams = db.prepare(`SELECT t.id, t.name, s.url, s.note, s.aiuse, s.aidrop
                             FROM teams t LEFT JOIN submissions s ON s.team = t.id
                             WHERE t.event = ? ORDER BY t.id`).all(event);
+  if (hideUrl) for (const t of teams) t.url = '';
   for (const t of teams) {
     t.mine = {};
     if (judge)
@@ -1790,7 +1798,12 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 function body(req) {
   return new Promise((res, rej) => {
     let s = ''; req.on('data', c => { s += c; if (s.length > 1e5) rej(new HttpError(413, '너무 큽니다')); });
-    req.on('end', () => { try { res(s ? JSON.parse(s) : {}); } catch { rej(new HttpError(400, 'JSON 이 아닙니다')); } });
+    req.on('end', () => { try {
+      const v = s ? JSON.parse(s) : {};
+      /* null·배열·문자열 본문은 빈 것으로 친다. 안 그러면 라우트가 v.title 을 읽다 500 이 난다
+         (본문이 정상 JSON 이라 400 으로도 안 걸린다). 빈 것이면 각 라우트의 '필수' 검사가 400 을 낸다. */
+      res(v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+    } catch { rej(new HttpError(400, 'JSON 이 아닙니다')); } });
   });
 }
 const json = (res, code, data) => {
@@ -2087,7 +2100,7 @@ function routes(db) {
         }
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/judge$/)) && req.method === 'GET')
-          return json(res, 200, judgeView(db, m[1], q.judge || ''));
+          return json(res, 200, judgeView(db, m[1], q.judge || '', isAdmin(db, m[1], key, owner)));
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/support$/))) {
           if (req.method === 'GET') {
