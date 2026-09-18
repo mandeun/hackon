@@ -163,7 +163,7 @@ with sync_playwright() as p:
     pg.wait_for_selector("#t-name")
     A(pg.query_selector("#t-contact") is None and pg.query_selector("#t-found") is None,
       "신청 화면이 처음부터 연락처와 유입 경로를 묻는다")
-    pg.fill("#t-name", "하나팀")
+    pg.fill("#t-name", "하나팀"); pg.fill("#t-email", "one@example.com")
 
     # 동의를 안 하면 신청이 안 된다. 화면이 먼저 막고 서버도 막는다.
     pg.click("#t-join")
@@ -176,21 +176,22 @@ with sync_playwright() as p:
     # 실패 안내가 뜨면서 화면이 다시 그려져 칸이 비워진다. 다시 펴고 채운다.
     open_apply()
     pg.wait_for_selector("#t-name")
-    pg.fill("#t-name", "하나팀")
+    pg.fill("#t-name", "하나팀"); pg.fill("#t-email", "one@example.com")
     pg.check("#t-agree")
     pg.click("#t-join")
     pg.wait_for_timeout(1000)
 
     # 신청하고 나면 두 번째 칸이 뜬다. 여기서 진짜 정보를 받는다.
     pg.wait_for_selector("#m-save", timeout=8000)
-    pg.fill("#m-contact", "one@example.com")
+    # 이메일을 첫 칸에서 받았으니 연락처 칸은 안 뜬다
+    A(pg.query_selector("#m-contact") is None, "이메일을 받고도 연락처를 또 묻는다")
     pg.select_option("#m-role", "만들기")
     pg.select_option("#m-found", "캠퍼스픽")
     pg.fill("#m-note", "골목 보행 불편을 풀고 싶습니다")
     pg.check("#m-photo")
     pg.click("#m-save")
     pg.wait_for_timeout(900)
-    A(post(f"/api/events/{ev}/teams", {"name": "가나다팀", "agree": True})[0] == 201, "둘째 팀이 안 들어갔다")
+    A(post(f"/api/events/{ev}/teams", {"name": "가나다팀", "email": "t@example.com", "agree": True})[0] == 201, "둘째 팀이 안 들어갔다")
     rows = api(f"/api/events/{ev}/board", OK)["rows"]
     A(len(rows) == 2, f"참가팀이 2여야 하는데 {len(rows)}")
     A(all(r["score"] == 0 and not r["done"] for r in rows), "심사 전인데 점수가 있다")
@@ -201,7 +202,7 @@ with sync_playwright() as p:
     ok("문간에 발 담그기 — 이름·동의로 신청하고 나머지는 그다음 칸에서 받는다")
     ok("참가 신청 저장 — 2팀 · 역할과 유입 경로까지")
 
-    A(post(f"/api/events/{ev}/teams", {"name": "하나팀", "agree": True})[0] == 409,
+    A(post(f"/api/events/{ev}/teams", {"name": "하나팀", "email": "t@example.com", "agree": True})[0] == 409,
       "같은 팀 이름이 두 번 들어갔다")
     ok("같은 팀 이름 차단 (409)")
 
@@ -355,11 +356,12 @@ with sync_playwright() as p:
 
     # ── 같이 할 사람 찾기 — 혼자 온 사람이 돌아가지 않게 ────
     # 혼자 온 사람 하나와 사람 찾는 팀 하나를 만든다
-    _, so = post(f"/api/events/{ev}/teams", {"name": "혼자온사람", "agree": True})
+    _, so = post(f"/api/events/{ev}/teams", {"name": "혼자온사람", "email": "t@example.com", "agree": True})
     A(len(so.get("tkey", "")) == 10, f"신청할 때 팀 열쇠를 안 준다: {so}")
     # 팀 번호만 알고 열쇠가 없으면 빈 팀을 가로챌 수 없다.
-    # 연락처는 한 번 쓰면 끝이라, 남이 먼저 채우면 진짜 참가자가 영영 밀려난다.
-    A(post(f"/api/teams/{so['id']}/more", {"contact": "가로챈@evil.test"})[0] == 403,
+    # 빈 칸은 한 번 쓰면 끝이라, 남이 먼저 채우면 진짜 참가자가 영영 밀려난다.
+    # (연락처는 이제 신청할 때 이메일로 채워지므로 비어 있는 역할 칸으로 본다)
+    A(post(f"/api/teams/{so['id']}/more", {"role": "가로챈역할"})[0] == 403,
       "열쇠 없이 남의 빈 팀이 선점됐다")
     A(post(f"/api/teams/{so['id']}/more",
            {"tkey": so["tkey"], "solo": True, "role": "기획",
@@ -497,7 +499,7 @@ with sync_playwright() as p:
     # 화면만 잠그면 주소를 아는 사람은 그냥 낸다. 그래서 서버를 때려서 확인한다.
     gone = (datetime.now() - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M')
     _, late = post('/api/events', {'title': '마감지난대회', 'due': gone})
-    _, lt = post(f"/api/events/{late['id']}/teams", {'name': '늦은팀', 'agree': True})
+    _, lt = post(f"/api/events/{late['id']}/teams", {'name': '늦은팀', "email": "t@example.com", 'agree': True})
     A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'})[0] == 409,
       '마감이 지났는데 제출이 됐다')
     ok('마감 뒤 제출 차단 (409)')
@@ -681,9 +683,9 @@ with sync_playwright() as p:
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")
-    A(post(f"/api/events/{small['id']}/teams", {"name": "첫팀", "agree": True})[0] == 201,
+    A(post(f"/api/events/{small['id']}/teams", {"name": "첫팀", "email": "t@example.com", "agree": True})[0] == 201,
       "첫 팀이 못 들어갔다")
-    A(post(f"/api/events/{small['id']}/teams", {"name": "둘째팀", "agree": True})[0] == 409,
+    A(post(f"/api/events/{small['id']}/teams", {"name": "둘째팀", "email": "t@example.com", "agree": True})[0] == 409,
       "정원 찬 대회에 들어가졌다")
     ok("정원 초과 차단 (409)")
 
@@ -945,7 +947,7 @@ with sync_playwright() as p:
 
     # 모집 글에 이 주소를 쓴다. 여기서 바로 신청이 돼야 한다.
     before = len(api(f"/api/events/{ev}/board", OK)["rows"])
-    pub.fill("#t-name", "공개링크팀")
+    pub.fill("#t-name", "공개링크팀"); pub.fill("#t-email", "t@example.com")
     pub.check("#t-agree")
     pub.click("#t-join")
     pub.wait_for_timeout(1000)
@@ -1313,7 +1315,7 @@ with sync_playwright() as pw:
 
     off.goto(f"{BASE}/e/{oev['id']}", wait_until="domcontentloaded")
     off.wait_for_selector("body[data-ready='1']", timeout=10000)
-    off.fill("#t-name", "정전팀")
+    off.fill("#t-name", "정전팀"); off.fill("#t-email", "t@example.com")
     off.check("#t-agree")
     off.click("#t-join")
     off.wait_for_timeout(900)
