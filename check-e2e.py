@@ -945,6 +945,19 @@ with sync_playwright() as p:
         A(all(r.get("score") is None for r in st["rows"]), "서버가 마감 전에 점수를 내려보냈다")
     ok("공개 링크 — 규칙(결과물 권리·AI 허용·행동강령)이 함께 보인다")
 
+    # 바닥 단추 — 어디서 신청하는지 찾지 않게 늘 엄지 밑에 있고, 누르면 신청 칸으로 간다.
+    pub.evaluate("window.scrollTo(0, 0)")
+    pub.wait_for_timeout(300)
+    A(pub.is_visible("#cta-go"), "공개 페이지에 바닥 신청 단추가 없다")
+    A("참가 신청" in pub.inner_text("#cta-go"), "바닥 단추 글자가 신청이 아니다")
+    pub.click("#cta-go")
+    pub.wait_for_timeout(900)
+    box = pub.evaluate("(() => { const r = document.getElementById('apply').getBoundingClientRect();"
+                       " return [r.top, innerHeight]; })()")
+    A(box[0] < box[1], f"바닥 단추를 눌러도 신청 칸으로 안 간다: {box}")
+    A("away" in (pub.get_attribute("#cta", "class") or ""), "신청 칸이 보이는데 바닥 단추가 안 비킨다")
+    ok("공개 페이지 바닥 단추 — 누르면 신청 칸으로 가고, 신청 칸이 보이면 비킨다")
+
     # 모집 글에 이 주소를 쓴다. 여기서 바로 신청이 돼야 한다.
     before = len(api(f"/api/events/{ev}/board", OK)["rows"])
     pub.fill("#t-name", "공개링크팀"); pub.fill("#t-email", "t@example.com")

@@ -293,6 +293,219 @@ nav .i{font-size:17px}
 .btn.sm{min-height:40px}
 .contact{font-size:13px;color:var(--ink2);margin-top:4px}
 .contact b{color:var(--ink)}
+
+/* ══ 겉모양 (2026-09 개편) ═══════════════════════════════════════
+   토스·당근처럼: 회색 바탕 위에 흰 카드를 얹고 테두리를 없앤다. 테두리 안에 테두리가 겹치면
+   무엇이 한 묶음인지 눈이 다시 세어야 한다. 글자는 키우고(본문 15→16, 설명 12.5→14),
+   누르는 것은 크고 파랗게, 안 누르는 것은 회색으로. 위의 규칙을 여기서 덮어쓴다 —
+   행사장 큰 화면(body.tv)은 건드리지 않는다. */
+:root{
+  --pg:#F2F4F6; --card:#fff; --soft:#F9FAFB; --fill:#F2F4F6;
+  --ink:#191F28; --ink2:#4E5968; --ink3:#8B95A1; --rule:#E5E8EB;
+  --acc-l:#EDF1FE; --warn:#C27C0E; --warn-l:#FFF6E0; --bad:#E5484D; --bad-l:#FFEEEE;
+  --r:20px;
+}
+body{background:#E9ECEF;font-size:16px;letter-spacing:-.01em}
+#app{background:var(--pg);box-shadow:0 0 0 1px rgba(0,0,0,.03)}
+header{position:sticky;top:0;z-index:20;background:rgba(242,244,246,.88);
+  backdrop-filter:saturate(1.6) blur(14px);-webkit-backdrop-filter:saturate(1.6) blur(14px);
+  border-bottom:0;padding:12px 20px 0}
+.hrow{padding-bottom:10px}
+.logo svg{height:20px}
+.chip{background:#fff;font-size:12px;padding:4px 10px;font-weight:600}
+main{padding:8px 16px 28px}
+h2{font-size:25px;line-height:1.35;letter-spacing:-.04em;margin:12px 4px 8px}
+h3{letter-spacing:-.03em}
+main > h3{font-size:19px;margin:28px 4px 10px !important}
+.sub{font-size:15px;color:var(--ink2);margin:0 4px 18px;line-height:1.65}
+.meta{font-size:14px;color:#6B7684;line-height:1.65}
+.meta b{color:var(--ink2)}
+label{font-size:14px;color:var(--ink2);margin:18px 0 8px}
+
+/* 카드. 테두리 없이 흰 면 하나. 카드 안의 카드는 옅은 회색 면이 된다. */
+.card{background:var(--card);border:0;border-radius:var(--r);padding:20px;margin-bottom:12px}
+.card h3{font-size:17px;margin-bottom:6px}
+.card .card,details .card,.card .stat div,details .stat div{background:var(--soft);border-radius:14px}
+.card[data-open]{padding-right:44px;transition:transform .12s,background .12s}
+.card[data-open]:hover{background:#FCFCFD;border:0}
+.card[data-open]:active{transform:scale(.985);background:var(--soft)}
+.card[data-open]::after{right:18px;font-size:28px;color:#B0B8C1}
+
+/* 입력칸. 테두리 대신 회색 면, 누르면 흰 면에 파란 테두리. 16px 이 아니면 아이폰이 확대한다. */
+input,select,textarea{background:var(--fill);border:1.5px solid transparent;border-radius:12px;
+  padding:13px 15px;font-size:16px;transition:border-color .12s,background .12s}
+input:focus,select:focus,textarea:focus{outline:0;background:#fff;border-color:var(--acc)}
+input::placeholder,textarea::placeholder{color:#B0B8C1}
+input:disabled{color:var(--ink2);-webkit-text-fill-color:var(--ink2);opacity:1}
+select{appearance:none;-webkit-appearance:none;padding-right:38px;cursor:pointer;
+  background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238B95A1' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 15px center}
+input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
+.row{gap:10px}
+
+/* 단추. 주 단추는 파랗고 크다. 보조는 회색. 누르면 살짝 눌린다. */
+.btn{background:var(--acc);border-radius:14px;padding:15px 18px;font-size:16px;min-height:54px;
+  transition:transform .1s,filter .12s,background .12s;letter-spacing:-.02em}
+.btn:hover{opacity:1;filter:brightness(1.06)}
+.btn:active{opacity:1;transform:scale(.97)}
+.btn.sec{background:var(--fill);color:var(--ink2);border:0}
+.btn.sec:hover{background:#E8EBED;filter:none}
+.btn.sm{padding:9px 14px;font-size:14px;border-radius:10px;min-height:40px}
+.card .btn.sec,details .btn.sec{background:#F2F4F6}
+
+.pill{border-radius:6px;padding:3px 7px;font-size:12px;background:var(--acc-l);color:var(--acc);vertical-align:2px}
+.pill.ok{background:#E5F7EE;color:#0E8A57}
+.pill.warn{background:var(--warn-l);color:var(--warn)}
+
+/* 숫자 칸 */
+.stat{gap:10px;margin:12px 0}
+.stat div{background:var(--card);border:0;border-radius:18px;padding:16px}
+.stat b{font-size:24px;color:var(--ink);margin-bottom:2px}
+.stat span{font-size:13px;color:var(--ink3)}
+
+/* 표. 세로줄 없이, 가로줄도 아주 옅게 */
+table{font-size:14.5px}
+th,td{border-bottom:1px solid #F2F4F6;padding:12px 6px}
+th{font-size:13px;color:var(--ink3);font-weight:600}
+main > table{background:var(--card);border-radius:var(--r);overflow:hidden;margin-bottom:12px}
+main > table th:first-child,main > table td:first-child{padding-left:20px}
+main > table th:last-child,main > table td:last-child{padding-right:20px}
+main > table tr:last-child td{border-bottom:0}
+tr[data-team]:hover td{background:var(--soft)}
+
+/* 접는 묶음. 카드와 똑같이 생기고, 오른쪽 꺾쇠가 돌아간다. */
+details{background:var(--card);border:0;border-radius:var(--r);margin-bottom:12px}
+details>summary{padding:20px;font-size:17px;gap:8px}
+details>summary::after{content:'';width:9px;height:9px;border:solid #B0B8C1;border-width:0 2px 2px 0;
+  transform:rotate(45deg) translate(-2px,-2px);transition:transform .2s;margin-right:4px}
+details[open]>summary::after{content:'';transform:rotate(-135deg) translate(-2px,-2px)}
+details>summary:hover{color:var(--ink)}
+details .in{padding:0 20px 20px}
+details details{background:var(--soft);border-radius:14px}
+.when{font-size:13px;color:var(--ink3);font-weight:500}
+
+.share{background:var(--fill);border:0;border-radius:10px;padding:11px 13px;font-size:13px;color:var(--ink2)}
+.shrow{gap:8px;align-items:center}
+.qr{border:0;border-radius:12px;padding:6px}
+
+/* 남은 시간 */
+.due{background:var(--card);border:0;border-radius:16px;padding:15px 18px;font-size:15px;color:var(--ink);
+  display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.due::before{content:'⏰';font-size:17px}
+.due.hot{background:#FFF1EC;color:#E5484D;border:0}
+.due.over{background:var(--bad-l);color:var(--bad);border:0}
+.late{color:var(--bad)}
+.notice{background:#FFF6E0;border:0;border-radius:16px;padding:16px 18px;color:#7A4E00}
+.off{font-size:13.5px}
+
+/* 동의 칸 */
+.agree{background:var(--soft);border:0;border-radius:16px;padding:16px;margin-top:16px}
+.agree .meta{font-size:13px}
+.ck{gap:10px;font-size:15px;margin-top:12px;align-items:center;cursor:pointer;color:var(--ink)}
+.ck input{width:22px;height:22px;margin-top:0;cursor:pointer}
+
+.err{background:var(--bad-l);color:var(--bad);border:0;border-radius:14px;padding:14px 16px;font-size:14.5px}
+.ok-msg{background:#E5F7EE;color:#0E8A57;border:0;border-radius:14px;padding:14px 16px;font-size:14.5px}
+
+/* 알림은 아래에서 올라오는 검은 알약. 토스·당근이 전부 이 모양이라 사람들이 이미 읽을 줄 안다. */
+#toast{bottom:calc(92px + env(safe-area-inset-bottom))}
+#toast div{background:rgba(25,31,40,.94)!important;color:#fff!important;border:0!important;
+  border-radius:16px;padding:15px 18px;font-size:15px;font-weight:600;
+  box-shadow:0 10px 30px rgba(0,0,0,.18);display:flex;gap:10px;align-items:center;
+  animation:toastin .22s ease-out}
+#toast .ok-msg::before{content:'✓';display:grid;place-items:center;width:20px;height:20px;flex:none;
+  border-radius:50%;background:#12A36B;font-size:12px}
+#toast .err::before{content:'!';display:grid;place-items:center;width:20px;height:20px;flex:none;
+  border-radius:50%;background:#E5484D;font-size:13px;font-weight:800}
+@keyframes toastin{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+
+/* 아래 탭. 스크롤해도 늘 손가락 밑에 있다 — 전에는 긴 화면 맨 끝까지 내려가야 보였다. */
+nav{position:sticky;bottom:0;z-index:20;background:rgba(255,255,255,.94);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-top:1px solid #F2F4F6;padding-bottom:env(safe-area-inset-bottom)}
+nav button{padding:9px 0 10px;font-size:11px;color:#B0B8C1;gap:4px;font-weight:600}
+nav button.on{color:var(--ink);font-weight:700}
+nav .i{display:grid;place-items:center;height:24px}
+nav .i svg{width:24px;height:24px;display:block}
+nav button:active .i{transform:scale(.9)}
+
+.dots{border-radius:var(--r);padding:22px 20px 18px}
+.kko{border-radius:14px;padding:14px 18px}
+.hid{background:var(--fill);padding:3px 8px;border-radius:6px}
+.tags button{background:var(--fill);border:0;color:var(--ink2);padding:8px 13px;font-size:13.5px;border-radius:10px}
+.tags button:hover{background:var(--acc-l);color:var(--acc)}
+.seat{background:var(--soft);border-color:var(--rule)}
+.logos > *{border:0;background:var(--soft);border-radius:12px;padding:10px 14px}
+.plan::before{background:#E5E8EB}
+
+/* ── 대회 첫 장 (공개 페이지·운영 화면 머리) ── */
+.hero{background:var(--card);border-radius:24px;padding:24px 20px 20px;margin:4px 0 12px}
+.hero .top{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink3);font-weight:600}
+.hero h2{margin:10px 0 18px;font-size:24px}
+.facts{list-style:none;display:flex;flex-direction:column;gap:14px}
+.facts li{display:flex;gap:12px;align-items:flex-start;font-size:15px;color:var(--ink);line-height:1.5}
+.facts .ic{flex:none;width:36px;height:36px;border-radius:12px;background:var(--soft);
+  display:grid;place-items:center;font-size:18px}
+.facts .k{display:block;font-size:13px;color:var(--ink3);font-weight:600;margin-bottom:1px}
+.facts .v{font-weight:700}
+.hero .due{background:var(--soft);margin:18px 0 0}
+.hero .due.hot{background:#FFF1EC}
+.quick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
+.quick a,.quick button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px;
+  border-radius:14px;background:var(--soft);font-size:13px;font-weight:600;color:var(--ink2);
+  text-decoration:none;min-height:0;transition:transform .1s}
+.quick a:active,.quick button:active{transform:scale(.96)}
+.quick span{font-size:20px;line-height:1}
+
+/* 체크 목록 (누가 나올 수 있나요) */
+.checks{list-style:none;display:flex;flex-direction:column;gap:12px;margin-top:6px}
+.checks li{display:flex;gap:10px;font-size:15px;color:var(--ink2);line-height:1.55}
+.checks li::before{content:'';flex:none;width:22px;height:22px;border-radius:50%;margin-top:1px;
+  background:#E5F7EE url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='10'%3E%3Cpath d='M1 5l3.5 3.5L11 1.5' fill='none' stroke='%2312A36B' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center}
+.checks b{color:var(--ink)}
+
+/* 진행 순서 — 시간 줄 */
+.tl{list-style:none;position:relative;margin-top:8px}
+.tl li{display:flex;gap:14px;padding:9px 0;font-size:15px;position:relative}
+.tl li::before{content:'';position:absolute;left:52px;top:0;bottom:0;width:2px;background:#F2F4F6}
+.tl li:first-child::before{top:50%}.tl li:last-child::before{bottom:50%}
+.tl time{flex:none;width:44px;color:var(--ink3);font-variant-numeric:tabular-nums;font-weight:600}
+.tl .d{flex:none;width:10px;height:10px;border-radius:50%;background:#D1D6DB;margin-top:7px;z-index:1;
+  box-shadow:0 0 0 4px #fff}
+.tl li.hot .d{background:var(--bad)}.tl li.hot{color:var(--bad);font-weight:700}
+.tl li.key .d{background:var(--acc)}.tl li.key{font-weight:700}
+
+/* 심사 기준 막대 */
+.rub{display:flex;flex-direction:column;gap:12px;margin-top:10px}
+.rub div{font-size:14.5px;color:var(--ink2)}
+.rub .top{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+.rub b{color:var(--ink);font-variant-numeric:tabular-nums}
+.rub .bar{height:8px;background:var(--fill)}
+.rub .bar i{background:var(--acc);border-radius:99px}
+
+/* 내 대회 목록 — 당근 목록처럼 왼쪽에 날짜 딱지 */
+.ev{display:flex;gap:14px;align-items:center}
+.dtile{flex:none;width:52px;height:56px;border-radius:14px;background:var(--acc-l);color:var(--acc);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1}
+.dtile b{font-size:21px;font-weight:800}
+.dtile span{font-size:11.5px;font-weight:700}
+.dtile.none{background:var(--fill);color:var(--ink3)}
+.ev .body{min-width:0;flex:1}
+.ev h3{font-size:16.5px;margin-bottom:4px;line-height:1.4}
+
+/* 공개 페이지 바닥 단추. 신청 칸이 화면에 들어오면 비켜 준다. */
+#cta{position:sticky;bottom:0;z-index:15;padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+  background:linear-gradient(rgba(242,244,246,0),var(--pg) 30%);transition:opacity .18s,transform .18s}
+#cta.away{opacity:0;transform:translateY(16px);pointer-events:none}
+#cta .btn{box-shadow:0 8px 24px rgba(35,80,245,.28)}
+.logo{align-items:center}
+.hrow{min-height:44px}
+body.guest #mode{display:none}
+.steps{list-style:none;counter-reset:st;display:flex;flex-direction:column;gap:12px;margin-top:10px}
+.steps li{counter-increment:st;display:flex;gap:12px;align-items:center;font-size:15px;color:var(--ink2)}
+.steps li::before{content:counter(st);flex:none;width:26px;height:26px;border-radius:50%;
+  background:var(--acc-l);color:var(--acc);font-weight:800;font-size:13px;display:grid;place-items:center}
+body.tv #cta{display:none}
+@media print{#cta{display:none!important}}
 </style>
 </head>
 <body>
@@ -313,13 +526,14 @@ nav .i{font-size:17px}
     </div>
   </header>
   <main id="view"></main>
+  <div id="cta" hidden></div>
   <div id="toast"></div>
   <nav>
-    <button data-t="home" class="on"><span class="i">◎</span>대회</button>
-    <button data-t="make"><span class="i">＋</span>열기</button>
-    <button data-t="find"><span class="i">◇</span>구하기</button>
-    <button data-t="board"><span class="i">▤</span>순위</button>
-    <button data-t="spon"><span class="i">◆</span>협찬 성과</button>
+    <button data-t="home" class="on"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg></span>대회</button>
+    <button data-t="make"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="6"/><path d="M12 8v8M8 12h8"/></svg></span>열기</button>
+    <button data-t="find"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>구하기</button>
+    <button data-t="board"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 20V11M12 20V5M18 20v-6"/></svg></span>순위</button>
+    <button data-t="spon"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7.5-4.6-9.3-9.4C1.6 8.6 3.6 5 7 5c2.1 0 3.5 1.2 5 3 1.5-1.8 2.9-3 5-3 3.4 0 5.4 3.6 4.3 6.6C19.5 16.4 12 21 12 21z"/></svg></span>협찬 성과</button>
   </nav>
 </div>
 
@@ -454,27 +668,62 @@ const dueBox = e => e.due ? `<div class="due" data-due="${esc(e.due)}"></div>` :
    2026-09-04 모두의 창업 설명회 질의응답이 처음부터 끝까지 자격 질문이었다.
    답이 '아무나' 인데 그걸 안 적어 두면 사람은 안 온다. */
 function whoBox() {
-  return `<div class="card" style="border-color:#AECFB8;background:var(--ok-l)">
-    <h3>누가 나올 수 있나요</h3><div class="meta">
-    <b>아무나 됩니다.</b> 나이·학교·소속·경력 제한이 없습니다.<br>
-    <b>혼자 오셔도 됩니다.</b> 당일 팀 짜는 시간에 팀이 생깁니다.<br>
-    <b>처음이어도 됩니다.</b> 대단한 기술이 아니어도 됩니다 —
-    평소 불편했던 것 하나면 충분합니다.<br>
-    <b>못 만들어도 됩니다.</b> 중간에 떨어뜨리지 않습니다.
-  </div></div>`;
+  return `<div class="card">
+    <h3>누가 나올 수 있나요</h3><ul class="checks">
+    <li><span><b>아무나 됩니다.</b> 나이·학교·소속·경력 제한이 없습니다.</span></li>
+    <li><span><b>혼자 오셔도 됩니다.</b> 당일 팀 짜는 시간에 팀이 생깁니다.</span></li>
+    <li><span><b>처음이어도 됩니다.</b> 평소 불편했던 것 하나면 충분합니다.</span></li>
+    <li><span><b>못 만들어도 됩니다.</b> 중간에 떨어뜨리지 않습니다.</span></li>
+  </ul></div>`;
 }
 
 function rulesBox() {
-  return `<div class="card"><h3>규칙</h3><div class="meta">
-    <b>만든 것은 팀의 것입니다.</b> 주최 측은 결과물의 권리를 가져가지 않습니다.
-    홍보에 쓸 때도 먼저 물어봅니다.<br>
-    <b>생성형 AI 를 써도 됩니다.</b> 검사기로 잡아내지 않습니다.
-    대신 <b>어디에 썼고 무엇을 버렸는지</b>를 직접 적어 주세요. 그게 심사에서 가장 크게 보는 곳입니다.<br>
-    중간에 떨어뜨리는 라운드가 없습니다. 모든 팀이 같은 시간을 씁니다.<br>
-    심사 기준은 시작 전에 공개하고, 시작한 뒤에는 바꾸지 않습니다.<br>
-    멘토의 조언은 참고 사항입니다. 무엇을 만들지는 팀이 정합니다.<br>
-    행동강령은 참가자·멘토·스태프·심사위원·협찬사 모두에게 똑같이 적용됩니다.
-  </div></div>`;
+  /* 결과물 권리를 맨 위에 둔다 — 참가자가 가장 크게 데는 곳이다. */
+  return `<div class="card"><h3>규칙</h3><ul class="checks">
+    <li><span><b>만든 것은 팀의 것입니다.</b> 주최 측은 결과물의 권리를 가져가지 않습니다.
+      홍보에 쓸 때도 먼저 물어봅니다.</span></li>
+    <li><span><b>생성형 AI 를 써도 됩니다.</b> 대신 <b>어디에 썼고 무엇을 버렸는지</b>를 적어 주세요.
+      그게 심사에서 가장 크게 보는 곳입니다.</span></li>
+    <li><span>중간에 떨어뜨리는 라운드가 없습니다. 모든 팀이 같은 시간을 씁니다.</span></li>
+    <li><span>심사 기준은 시작 전에 공개하고, 시작한 뒤에는 바꾸지 않습니다.</span></li>
+    <li><span>멘토의 조언은 참고 사항입니다. 무엇을 만들지는 팀이 정합니다.</span></li>
+    <li><span>행동강령은 참가자·멘토·스태프·심사위원·협찬사 모두에게 똑같이 적용됩니다.</span></li>
+  </ul></div>`;
+}
+
+/* 2026-10-31 → '10월 31일 (토)'. 이틀 이상이면 '~' 로 잇는다. 날짜가 없으면 '미정'. */
+const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+function dayText(s) {
+  const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return `${+m[2]}월 ${+m[3]}일 (${DOW[d.getDay()]})`;
+}
+function whenText(e) {
+  const a = dayText(e.starts), b = dayText(e.ends);
+  if (!a) return '날짜 미정';
+  const plan = e.plan || [];
+  const hrs = plan.length > 1 ? ` ${plan[0].at}–${plan[plan.length - 1].at}` : '';
+  return (b && b !== a ? `${a} ~ ${b}` : a) + hrs;
+}
+/** 날짜 딱지 — 목록 왼쪽에 붙는다 */
+function dateTile(s) {
+  const m = String(s || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+  return m ? `<div class="dtile"><b>${+m[2]}</b><span>${+m[1]}월</span></div>`
+           : `<div class="dtile none"><span>미정</span></div>`;
+}
+/** 진행 순서를 시간 줄로 */
+function timeline(plan) {
+  return `<ul class="tl">${plan.map(r => `<li class="${
+    /제출 마감|코드 프리즈/.test(r.what) ? 'hot' : /^발표|시상|등록/.test(r.what) ? 'key' : ''}">
+    <time>${esc(r.at)}</time><i class="d"></i><span>${esc(r.what)}</span></li>`).join('')}</ul>`;
+}
+/** 심사 기준을 막대로. 무엇에 몇 점이 걸렸는지가 한눈에 보여야 거기에 시간을 쓴다. */
+function rubricBars(rubric) {
+  return `<div class="rub">${(rubric || []).map(r => `<div>
+    <div class="top"><span>${esc(r.label)}</span><b>${+r.weight}%</b></div>
+    <div class="bar"><i style="width:${Math.max(0, Math.min(100, +r.weight || 0))}%"></i></div>
+  </div>`).join('')}</div>`;
 }
 
 const FOUND = ['캠퍼스픽', '위비티', '이벤터스', '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
@@ -503,9 +752,9 @@ function applyForm() {
       <label class="ck"><input type="checkbox" id="t-share">
         <span>협찬사에 이메일을 제공하는 데 동의합니다 <span class="pill ok">선택</span></span></label>
     </div>
-    <div style="height:10px"></div>
-    <button class="btn sm" id="t-join">참가 신청</button>
-    <div class="meta" style="margin-top:8px">지금은 이름과 이메일만 받습니다.
+    <div style="height:16px"></div>
+    <button class="btn" id="t-join">참가 신청하기</button>
+    <div class="meta" style="margin-top:10px;text-align:center">지금은 이름과 이메일만 받습니다.
       나머지는 신청한 뒤에 여쭙겠습니다.</div>`;
 }
 
@@ -515,9 +764,12 @@ function moreForm(t) {
   if (!t.contact) need.push('연락처');
   if (!t.role) need.push('역할');
   if (!t.found) need.push('어디서 보셨는지');
-  if (!need.length) return `<div class="card"><h3>신청 완료</h3>
+  if (!need.length) return `<div class="card" id="apply" style="text-align:center;padding:28px 20px">
+    <div style="font-size:40px;line-height:1">🎉</div>
+    <h3 style="margin-top:12px">신청 완료</h3>
     <div class="meta">필요한 것을 다 주셨습니다. 확정 메일을 기다려 주세요.</div></div>`;
-  return `<div class="card">
+  return `<div class="card" id="apply">
+    <div class="pill ok" style="margin-bottom:10px">✓ 접수됨</div>
     <h3>신청됐습니다. 조금만 더</h3>
     <div class="meta">${esc(t.name)} 팀으로 접수됐습니다.
       아래를 채워 주시면 확정 안내를 드리고 팀을 짜 드릴 수 있습니다.
@@ -552,8 +804,8 @@ function moreForm(t) {
       <span>협찬사가 채용·인턴·협업 제안으로 연락하는 것에 동의합니다
         <span class="pill ok">선택</span></span></label>
     <div class="meta">동의하신 분의 연락처만 전달됩니다. 언제든 끌 수 있습니다.</div>
-    <div style="height:10px"></div>
-    <button class="btn sm" id="m-save">보내기</button>
+    <div style="height:16px"></div>
+    <button class="btn" id="m-save">보내기</button>
   </div>`;
 }
 let msg = null;
@@ -939,6 +1191,28 @@ function shareBase() {
   return location.origin;
 }
 
+/* 바닥 단추. 공개 페이지에서 '어디서 신청하지' 를 찾게 하지 않는다 — 늘 엄지 밑에 있다.
+   가리키는 칸이 화면에 들어오면 비켜 준다. 신청 칸을 가리면 그게 더 나쁘다. */
+let CTA = null, ctaSeen = null;
+function paintCta() {
+  const box = $('#cta');
+  if (ctaSeen) { ctaSeen.disconnect(); ctaSeen = null; }
+  const target = CTA && document.getElementById(CTA.to);
+  if (!CTA || !target) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+  box.innerHTML = `<button class="btn" id="cta-go">${esc(CTA.text)}</button>`;
+  $('#cta-go').onclick = () => {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const f = target.querySelector('input:not([type=checkbox]),select,textarea');
+    if (f) setTimeout(() => f.focus({ preventScroll: true }), 450);
+  };
+  if ('IntersectionObserver' in window) {
+    ctaSeen = new IntersectionObserver(([en]) => box.classList.toggle('away', en.isIntersecting),
+                                       { threshold: 0.15 });
+    ctaSeen.observe(target);
+  }
+}
+
 async function render() {
   if (LIVE && !NET) { try { NET = await api('/health'); } catch { NET = { net: [] }; } }
   if (LIVE && !AUTH) { try { AUTH = await api('/auth'); } catch { AUTH = { kakao: false }; } }
@@ -956,8 +1230,10 @@ async function render() {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === navOn));
   // innerHTML 을 쓰되 서버에서 온 값은 전부 esc() 를 거친다. 화면 조립이 문자열 한 곳에
   // 모여 있어야 라켓온처럼 "서버 호출이 사라졌는지"를 검사로 셀 수 있다.
+  CTA = null;
   try { view.innerHTML = head() + await SCREEN[tab](); }
   catch (e) { view.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  paintCta();
   wire();
   tickDue();
   document.body.dataset.ready = '1';   // 완주 테스트가 이 표시를 기다린다
@@ -976,11 +1252,12 @@ const SCREEN = {
         <div><b>${my.total.finishRate}%</b><span>완주율</span></div>
         <div><b>${my.total.promised ? my.total.keptRate + '%' : '—'}</b><span>약속 이행</span></div>
       </div>` : ''}
-      ${my.events.map(e => `<div class="card" role="button" tabindex="0" data-open="${esc(e.id)}">
-        <h3>${esc(e.title)} ${e.listed ? '' : '<span class="pill warn">초안</span>'}</h3>
-        <div class="meta">${esc(e.starts)}${e.ends !== e.starts ? '~' + esc(e.ends) : ''}
-          · 상금 ${won(e.prize)}<br>
-          <b style="color:var(--navy)">눌러서 운영 화면 열기</b></div>
+      ${my.events.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
+        ${dateTile(e.starts)}
+        <div class="body"><h3>${esc(e.title)}</h3>
+        <div class="meta">${e.listed ? badge(e) : '<span class="pill warn">초안</span>'}
+          ${+e.prize ? ' · 상금 ' + won(e.prize) : ''}
+          · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
       </div>`).join('')}
       ${AUTH && AUTH.linked ? `<div class="card" style="padding:11px 13px"><div class="meta">
         <b>카카오로 로그인돼 있습니다.</b> 다른 기기에서도 그대로 보입니다.
@@ -996,9 +1273,9 @@ const SCREEN = {
     /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
        그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
     if (!list.length && my && my.events.length) return mineBox + `
-      <div class="card" style="border-color:#BFD8C6;background:var(--ok-l)">
+      <div class="card">
         <h3>다음에 할 일</h3>
-        <div class="meta">① 날짜와 제출 마감 ② 진행표 채우기 ③ 주소(QR) 보내기</div>
+        <ol class="steps"><li>날짜와 제출 마감 정하기</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
       </div>`;
     if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>
@@ -1014,9 +1291,10 @@ const SCREEN = {
         <button class="btn sm" id="ow-go">찾기</button>
       </div>`}`;
     return mineBox + `<h2>열린 대회</h2><p class="sub">누르면 참가 신청과 순위를 볼 수 있습니다.</p>` +
-      list.map(e => `<div class="card" role="button" tabindex="0" data-open="${esc(e.id)}">
-        <h3>${esc(e.title)} ${badge(e)}</h3>
-        <div class="meta">${esc(e.host)} · ${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)}</div>
+      list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
+        ${dateTile(e.starts)}
+        <div class="body"><h3>${esc(e.title)}</h3>
+        <div class="meta">${badge(e)} ${esc(e.host)}${+e.prize ? ' · 상금 ' + won(e.prize) : ''}</div></div>
       </div>`).join('') +
       (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '');
   },
@@ -1226,10 +1504,26 @@ const SCREEN = {
                : '정산';
     const 폄 = k => (할일 === k ? ' open' : '');
 
-    return `<h2>${esc(e.title)} ${badge(e)}</h2>
-      <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
-      ${!LIVE ? '<button class="btn sec sm" id="b-pub" style="margin-bottom:10px">공개 페이지 미리보기</button>' : ''}
-      ${dueBox(e)}
+    /* 운영 화면 첫 장. 제일 자주 누르는 셋(공개 페이지 보기·주소 복사·큰 화면)을 맨 위에 둔다.
+       전에는 '보낼 주소' 묶음을 펴야 나왔다. */
+    const doneN = d.rows.filter(r => r.done).length;
+    return `<section class="hero">
+        <div class="top">${badge(e)}<span>운영 화면</span></div>
+        <h2>${esc(e.title)}</h2>
+        <ul class="facts">
+          <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          <li><span class="ic">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
+            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명</span>` : ''}</span></span></li>
+          ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
+        </ul>
+        ${dueBox(e)}
+        ${LIVE ? `<span id="qurl" hidden>${esc(shareBase())}/e/${esc(e.id)}</span>
+        <div class="quick">
+          <a href="/e/${esc(e.id)}" target="_blank" rel="noopener"><span>👀</span>공개 페이지</a>
+          <button id="b-qcopy"><span>🔗</span>주소 복사</button>
+          <a href="/tv/${esc(e.id)}" target="_blank" rel="noopener"><span>📺</span>큰 화면</a>
+        </div>` : '<button class="btn sec sm" id="b-pub" style="margin-top:14px">공개 페이지 미리보기</button>'}
+      </section>
 
       ${noWord ? nudge(`심사위원이 <b>${noWord}팀</b>에 점수만 넣고 심사평을 안 남겼습니다.
         참가자가 가장 아쉬워하는 것이 “왜 떨어졌는지 모른다” 입니다`) : ''}
@@ -1447,89 +1741,90 @@ const SCREEN = {
     const hrep = LIVE ? await api(`/events/${cur}/rep`).catch(() => null) : null;
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : DEMO.ledger;
-    return `<h2>${esc(e.title)} ${badge(e)}</h2>
-      <p class="sub">${esc(e.host)} 주최 · ${esc(e.starts)}~${esc(e.ends)}
-        ${e.topic ? '· 주제 ' + esc(e.topic) : ''}<br>상금 ${won(e.prize)} · 참가 ${e.teams}팀</p>
-      ${dotBoard(needs, '이 대회를 함께 여는 자리')}
-      ${e.notice ? `<div class="notice">${esc(e.notice)}</div>` : ''}
-      ${dueBox(e)}
+    const ended = statusOf(e).k === '끝남';
+    /* 아래 바닥 단추. 화면을 그린 뒤 render() 가 붙인다. */
+    CTA = ended ? null
+        : !mine ? { text: '참가 신청하기', to: 'apply' }
+        : (!mine.role || !mine.found) ? { text: '신청 완료 · 남은 것 채우기', to: 'apply' }
+        : null;
+    const confirmed = n => (n.pledges || []).filter(p => p.status === 'ok' || p.status === 'done');
+    /* 숫자가 아직 없는 대회에 '완주율 0%' 를 띄우면 '아무도 완주 못 했다' 로 읽힌다.
+       모름을 0 으로 그리지 않는다 — 낸 팀이 생겼거나 대회가 끝났을 때만 보인다. */
+    const showStats = ended || d.closed || (+o.finished || 0) > 0;
+    return `<section class="hero">
+        <div class="top">${badge(e)}<span>${esc(e.host)} 주최</span></div>
+        <h2>${esc(e.title)}</h2>
+        <ul class="facts">
+          <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          ${e.topic ? `<li><span class="ic">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
+          <li><span class="ic">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
+            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명</span>` : ''}</span></span></li>
+          ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
+        </ul>
+        ${dueBox(e)}
+      </section>
+      ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
+
+      ${whoBox()}
+
+      ${(e.plan || []).length ? `<div class="card"><h3>진행 순서</h3>${timeline(e.plan)}</div>` : ''}
 
       ${e.sponsors.length ? `<div class="card"><h3>함께한 곳</h3>
-
         ${logoBand(e.sponsors)}
       </div>` : ''}
 
-      <h3 style="margin-top:16px">필요한 자리</h3>
-      <p class="sub">한 자리씩 맡아서 같이 엽니다. 연락처는 운영자에게만 전달되고 공개 장부에는 나오지 않습니다.</p>
-      ${needs.length ? needs.map(n => `<div class="card">
-        <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)} 채움</span></h3>
-        ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
-        ${(n.pledges || []).filter(p => p.status === 'ok' || p.status === 'done').length ? `<div class="meta" style="margin-top:6px">확인됨 · ${(n.pledges || []).filter(p => p.status === 'ok' || p.status === 'done').map(p => `<b>${esc(p.name)}</b>${p.org ? ' (' + esc(p.org) + ')' : ''}`).join(' · ')}</div>` : ''}
-        ${(+n.filled||0) < (+n.qty||0) ? `<div style="height:9px"></div><button class="btn sec sm" data-pledge-open="${esc(n.id)}">내가 맡겠다</button>
-          <div id="pledge-${esc(n.id)}" hidden>
-            <label>이름</label><input data-p-name="${esc(n.id)}" placeholder="이름 또는 팀/가게 이름">
-            <label>소속</label><input data-p-org="${esc(n.id)}" placeholder="선택">
-            <label>연락처 <span class="pill warn">운영자에게만 보임</span></label><input data-p-contact="${esc(n.id)}" placeholder="이메일 또는 전화">
-            <label>메모</label><input data-p-note="${esc(n.id)}" placeholder="가능한 시간·수량 등">
-            <div style="height:9px"></div><button class="btn sm" data-pledge-send="${esc(n.id)}">맡겠다고 보내기</button>
-          </div>` : '<div class="meta" style="margin-top:7px"><b>필요한 만큼 채워졌습니다.</b></div>'}
-      </div>`).join('') : '<div class="card"><div class="meta">아직 올린 자리가 없습니다.</div></div>'}
-
-      <h3 style="margin-top:16px">공개 장부</h3>
-      <p class="sub">운영자가 확인한 것만 이름과 함께 남습니다. 연락처는 공개하지 않습니다.</p>
-      ${ledger.length ? `<table><tr><th>자리</th><th>이름</th><th>소속</th></tr>${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : '<div class="card"><div class="meta">아직 확인된 기여가 없습니다.</div></div>'}
-
-      <div class="stat">
+      ${showStats ? `<div class="stat">
         <div><b>${o.finishRate}%</b><span>완주율</span></div>
         <div><b>${o.interview}</b><span>면접 연결</span></div>
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
-      </div>
+      </div>` : ''}
 
-      ${d.closed ? `<h3 style="margin-top:16px">순위</h3>
+      ${d.closed ? `<h3>순위</h3>
         <table><tr><th>순위</th><th>팀</th><th class="n">점수</th></tr>
         ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${esc(r.name)}</td>
           <td class="n">${r.score}</td></tr>`).join('')}</table>`
-      : `<h3 style="margin-top:16px">참가한 팀</h3>
+      : d.rows.length ? `<h3>참가한 팀 <span style="color:var(--ink3);font-weight:600">${d.rows.length}</span></h3>
         <p class="sub">순위와 점수는 <b>제출 마감 뒤</b>에 함께 공개됩니다.</p>
-        <table><tr><th>팀</th><th>제출</th></tr>
+        <table><tr><th>팀</th><th class="n">제출</th></tr>
         ${d.rows.map(r => `<tr><td>${esc(r.name)}</td>
-          <td>${(r.done || r.hidden) ? '<span class="pill ok">냈습니다</span>'
-                                     : '<span class="pill">아직</span>'}</td></tr>`).join('')}</table>`}
-
-      ${sup.rows.length ? `<h3 style="margin-top:16px">끝난 뒤에도 봐 드립니다</h3>
-        <p class="sub">대회가 끝나고 버려지지 않게, 팀마다 봐 줄 사람을 미리 정해 뒀습니다.</p>
-        <table><tr><th>팀</th><th>봐 줄 사람</th><th>언제까지</th></tr>
-        ${sup.rows.map(r => `<tr><td>${esc(r.team_name)}</td>
-          <td>${esc(r.helper_name)}${r.org ? ' · ' + esc(r.org) : ''}</td>
-          <td>${r.done ? '<span class="pill ok">완료</span>' : esc(r.due)}</td></tr>`).join('')}</table>` : ''}
+          <td class="n">${(r.done || r.hidden) ? '<span class="pill ok">냈습니다</span>'
+                                     : '<span class="pill" style="background:var(--fill);color:var(--ink3)">아직</span>'}</td></tr>`).join('')}</table>`
+      : ''}
 
       ${(() => {
         /* 마감 전에는 무엇을 만들고 있는지만 보이고 링크는 안 보인다.
            서버가 아예 안 내려보낸다 - 화면에서만 감추면 소용이 없다. */
         const made = d.rows.filter(r => r.done || r.hidden || r.note);
         if (!made.length) return '';
-        return `<h3 style="margin-top:16px">${d.closed ? '제출작' : '무엇을 만들고 있나'}</h3>
+        return `<h3>${d.closed ? '제출작' : '무엇을 만들고 있나'}</h3>
           ${d.closed ? '' : `<p class="sub">링크는 <b>마감 뒤</b>에 한꺼번에 열립니다.
             먼저 낸 팀이 손해를 보지 않게 하기 위해서입니다.</p>`}
           ${made.map(r => `<div class="card"><h3>${esc(r.name)}</h3>
             ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
-            ${r.url ? `<div class="share">${esc(r.url)}</div>` : ''}</div>`).join('')}`;
+            ${r.url ? `<div class="share" style="margin-top:10px">${esc(r.url)}</div>` : ''}</div>`).join('')}`;
       })()}
+
+      ${sup.rows.length ? `<h3>끝난 뒤에도 봐 드립니다</h3>
+        <p class="sub">대회가 끝나고 버려지지 않게, 팀마다 봐 줄 사람을 미리 정해 뒀습니다.</p>
+        <table><tr><th>팀</th><th>봐 줄 사람</th><th>언제까지</th></tr>
+        ${sup.rows.map(r => `<tr><td>${esc(r.team_name)}</td>
+          <td>${esc(r.helper_name)}${r.org ? ' · ' + esc(r.org) : ''}</td>
+          <td>${r.done ? '<span class="pill ok">완료</span>' : esc(r.due)}</td></tr>`).join('')}</table>` : ''}
 
       ${(cw.solo.length || cw.looking.length) ? `<div class="card">
         <h3>같이 할 사람 찾기</h3>
         <div class="meta">연락처는 공개하지 않습니다.
           <b>당일 팀 짜는 시간에 이 목록을 보고 얼굴 보며 정합니다.</b>
           혼자 오셔도 팀이 생깁니다.</div>
-        ${cw.solo.length ? `<div style="margin-top:12px">
-          <b style="font-size:13px">혼자 오시는 분 ${cw.solo.length}명</b>
+        ${cw.solo.length ? `<div style="margin-top:14px">
+          <b style="font-size:14px">혼자 오시는 분 ${cw.solo.length}명</b>
           <table>${cw.solo.map(r => `<tr>
             <td style="width:7em">${esc(r.name)}</td>
             <td>${r.role ? `<span class="pill">${esc(r.role)}</span> ` : ''}${esc(r.note || '')}</td>
           </tr>`).join('')}</table></div>` : ''}
-        ${cw.looking.length ? `<div style="margin-top:12px">
-          <b style="font-size:13px">자리가 남은 팀 ${cw.looking.length}팀</b>
-          ${cw.looking.map(r => `<div class="card" style="margin-top:9px">
+        ${cw.looking.length ? `<div style="margin-top:14px">
+          <b style="font-size:14px">자리가 남은 팀 ${cw.looking.length}팀</b>
+          ${cw.looking.map(r => `<div class="card" style="margin-top:9px;padding:16px">
             <h3>${esc(r.name)} <span class="pill ${r.free ? 'ok' : ''}">${
               r.free ? r.free + '자리 남음' : '다 참'}</span></h3>
             ${r.want ? `<div class="meta">${esc(r.want)}</div>` : ''}
@@ -1543,12 +1838,28 @@ const SCREEN = {
           </div>`).join('')}</div>` : ''}
       </div>` : ''}
 
-      ${(e.plan || []).length ? `<div class="card"><h3>진행 순서</h3>
-        <table>${e.plan.map(r => `<tr class="${
-          /제출 마감|코드 프리즈/.test(r.what) ? 'row-hot'
-          : /^발표|시상|등록/.test(r.what) ? 'row-key' : ''}">
-          <td style="width:5.5em">${esc(r.at)}</td>
-          <td>${esc(r.what)}</td></tr>`).join('')}</table></div>` : ''}
+      ${/* 필요한 자리는 참가자가 아니라 '도와줄 사람' 몫이다. 참가자가 먼저 볼 것(언제·누가·순서)
+            뒤로 보낸다. 올린 자리가 없으면 통째로 안 그린다 — 빈 점판은 '아무도 안 돕는다' 로 읽힌다. */''}
+      ${needs.length ? `<h3>함께 여는 자리</h3>
+      <p class="sub">한 자리씩 맡아서 같이 엽니다. 연락처는 운영자에게만 전달되고 공개 장부에는 나오지 않습니다.</p>
+      ${dotBoard(needs, '이 대회를 함께 여는 자리')}
+      ${needs.map(n => `<div class="card">
+        <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)} 채움</span></h3>
+        ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
+        ${confirmed(n).length ? `<div class="meta" style="margin-top:6px">확인됨 · ${confirmed(n).map(p => `<b>${esc(p.name)}</b>${p.org ? ' (' + esc(p.org) + ')' : ''}`).join(' · ')}</div>` : ''}
+        ${(+n.filled||0) < (+n.qty||0) ? `<div style="height:12px"></div><button class="btn sec sm" data-pledge-open="${esc(n.id)}">🙌 내가 맡겠다</button>
+          <div id="pledge-${esc(n.id)}" hidden>
+            <label>이름</label><input data-p-name="${esc(n.id)}" placeholder="이름 또는 팀/가게 이름">
+            <label>소속</label><input data-p-org="${esc(n.id)}" placeholder="선택">
+            <label>연락처 <span class="pill warn">운영자에게만 보임</span></label><input data-p-contact="${esc(n.id)}" placeholder="이메일 또는 전화">
+            <label>메모</label><input data-p-note="${esc(n.id)}" placeholder="가능한 시간·수량 등">
+            <div style="height:12px"></div><button class="btn" data-pledge-send="${esc(n.id)}">맡겠다고 보내기</button>
+          </div>` : '<div class="meta" style="margin-top:8px"><b>필요한 만큼 채워졌습니다.</b></div>'}
+      </div>`).join('')}` : ''}
+
+      ${ledger.length ? `<h3>공개 장부</h3>
+      <p class="sub">운영자가 확인한 것만 이름과 함께 남습니다. 연락처는 공개하지 않습니다.</p>
+      <table><tr><th>자리</th><th>이름</th><th>소속</th></tr>${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
 
       ${(hrep && hrep.n) ? `<div class="card">
         <h3>참가하신 분들이 남긴 평가</h3>
@@ -1568,11 +1879,11 @@ const SCREEN = {
         <label>배울 게 있었나요</label>${stars('worth', 0)}
         <label>한 줄 (선택)</label>
         <input id="rv-n" placeholder="다음 참가자에게 도움이 될 한 줄">
-        <div style="height:10px"></div>
-        <button class="btn sm" id="rv-go">남기기</button>
+        <div style="height:14px"></div>
+        <button class="btn" id="rv-go">남기기</button>
       </div>` : ''}
 
-      ${rec && rec.events ? `<div class="card" style="border-color:#AECFB8;background:var(--ok-l)">
+      ${rec && rec.events ? `<div class="card">
         <h3>이 주최자가 지난번에</h3>
         <div class="meta">지난 대회 ${rec.events}개 · 참가 ${rec.teams}팀 ·
           완주율 <b>${rec.finishRate}%</b>${rec.promised
@@ -1582,19 +1893,16 @@ const SCREEN = {
           해커톤은 시상식에서 끝나지 않습니다. 이 숫자가 그 증거입니다.</div>
       </div>` : ''}
 
-      ${whoBox()}
+      <div class="card"><h3>심사 기준</h3>${rubricBars(e.rubric)}</div>
       ${rulesBox()}
 
-      ${statusOf(e).k !== '끝남'
+      ${!ended
         ? (mine
             ? moreForm(mine)
-            : `<div class="card"><h3>참가 신청</h3>
-                 <div class="meta">이 페이지에서 바로 신청합니다. 이름만 있으면 됩니다.</div>
+            : `<div class="card" id="apply"><h3>참가 신청</h3>
+                 <div class="meta">이 페이지에서 바로 신청합니다. 1분이면 됩니다.</div>
                  ${applyForm()}</div>`)
-        : ''}
-
-      <p class="sub" style="margin-top:14px">심사 기준 ·
-        ${e.rubric.map(r => esc(r.label) + ' ' + r.weight).join(' · ')}</p>`;
+        : ''}`;
   },
 
   /* 행사장 큰 화면 — /tv/<대회id>. 노트북을 HDMI 로 꽂아 두는 용도다.
@@ -2623,6 +2931,8 @@ function wire() {
     }
     flash(msg);
   };
+  const qc = $('#b-qcopy');
+  if (qc) qc.onclick = () => copyAny('#qurl', '공개 주소를 복사했습니다');
   const copy = $('#b-copy');
   if (copy) copy.onclick = () => copyAny('.share', '공개 주소를 복사했습니다');
   const copyj = $('#b-copyj');
@@ -3022,6 +3332,8 @@ else if (PUB || JUD || TVM) {
   cur = (PUB || JUD || TVM)[1];
   tab = TVM ? 'tv' : JUD ? 'judge' : (PUB[2] ? 'report' : 'pub');
   document.querySelector('nav').style.display = 'none';
+  /* 손님 화면. '서버 연결됨' 은 운영자 말이라 손님에게는 안 보인다. */
+  document.body.classList.add('guest');
 }
 if (TVM) {
   document.body.classList.add('tv');
