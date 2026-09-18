@@ -40,19 +40,23 @@ def ok(msg):
     print(f"ok {step:2d}  {msg}")
 
 
-def api(path, key=None):
+def api(path, key=None, jkey=None):
     req = urllib.request.Request(BASE + path)
     if key:
         req.add_header("x-okey", key)
+    if jkey:
+        req.add_header("x-jkey", jkey)
     with urllib.request.urlopen(req) as r:
         return json.load(r)
 
 
-def code_of(path, key=None):
+def code_of(path, key=None, jkey=None):
     """GET 을 해 보고 상태 코드만 돌려준다. 막혔는지 확인할 때 쓴다."""
     req = urllib.request.Request(BASE + path)
     if key:
         req.add_header("x-okey", key)
+    if jkey:
+        req.add_header("x-jkey", jkey)
     try:
         with urllib.request.urlopen(req) as r:
             return r.status
@@ -60,12 +64,14 @@ def code_of(path, key=None):
         return e.code
 
 
-def post(path, payload, key=None, method="POST", tkey=None):
+def post(path, payload, key=None, method="POST", tkey=None, jkey=None):
     h = {"content-type": "application/json"}
     if key:
         h["x-okey"] = key
     if tkey:
         h["x-tkey"] = tkey
+    if jkey:
+        h["x-jkey"] = jkey
     req = urllib.request.Request(
         BASE + path, method=method, data=json.dumps(payload).encode(), headers=h)
     try:
@@ -129,6 +135,8 @@ with sync_playwright() as p:
     A(ev and len(ev) == 8, f"대회가 안 만들어졌다: {ev}")
     OK = pg.evaluate("localStorage.getItem('hackon.okey.' + cur)")
     A(OK and len(OK) == 10, f"운영자 열쇠가 저장되지 않았다: {OK}")
+    JK = pg.evaluate("localStorage.getItem('hackon.jkey.' + cur)")
+    A(JK and len(JK) == 10, f"심사 열쇠가 저장되지 않았다: {JK}")
     OWNER = pg.evaluate("localStorage.getItem('hackon.owner')")
     A(OWNER and len(OWNER) == 12, f"주최자 열쇠가 저장되지 않았다: {OWNER}")
     A(api(f"/api/events/{ev}")["title"] == "우리 동네 문제 해결 해커톤", "화면이 보낸 값이 안 들어갔다")
@@ -260,7 +268,7 @@ with sync_playwright() as p:
     # ── 심사평과 성적표 — 불만 1위가 "왜 떨어졌는지 모른다" 였다 ──
     jc3 = b.new_context()
     jp3 = jc3.new_page()
-    jp3.goto(f"{BASE}/j/{ev}")
+    jp3.goto(f"{BASE}/j/{ev}?k={JK}")
     jp3.wait_for_selector("body[data-ready='1']", timeout=8000)
     jp3.fill("#jn", "심사1"); jp3.click("#jn-go"); jp3.wait_for_timeout(700)
     tid = str(top["id"])
@@ -306,7 +314,7 @@ with sync_playwright() as p:
     # ── 심사 눈높이 — 운영자만 본다 ─────────────────────────
     # 짜게 주는 심사위원을 하나 더 넣어 차이를 만든다
     A(post(f"/api/teams/{top['id']}/score",
-           {"judge": "짠심사", "values": {"idea": 55, "make": 55, "use": 55, "tell": 55}})[0] == 200,
+           {"judge": "짠심사", "values": {"idea": 55, "make": 55, "use": 55, "tell": 55}}, jkey=JK)[0] == 200,
       "둘째 심사위원이 못 넣었다")
     sp = api(f"/api/events/{ev}/spread", OK)
     A(sp["gap"] >= 15 and sp["warn"], f"차이가 큰데 경고가 없다: {sp}")
@@ -319,7 +327,7 @@ with sync_playwright() as p:
     # 심사위원에게는 안 새야 한다. 서로 눈치를 보게 된다.
     jc2 = b.new_context()
     jp2 = jc2.new_page()
-    jp2.goto(f"{BASE}/j/{ev}")
+    jp2.goto(f"{BASE}/j/{ev}?k={JK}")
     jp2.wait_for_selector("body[data-ready='1']", timeout=8000)
     jp2.fill("#jn", "최심사"); jp2.click("#jn-go"); jp2.wait_for_timeout(700)
     j2 = jp2.inner_text("#view")
@@ -536,15 +544,15 @@ with sync_playwright() as p:
     # 절대값을 박아 두지 않는다 — 앞 단계에서 심사위원이 늘면 그때 깨진다.
     was = [r for r in api(f"/api/events/{ev}/board", OK)["rows"] if r["id"] == top["id"]][0]["judges"]
     A(post(f"/api/teams/{top['id']}/score",
-           {"judge": "심사1", "values": {"idea": 95, "make": 90, "use": 85, "tell": 80}})[0] == 200,
+           {"judge": "심사1", "values": {"idea": 95, "make": 90, "use": 85, "tell": 80}}, jkey=JK)[0] == 200,
       "같은 심사위원이 다시 못 넣는다")
     now = [r for r in api(f"/api/events/{ev}/board", OK)["rows"] if r["id"] == top["id"]][0]["judges"]
     A(now == was, f"같은 사람이 두 명으로 셌다: {was} → {now}")
     ok("같은 심사위원 재저장 → 덮어쓰기 (중복 안 됨)")
 
-    A(post(f"/api/teams/{top['id']}/score", {"judge": "심사2", "values": {"nope": 10}})[0] == 400,
+    A(post(f"/api/teams/{top['id']}/score", {"judge": "심사2", "values": {"nope": 10}}, jkey=JK)[0] == 400,
       "없는 심사 항목이 들어갔다")
-    A(post(f"/api/teams/{top['id']}/score", {"judge": "심사2", "values": {"idea": 120}})[0] == 400,
+    A(post(f"/api/teams/{top['id']}/score", {"judge": "심사2", "values": {"idea": 120}}, jkey=JK)[0] == 400,
       "100 넘는 점수가 들어갔다")
     A(post("/api/events", {"title": "배점깨진대회",
                            "rubric": [{"key": "a", "label": "가", "weight": 50}]})[0] == 400,
@@ -555,7 +563,7 @@ with sync_playwright() as p:
     jctx = b.new_context(viewport={"width": 460, "height": 1100})
     jp = jctx.new_page()
     jp.on("pageerror", lambda e: errs.append("심사:" + str(e)))
-    jp.goto(f"{BASE}/j/{ev}")
+    jp.goto(f"{BASE}/j/{ev}?k={JK}")
     jp.wait_for_selector("body[data-ready='1']", timeout=8000)
     A(jp.evaluate("document.querySelector('nav').style.display") == "none", "심사 화면에 아래 탭이 보인다")
     jp.fill("#jn", "박심사")
@@ -563,7 +571,7 @@ with sync_playwright() as p:
     jp.wait_for_timeout(700)
     jtxt = jp.inner_text("#view")
     # 팀 수를 박아 두지 않는다. 앞 단계에서 팀이 늘면 바뀐다.
-    nteams = len(api(f"/api/events/{ev}/judge")["teams"])
+    nteams = len(api(f"/api/events/{ev}/judge", jkey=JK)["teams"])
     A(f"0/{nteams}팀 봤습니다" in jtxt, f"진행 표시가 틀렸다(={nteams}): {jtxt[:120]}")
     # 한 팀씩 본다. 목록이 아니라 지금 볼 팀 하나만 떠 있어야 한다.
     A(len(jp.query_selector_all("[data-jsave]")) == 1,
@@ -581,7 +589,7 @@ with sync_playwright() as p:
     jp.evaluate("(id) => document.querySelectorAll('.jv-' + id).forEach((i, n) => { i.value = [60,65,70,75][n] })", first)
     jp.click(f'[data-jsave="{first}"]')
     jp.wait_for_timeout(1000)
-    jv = api(f"/api/events/{ev}/judge?judge=" + urllib.parse.quote("박심사"))
+    jv = api(f"/api/events/{ev}/judge?judge=" + urllib.parse.quote("박심사"), jkey=JK)
     A(jv["left"] == nteams - 1, f"남은 팀이 안 줄었다: {jv['left']} (팀 {nteams})")
     scored = [t for t in jv["teams"] if str(t["id"]) == first][0]
     A(scored["mine"]["idea"] == 60, f"내 점수가 안 저장됐다: {scored['mine']}")
@@ -685,8 +693,9 @@ with sync_playwright() as p:
     # 손님에게 링크를 줬다 (GLM 레드팀 leak_pre_due). top 팀은 example.com/walk 를 이미 냈고 ev 는 마감 전.
     A(all(not r.get("url") for r in api(f"/api/events/{ev}/follow")["rows"]),
       "마감 전 손님에게 follow 로 제출 링크가 샜다")
-    A(all(not t.get("url") for t in api(f"/api/events/{ev}/judge")["teams"]),
-      "마감 전 손님에게 judge 로 제출 링크가 샜다")
+    A(code_of(f"/api/events/{ev}/judge") == 403, "심사 화면이 열쇠 없이 열린다")
+    A(all(not t.get("url") for t in api(f"/api/events/{ev}/judge", jkey=JK)["teams"]),
+      "마감 전 심사위원에게 judge 로 제출 링크가 샜다")
     # 운영자는 마감 전에도 봐야 심사·정리를 한다
     A(any(r.get("url") == "https://example.com/walk"
           for r in api(f"/api/events/{ev}/follow", key=OK)["rows"]),
@@ -705,6 +714,17 @@ with sync_playwright() as p:
     # 사후지원 약속 '완료' 처리도 운영자만 — 보고서 이행률이 여기서 나온다 (pwn-assign-done)
     A(post("/api/assignments/999999/done", {"done": True})[0] in (403, 404),
       "열쇠 없이 약속 완료 처리가 됐다")
+    # 점수는 심사 열쇠나 운영자 열쇠가 있어야 넣는다. 공개 event id 만으로 아무나 남의 점수를
+    # 0점으로 덮던 것을 막았다 (GLM 레드팀 score_tamper). 마감·항목은 그 뒤 검사라 지금은 열쇠만 본다.
+    sv = {"idea": 40, "make": 40, "use": 40, "tell": 40}
+    A(post(f"/api/teams/{top['id']}/score", {"judge": "무단", "values": sv})[0] == 403,
+      "열쇠 없이 점수가 들어갔다")
+    A(post(f"/api/teams/{top['id']}/score", {"judge": "무단", "values": sv}, jkey="0000000000")[0] == 403,
+      "틀린 심사 열쇠로 점수가 들어갔다")
+    A(post(f"/api/teams/{top['id']}/score", {"judge": "열쇠심사", "values": sv}, jkey=JK)[0] == 200,
+      "맞는 심사 열쇠로 점수가 안 들어갔다")
+    A(post(f"/api/teams/{top['id']}/score", {"judge": "운영자심사", "values": sv}, OK)[0] == 200,
+      "운영자 열쇠로 점수가 안 들어갔다")
     A(post(f"/api/teams/{top['id']}/checkin", {})[0] == 403, "열쇠 없이 체크인이 됐다")
     A(post(f"/api/events/{ev}/list", {"list": False})[0] == 403, "열쇠 없이 목록 조작이 됐다")
 
@@ -723,9 +743,12 @@ with sync_playwright() as p:
     ok("운영자 열쇠 — 삭제·연락처·성과·체크인이 전부 막힌다 (403)")
 
     # 참가자가 해야 하는 일은 열쇠 없이도 된다
-    A(code_of(f"/api/events/{ev}/judge") == 200, "심사 화면이 막혔다")
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")
-    ok("신청·제출·심사·공개 페이지는 열쇠 없이 그대로 열린다")
+    # 심사 화면은 이제 심사 열쇠가 있어야 열린다 — 공개 링크만으로 아무나 점수를 넣던 것을 막았다
+    A(code_of(f"/api/events/{ev}/judge") == 403, "심사 화면이 열쇠 없이 열린다")
+    A(code_of(f"/api/events/{ev}/judge", jkey=JK) == 200, "심사 열쇠로도 심사 화면이 안 열린다")
+    A(code_of(f"/api/events/{ev}/judge", OK) == 200, "운영자 열쇠로도 심사 화면이 안 열린다")
+    ok("신청·제출·공개 페이지는 열쇠 없이 열리고, 심사 화면은 심사 열쇠가 있어야 열린다")
 
     # 통째로 내려받기 — 노트북이 죽으면 이걸로 살린다. 열쇠가 있어야 한다.
     A(code_of(f"/api/events/{ev}/dump") == 403, "열쇠 없이 백업이 받아졌다")
@@ -1372,6 +1395,7 @@ with sync_playwright() as pw:
 
     oev = post("/api/events", {"title": "정전 시험"})[1]
     OK2 = oev["okey"]
+    OJK = oev["jkey"]
     post(f"/api/events/{oev['id']}", {"starts": "2026-01-01", "ends": "2030-01-01",
          "due": "2030-01-01T18:00", "wifi": "hackon / 1234"}, key=OK2, method="PATCH")
     # 협찬 로고를 일부러 넣는다. 인터넷이 없으면 이미지가 안 오는데,
@@ -1396,7 +1420,7 @@ with sync_playwright() as pw:
 
     jo = ctx.new_page()
     jo.on("pageerror", lambda e: errs.append("정전심사:" + str(e)))
-    jo.goto(f"{BASE}/j/{oev['id']}", wait_until="domcontentloaded")
+    jo.goto(f"{BASE}/j/{oev['id']}?k={OJK}", wait_until="domcontentloaded")
     jo.wait_for_selector("#jn", timeout=10000)
     jo.fill("#jn", "정전심사")
     jo.click("#jn-go")

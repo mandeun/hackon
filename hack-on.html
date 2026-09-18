@@ -549,12 +549,15 @@ const okeyOf = id => localStorage.getItem('hackon.okey.' + id) || '';
 const myKey = () => localStorage.getItem('hackon.owner') || '';
 /* 팀 열쇠. 신청할 때 한 번 받아 두고, 그 팀 칸을 고칠 때마다 같이 보낸다. */
 const tkeyOf = tid => localStorage.getItem('hackon.tkey.' + tid) || '';
+/* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 한 번 받아 두고, 점수를 넣을 때 같이 보낸다. */
+const jkeyOf = id => localStorage.getItem('hackon.jkey.' + id) || '';
 async function api(path, opt) {
   const r = await fetch('/api' + path, {
     method: opt?.method || 'GET',
     headers: { 'content-type': 'application/json',
                ...(cur && okeyOf(cur) ? { 'x-okey': okeyOf(cur) } : {}),
                ...(opt?.tkey ? { 'x-tkey': opt.tkey } : {}),
+               ...(cur && jkeyOf(cur) ? { 'x-jkey': jkeyOf(cur) } : {}),
                ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
@@ -1456,6 +1459,8 @@ const SCREEN = {
     if (!cur) return `<h2>대회를 먼저 고르세요</h2><p class="sub">‘대회’ 탭에서 하나 누르면 됩니다.</p>`;
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const e = d.event;
+    /* 운영자 board 에는 심사 열쇠가 딸려 온다. 적어 두면 심사 링크·심사 창 열기가 늘 된다. */
+    if (e.jkey) try { localStorage.setItem('hackon.jkey.' + cur, e.jkey); } catch (_) {}
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : DEMO.ledger;
     /* 운영자 열쇠가 있을 때만 연락처가 붙은 명단을 받는다. 없으면 빈 배열. */
@@ -1668,13 +1673,14 @@ const SCREEN = {
         </div>
         <div class="meta" style="margin-top:6px">
           큰 화면은 당일 아침에 이 노트북에서 열고 F11 을 누르세요.
-          심사 주소는 심사 직전에 심사위원 폰으로 QR 을 찍게 하면 됩니다.</div>
+          <b>심사 링크에는 심사 열쇠가 들어 있습니다 — 심사위원에게만 주세요.</b>
+          심사 직전에 심사위원 폰으로 QR 을 찍게 하면 됩니다.</div>
 
         <details style="margin-top:12px"><summary>주소를 직접 복사해야 한다면</summary><div class="in">
           ${linkBox(`${shareBase()}/tv/${e.id}`, 'tvlink', 'b-copyt',
             '<b>행사장 큰 화면용.</b>')}
-          ${linkBox(`${shareBase()}/j/${e.id}`, 'jlink', 'b-copyj',
-            '<b>심사위원용.</b> 순위는 안 보입니다.')}
+          ${linkBox(`${shareBase()}/j/${e.id}${e.jkey ? '?k=' + e.jkey : ''}`, 'jlink', 'b-copyj',
+            '<b>심사위원용.</b> 심사 열쇠가 들어 있습니다. 순위는 안 보입니다.')}
         </div></details>
       </div></details>
       ${/* 이 브라우저로 신청한 사람에게만 펴 준다. 이어서 채울 칸이 있기 때문이다.
@@ -1994,9 +2000,21 @@ const SCREEN = {
   /* 심사위원 화면 — /j/<대회id> 로 연다. 점수만 넣는다.
      남의 점수와 순위는 서버가 아예 안 준다. 심사 중에 순위를 보면 점수가 끌려간다. */
   async judge() {
+    /* 심사 열쇠가 없으면 화면 자체가 안 열린다 — 공개 링크만으로 아무나 점수를 넣던 것을 막았다.
+       운영자가 보낸 /j/<id>?k=… 를 열면 열쇠가 자동으로 담긴다. 직접 받은 열쇠를 넣어도 된다. */
+    const keyPrompt = (err) => `<h2>심사위원 화면</h2>
+      <p class="sub">${err ? '<b class="late">' + esc(err) + '</b><br>' : ''}
+        운영자에게 받은 <b>심사 링크</b>를 여세요. 링크에 심사 열쇠가 들어 있습니다.<br>
+        열쇠만 따로 받으셨다면 여기에 넣으세요.</p>
+      <label>심사 열쇠</label><input id="jk-in" placeholder="영문과 숫자 10자">
+      <div style="height:12px"></div>
+      <button class="btn" id="jk-go">열기</button>`;
+    if (!jkeyOf(cur)) return keyPrompt('');
     const who = localStorage.getItem('hackon.judge') || '';
     if (!who) {
-      const e = await api(`/events/${cur}/judge`);
+      let e;
+      try { e = await api(`/events/${cur}/judge`); }
+      catch (err) { return keyPrompt('열쇠가 맞지 않습니다. 다시 확인해 주세요.'); }
       return `<h2>${esc(e.event.title)}</h2>
         <p class="sub">심사위원 화면입니다. 이름을 넣으면 시작합니다.<br>
           같은 이름으로 다시 들어오면 넣던 점수를 이어서 고칠 수 있습니다.</p>
@@ -2702,6 +2720,7 @@ function wire() {
       localStorage.setItem('hackon.event', cur);
       localStorage.setItem('hackon.okey.' + r.id, r.okey);   // 대회 열쇠
       if (r.owner) localStorage.setItem('hackon.owner', r.owner);   // 주최자 열쇠
+      if (r.jkey) localStorage.setItem('hackon.jkey.' + r.id, r.jkey);   // 심사 열쇠
       /* 빈 관리 화면을 마주하게 두지 않는다. 고른 유형에 맞는 진행표를 깔아 준다.
          고치는 것과 처음부터 쓰는 것은 완전히 다른 일이다. */
       const kind = $('#f-kind') ? $('#f-kind').value : '당일';
@@ -2819,6 +2838,14 @@ function wire() {
   };
   const jout = $('#jn-out');
   if (jout) jout.onclick = () => { localStorage.removeItem('hackon.judge'); render(); };
+
+  const jkgo = $('#jk-go');
+  if (jkgo) jkgo.onclick = () => {
+    const v = $('#jk-in').value.trim();
+    if (!v) return flash('심사 열쇠를 넣어 주세요', true);
+    try { localStorage.setItem('hackon.jkey.' + cur, v); } catch (_) {}
+    render();
+  };
 
   document.querySelectorAll('[data-jsave]').forEach(b => b.onclick = async () => {
     const id = b.dataset.jsave, values = {};
@@ -2944,7 +2971,8 @@ function wire() {
   const tvb = $('#b-tv');
   if (tvb) tvb.onclick = () => window.open(`${shareBase()}/tv/${cur}`, '_blank');
   const jb = $('#b-jopen');
-  if (jb) jb.onclick = () => window.open(`${shareBase()}/j/${cur}`, '_blank');
+  if (jb) jb.onclick = () => window.open(
+    `${shareBase()}/j/${cur}${jkeyOf(cur) ? '?k=' + jkeyOf(cur) : ''}`, '_blank');
 
   const csv = $('#b-csv');
   if (csv) csv.onclick = async () => {
@@ -3334,6 +3362,9 @@ else if (PUB || JUD || TVM) {
   document.querySelector('nav').style.display = 'none';
   /* 손님 화면. '서버 연결됨' 은 운영자 말이라 손님에게는 안 보인다. */
   document.body.classList.add('guest');
+  /* 심사 링크는 /j/<id>?k=<심사 열쇠>. 열쇠를 받아 두면 다음에 주소만으로도 열린다. */
+  if (JUD) { const k = new URLSearchParams(location.search).get('k');
+             if (k) try { localStorage.setItem('hackon.jkey.' + cur, k); } catch (_) {} }
 }
 if (TVM) {
   document.body.classList.add('tv');

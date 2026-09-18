@@ -836,6 +836,14 @@ function open(file) {
     const 채움 = db.prepare('UPDATE teams SET tkey=? WHERE id=?');
     for (const r of 빈것) 채움.run(crypto.randomBytes(5).toString('hex'), r.id);
   } catch {}
+  /* 심사 열쇠. 점수를 넣는 사람만 받는다 — 공개 링크만 알면 아무나 점수를 넣던 것을 막는다.
+     열쇠가 없던 시절의 대회에도 하나씩 채운다. 빈 열쇠를 두면 '비면 아무나' 구멍이 남는다. */
+  try { db.exec("ALTER TABLE events ADD COLUMN jkey TEXT NOT NULL DEFAULT ''"); } catch {}
+  try {
+    const 빈대회 = db.prepare("SELECT id FROM events WHERE jkey=''").all();
+    const 채움 = db.prepare('UPDATE events SET jkey=? WHERE id=?');
+    for (const r of 빈대회) 채움.run(crypto.randomBytes(5).toString('hex'), r.id);
+  } catch {}
   return db;
 }
 /* #endregion reuse:db-open */
@@ -1151,6 +1159,7 @@ function createEvent(db, b) {
   if (!b.title) throw new HttpError(400, '대회 이름이 필요합니다');
   const id = b.id || nid();
   const okey = crypto.randomBytes(5).toString('hex');   // 운영자 열쇠. 만든 사람만 받는다
+  const jkey = crypto.randomBytes(5).toString('hex');   // 심사 열쇠. 심사위원에게만 준다
   const rubric = Array.isArray(b.rubric) && b.rubric.length ? b.rubric
     : (RUBRICS[b.rubricKind] || RUBRICS['만들기']).rows;
   const sum = rubric.reduce((a, r) => a + Number(r.weight || 0), 0);
@@ -1169,9 +1178,9 @@ function createEvent(db, b) {
     db.prepare("UPDATE owners SET name=? WHERE id=? AND name=''").run(b.host, owner);
   }
   db.prepare('UPDATE events SET owner=? WHERE id=?').run(owner, id);
-  db.prepare('UPDATE events SET okey=?, plan=? WHERE id=?')
-    .run(okey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
-  return { id, okey, owner };
+  db.prepare('UPDATE events SET okey=?, jkey=?, plan=? WHERE id=?')
+    .run(okey, jkey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
+  return { id, okey, jkey, owner };
 }
 
 /** 운영자인가. 열쇠는 헤더나 쿼리로 온다. 없으면 손님이다.
@@ -1184,6 +1193,12 @@ function isAdmin(db, event, key, owner) {
      둘 중 하나만 맞으면 된다 — 대회 하나를 남에게 넘길 때 대회 열쇠만 주면 된다. */
   if (key && key === e.okey) return true;
   return !!owner && !!e.owner && owner === e.owner;
+}
+/* 점수를 넣거나 심사 화면을 여는 자격. 운영자이거나, 그 대회의 심사 열쇠를 든 사람. */
+function canJudge(db, event, key, owner, jkey) {
+  if (isAdmin(db, event, key, owner)) return true;
+  const e = db.prepare('SELECT jkey FROM events WHERE id=?').get(event);
+  return !!(e && e.jkey && jkey && jkey === e.jkey);
 }
 const needAdmin = (db, event, key, owner) => {
   if (!isAdmin(db, event, key, owner)) throw new HttpError(403, '운영자 열쇠가 필요합니다');
@@ -1240,6 +1255,7 @@ function getEvent(db, id) {
   if (!e) throw new HttpError(404, '없는 대회입니다');
   delete e.okey;                     // 열쇠는 절대 안 내려보낸다
   delete e.owner;                    // 주최자 열쇠도 안 내려보낸다 — 계정 노릇을 하는 비밀이라 링크만 열어도 새면 통째로 털린다
+  delete e.jkey;                     // 심사 열쇠도 안 내려보낸다 — 운영자에게만 따로 준다
   e.rubric = JSON.parse(e.rubric);
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
   e.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(id).c;
@@ -1854,6 +1870,8 @@ function routes(db) {
             && tooMany(req.socket.remoteAddress || ''))
           throw new HttpError(429, '열쇠를 너무 여러 번 틀렸습니다. 잠시 뒤에 다시 해 주세요');
         const owner = cookieOwner || headOwner;
+        /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 받아 브라우저가 x-jkey 로 실어 보낸다. */
+        const jkey = req.headers['x-jkey'] || '';
 
         if (p === '/api/events' && req.method === 'POST') {
           const b = await body(req);
@@ -1971,6 +1989,8 @@ function routes(db) {
           if (req.method === 'GET') {
             const e = getEvent(db, m[1]);
             e.admin = isAdmin(db, m[1], key, owner);
+            /* 심사 열쇠는 운영자에게만. 심사위원에게 보낼 링크를 이걸로 만든다. */
+            if (e.admin) e.jkey = db.prepare('SELECT jkey FROM events WHERE id=?').get(m[1]).jkey;
             return json(res, 200, e);
           }
           if (req.method === 'DELETE') {
@@ -1986,8 +2006,13 @@ function routes(db) {
           return json(res, 201, { id: tid, tkey: nt.tkey });
         }
 
-        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/board$/)))
-          return json(res, 200, board(db, m[1], isAdmin(db, m[1], key, owner)));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/board$/))) {
+          const adm = isAdmin(db, m[1], key, owner);
+          const bd = board(db, m[1], adm);
+          /* 심사 링크를 만들려면 운영자에게 심사 열쇠가 필요하다. 손님에겐 절대 안 준다. */
+          if (adm) bd.event.jkey = db.prepare('SELECT jkey FROM events WHERE id=?').get(m[1]).jkey;
+          return json(res, 200, bd);
+        }
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/sponsors$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);
@@ -2099,8 +2124,11 @@ function routes(db) {
           return json(res, 200, spread(db, m[1]));
         }
 
-        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/judge$/)) && req.method === 'GET')
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/judge$/)) && req.method === 'GET') {
+          if (!canJudge(db, m[1], key, owner, jkey))
+            throw new HttpError(403, '심사 열쇠가 필요합니다');
           return json(res, 200, judgeView(db, m[1], q.judge || '', isAdmin(db, m[1], key, owner)));
+        }
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/support$/))) {
           if (req.method === 'GET') {
@@ -2197,6 +2225,12 @@ function routes(db) {
           return json(res, 200, { ok: true });
         }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/score$/)) && req.method === 'POST') {
+          /* 점수는 운영자나 심사 열쇠를 든 사람만 넣는다. 팀 번호가 순서라, 안 막으면
+             공개 event id 만 알면 아무나 남의 점수를 0점으로 덮을 수 있었다(GLM 레드팀). */
+          const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          if (!canJudge(db, t.event, key, owner, jkey))
+            throw new HttpError(403, '심사 열쇠가 필요합니다');
           score(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
         }
