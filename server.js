@@ -799,6 +799,19 @@ function open(file) {
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    /* 관객·참가자 상호평가. 심사위원을 못 구했을 때 그 자리를 대신한다.
+       한 사람(voter 토큰)이 한 팀에 한 번, 1~5점. 현장 큰 화면의 QR 로 열어 폰으로 준다.
+       심사 점수(scores)와 별개 테이블 — 섞이지 않는다. */
+    CREATE TABLE IF NOT EXISTS votes(
+      id     INTEGER PRIMARY KEY,
+      event  TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      team   INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      voter  TEXT NOT NULL,
+      score  INTEGER NOT NULL,   -- 1~5
+      at     TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(event, team, voter)
+    );
+
     /* 2주 뒤 도구 확인. 한 팀의 답은 한 칸 - 다시 쓰면 덮어쓴다.
        요약(followup-summary)에는 팀 이름도 연락처도 메모도 안 나간다. */
     CREATE TABLE IF NOT EXISTS followups(
@@ -859,6 +872,14 @@ function open(file) {
     const 빈대회 = db.prepare("SELECT id FROM events WHERE jkey=''").all();
     const 채움 = db.prepare('UPDATE events SET jkey=? WHERE id=?');
     for (const r of 빈대회) 채움.run(crypto.randomBytes(5).toString('hex'), r.id);
+  } catch {}
+  /* 관객 평가. 심사위원 자리가 비면 켠다. 투표 열쇠도 심사 열쇠처럼 빈 것을 채운다. */
+  try { db.exec('ALTER TABLE events ADD COLUMN vmode INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE events ADD COLUMN vkey TEXT NOT NULL DEFAULT ''"); } catch {}
+  try {
+    const 빈투표 = db.prepare("SELECT id FROM events WHERE vkey=''").all();
+    const 채움v = db.prepare('UPDATE events SET vkey=? WHERE id=?');
+    for (const r of 빈투표) 채움v.run(crypto.randomBytes(5).toString('hex'), r.id);
   } catch {}
   return db;
 }
@@ -1176,6 +1197,7 @@ function createEvent(db, b) {
   const id = b.id || nid();
   const okey = crypto.randomBytes(5).toString('hex');   // 운영자 열쇠. 만든 사람만 받는다
   const jkey = crypto.randomBytes(5).toString('hex');   // 심사 열쇠. 심사위원에게만 준다
+  const vkey = crypto.randomBytes(5).toString('hex');   // 관객 투표 열쇠. 현장 큰 화면에 QR 로
   const rubric = Array.isArray(b.rubric) && b.rubric.length ? b.rubric
     : (RUBRICS[b.rubricKind] || RUBRICS['만들기']).rows;
   const sum = rubric.reduce((a, r) => a + Number(r.weight || 0), 0);
@@ -1194,9 +1216,9 @@ function createEvent(db, b) {
     db.prepare("UPDATE owners SET name=? WHERE id=? AND name=''").run(b.host, owner);
   }
   db.prepare('UPDATE events SET owner=? WHERE id=?').run(owner, id);
-  db.prepare('UPDATE events SET okey=?, jkey=?, plan=? WHERE id=?')
-    .run(okey, jkey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
-  return { id, okey, jkey, owner };
+  db.prepare('UPDATE events SET okey=?, jkey=?, vkey=?, plan=? WHERE id=?')
+    .run(okey, jkey, vkey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
+  return { id, okey, jkey, vkey, owner };
 }
 
 /** 운영자인가. 열쇠는 헤더나 쿼리로 온다. 없으면 손님이다.
@@ -1215,6 +1237,12 @@ function canJudge(db, event, key, owner, jkey) {
   if (isAdmin(db, event, key, owner)) return true;
   const e = db.prepare('SELECT jkey FROM events WHERE id=?').get(event);
   return !!(e && e.jkey && jkey && jkey === e.jkey);
+}
+/* 관객 평가에 표를 던질 자격. 운영자이거나, 관객 평가가 켜진 그 대회의 투표 열쇠를 든 사람. */
+function canVote(db, event, key, owner, vkey) {
+  if (isAdmin(db, event, key, owner)) return true;
+  const e = db.prepare('SELECT vmode, vkey FROM events WHERE id=?').get(event);
+  return !!(e && e.vmode && e.vkey && vkey && vkey === e.vkey);
 }
 const needAdmin = (db, event, key, owner) => {
   if (!isAdmin(db, event, key, owner)) throw new HttpError(403, '운영자 열쇠가 필요합니다');
@@ -1272,6 +1300,7 @@ function getEvent(db, id) {
   delete e.okey;                     // 열쇠는 절대 안 내려보낸다
   delete e.owner;                    // 주최자 열쇠도 안 내려보낸다 — 계정 노릇을 하는 비밀이라 링크만 열어도 새면 통째로 털린다
   delete e.jkey;                     // 심사 열쇠도 안 내려보낸다 — 운영자에게만 따로 준다
+  delete e.vkey;                     // 관객 투표 열쇠도 마찬가지
   e.rubric = JSON.parse(e.rubric);
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
   e.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(id).c;
@@ -1426,7 +1455,10 @@ function board(db, event, admin = false) {
        설명회에서도 2기부터 피드백 분량 기준을 강화했다고 했다. */
     const words = db.prepare(`SELECT COUNT(*) c FROM reviews
                               WHERE team=? AND (good<>'' OR next<>'')`).get(t.id).c;
+    /* 관객 평가. 심사위원 자리를 대신하는 표. 심사 점수와 별개다. */
+    const v = db.prepare('SELECT AVG(score) a, COUNT(*) c FROM votes WHERE team=?').get(t.id);
     const row = { ...t, score: Math.round(total * 10) / 10, judges: judged.size,
+                  vote: v.c ? Math.round((v.a || 0) * 10) / 10 : 0, votes: v.c,
                   words, by: [...judged].sort(), done: !!t.url };
     /* 마감 전에는 제출 링크를 안 내려보낸다.
        먼저 낸 팀의 결과물을 뒤에 내는 팀이 보고 만들 수 있기 때문이다.
@@ -1438,7 +1470,8 @@ function board(db, event, admin = false) {
                   delete row.photo; delete row.came; delete row.apply; }
     return row;
   });
-  rows.sort((a, b) => b.score - a.score);
+  /* 관객 평가 모드면 표 평균으로 줄 세운다. 아니면 심사 점수로. */
+  rows.sort((a, b) => e.vmode ? (b.vote - a.vote) || (b.votes - a.votes) : b.score - a.score);
   rows.forEach((r, i) => { r.rank = i + 1; });
   e.admin = admin;   // 화면이 운영 칸을 그릴지 말지 이걸로 정한다
   /* 이 대회에 한 번이라도 점수를 넣은 사람 전부. 화면이 '아직 안 본 사람' 을 계산하는 근거다. */
@@ -1447,7 +1480,7 @@ function board(db, event, admin = false) {
                              WHERE t.event = ? ORDER BY s.judge`).all(event).map(r => r.judge);
   /* 마감 전에는 점수도 안 준다. 심사 중에 순위가 보이면 심사위원이 그걸 보고 맞춘다.
      Kaggle 이 public/private 리더보드를 나눈 것과 같은 이유다. */
-  if (!admin && !closed(e)) for (const r of rows) { r.score = null; r.rank = null; }
+  if (!admin && !closed(e)) for (const r of rows) { r.score = null; r.rank = null; r.vote = null; r.votes = null; }
   e.notice = noticeOf(e);
   return { event: e, rows, judges, closed: closed(e) };
 }
@@ -2054,7 +2087,8 @@ function routes(db) {
             const e = getEvent(db, m[1]);
             e.admin = isAdmin(db, m[1], key, owner);
             /* 심사 열쇠는 운영자에게만. 심사위원에게 보낼 링크를 이걸로 만든다. */
-            if (e.admin) e.jkey = db.prepare('SELECT jkey FROM events WHERE id=?').get(m[1]).jkey;
+            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey FROM events WHERE id=?').get(m[1]);
+                           e.jkey = kk.jkey; e.vkey = kk.vkey; }
             return json(res, 200, e);
           }
           if (req.method === 'DELETE') {
@@ -2074,7 +2108,8 @@ function routes(db) {
           const adm = isAdmin(db, m[1], key, owner);
           const bd = board(db, m[1], adm);
           /* 심사 링크를 만들려면 운영자에게 심사 열쇠가 필요하다. 손님에겐 절대 안 준다. */
-          if (adm) bd.event.jkey = db.prepare('SELECT jkey FROM events WHERE id=?').get(m[1]).jkey;
+          if (adm) { const kk = db.prepare('SELECT jkey, vkey FROM events WHERE id=?').get(m[1]);
+                     bd.event.jkey = kk.jkey; bd.event.vkey = kk.vkey; }
           return json(res, 200, bd);
         }
 
@@ -2288,6 +2323,35 @@ function routes(db) {
           submit(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
         }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/vmode$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);   // 관객 평가 켜고 끄기 — 운영자만
+          const on = (await body(req)).on ? 1 : 0;
+          db.prepare('UPDATE events SET vmode=? WHERE id=?').run(on, m[1]);
+          return json(res, 200, { vmode: !!on });
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/vote$/)) && req.method === 'GET') {
+          /* 투표 화면 데이터. 투표 열쇠나 운영자만. 팀 이름만 준다(마감 전 링크 보호는 board 몫). */
+          if (!canVote(db, m[1], key, owner, req.headers['x-vkey'] || ''))
+            throw new HttpError(403, '관객 평가가 아직 안 켜졌거나 투표 열쇠가 필요합니다');
+          const e = getEvent(db, m[1]);
+          const teams = db.prepare('SELECT id, name FROM teams WHERE event=? ORDER BY id').all(m[1]);
+          return json(res, 200, { event: { id: e.id, title: e.title, due: e.due, ends: e.ends }, teams });
+        }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/vote$/)) && req.method === 'POST') {
+          const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          if (!canVote(db, t.event, key, owner, req.headers['x-vkey'] || ''))
+            throw new HttpError(403, '관객 평가가 아직 안 켜졌거나 투표 열쇠가 필요합니다');
+          const b = await body(req);
+          const voter = plain(b.voter, 40);
+          const sc = +b.score;
+          if (!voter) throw new HttpError(400, '누가 주는 표인지가 없습니다');
+          if (!(sc >= 1 && sc <= 5)) throw new HttpError(400, '표는 1~5 입니다');
+          db.prepare(`INSERT INTO votes(event,team,voter,score) VALUES(?,?,?,?)
+                      ON CONFLICT(event,team,voter) DO UPDATE SET score=excluded.score, at=datetime('now')`)
+            .run(t.event, +m[1], voter, sc);
+          return json(res, 200, { ok: true });
+        }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/feature$/)) && req.method === 'POST') {
           /* 추천작 표시. 운영자만. 공개 페이지·첫 화면 쇼케이스에 별표로 뜬다. */
           const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
@@ -2453,6 +2517,7 @@ function routes(db) {
          /app         대회를 열고 굴리는 곳 (hack-on.html)
          /e /j /tv    공개·심사·현장 화면. 전부 같은 hack-on.html 이 주소를 보고 갈라진다 */
       const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/) || p.match(/^\/j\/[a-z0-9]+$/)
+               || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app';
 

@@ -50,6 +50,10 @@ def api(path, key=None, jkey=None):
         return json.load(r)
 
 
+def codepost(path, payload, key=None, vkey=None):
+    return post(path, payload, key=key, vkey=vkey)[0]
+
+
 def code_of(path, key=None, jkey=None):
     """GET 을 해 보고 상태 코드만 돌려준다. 막혔는지 확인할 때 쓴다."""
     req = urllib.request.Request(BASE + path)
@@ -64,7 +68,7 @@ def code_of(path, key=None, jkey=None):
         return e.code
 
 
-def post(path, payload, key=None, method="POST", tkey=None, jkey=None):
+def post(path, payload, key=None, method="POST", tkey=None, jkey=None, vkey=None):
     h = {"content-type": "application/json"}
     if key:
         h["x-okey"] = key
@@ -72,6 +76,8 @@ def post(path, payload, key=None, method="POST", tkey=None, jkey=None):
         h["x-tkey"] = tkey
     if jkey:
         h["x-jkey"] = jkey
+    if vkey:
+        h["x-vkey"] = vkey
     req = urllib.request.Request(
         BASE + path, method=method, data=json.dumps(payload).encode(), headers=h)
     try:
@@ -794,6 +800,41 @@ with sync_playwright() as p:
     post(f"/api/teams/{ct['id']}/feature", {"on": 0}, CK)
     A(not any(w["event"] == CID for w in api("/api/showcase")), "추천작을 내렸는데 쇼케이스에 남았다")
     ok("추천작 — 운영자만 표시, 마감 뒤 첫 화면 쇼케이스에 뜨고, 내리면 사라진다 (개인정보 없음)")
+
+    # ── 관객 평가 대안 (기능 2/3) — 심사위원 없을 때 관객이 폰으로 별점 ──
+    _, vev = post("/api/events", {"title": "관객평가검사"})
+    VID, VOK = vev["id"], vev["okey"]
+    VVK = vev["vkey"]
+    A(VVK and len(VVK) == 10, f"투표 열쇠가 안 나온다: {vev}")
+    post(f"/api/events/{VID}", {"due": "2099-01-01T23:59"}, VOK, method="PATCH")
+    _, va = post(f"/api/events/{VID}/teams", {"name": "브이가", "email": "va@example.com", "agree": True})
+    _, vb = post(f"/api/events/{VID}/teams", {"name": "브이나", "email": "vb@example.com", "agree": True})
+    ta = api(f"/api/events/{VID}/board", key=VOK)["rows"]
+    ta = {r["name"]: r["id"] for r in ta}
+    A1, B1 = ta["브이가"], ta["브이나"]
+    # 관객 평가가 꺼져 있으면 투표 열쇠가 있어도 표를 못 넣는다
+    A(post(f"/api/teams/{A1}/vote", {"voter": "u1", "score": 5}, jkey=None)[0] == 403, "vmode 꺼짐인데 투표됨(무열쇠)")
+    # 켜는 것은 운영자만
+    A(post(f"/api/events/{VID}/vmode", {"on": 1})[0] == 403, "열쇠 없이 관객 평가가 켜졌다")
+    A(post(f"/api/events/{VID}/vmode", {"on": 1}, VOK)[0] == 200, "운영자가 관객 평가를 못 켠다")
+    # 투표 열쇠 없이·틀린 열쇠로는 표를 못 넣는다
+    A(codepost(f"/api/teams/{A1}/vote", {"voter": "u1", "score": 5}) == 403, "투표 열쇠 없이 표가 들어갔다")
+    A(codepost(f"/api/teams/{A1}/vote", {"voter": "u1", "score": 5}, vkey="0000000000") == 403, "틀린 투표 열쇠로 표가 들어갔다")
+    # 범위 밖 점수 거부 (열쇠는 맞게)
+    A(codepost(f"/api/teams/{A1}/vote", {"voter": "u1", "score": 9}, vkey=VVK) == 400, "6점 이상이 들어갔다")
+    # 관객 둘이 별점 — 한 사람이 한 팀에 한 번(다시 넣으면 덮어쓰기)
+    A(codepost(f"/api/teams/{A1}/vote", {"voter": "u1", "score": 5}, vkey=VVK) == 200, "관객 투표가 안 됐다")
+    codepost(f"/api/teams/{A1}/vote", {"voter": "u2", "score": 3}, vkey=VVK)
+    codepost(f"/api/teams/{A1}/vote", {"voter": "u2", "score": 1}, vkey=VVK)   # u2 가 3→1 로 고침
+    codepost(f"/api/teams/{B1}/vote", {"voter": "u1", "score": 2}, vkey=VVK)
+    vbd = {r["name"]: r for r in api(f"/api/events/{VID}/board", key=VOK)["rows"]}
+    # 브이가: (5+1)/2 = 3.0, 2표. 브이나: 2, 1표. 관객 평가라 브이가가 1위.
+    A(vbd["브이가"]["votes"] == 2 and vbd["브이가"]["vote"] == 3.0, f"관객 평균/표수가 틀렸다: {vbd['브이가']}")
+    A(vbd["브이가"]["rank"] == 1 and vbd["브이나"]["rank"] == 2, "관객 평가 순위가 표 평균을 안 따른다")
+    # 투표 열쇠는 손님에게 안 샌다
+    A("vkey" not in json.dumps(api(f"/api/events/{VID}/board"), ensure_ascii=False), "투표 열쇠가 손님 board 로 샜다")
+    A("vkey" not in json.dumps(api(f"/api/events/{VID}"), ensure_ascii=False), "투표 열쇠가 손님 대회정보로 샜다")
+    ok("관객 평가 — 운영자만 켜고, 투표 열쇠 든 관객만 한 팀 한 표, 순위는 표 평균 (열쇠 비노출)")
 
     # 참가자가 해야 하는 일은 열쇠 없이도 된다
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")

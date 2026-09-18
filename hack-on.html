@@ -551,6 +551,14 @@ const myKey = () => localStorage.getItem('hackon.owner') || '';
 const tkeyOf = tid => localStorage.getItem('hackon.tkey.' + tid) || '';
 /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 한 번 받아 두고, 점수를 넣을 때 같이 보낸다. */
 const jkeyOf = id => localStorage.getItem('hackon.jkey.' + id) || '';
+/* 관객 투표 열쇠. 투표 링크(/v/<id>?k=…)로 받아 두고, 표를 던질 때 같이 보낸다. */
+const vkeyOf = id => localStorage.getItem('hackon.vkey.' + id) || '';
+/* 이 브라우저의 투표자 표식. 이름 대신 무작위 토큰 하나 — 같은 사람이 한 팀에 한 번만. */
+function voterId() {
+  let v = localStorage.getItem('hackon.voter');
+  if (!v) { v = 'v' + Math.random().toString(36).slice(2, 12); try { localStorage.setItem('hackon.voter', v); } catch (_) {} }
+  return v;
+}
 async function api(path, opt) {
   const r = await fetch('/api' + path, {
     method: opt?.method || 'GET',
@@ -558,6 +566,7 @@ async function api(path, opt) {
                ...(cur && okeyOf(cur) ? { 'x-okey': okeyOf(cur) } : {}),
                ...(opt?.tkey ? { 'x-tkey': opt.tkey } : {}),
                ...(cur && jkeyOf(cur) ? { 'x-jkey': jkeyOf(cur) } : {}),
+               ...(cur && vkeyOf(cur) ? { 'x-vkey': vkeyOf(cur) } : {}),
                ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
@@ -1480,8 +1489,9 @@ const SCREEN = {
     if (!cur) return `<h2>대회를 먼저 고르세요</h2><p class="sub">‘대회’ 탭에서 하나 누르면 됩니다.</p>`;
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const e = d.event;
-    /* 운영자 board 에는 심사 열쇠가 딸려 온다. 적어 두면 심사 링크·심사 창 열기가 늘 된다. */
+    /* 운영자 board 에는 심사·투표 열쇠가 딸려 온다. 적어 두면 링크·창 열기가 늘 된다. */
     if (e.jkey) try { localStorage.setItem('hackon.jkey.' + cur, e.jkey); } catch (_) {}
+    if (e.vkey) try { localStorage.setItem('hackon.vkey.' + cur, e.vkey); } catch (_) {}
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : DEMO.ledger;
     /* 운영자 열쇠가 있을 때만 연락처가 붙은 명단을 받는다. 없으면 빈 배열. */
@@ -1634,6 +1644,22 @@ const SCREEN = {
             full < d.rows.length ? ' — 아직 남았습니다' : ' — 다 봤습니다'}</div>
       </div>` : ''}
 
+      ${/* 심사위원 자리가 비었을 때의 대안. 관객·참가자가 폰으로 별점을 준다. */''}
+      <div class="card" style="${e.vmode ? 'border-color:#AECFB8;background:var(--ok-l)' : ''}">
+        <h3>${e.vmode ? '⭐ 관객 평가 켜짐' : '심사위원을 못 구하셨나요'}</h3>
+        <div class="meta">${e.vmode
+          ? '심사위원 대신 관객·참가자가 폰으로 별점을 줍니다. 순위는 별점 평균으로 매겨집니다.'
+          : '심사위원 자리가 비면 관객 평가로 대신할 수 있습니다. 현장 사람들이 폰으로 작품에 별점을 주고, 그 평균으로 순위를 냅니다.'}</div>
+        <div style="height:10px"></div>
+        <button class="btn ${e.vmode ? 'sec' : ''} sm" id="b-vmode" data-on="${e.vmode ? 0 : 1}">${
+          e.vmode ? '관객 평가 끄기' : '관객 평가 켜기'}</button>
+        ${e.vmode ? `<div style="margin-top:12px">
+          <div class="meta"><b>투표 링크</b> — 큰 화면에 띄우거나 QR 을 보여 주세요. 열쇠가 들어 있습니다.</div>
+          ${linkBox(`${shareBase()}/v/${e.id}${e.vkey ? '?k=' + e.vkey : ''}`, 'vlink', 'b-copyv',
+            '<b>관객용.</b> 찍으면 별점 화면이 열립니다.')}
+        </div>` : ''}
+      </div>
+
       ${sp.rows.length > 1 ? `<div class="card" style="padding:11px 13px">
         <div class="meta"><b>심사 눈높이</b> · 운영자만 보입니다<br>
           ${sp.rows.map(r => esc(r.judge) + ' ' + r.avg + '점').join(' · ')}<br>
@@ -1722,10 +1748,11 @@ const SCREEN = {
       <details${mine ? ' open' : ''}><summary>참가 신청
         <span class="when">${mine ? '조금만 더' : d.rows.length ? '대신 넣어 줄 때' : '아직 아무도 없습니다'}</span>
         </summary><div class="in">${mine ? moreForm(mine) : applyForm()}</div></details>
-      <table><tr><th>순위</th><th>팀</th><th class="n">점수</th><th class="n">심사</th></tr>
+      <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객' : '점수'}</th><th class="n">${e.vmode ? '표' : '심사'}</th><th></th></tr>
       ${d.rows.map(r => `<tr data-team="${r.id ?? ''}" style="cursor:pointer"><td>${r.rank}</td>
         <td>${r.featured ? '⭐ ' : ''}${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
-        <td class="n">${r.score}</td><td class="n">${r.judges}명</td>
+        <td class="n">${e.vmode ? (r.votes ? r.vote + '★' : '—') : r.score}</td>
+        <td class="n">${e.vmode ? (r.votes || 0) + '표' : r.judges + '명'}</td>
         <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
           title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button></td></tr>`).join('')}</table>
       <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.
@@ -1822,10 +1849,11 @@ const SCREEN = {
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
       </div>` : ''}
 
-      ${d.closed ? `<h3>순위</h3>
-        <table><tr><th>순위</th><th>팀</th><th class="n">점수</th></tr>
+      ${d.closed ? `<h3>순위${e.vmode ? ' <span class="pill">관객 평가</span>' : ''}</h3>
+        ${e.vmode ? '<p class="sub">심사위원 대신 관객·참가자가 준 별점 평균으로 매겼습니다.</p>' : ''}
+        <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객 평가' : '점수'}</th></tr>
         ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${r.featured ? '⭐ ' : ''}${esc(r.name)}</td>
-          <td class="n">${r.score}</td></tr>`).join('')}</table>`
+          <td class="n">${e.vmode ? (r.votes ? r.vote + '★ (' + r.votes + ')' : '—') : r.score}</td></tr>`).join('')}</table>`
       : d.rows.length ? `<h3>참가한 팀 <span style="color:var(--ink3);font-weight:600">${d.rows.length}</span></h3>
         <p class="sub">순위와 점수는 <b>제출 마감 뒤</b>에 함께 공개됩니다.</p>
         <table><tr><th>팀</th><th class="n">제출</th></tr>
@@ -2191,6 +2219,30 @@ const SCREEN = {
         <div style="height:10px"></div>
         <button class="btn sm" id="pf-save">고치기</button>
       </div>`;
+  },
+
+  /* 관객 평가 화면 — /v/<대회id>?k=<투표 열쇠>. 심사위원을 못 구했을 때 그 자리를 대신한다.
+     현장 큰 화면의 QR 을 찍어 연다. 한 팀에 한 번, 별 1~5. 언제든 고친다. */
+  async vote() {
+    const keyPrompt = (err) => `<h2>관객 평가</h2>
+      <p class="sub">${err ? '<b class="late">' + esc(err) + '</b><br>' : ''}
+        운영자가 큰 화면에 띄운 <b>투표 링크</b>(QR)를 여세요. 링크에 투표 열쇠가 들어 있습니다.</p>
+      <label>투표 열쇠</label><input id="vk-in" placeholder="영문과 숫자 10자">
+      <div style="height:12px"></div><button class="btn" id="vk-go">열기</button>`;
+    if (!vkeyOf(cur)) return keyPrompt('');
+    let d;
+    try { d = await api(`/events/${cur}/vote`); }
+    catch (e) { return keyPrompt('아직 안 켜졌거나 열쇠가 맞지 않습니다.'); }
+    if (!d.teams.length) return `<h2>${esc(d.event.title)}</h2>
+      <p class="sub">아직 참가한 팀이 없습니다. 팀이 생기면 여기서 별점을 줄 수 있습니다.</p>`;
+    return `<h2>${esc(d.event.title)}</h2>
+      <p class="sub">마음에 드는 작품에 별점을 주세요. 한 팀에 한 번, 언제든 고칠 수 있습니다.
+        누가 줬는지는 남기지 않습니다.</p>
+      ${d.teams.map(t => { const mine = +(localStorage.getItem('hackon.vote.' + t.id) || 0);
+        return `<div class="card"><h3>${esc(t.name)}</h3>
+        <div class="stars" data-vote="${t.id}">${[1, 2, 3, 4, 5].map(i =>
+          `<button data-vs="${i}" class="${i <= mine ? 'on' : ''}">★</button>`).join('')}</div>
+      </div>`; }).join('')}`;
   },
 
   /* 결과 보고서 — 협찬사에게 보내는 물건. 인쇄하면 그대로 PDF 가 된다.
@@ -2792,6 +2844,7 @@ function wire() {
       localStorage.setItem('hackon.okey.' + r.id, r.okey);   // 대회 열쇠
       if (r.owner) localStorage.setItem('hackon.owner', r.owner);   // 주최자 열쇠
       if (r.jkey) localStorage.setItem('hackon.jkey.' + r.id, r.jkey);   // 심사 열쇠
+      if (r.vkey) localStorage.setItem('hackon.vkey.' + r.id, r.vkey);   // 관객 투표 열쇠
       /* 빈 관리 화면을 마주하게 두지 않는다. 고른 유형에 맞는 진행표를 깔아 준다.
          고치는 것과 처음부터 쓰는 것은 완전히 다른 일이다. */
       const kind = $('#f-kind') ? $('#f-kind').value : '당일';
@@ -2917,6 +2970,38 @@ function wire() {
     try { localStorage.setItem('hackon.jkey.' + cur, v); } catch (_) {}
     render();
   };
+
+  const bvmode = $('#b-vmode');
+  if (bvmode) bvmode.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try {
+      const r = await api(`/events/${cur}/vmode`, { method: 'POST', body: { on: +bvmode.dataset.on } });
+      flash(r.vmode ? '관객 평가를 켰습니다. 큰 화면에 투표 링크를 띄우세요' : '관객 평가를 껐습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+  const copyv = $('#b-copyv');
+  if (copyv) copyv.onclick = () => copyAny('#vlink', '투표 주소를 복사했습니다');
+
+  const vkgo = $('#vk-go');
+  if (vkgo) vkgo.onclick = () => {
+    const v = $('#vk-in').value.trim();
+    if (!v) return flash('투표 열쇠를 넣어 주세요', true);
+    try { localStorage.setItem('hackon.vkey.' + cur, v); } catch (_) {}
+    render();
+  };
+  /* 관객 투표. 별을 누르면 바로 그 점수를 보낸다. 한 팀에 한 번, 다시 누르면 고쳐진다. */
+  document.querySelectorAll('[data-vote]').forEach(box => {
+    const tid = box.dataset.vote;
+    box.querySelectorAll('button').forEach(b => b.onclick = async () => {
+      const sc = +b.dataset.vs;
+      box.querySelectorAll('button').forEach(x => x.classList.toggle('on', +x.dataset.vs <= sc));
+      try {
+        await api(`/teams/${tid}/vote`, { method: 'POST', body: { voter: voterId(), score: sc } });
+        try { localStorage.setItem('hackon.vote.' + tid, sc); } catch (_) {}
+        flash('별 ' + sc + '점 보냈습니다');
+      } catch (e) { flash(e.message, true); }
+    });
+  });
 
   document.querySelectorAll('[data-jsave]').forEach(b => b.onclick = async () => {
     const id = b.dataset.jsave, values = {};
@@ -3421,21 +3506,24 @@ if (home) home.onclick = () => {
 const PRO = location.pathname.match(/^\/p\/([0-9a-f]{12})$/);
 const PUB = location.pathname.match(/^\/e\/([a-z0-9]+)(\/report)?$/);
 const JUD = location.pathname.match(/^\/j\/([a-z0-9]+)$/);
+const VOT = location.pathname.match(/^\/v\/([a-z0-9]+)$/);
 const TVM = location.pathname.match(/^\/tv\/([a-z0-9]+)$/);
 if (PRO) {
   curPerson = PRO[1];
   tab = 'prof';
   document.querySelector('nav').style.display = 'none';
 }
-else if (PUB || JUD || TVM) {
-  cur = (PUB || JUD || TVM)[1];
-  tab = TVM ? 'tv' : JUD ? 'judge' : (PUB[2] ? 'report' : 'pub');
+else if (PUB || JUD || VOT || TVM) {
+  cur = (PUB || JUD || VOT || TVM)[1];
+  tab = TVM ? 'tv' : JUD ? 'judge' : VOT ? 'vote' : (PUB[2] ? 'report' : 'pub');
   document.querySelector('nav').style.display = 'none';
   /* 손님 화면. '서버 연결됨' 은 운영자 말이라 손님에게는 안 보인다. */
   document.body.classList.add('guest');
-  /* 심사 링크는 /j/<id>?k=<심사 열쇠>. 열쇠를 받아 두면 다음에 주소만으로도 열린다. */
+  /* 심사·투표 링크는 /j|v/<id>?k=<열쇠>. 열쇠를 받아 두면 다음에 주소만으로도 열린다. */
   if (JUD) { const k = new URLSearchParams(location.search).get('k');
              if (k) try { localStorage.setItem('hackon.jkey.' + cur, k); } catch (_) {} }
+  if (VOT) { const k = new URLSearchParams(location.search).get('k');
+             if (k) try { localStorage.setItem('hackon.vkey.' + cur, k); } catch (_) {} }
 }
 if (TVM) {
   document.body.classList.add('tv');
