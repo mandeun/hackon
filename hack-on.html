@@ -2758,7 +2758,7 @@ function wire() {
   if (ssave) ssave.onclick = async () => {
     if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
     try {
-      await api(`/teams/${curTeam}/submit`, { method: 'POST',
+      await api(`/teams/${curTeam}/submit`, { method: 'POST', tkey: tkeyOf(curTeam),
         body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim(),
                 aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim() } });
       flash('제출했습니다');

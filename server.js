@@ -2172,6 +2172,14 @@ function routes(db) {
           return json(res, 200, { came });
         }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/submit$/)) && req.method === 'POST') {
+          /* 제출물은 그 팀이나 운영자만 바꾼다. 팀 번호가 1,2,3… 순서라 이걸 안 막으면
+             지나가던 사람이 남의 제출 링크를 마감 직전에 바꿔치기할 수 있다(GLM 레드팀).
+             /more 가 팀 열쇠로 막는 것과 같은 방식 — 대회의 경쟁 결과가 걸린 곳이라 더 그렇다. */
+          const t = db.prepare('SELECT event, tkey FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          const tk = req.headers['x-tkey'] || '';
+          if (!isAdmin(db, t.event, key, owner) && !(t.tkey && tk && tk === t.tkey))
+            throw new HttpError(403, '이 팀의 참가 열쇠나 운영자 열쇠가 필요합니다');
           submit(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
         }

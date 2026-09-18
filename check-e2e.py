@@ -60,10 +60,12 @@ def code_of(path, key=None):
         return e.code
 
 
-def post(path, payload, key=None, method="POST"):
+def post(path, payload, key=None, method="POST", tkey=None):
     h = {"content-type": "application/json"}
     if key:
         h["x-okey"] = key
+    if tkey:
+        h["x-tkey"] = tkey
     req = urllib.request.Request(
         BASE + path, method=method, data=json.dumps(payload).encode(), headers=h)
     try:
@@ -367,6 +369,24 @@ with sync_playwright() as p:
            {"tkey": so["tkey"], "solo": True, "role": "기획",
             "note": "골목 지도를 만들고 싶습니다"})[0] == 200,
       "혼자 온 사람 정보가 안 들어갔다")
+    # 제출물도 그 팀이나 운영자만 바꾼다. 팀 번호가 순서라, 안 막으면 남의 제출 링크를
+    # 마감 직전에 바꿔치기할 수 있다 (GLM 레드팀 pwn-submit-forge). 따로 대회를 만들어 본다.
+    _, fev = post("/api/events", {"title": "제출위조시험"})
+    _, ft = post(f"/api/events/{fev['id']}/teams",
+                 {"name": "제출팀", "email": "s@example.com", "agree": True})
+    A(post(f"/api/teams/{ft['id']}/submit", {"url": "https://real.example/ours"},
+           tkey=ft["tkey"])[0] == 200, "제 팀 열쇠로도 제출이 안 된다")
+    A(post(f"/api/teams/{ft['id']}/submit", {"url": "https://attacker.example/fake"})[0] == 403,
+      "열쇠 없이 남의 제출물이 바뀐다")
+    A(post(f"/api/teams/{ft['id']}/submit", {"url": "https://attacker.example/fake"},
+           tkey="0000000000")[0] == 403, "틀린 팀 열쇠로 남의 제출물이 바뀐다")
+    A(post(f"/api/teams/{ft['id']}/submit", {"url": "https://attacker.example/fake"},
+           fev["okey"])[0] == 200, "운영자 열쇠로 제출 대행이 안 된다")
+    # 공격이 막힌 뒤 원래 링크가 그대로인지 (운영자 대행은 방금 성공했으니 그 값 확인)
+    frow = [r for r in api(f"/api/events/{fev['id']}/board", key=fev["okey"])["rows"]
+            if r["id"] == ft["id"]][0]
+    A(frow["url"] == "https://attacker.example/fake",
+      f"운영자 대행 제출이 저장 안 됐다: {frow.get('url')}")
     # 정원은 그 팀만 바꿀 수 있다. 연락처가 본인 확인이다 - 화면도 이걸 같이 보낸다.
     A(post(f"/api/teams/{top['id']}/more", {"want": "화면 만드는 분 한 분", "size": 2})[0] == 403,
       "연락처 없이 남의 팀 정원이 바뀌었다")
@@ -500,7 +520,7 @@ with sync_playwright() as p:
     gone = (datetime.now() - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M')
     _, late = post('/api/events', {'title': '마감지난대회', 'due': gone})
     _, lt = post(f"/api/events/{late['id']}/teams", {'name': '늦은팀', "email": "t@example.com", 'agree': True})
-    A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'})[0] == 409,
+    A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'}, late['okey'])[0] == 409,
       '마감이 지났는데 제출이 됐다')
     ok('마감 뒤 제출 차단 (409)')
 
@@ -508,7 +528,7 @@ with sync_playwright() as p:
     LK = late['okey']
     code, r = post(f"/api/events/{late['id']}/extend", {'minutes': 60}, LK)
     A(code == 200, f'연장 실패 {code}')
-    A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'})[0] == 200,
+    A(post(f"/api/teams/{lt['id']}/submit", {'url': 'https://example.com/late'}, LK)[0] == 200,
       '미뤘는데도 제출이 막힌다')
     ok(f"마감 60분 연장 → 다시 제출됨 (새 마감 {r['due']})")
 
@@ -1358,7 +1378,7 @@ with sync_playwright() as pw:
 
     otid = orows[0]["id"]
     A(post(f"/api/teams/{otid}/submit",
-           {"url": "http://192.168.0.9:3000", "note": "정전"} )[0] == 200,
+           {"url": "http://192.168.0.9:3000", "note": "정전"}, OK2)[0] == 200,
       "인터넷 없이 제출이 안 된다")
 
     jo = ctx.new_page()
