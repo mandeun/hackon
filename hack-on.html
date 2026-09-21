@@ -2413,7 +2413,9 @@ const SCREEN = {
         ${d.event.due && new Date(d.event.due) < new Date()
           ? `<div class="err" style="margin:8px 0 0">마감이 지나 더는 낼 수 없습니다.
              진행자가 마감을 미루면 다시 열립니다.</div>` : ''}
-        <label>링크</label><input id="s-url" value="${esc(t.url || '')}" placeholder="https://...">
+        <label>링크 <span class="pill">배포한 주소</span></label>
+        <input id="s-url" value="${esc(t.url || '')}" placeholder="https://... (누르면 바로 열리는 주소)">
+        <div class="meta" id="s-url-hint"></div>
         ${t.seats ? `<label>팀 자리 <span class="pill">밖에서 구한 분은 게스트로</span></label>
           <div class="seats">
             ${t.seats.mem.map((m, i) => `<span class="seat${m.g ? ' g' : ''}">${esc(m.n)}
@@ -2918,6 +2920,27 @@ function wire() {
   /* 쇼케이스 동의는 마감이 지나도 바꿀 수 있어야 한다.
      제출은 마감에 막히므로 체크만 따로 보낸다 - 쇼케이스는 마감 뒤에 걸리는 것이라
      «걸린 뒤에 못 내리는» 동의가 되면 그건 동의가 아니다. */
+  /* 저장소 주소를 제출 칸에 넣는 일이 잦다. 막지는 않는다 - 라이브러리처럼
+     저장소가 결과물인 경우가 있다. 다만 심사 40점이 «지금 인터넷에서 열리는가» 라
+     저장소만 내면 그 40점을 스스로 버리는 것이라 그 사실만 알린다.
+     주소가 살아 있는지는 검사하지 않는다 - 기계가 진위를 못 가리는 값이다(오답노트 P3). */
+  const surl = $('#s-url'), shint = $('#s-url-hint');
+  if (surl && shint) {
+    const REPO = /^https?:\/\/(www\.)?(github\.com|gitlab\.com|bitbucket\.org)\//i;
+    const tell = () => {
+      const v = surl.value.trim();
+      shint.innerHTML = !v ? ''
+        : REPO.test(v)
+          ? '⚠️ 저장소 주소입니다. 심사 40점이 <b>「지금 인터넷에서 열리는가」</b>라, ' +
+            '눌러서 바로 쓸 수 있는 주소를 같이 내시는 편이 좋습니다. ' +
+            '라이브러리처럼 저장소를 그대로 내는 것이면 두셔도 됩니다.'
+        : !/^https?:\/\//i.test(v)
+          ? '⚠️ <b>https://</b> 로 시작해야 합니다.'
+          : '';
+    };
+    surl.oninput = tell; tell();
+  }
+
   const sshow = $('#s-show');
   if (sshow) sshow.onchange = async () => {
     if (!LIVE) return;
