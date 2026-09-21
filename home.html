@@ -758,7 +758,11 @@ fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list)
      그대로 띄울 뿐이라 서버 비용이 0 이다 (심사 기준 1번이 「지금 인터넷에서 열리는가」라
      제출물은 애초에 살아 있는 주소다).
      - 눌렀을 때만 만든다. 24개를 한꺼번에 띄우면 첫 화면이 죽는다.
-     - sandbox 로 가둔다. 남의 페이지가 이 페이지를 건드리지 못하게 한다.
+     - sandbox 로 가둔다. 상위 창 이동(allow-top-navigation)은 안 준다.
+       allow-same-origin 은 **줘야 한다**. 이게 없으면 프레임 안이 불투명 origin 이 되어
+       localStorage·쿠키를 읽는 순간 남의 앱이 죽는다 — 새 탭에서는 멀쩡한 앱이
+       우리 페이지 안에서만 흰 화면이 된다. 참가자 사이트는 우리와 다른 출처라
+       allow-same-origin 을 줘도 우리 페이지를 건드리지 못한다.
      - 띄우기를 거부하는 사이트가 있다(X-Frame-Options). 그때는 새 창으로 안내한다. */
   document.getElementById('showcase-grid').addEventListener('click', function(e){
     var b = e.target.closest ? e.target.closest('[data-try]') : null;
@@ -769,7 +773,7 @@ fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list)
     box.innerHTML = '<div class="trynote">안 뜨면 만든 분이 다른 곳에서 못 열게 막아 둔 것입니다. ' +
       '<a href="' + esc(w.url) + '" target="_blank" rel="noopener">새 창에서 열기</a></div>' +
       '<iframe src="' + esc(w.url) + '" loading="lazy" referrerpolicy="no-referrer" ' +
-      'sandbox="allow-scripts allow-forms allow-popups" ' +
+      'sandbox="allow-scripts allow-forms allow-popups allow-same-origin" ' +
       'title="' + esc(w.name) + ' 결과물"></iframe>';
   });
 }).catch(function(){});

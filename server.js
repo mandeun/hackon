@@ -1377,7 +1377,7 @@ function submit(db, team, b) {
               ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note,
                 aiuse=excluded.aiuse, aidrop=excluded.aidrop,
                 show=excluded.show, show_at=excluded.show_at, at=datetime('now')`)
-    .run(team, b.url || '', b.note || '',
+    .run(team, webUrl(b.url), b.note || '',
          (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at);
 }
 
@@ -1862,8 +1862,13 @@ function showcase(db) {
                            ORDER BY t.id DESC LIMIT 24`).all();
   return rows
     .filter(r => closed({ due: r.due, ends: r.ends }))   // 마감 전 링크 보호 규칙과 같은 선
+    /* 주소를 한 번 더 거른다. 저장할 때 webUrl 로 막지만, 그 칸이 생기기 전에 들어간 값과
+       DB 를 직접 만진 경우가 남는다. 첫 화면은 이 주소를 <iframe src> 와 <a href> 에 그대로
+       넣으므로 javascript: 하나가 들어오면 그게 우리 첫 화면에서 돈다.
+       열쇠를 «지우고 + 참검사» 두 번 보는 것과 같은 이유다. */
+    .filter(r => webUrl(r.url))
     .map(r => ({ name: r.name, event: r.event, eventTitle: r.event_title,
-                 url: r.url || '', note: r.note || '' }));
+                 url: webUrl(r.url), note: r.note || '' }));
 }
 
 function ledgerOf(db, event) {
@@ -2814,6 +2819,24 @@ function selftest() {
   showConsent(db, scT, true);
   db.prepare("UPDATE submissions SET url='' WHERE team=?").run(scT);
   ok(showcase(db).every(w => w.event !== scEv.id), '링크가 비면 동의해도 안 싣는다');
+  /* 첫 화면은 이 주소를 <iframe src> 와 <a href> 에 그대로 넣는다.
+     javascript: 하나가 들어오면 우리 첫 화면에서 그게 돈다. 저장할 때와 내보낼 때 둘 다 막는다.
+     (GLM 적대 검토 2026-09-21 이 짚었고, 직접 재현해 확인한 뒤 막았다) */
+  db.prepare("UPDATE submissions SET url=? WHERE team=?").run('javascript:alert(1)', scT);
+  ok(showcase(db).every(w => w.event !== scEv.id),
+     'DB 에 javascript: 주소가 들어가 있어도 쇼케이스로는 안 나간다');
+  db.prepare("UPDATE submissions SET url=? WHERE team=?").run('data:text/html,<script>x</script>', scT);
+  ok(showcase(db).every(w => w.event !== scEv.id), 'data: 주소도 안 나간다');
+  const scEv2 = createEvent(db, { title: '주소정화시험', starts: today(), ends: today() });
+  editEvent(db, scEv2.id, { due: '2099-01-01T00:00' });
+  const scT2 = joinTeam(db, scEv2.id, { name: '정화시험팀', agree: true });
+  submit(db, scT2, { url: 'javascript:alert(1)' });
+  ok(db.prepare('SELECT url FROM submissions WHERE team=?').get(scT2).url === '',
+     '제출할 때부터 javascript: 주소는 안 저장된다');
+  submit(db, scT2, { url: '  https://ok.test/a  ' });
+  ok(db.prepare('SELECT url FROM submissions WHERE team=?').get(scT2).url === 'https://ok.test/a',
+     '멀쩡한 주소는 앞뒤 공백만 떼고 그대로 들어간다');
+  db.prepare('DELETE FROM events WHERE id=?').run(scEv2.id);
   db.prepare('DELETE FROM events WHERE id=?').run(scEv.id);
 
   // 큰 화면 - 벽에 걸리는 것
