@@ -658,6 +658,8 @@ function open(file) {
       note   TEXT NOT NULL DEFAULT '',
       aiuse  TEXT NOT NULL DEFAULT '',   -- AI 를 어느 단계에서 썼나
       aidrop TEXT NOT NULL DEFAULT '',   -- AI 가 제안한 것 중 버리거나 고친 판단
+      show   INTEGER NOT NULL DEFAULT 0, -- 끝난 뒤 첫 화면 쇼케이스에 실어도 되는가 (본인 동의)
+      show_at TEXT NOT NULL DEFAULT '',  -- 그 동의를 켠 시각. 증거는 이것뿐이다
       at     TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(team)
     );
@@ -848,6 +850,10 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN notice_at TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN members TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 쇼케이스 동의 칸. 옛 배포판에는 없다. 없으면 0(=동의 안 함)으로 시작한다 -
+     «모름» 을 «있음» 으로 그리지 않는다(오답노트 E22). 동의는 본인이 켜야 생긴다. */
+  try { db.exec("ALTER TABLE submissions ADD COLUMN show INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE submissions ADD COLUMN show_at TEXT NOT NULL DEFAULT ''"); } catch {}
   for (const c of ['aiuse', 'aidrop'])
     try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
@@ -1361,11 +1367,31 @@ function pastDue(db, team) {
 
 function submit(db, team, b) {
   if (pastDue(db, team)) throw new HttpError(409, '제출 마감이 지났습니다');
-  db.prepare(`INSERT INTO submissions(team,url,note,aiuse,aidrop) VALUES(?,?,?,?,?)
+  const prev = db.prepare('SELECT show, show_at FROM submissions WHERE team=?').get(team);
+  /* 제출 폼도 동의 체크칸을 같이 보낸다. 안 보내면 지금 값을 그대로 둔다 -
+     칸이 없는 옛 화면이 저장할 때 남의 동의를 꺼 버리면 안 된다. */
+  const on = b.show === undefined ? (prev ? prev.show : 0) : (b.show ? 1 : 0);
+  const at = on ? ((prev && prev.show && prev.show_at) || new Date().toISOString()) : '';
+  db.prepare(`INSERT INTO submissions(team,url,note,aiuse,aidrop,show,show_at)
+                VALUES(?,?,?,?,?,?,?)
               ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note,
-                aiuse=excluded.aiuse, aidrop=excluded.aidrop, at=datetime('now')`)
+                aiuse=excluded.aiuse, aidrop=excluded.aidrop,
+                show=excluded.show, show_at=excluded.show_at, at=datetime('now')`)
     .run(team, b.url || '', b.note || '',
-         (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500));
+         (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at);
+}
+
+/** 쇼케이스 동의만 켜고 끈다.
+    제출(submit)은 마감이 지나면 막히는데, 쇼케이스는 **마감이 지난 뒤에야** 화면에 걸린다.
+    그러니 동의를 submit 안에만 두면 «걸린 뒤에는 내릴 수 없는» 꼴이 된다.
+    뺄 수 없는 동의는 동의가 아니므로, 이 길은 마감을 보지 않는다. */
+function showConsent(db, team, on) {
+  const s = db.prepare('SELECT show, show_at FROM submissions WHERE team=?').get(team);
+  if (!s) throw new HttpError(404, '아직 제출한 것이 없습니다');
+  const v = on ? 1 : 0;
+  const at = v ? (s.show && s.show_at ? s.show_at : new Date().toISOString()) : '';
+  db.prepare('UPDATE submissions SET show=?, show_at=? WHERE team=?').run(v, at, team);
+  return { show: !!v, at };
 }
 
 /** 한 팀이 받은 성적표. 점수 분해와 심사평을 같이 준다.
@@ -1439,7 +1465,7 @@ function board(db, event, admin = false) {
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured,
            t.agreed, t.photo, t.came, t.size, t.want,
-           s.url, s.note, s.aiuse, s.aidrop
+           s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
   const rows = teams.map(t => {
@@ -1467,7 +1493,8 @@ function board(db, event, admin = false) {
     if (!admin && !closed(e)) { delete row.url; row.hidden = !!t.url; }
     /* 개인정보는 운영자에게만. 화면에서 감추면 브라우저 콘솔에서 다 보인다. */
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
-                  delete row.photo; delete row.came; delete row.apply; }
+                  delete row.photo; delete row.came; delete row.apply;
+                  delete row.show_at; }
     return row;
   });
   /* 관객 평가 모드면 표 평균으로 줄 세운다. 아니면 심사 점수로. */
@@ -1824,12 +1851,15 @@ function needsOf(db, event) {
 /* 첫 화면 '지난 대회 우수작'. 운영자가 별표한 팀만. 목록에 올린 대회에서, 링크는 마감 뒤에만.
    메일·연락처 같은 개인정보는 절대 안 싣는다 — 팀 이름·대회 제목·설명·제출 링크뿐. */
 function showcase(db) {
+  /* 문 세 개를 다 지나야 실린다 - 운영자 별표(featured) · 목록 공개(listed) ·
+     그리고 만든 사람 본인의 동의(s.show). 앞의 둘은 우리가 켜고, 마지막은 본인만 켠다.
+     별표만으로 남의 결과물을 첫 화면에 거는 것은 게시가 아니라 전시다. */
   const rows = db.prepare(`SELECT t.name, t.event, e.title AS event_title, e.due, e.ends,
                                   s.url, s.note
                            FROM teams t JOIN events e ON e.id = t.event
-                           LEFT JOIN submissions s ON s.team = t.id
-                           WHERE t.featured=1 AND e.listed=1
-                           ORDER BY t.featured DESC, t.id DESC LIMIT 24`).all();
+                           JOIN submissions s ON s.team = t.id
+                           WHERE t.featured=1 AND e.listed=1 AND s.show=1 AND s.url<>''
+                           ORDER BY t.id DESC LIMIT 24`).all();
   return rows
     .filter(r => closed({ due: r.due, ends: r.ends }))   // 마감 전 링크 보호 규칙과 같은 선
     .map(r => ({ name: r.name, event: r.event, eventTitle: r.event_title,
@@ -2323,6 +2353,20 @@ function routes(db) {
           submit(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
         }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/showcase$/)) && req.method === 'POST') {
+          /* 쇼케이스 동의 켜고 끄기. 제출과 같은 열쇠를 요구하되 마감은 보지 않는다.
+             동의를 남이 대신 켜 주는 것은 동의가 아니므로 운영자도 «켜는» 것은 못 한다.
+             내리는 것은 운영자도 할 수 있어야 한다 - 문제가 생겼을 때 즉시 내려야 한다. */
+          const t2 = db.prepare('SELECT event, tkey FROM teams WHERE id=?').get(+m[1]);
+          if (!t2) throw new HttpError(404, '없는 팀입니다');
+          const tk2 = req.headers['x-tkey'] || '';
+          const owns = !!(t2.tkey && tk2 && tk2 === t2.tkey);
+          const adm = isAdmin(db, t2.event, key, owner);
+          if (!owns && !adm) throw new HttpError(403, '이 팀의 참가 열쇠가 필요합니다');
+          const want = !!(await body(req)).on;
+          if (want && !owns) throw new HttpError(403, '쇼케이스 동의는 본인만 켤 수 있습니다');
+          return json(res, 200, showConsent(db, +m[1], want));
+        }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/vmode$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);   // 관객 평가 켜고 끄기 — 운영자만
           const on = (await body(req)).on ? 1 : 0;
@@ -2734,6 +2778,43 @@ function selftest() {
      '마감이 지나면 링크가 공개된다');
   ok(board(db, shEv.id, false).closed === true, '마감 여부를 화면에 알려 준다');
   db.prepare('DELETE FROM events WHERE id=?').run(shEv.id);
+
+  // 쇼케이스 - 만든 사람이 동의해야만 첫 화면에 실린다
+  const scEv = createEvent(db, { title: '쇼케이스시험', starts: today(), ends: today() });
+  editEvent(db, scEv.id, { due: '2099-01-01T00:00' });
+  db.prepare('UPDATE events SET listed=1 WHERE id=?').run(scEv.id);
+  const scT = joinTeam(db, scEv.id, { name: '동의안한팀', agree: true });
+  submit(db, scT, { url: 'https://shown.test/a', note: '만든 것' });
+  db.prepare('UPDATE teams SET featured=1 WHERE id=?').run(scT);
+  ok(showcase(db).every(w => w.url !== 'https://shown.test/a'),
+     '마감 전에는 동의와 상관없이 쇼케이스에 안 실린다');
+  /* 여기서 마감을 먼저 지나게 한다. 그래야 다음 줄이 «마감 전이라» 가 아니라
+     «동의가 없어서» 안 실린다는 것을 증명한다. 문 하나씩만 잠가 놓고 본다. */
+  submit(db, scT, { url: 'https://shown.test/a', note: '만든 것' });
+  editEvent(db, scEv.id, { due: '2000-01-01T00:00' });
+  ok(showcase(db).every(w => w.url !== 'https://shown.test/a'),
+     '마감이 지나고 운영자가 별표해도, 본인 동의가 없으면 쇼케이스에 안 실린다');
+  showConsent(db, scT, true);
+  const shown = showcase(db).find(w => w.url === 'https://shown.test/a');
+  ok(!!shown, '본인이 동의하면 그때 실린다');
+  ok(shown.name === '동의안한팀' && shown.note === '만든 것', '이름과 설명이 같이 간다');
+  const at1 = db.prepare('SELECT show_at FROM submissions WHERE team=?').get(scT).show_at;
+  ok(at1 !== '', '동의한 시각이 남는다 - 증거는 그것뿐이다');
+  let late = false;
+  try { submit(db, scT, { url: 'https://shown.test/a', show: false }); } catch { late = true; }
+  ok(late, '마감이 지나면 제출 길로는 아무것도 못 바꾼다');
+  showConsent(db, scT, true);
+  ok(db.prepare('SELECT show_at FROM submissions WHERE team=?').get(scT).show_at === at1,
+     '이미 켜져 있으면 처음 동의한 시각은 안 바뀐다');
+  showConsent(db, scT, false);
+  ok(showcase(db).every(w => w.url !== 'https://shown.test/a'),
+     '마감이 지난 뒤에도 동의를 끄면 바로 내려간다');
+  ok(db.prepare('SELECT show_at FROM submissions WHERE team=?').get(scT).show_at === '',
+     '동의를 끄면 시각도 지운다');
+  showConsent(db, scT, true);
+  db.prepare("UPDATE submissions SET url='' WHERE team=?").run(scT);
+  ok(showcase(db).every(w => w.event !== scEv.id), '링크가 비면 동의해도 안 싣는다');
+  db.prepare('DELETE FROM events WHERE id=?').run(scEv.id);
 
   // 큰 화면 - 벽에 걸리는 것
   const tvEv = createEvent(db, { title: '큰화면시험', starts: today(), ends: today() });
@@ -3243,7 +3324,7 @@ if (require.main === module) {
     }
   });
 }
-module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, score, board, outcomes,
+module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, showConsent, score, board, outcomes,
                    card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
                    dump, backup, isAdmin,
                    addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary,

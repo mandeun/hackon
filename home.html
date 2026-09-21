@@ -384,6 +384,18 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 </section>
 
 <!-- 01.5 지난 대회 우수작 (운영자가 별표한 것만) -->
+<style>
+/* 쇼케이스 - 링크로 내보내지 않고 이 자리에서 연다 */
+.ev.shown{display:block;cursor:default}
+.shead{display:flex;align-items:center;gap:10px}
+.sname{flex:1;min-width:0}
+.sname .t,.sname .m{display:block}
+.trybox{margin-top:10px}
+.trybox iframe{width:100%;height:min(62vh,520px);border:1px solid var(--rule);
+  border-radius:12px;background:#fff;display:block}
+.trynote{font-size:13px;color:var(--ink3);margin-bottom:8px}
+@media(max-width:560px){ .shead{flex-wrap:wrap} .sname{flex:1 0 100%;order:-1} }
+</style>
 <section id="showcase" hidden>
   <div class="wrap">
     <div class="head"><div>
@@ -727,14 +739,39 @@ function 머리글(){
 fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list){
   if (!list || !list.length) return;
   document.getElementById('showcase').hidden = false;
-  document.getElementById('showcase-grid').innerHTML = list.map(function(w){
-    var inner = '<span class="st open">⭐ 추천작</span>' +
-      '<span><div class="t">' + esc(w.name) + '</div><div class="m">' +
-        esc(w.eventTitle) + (w.note ? ' · ' + esc(w.note) : '') + '</div></span>' +
-      '<span class="n grey">' + (w.url ? '링크' : '') + '</span>';
-    return w.url ? '<a class="ev" href="' + esc(w.url) + '" target="_blank" rel="noopener">' + inner + '</a>'
-                 : '<a class="ev" href="/e/' + esc(w.event) + '">' + inner + '</a>';
+  document.getElementById('showcase-grid').innerHTML = list.map(function(w, i){
+    return '<div class="ev shown">' +
+      '<div class="shead">' +
+        '<span class="st open">⭐ 추천작</span>' +
+        '<span class="sname"><span class="t">' + esc(w.name) + '</span>' +
+          '<span class="m">' + esc(w.eventTitle) +
+          (w.note ? ' · ' + esc(w.note) : '') + '</span></span>' +
+        '<button class="btn sec sm" data-try="' + i + '">열어보기</button>' +
+        '<a class="n grey" href="' + esc(w.url) + '" target="_blank" rel="noopener">새 창</a>' +
+      '</div>' +
+      '<div class="trybox" id="try-' + i + '" hidden></div>' +
+    '</div>';
   }).join('');
+
+  /* 「열어보기」 - 만든 것을 이 페이지 안에서 바로 돌린다.
+     우리가 남의 코드를 받아 돌리는 게 아니다. 참가자가 이미 배포해 둔 주소를
+     그대로 띄울 뿐이라 서버 비용이 0 이다 (심사 기준 1번이 「지금 인터넷에서 열리는가」라
+     제출물은 애초에 살아 있는 주소다).
+     - 눌렀을 때만 만든다. 24개를 한꺼번에 띄우면 첫 화면이 죽는다.
+     - sandbox 로 가둔다. 남의 페이지가 이 페이지를 건드리지 못하게 한다.
+     - 띄우기를 거부하는 사이트가 있다(X-Frame-Options). 그때는 새 창으로 안내한다. */
+  document.getElementById('showcase-grid').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('[data-try]') : null;
+    if (!b) return;
+    var i = b.getAttribute('data-try'), box = document.getElementById('try-' + i), w = list[i];
+    if (!box.hidden) { box.hidden = true; box.innerHTML = ''; b.textContent = '열어보기'; return; }
+    box.hidden = false; b.textContent = '접기';
+    box.innerHTML = '<div class="trynote">안 뜨면 만든 분이 다른 곳에서 못 열게 막아 둔 것입니다. ' +
+      '<a href="' + esc(w.url) + '" target="_blank" rel="noopener">새 창에서 열기</a></div>' +
+      '<iframe src="' + esc(w.url) + '" loading="lazy" referrerpolicy="no-referrer" ' +
+      'sandbox="allow-scripts allow-forms allow-popups" ' +
+      'title="' + esc(w.name) + ' 결과물"></iframe>';
+  });
 }).catch(function(){});
 
 /* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. */

@@ -788,18 +788,34 @@ with sync_playwright() as p:
     # 마감 전엔 쇼케이스에 이 팀의 링크가 안 나간다 (선제출 팀 보호와 같은 선)
     A(not any(w["event"] == CID for w in api("/api/showcase")),
       "마감 전인데 추천작이 쇼케이스에 떴다")
-    # 마감 뒤엔 뜨고 링크도 함께
+    # 마감을 지나게 한다. 여기서부터는 «마감 전이라» 가 아니라 «동의가 없어서» 안 뜨는 것이다
     gone = (datetime.now() - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M')
     post(f"/api/events/{CID}", {"due": gone}, CK, method="PATCH")
+    A(not any(w["event"] == CID for w in api("/api/showcase")),
+      "마감이 지나고 운영자가 별표했는데, 본인 동의 없이 쇼케이스에 떴다")
+    # 동의는 본인만 켠다 — 운영자 열쇠로도 못 켠다
+    A(post(f"/api/teams/{ct['id']}/showcase", {"on": True})[0] == 403,
+      "열쇠 없이 쇼케이스 동의가 켜졌다")
+    A(post(f"/api/teams/{ct['id']}/showcase", {"on": True}, CK)[0] == 403,
+      "운영자가 남의 쇼케이스 동의를 대신 켰다")
+    A(post(f"/api/teams/{ct['id']}/showcase", {"on": True}, tkey=ct["tkey"])[0] == 200,
+      "본인이 쇼케이스 동의를 못 켰다")
     sc = [w for w in api("/api/showcase") if w["event"] == CID]
     A(sc and sc[0]["name"] == "쇼케이스팀" and sc[0]["url"] == "https://showcase.example/app",
-      f"마감 뒤 추천작이 쇼케이스에 안 떴다: {sc}")
+      f"동의했는데도 쇼케이스에 안 떴다: {sc}")
+    # 마감이 지난 뒤에도 본인이 내릴 수 있어야 한다 — 못 내리는 동의는 동의가 아니다
+    A(post(f"/api/teams/{ct['id']}/showcase", {"on": False}, tkey=ct["tkey"])[0] == 200,
+      "마감 뒤에 쇼케이스 동의를 못 껐다")
+    A(not any(w["event"] == CID for w in api("/api/showcase")),
+      "동의를 껐는데 쇼케이스에 남아 있다")
+    post(f"/api/teams/{ct['id']}/showcase", {"on": True}, tkey=ct["tkey"])
+    A(any(w["event"] == CID for w in api("/api/showcase")), "다시 켰는데 안 떴다")
     # 쇼케이스엔 개인정보가 없다 — 팀 이름·대회·링크·설명뿐
     A("@" not in json.dumps(api("/api/showcase"), ensure_ascii=False), "쇼케이스에 연락처가 샜다")
     # 별표를 내리면 사라진다
     post(f"/api/teams/{ct['id']}/feature", {"on": 0}, CK)
     A(not any(w["event"] == CID for w in api("/api/showcase")), "추천작을 내렸는데 쇼케이스에 남았다")
-    ok("추천작 — 운영자만 표시, 마감 뒤 첫 화면 쇼케이스에 뜨고, 내리면 사라진다 (개인정보 없음)")
+    ok("추천작 — 운영자 별표 + 본인 동의 둘 다 있어야 뜨고, 마감 뒤에도 본인이 내릴 수 있다 (개인정보 없음)")
 
     # ── 관객 평가 대안 (기능 2/3) — 심사위원 없을 때 관객이 폰으로 별점 ──
     _, vev = post("/api/events", {"title": "관객평가검사"})

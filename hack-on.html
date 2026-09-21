@@ -2439,6 +2439,12 @@ const SCREEN = {
           placeholder="예) 추천 로직을 제안했는데 우리 문제와 안 맞아서 버렸습니다">${esc(t.aidrop || '')}</textarea>
         <div class="meta">이 두 줄이 심사에서 가장 크게 보이는 곳입니다.
           만드는 것은 이제 누구나 합니다. <b>무엇을 버렸는지가 그 팀의 판단입니다.</b></div>
+        <div style="height:14px"></div>
+        <label class="ck"><input type="checkbox" id="s-show"${t.show ? ' checked' : ''}>
+          <span>대회가 끝난 뒤 <b>첫 화면에 내 결과물을 걸어도 좋습니다</b></span></label>
+        <div class="meta">건 뒤에도 여기서 체크를 풀면 바로 내려갑니다.
+          마감이 지나도 이 체크만은 언제든 바꿀 수 있습니다.
+          링크와 팀 이름, 설명만 올라갑니다 — <b>연락처는 올라가지 않습니다.</b></div>
         <div style="height:10px"></div>
         <button class="btn sm" id="s-save">제출하기</button>
       </div>
@@ -2903,9 +2909,23 @@ function wire() {
     try {
       await api(`/teams/${curTeam}/submit`, { method: 'POST', tkey: tkeyOf(curTeam),
         body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim(),
-                aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim() } });
+                aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(),
+                show: $('#s-show') ? $('#s-show').checked : undefined } });
       flash('제출했습니다');
     } catch (e) { flash(e.message, true); }
+  };
+
+  /* 쇼케이스 동의는 마감이 지나도 바꿀 수 있어야 한다.
+     제출은 마감에 막히므로 체크만 따로 보낸다 - 쇼케이스는 마감 뒤에 걸리는 것이라
+     «걸린 뒤에 못 내리는» 동의가 되면 그건 동의가 아니다. */
+  const sshow = $('#s-show');
+  if (sshow) sshow.onchange = async () => {
+    if (!LIVE) return;
+    try {
+      await api(`/teams/${curTeam}/showcase`, { method: 'POST', tkey: tkeyOf(curTeam),
+        body: { on: sshow.checked } });
+      flash(sshow.checked ? '첫 화면 게시에 동의했습니다' : '게시를 내렸습니다');
+    } catch (e) { sshow.checked = !sshow.checked; flash(e.message, true); }
   };
 
   const jsave = $('#j-save');
