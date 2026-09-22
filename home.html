@@ -1,9 +1,12 @@
 <!doctype html>
 <!-- ─────────────────────────────────────────────────────────────
      HACK:ON 첫 화면.
-     생김새는 장부(전표)다. 이 서비스가 파는 것이 '들어오고 나간 것을 다 적는 것' 이라서
-     첫 화면부터 표와 괘선으로 만든다. 카드·그림자·둥근 모서리·스크롤 애니메이션 없음.
-     외부 스크립트 없음. 글꼴만 구글에서 받는다(IBM Plex Sans KR / Plex Mono).
+     2026-09-23 토스식으로 줄였다. 한 화면에 판단 하나. 처음 온 사람이 읽지 않고도
+     «대회를 여는 곳 / 만들러 가는 곳» 둘 중 하나를 5초 안에 누르게 한다.
+     남긴 것: 표제(한 문장 + 단추 둘) · 열린 대회(마감 임박순) · 우수작(동의된 것만) ·
+     «줄 수 있는 것» 입구 하나. 설명 표(기여·빈자리·당일·협찬 등급·장부·비교)는
+     지웠다. 그 내용은 /manual 에 있다.
+     외부 스크립트 없음. 글꼴은 시스템 글꼴.
 
      ▼ 고칠 곳은 아래 '고치는 곳' 한 군데에 모아 뒀습니다.
      ───────────────────────────────────────────────────────────── -->
@@ -11,282 +14,121 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#F4F6FA">
-<title>HACK:ON — 혼자서도 20명 해커톤을 연다</title>
-<meta name="description" content="동네 모임 20명, 6시간, 혼자 참가를 기본값으로 두고 이름 → 필요한 자리 → 링크 공유 세 단계로 작은 해커톤을 엽니다. 확인된 기여만 공개 장부에 남습니다.">
+<meta name="theme-color" content="#EEF1F4">
+<title>HACK:ON — 하루짜리 해커톤을 이름 하나로 엽니다</title>
+<meta name="description" content="동네에서 여는 하루짜리 해커톤. 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다. 장소·심사·간식은 한 자리씩 맡아 함께 엽니다.">
 <link rel="icon" href="/icon.svg">
 
 <style>
 :root{
-  --ink:#141824; --rule:#141824; --hair:#DDE2EC; --paper:#F4F6FA; --tint:#EAEEF5; --grey:#4A5163;
-  --stamp:#2350F5;                 /* 켜짐 파랑. 숫자 강조와 '지금 필요한 것' 에만 쓴다 (BRAND.md) */
+  --pg:#EEF1F4; --card:#fff; --soft:#F4F6F8; --acc:#2350F5; --ink:#191F28; --grey:#5B6470; --hair:#EAECEF;
   --sans:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif;
-  --mono:ui-monospace,Consolas,monospace; --acc:#2350F5; --navy:#141824; --warn:#E8A317; --r:12px;
-  --w:1120px;
+  --mono:ui-monospace,Consolas,monospace;
 }
 *{box-sizing:border-box}
-html{scroll-padding-top:60px}
-body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6;
+[hidden]{display:none!important}
+html{scroll-padding-top:64px}
+body{margin:0;background:var(--pg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;letter-spacing:-.01em;
   -webkit-font-smoothing:antialiased;word-break:keep-all;overflow-wrap:break-word;-webkit-tap-highlight-color:transparent}
 a{color:inherit}
-h1,h2,h3{margin:0;font-weight:700;letter-spacing:-.02em;line-height:1.2;text-wrap:balance}
-[id]{scroll-margin-top:60px}
+h1,h2,h3{margin:0;font-weight:800;letter-spacing:-.03em;line-height:1.2;text-wrap:balance}
+[id]{scroll-margin-top:64px}
 p{margin:0}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .grey{color:var(--grey)}
-.stamp{color:var(--stamp)}
-.wrap{max-width:var(--w);margin:0 auto;padding:0 20px}
+.stamp{color:var(--acc)}
+.wrap{max-width:720px;margin:0 auto;padding:0 20px}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 
-/* 단추. 사각, 굵은 테두리. 채운 것 하나, 빈 것 하나. */
-.btn{display:inline-block;padding:9px 16px;border:1.5px solid var(--ink);background:var(--ink);color:#fff;
-  font:600 14px/1.2 var(--sans);text-decoration:none;cursor:pointer;white-space:nowrap;touch-action:manipulation;
-  transition:background-color .1s,border-color .1s,color .1s}
-.btn.o{background:transparent;color:var(--ink)}
-.btn:hover{background:var(--stamp);border-color:var(--stamp);color:#fff}
+/* 단추. 채운 것 하나, 옅은 것 하나. 폰에서는 손가락 크기(52px). */
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:52px;padding:14px 22px;border:0;border-radius:14px;
+  background:var(--acc);color:#fff;font:700 16px/1.2 var(--sans);text-decoration:none;cursor:pointer;white-space:nowrap;touch-action:manipulation;
+  transition:background-color .1s}
+.btn:hover{background:#1a44d8}
 .btn:active{transform:translateY(1px)}
-.btn.s{padding:6px 11px;font-size:13px}
-:focus-visible{outline:2px solid var(--stamp);outline-offset:2px}
-input,select{font:inherit;color:inherit;background:#fff;border:1.5px solid var(--ink);padding:8px 10px;border-radius:0}
+.btn.o{background:var(--soft);color:var(--ink)}
+.btn.o:hover{background:#E7EAEE}
+.btn.s{min-height:42px;padding:10px 16px;font-size:14px;border-radius:11px}
+input,select{font:inherit;color:inherit;background:#fff;border:1.5px solid transparent;border-radius:14px;min-height:50px;padding:10px 12px}
+input:focus,select:focus{border-color:var(--acc);outline:none}
 input[type=search]{-webkit-appearance:none;appearance:none}
 input::placeholder{color:#8a8a8a}
 
-/* 머리. 한 줄. 스크롤해도 붙는다. */
-.top{position:sticky;top:0;z-index:5;background:var(--paper);border-bottom:1.5px solid var(--rule)}
-.top .wrap{display:flex;align-items:center;gap:22px;height:54px;font-size:14px;font-weight:600}
+/* 머리글. 로고와 «대회 열기» 한 줄, 그 아래 얇은 줄에 절 링크. */
+.top{position:sticky;top:0;z-index:5;background:rgba(238,241,244,.88);backdrop-filter:saturate(1.6) blur(14px);-webkit-backdrop-filter:saturate(1.6) blur(14px)}
+.top .wrap{display:flex;align-items:center;gap:14px;min-height:60px;font-size:14px;font-weight:600;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 .top a{text-decoration:none;white-space:nowrap}
-.top a:hover{text-decoration:underline;text-underline-offset:4px}
-.top .sp{flex:1}
-.top nav{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
-.top nav.sec{order:1} .top .sp{order:2} .top nav.tools{order:3}
-@media (max-width:640px){ .top .wrap{flex-wrap:wrap;height:auto;padding:9px 16px 8px;gap:6px 14px} .top .sp{display:none}
-  .top nav.tools{margin-left:auto} .top nav.sec{order:4;width:100%;gap:0 14px;font-size:13.5px;border-top:1px solid var(--hair);padding-top:6px} }
-.top sup{font:600 10px var(--mono);margin-left:2px;color:var(--stamp)}
-.top .btn:hover{text-decoration:none}
-
-/* 표제. 큰 글자 왼쪽 정렬, 오른쪽에 전표 머리. */
-.hero{border-bottom:1.5px solid var(--rule);padding:28px 0 24px}
-.hero .wrap{display:grid;grid-template-columns:1fr 280px;gap:40px;align-items:end}
-.hero h1{font-size:clamp(34px,5.4vw,66px);font-weight:700;letter-spacing:-.04em;line-height:1.05}
-.hero .lead{margin-top:14px;max-width:36em;font-size:16px;line-height:1.6;text-wrap:pretty}
-.hero .cta{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.hero .cta input{width:15em;min-width:0}
-.slip{border:1.5px solid var(--ink);font-family:var(--mono);font-size:12.5px}
-.slip div{display:flex;justify-content:space-between;gap:12px;padding:7px 10px;border-top:1px solid var(--hair)}
-.slip div:first-child{border-top:0;background:var(--ink);color:#fff;font-weight:600}
-.slip b{font-weight:600;text-align:right}
-@media (max-width:820px){ .hero .wrap{grid-template-columns:1fr} .slip{max-width:320px} }
-
-/* 절. 번호 + 제목이 한 줄, 아래 괘선. */
-section{padding:26px 0 30px;border-bottom:1.5px solid var(--rule)}
-.head{margin-bottom:12px}
-.head h2{font-size:clamp(22px,2.8vw,32px)}
-.head p{margin-top:5px;max-width:44em;color:var(--grey);text-wrap:pretty;font-size:14px}
-
-/* 표. 이 화면의 기본 부품이다. */
-table{width:100%;border-collapse:collapse;border-top:1.5px solid var(--rule)}
-th,td{text-align:left;vertical-align:top;padding:8px 12px 8px 0;border-bottom:1px solid var(--hair);font-size:14.5px}
-th{font-weight:600;font-size:12.5px;color:var(--grey);padding-top:8px;padding-bottom:8px}
-td.n,th.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
-td.k{font-weight:600;white-space:nowrap}
-td:last-child,th:last-child{padding-right:0}
-tr.emph td{font-weight:600}
-.scroll{overflow-x:auto;overscroll-behavior-x:contain}
-.scroll table{min-width:640px}
-@media (max-width:640px){
-  .scroll table{min-width:0} table.stack thead{display:none}
-  table.stack tr{display:block;padding:8px 0;border-bottom:1px solid var(--hair)}
-  table.stack td{display:block;padding:1px 0;border:0;white-space:normal;font-size:14px}
-  table.stack td.k{font-size:15px;padding-bottom:2px}
-  table.stack td[data-h]::before{content:attr(data-h) ' — ';color:var(--grey);font-size:12px}
-  .hero .cta input{width:100%} .hero .cta .btn{flex:1;text-align:center}
-}
-
-/* 대회 목록. 표 한 줄이 대회 하나. */
-.evs{border-top:1.5px solid var(--rule)}
-.ev{display:grid;grid-template-columns:84px minmax(0,1fr) 150px 110px 110px;gap:16px;padding:10px 0;border-bottom:1px solid var(--hair);
-  text-decoration:none;align-items:baseline}
-.ev:hover{background:var(--tint)}
-.ev .st{font:600 12.5px var(--mono)}
-.ev .st.open{color:var(--stamp)}
-.ev .t{font-weight:600;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ev .m{font-size:13px;color:var(--grey);margin-top:2px}
-.ev .n{font-family:var(--mono);font-size:13.5px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-@media (max-width:640px){ .ev{grid-template-columns:70px minmax(0,1fr);gap:6px 12px} .ev .n{text-align:left;grid-column:2} }
-.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
-.tools .chip{padding:5px 10px;border:1.5px solid var(--ink);background:transparent;font:600 13px var(--sans);cursor:pointer;touch-action:manipulation}
-.tools .chip:hover{background:var(--tint)}
-.tools .chip[aria-pressed="true"]{background:var(--ink);color:#fff}
-.tools select{padding:6px 8px;font-size:13px;font-weight:600}
-.empty{border:1.5px dashed var(--ink);padding:22px;margin-top:6px}
-
-/* 로고 띠. 회색 상자 아니고 괘선 안에 그대로. */
-.logos{display:flex;flex-wrap:wrap;border:1.5px solid var(--ink);border-right:0;border-bottom:0}
-.logo{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-right:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink);
-  font-size:13.5px;font-weight:600;text-decoration:none}
-a.logo:hover{background:var(--tint)}
-.logo img{height:20px;width:auto;max-width:110px}
-.logo .grey{font-weight:400}
-.logos.empty0{border:1.5px dashed var(--ink);padding:12px 14px;font-size:14px;color:var(--grey)}
-.tryit{display:flex;gap:8px;max-width:30em;margin-top:8px}
-.tryit input{flex:1;min-width:0;font-family:var(--mono);font-size:14px}
-
-/* 두 단. 본문 + 옆글. */
-.two{display:grid;grid-template-columns:1fr 1fr;gap:28px}
-@media (max-width:820px){ .two{grid-template-columns:1fr} }
-.ledger{font-family:var(--mono);font-size:13.5px;line-height:2;border-top:1.5px solid var(--rule);font-variant-numeric:tabular-nums}
-.ledger div{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid var(--hair);padding:2px 0}
-.ledger div span:last-child{text-align:right}
-.ledger b{font-weight:600;color:var(--stamp)}
-ul.plain{margin:0;padding-left:1.1em}
-ul.plain li{margin:4px 0}
-
-footer{padding:18px 0 34px;font-size:13px;color:var(--grey)}
-footer .wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:center}
-footer a{color:inherit}
-.band{background:var(--ink);color:var(--paper)}
-.band th{color:#9a9a9a} .band td{border-color:#3a3a3a} .band table{border-top-color:var(--paper)}
-.band .grey{color:#a9a69e} .band h2,.band h3{color:#fff}
-.band .btn{background:var(--paper);color:var(--ink);border-color:var(--paper)} .band .btn.o{background:transparent;color:var(--paper)}
-.band .btn:hover{background:var(--stamp);border-color:var(--stamp);color:#fff}
-.band .logos,.band .logo{border-color:var(--paper)} .band .logos.empty0{border-color:#6a6a6a;color:#a9a69e}
-.band input{background:#1d1d1d;color:var(--paper);border-color:var(--paper)} .band input::placeholder{color:#7d7d7d}
-.band .stamp{color:#ff5a4e} .band tr.emph td{color:#fff}
-.tint{background:var(--tint)}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-@media (prefers-reduced-motion:reduce){ .btn{transition:none} .btn:active{transform:none} }
-
-/* ===== 2026-09-17 브랜드 적용 (BRAND.md). 신문 괘선 → 차가운 회색 카드, 켜짐 파랑 ===== */
-body{background:var(--paper)}
-.btn{border-radius:var(--r);min-height:44px;padding:11px 18px;border:1px solid var(--navy);background:var(--navy);display:inline-flex;align-items:center;justify-content:center}
-.btn:hover{background:var(--acc);border-color:var(--acc)}
-.btn.o{background:#fff;border-color:var(--hair);color:var(--ink)}
-.btn.o:hover{border-color:var(--acc);color:var(--acc);background:#fff}
-.btn.s{min-height:36px;padding:7px 12px}
-.hero .cta .btn:first-child{background:var(--acc);border-color:var(--acc)}
-input,select{border:1px solid var(--hair);border-radius:var(--r);min-height:44px;padding:10px 12px}
-input:focus{border-color:var(--acc);outline:none;box-shadow:0 0 0 3px rgba(35,80,245,.18)}
-.top{border-bottom:1px solid var(--hair);background:rgba(244,246,250,.92);backdrop-filter:saturate(1.2) blur(6px)}
-.hero{border-bottom:0;padding:40px 0 34px}
-.hero .wrap{grid-template-columns:1fr 360px;align-items:center}
-.hero h1{font-weight:800;letter-spacing:-.045em}
-.eyebrow{font-size:13px;font-weight:700;color:var(--acc);margin-bottom:10px}
-section{border-bottom:1px solid var(--hair)}
-table{border-top:1px solid var(--hair)}
-.hdots{background:var(--navy);color:#fff;border-radius:18px;padding:22px 22px 18px}
-.hdots .t{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-.hdots .t b{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
-.hdots .t span{font-size:12.5px;color:#AEB6C8}
-.hdots .r{display:flex;gap:12px;margin:18px 0 16px}
-.hd{flex:0 0 26px;width:26px;height:26px;border-radius:50%;border:2.5px solid #5A6275;box-sizing:border-box;transition:background-color .2s,border-color .2s,box-shadow .2s}
-.hd.on{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 5px rgba(35,80,245,.3);animation:hdpop .25s ease-out}
-.hd.wait{border-color:var(--warn)}
-@keyframes hdpop{0%{transform:scale(.6)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
-.hdots ul{list-style:none;margin:0;padding:0;border-top:1px solid #2A3040}
-.hdots li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #2A3040;font-size:13.5px;color:#C9D0DE}
-.hdots li b{font-weight:700;color:#8A91A3}
-.hdots li b.on{color:#fff}
-.hdots p{margin-top:10px;font-size:12px;color:#8A91A3}
-@media (max-width:820px){ .hero .wrap{grid-template-columns:1fr} .hdots{max-width:420px} }
-@media (prefers-reduced-motion:reduce){ .hd,.hd.on{animation:none;transition:none} }
-
-.ledger{font-family:var(--sans);border-top:1px solid var(--hair)}
-.ledger b{color:var(--acc)}
-.chips button,.filters button,[data-f],[data-filter]{border-radius:99px!important;min-height:36px;padding:6px 14px!important;border:1px solid var(--hair)!important;background:#fff!important;color:var(--ink)!important}
-.chips button.on,.filters button.on,[data-f].on,[data-filter].on,[aria-pressed=true]{background:var(--navy)!important;color:#fff!important;border-color:var(--navy)!important}
-
-/* ══ 2026-09-18 토스·당근식 마감 ═══════════════════════════════════
-   앱 화면(hack-on.html)과 한 제품으로 보이게. 회색 바탕 위에 흰 카드가 떠 있고,
-   글자를 키우고, 괘선을 지우고, 여백을 넉넉히. 내용·구조·id 는 그대로 두고 겉만. */
-:root{--pg:#EEF1F4;--card:#fff;--soft:#F4F6F8;--acc:#2350F5;--ink:#191F28;--grey:#5B6470;--hair:#EAECEF}
-body{background:var(--pg);color:var(--ink);font-size:16px;letter-spacing:-.01em}
-.wrap{max-width:1080px}
-
-/* 머리글 — 얇고 투명하게 떠 있는다 */
-.top{border-bottom:0;background:rgba(238,241,244,.82);backdrop-filter:saturate(1.6) blur(14px);-webkit-backdrop-filter:saturate(1.6) blur(14px)}
-.top .wrap{height:60px}
-.top nav.sec a{color:var(--grey);font-weight:600}
+.top .logo{font-size:19px;font-weight:800;letter-spacing:-.02em;margin-right:auto}
+.top nav.sec{display:flex;gap:16px;align-items:center;width:100%;order:9;color:var(--grey);font-size:13.5px}
 .top nav.sec a:hover{color:var(--ink)}
-.top a[href="/"]{font-size:19px!important}
+.top nav.tools{display:flex;gap:12px;align-items:center}
+@media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
-/* 표제 — 큰 글자, 카드 없이 바탕 위에 바로 */
-.hero{padding:44px 0 20px;border-bottom:0}
-.hero .wrap{grid-template-columns:1fr 380px;gap:44px}
-.hero .eyebrow{color:var(--acc);font-size:14px}
-.hero h1{font-size:clamp(36px,5.6vw,60px);font-weight:850;letter-spacing:-.05em;line-height:1.08}
-.hero .lead{font-size:17px;color:var(--grey);line-height:1.6}
-.hero .ledger{background:var(--card);border-radius:18px;border:0;padding:8px 18px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
-.hero .ledger div{border-color:var(--hair);padding:12px 0;font-size:14.5px}
-.hero .ledger b{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--acc);color:#fff;font-size:12px;margin-right:8px;vertical-align:-2px}
-.hero .cta{gap:10px;margin-top:22px}
-.hero .cta input,input,select{border-radius:14px;border:1.5px solid transparent;background:#fff;min-height:50px;font-size:16px}
-.hero .cta input:focus,input:focus,select:focus{border-color:var(--acc);box-shadow:none}
-.btn{border-radius:14px;min-height:52px;padding:14px 22px;font-size:16px;font-weight:700;border:0;background:var(--acc)}
-.btn:hover{background:#1a44d8;border-color:transparent}
-.btn.o{background:var(--soft);color:var(--ink);border:0}
-.btn.o:hover{background:#E7EAEE;color:var(--ink)}
-.btn.s{min-height:42px;padding:10px 16px;font-size:14px;border-radius:11px}
-.hero .cta .btn:first-child{background:var(--acc)}
-.hdots{border-radius:22px;padding:26px 24px 20px}
+/* 표제. 한 문장과 단추 둘. 폰(390px)에서 접힘 위에 단추가 들어와야 한다. */
+.hero{padding:28px 0 10px}
+.hero .eyebrow{font-size:14px;font-weight:700;color:var(--acc);margin-bottom:10px}
+.hero h1{font-size:clamp(30px,7.2vw,46px);font-weight:850;letter-spacing:-.045em;line-height:1.12}
+.hero .lead{margin-top:14px;font-size:17px;color:var(--grey);line-height:1.6;text-wrap:pretty}
+.hero .cta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
+@media (max-width:640px){ .hero .cta{flex-direction:column;align-items:stretch} .hero .cta .btn{width:100%} }
 
-/* 절 — 흰 카드가 회색 바탕 위에 하나씩. 딱딱한 괘선 대신 카드 사이 여백. */
-main{max-width:1080px;margin:0 auto;padding:8px 20px 0}
-section{border:0!important;background:var(--card);border-radius:22px;padding:30px 28px;margin:14px 0}
-section .wrap{padding:0;max-width:none}
-section.band{background:#141824}
-section.tint{background:#EEF3FF}
-.head{margin-bottom:18px}
-.head h2{font-size:clamp(22px,2.6vw,28px);font-weight:800;letter-spacing:-.03em}
-.head p{font-size:15px;color:var(--grey);margin-top:8px}
+/* 절. 회색 바탕 위에 흰 카드 하나씩. */
+main{max-width:720px;margin:0 auto;padding:8px 20px 0}
+section{background:var(--card);border-radius:22px;padding:28px 26px;margin:14px 0}
+.head{margin-bottom:16px}
+.head h2{font-size:clamp(21px,2.6vw,26px)}
+.head p{font-size:15px;color:var(--grey);margin-top:8px;text-wrap:pretty}
 
-/* 표 — 괘선 걷고 여백. 첫 칸(항목)은 진하게. */
-table{border-top:0}
-th{color:#8B95A1;font-size:12.5px;padding-bottom:12px;border-bottom:1px solid var(--hair)}
-td{border-bottom:1px solid var(--soft);padding:14px 14px 14px 0;font-size:15px;color:var(--ink)}
-td.grey{color:var(--grey)}
-tr:last-child td{border-bottom:0}
-.scroll table{border-radius:0}
-
-/* 대회 목록 — 당근식 줄. hover 에 옅은 면. */
-.evs{border-top:0}
-.ev{padding:16px 12px;border-bottom:1px solid var(--soft);border-radius:12px;align-items:center}
+/* 대회 목록. 한 줄이 대회 하나. 누르면 신청 칸이 바로 나온다. */
+.evs{display:block}
+.ev{display:grid;grid-template-columns:76px minmax(0,1fr);gap:4px 12px;padding:16px 12px;border-bottom:1px solid var(--soft);border-radius:12px;
+  text-decoration:none;align-items:center}
 .ev:hover{background:var(--soft)}
 .ev:last-child{border-bottom:0}
-.ev .st{font-size:12px;font-weight:700;color:#8B95A1}
+.ev .st{font:700 12px var(--mono);color:#8B95A1}
 .ev .st.open{color:var(--acc)}
-.ev .t{font-size:17px}
-.empty{border:0;background:var(--soft);border-radius:16px;padding:26px;text-align:center}
-.tools{gap:8px;margin-bottom:16px}
+.ev .t{font-weight:700;font-size:17px;line-height:1.3;text-wrap:pretty}
+.ev .m{font-size:13px;color:var(--grey);margin-top:2px}
+.ev .n{grid-column:2;font-family:var(--mono);font-size:13.5px;color:var(--grey);font-variant-numeric:tabular-nums}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+.tools[hidden]{display:none}
+.tools .chip{padding:6px 14px;border-radius:99px;border:1px solid var(--hair);background:#fff;color:var(--ink);font:600 13px var(--sans);cursor:pointer;touch-action:manipulation;min-height:36px}
+.tools .chip[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.tools select{min-height:36px;padding:4px 8px;font-size:13px;font-weight:600;border-radius:99px;border:1px solid var(--hair)}
+.tools input{flex:1 1 12em;min-height:36px;padding:4px 12px;font-size:14px;border-radius:99px;border:1px solid var(--hair)}
+.empty{background:var(--soft);border-radius:16px;padding:26px 20px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center}
 
-/* 협찬 카드(어두운) 안에서도 부드럽게 */
-.band .head p,.band .grey{color:#AEB6C8}
-.band td{border-color:#2A3040;color:#E7EAF0}
-.band th{color:#8A91A3;border-color:#2A3040}
-.band tr:last-child td{border-bottom:0}
-.band .btn.o{background:rgba(255,255,255,.1);color:#fff}
-.band .btn.o:hover{background:rgba(255,255,255,.18)}
-.band input{background:#1E2536;border-color:transparent;color:#fff}
-.band .stamp{color:#7CA0FF}
-.logos{border:0;gap:8px}
-.logo{border:0!important;background:var(--soft);border-radius:12px;padding:10px 14px}
-.band .logo{background:rgba(255,255,255,.08)}
-.logos.empty0{border:1.5px dashed var(--hair);background:transparent;border-radius:14px;color:#8B95A1}
-.band .logos.empty0{border-color:#3A4150}
+/* 우수작. 링크로 내보내지 않고 이 자리에서 연다. */
+.ev.shown{display:block;cursor:default}
+.shead{display:flex;align-items:center;gap:10px}
+.sname{flex:1;min-width:0}
+.sname .t,.sname .m{display:block}
+.trybox{margin-top:10px}
+.trybox iframe{width:100%;height:min(62vh,520px);border:1px solid var(--hair);border-radius:12px;background:#fff;display:block}
+.trynote{font-size:13px;color:var(--grey);margin-bottom:8px}
+@media (max-width:560px){ .shead{flex-wrap:wrap} .sname{flex:1 0 100%;order:-1} }
 
-/* 장부(밝은 파랑 카드) */
-.tint .ledger{background:transparent;border-top:0}
-.tint .ledger div{border-color:#DCE4F7}
-.ledger b{color:var(--acc)}
+/* «줄 수 있는 것» 입구. 단추 하나, 그 아래 메일 한 줄. */
+.give .cta{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.give .cta .btn{flex:1 1 auto}
+.give .mail{font-size:13.5px;color:var(--grey);margin-top:12px}
+.give .mail a{color:var(--grey)}
 
-footer{padding:26px 0 40px;color:var(--grey)}
+/* 더 알아보기. 접혀 있다. */
+details.more{background:transparent;padding:4px 6px 0}
+details.more summary{cursor:pointer;font-weight:700;font-size:15px;color:var(--grey);list-style:none;padding:12px 0}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary::before{content:'＋ ';color:var(--acc)}
+details.more[open] summary::before{content:'－ '}
+details.more ul{margin:0;padding:0 0 12px 1.1em;color:var(--grey);font-size:15px}
+details.more li{margin:6px 0}
 
-@media (max-width:820px){ .hero .wrap{grid-template-columns:1fr;gap:28px} .hero{padding:28px 0 8px} }
-@media (max-width:640px){
-  section{padding:24px 20px;border-radius:18px;margin:12px 0}
-  main{padding:4px 14px 0} .wrap{padding:0 14px}
-  .hero .cta{flex-direction:column;align-items:stretch}
-  .hero .cta .btn,.hero .cta input{width:100%;text-align:center}
-  .ev{grid-template-columns:64px 1fr;gap:4px 12px}
-}
+footer{padding:26px 0 40px;font-size:13px;color:var(--grey)}
+footer .wrap{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+footer a{color:inherit}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (prefers-reduced-motion:reduce){ .btn{transition:none} .btn:active{transform:none} }
+@media (max-width:640px){ section{padding:22px 18px;border-radius:18px;margin:12px 0} main{padding:4px 14px 0} .wrap{padding:0 16px} }
 </style>
 </head>
 
@@ -294,9 +136,6 @@ footer{padding:26px 0 40px;color:var(--grey)}
 <script>
 /* ═══════════════ 고치는 곳 ═══════════════ */
 var 연락메일 = 'tree8727@gmail.com';
-var 첫대회  = '2026-11-07';        // 우리가 여는 1회차 날짜
-var 첫대회인원 = 20;               // 빈자리 판 계산 기준
-var 첫대회장소 = '서울 · 미정';
 /* 매뉴얼은 이 사이트 안에서 바로 열린다. 파일로 열었을 때만 저장소로 보낸다. */
 var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://github.com/mandeun/hackon';
 /* ═════════════ 고치는 곳 끝 ═════════════ */
@@ -305,254 +144,90 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <a href="#list" class="sr">본문으로 건너뛰기</a>
 <header class="top">
   <div class="wrap">
-    <a href="/" aria-label="HACK:ON 처음으로" translate="no" style="font-weight:700;letter-spacing:-.02em;font-size:16px">HACK<span class="stamp">:</span>ON</a>
+    <a href="/" class="logo" aria-label="HACK:ON 처음으로" translate="no">HACK<span class="stamp">:</span>ON</a>
     <nav class="sec" aria-label="절">
-      <a href="#list">대회 찾기<sup id="n-list"></sup></a>
-      <a href="#give">기여</a>
-      <a href="#need">빈자리</a>
-      <a href="#sponsor">협찬</a>
-      <a href="#ledger">장부</a>
-    </nav>
-    <span class="sp"></span>
-    <nav class="tools" aria-label="도구">
+      <a href="#list">대회 찾기</a>
+      <a href="#give">협찬·돕기</a>
       <a id="nav-manual" href="#">운영 매뉴얼</a>
+    </nav>
+    <nav class="tools" aria-label="도구">
       <a id="nav-login" href="/auth/kakao" style="display:none">카카오 로그인</a>
       <a id="nav-open" href="/app" class="btn s">대회 열기</a>
     </nav>
   </div>
 </header>
 
-<!-- 표제 -->
+<!-- 표제. 한 문장, 단추 둘. -->
 <div class="hero">
   <div class="wrap">
-    <div>
-      <p class="eyebrow">혼자 여는 20명 해커톤</p>
-      <h1>빈자리가 하나씩 켜지면,<br>대회가 열립니다.</h1>
-      <p class="lead">장소, 심사, 상품을 혼자 다 구하지 않아도 됩니다. 필요한 자리를 올리면 참가자와 동네 가게, 기업이 한 자리씩 맡습니다. 맡은 사람의 이름은 공개 장부에 남습니다.</p>
-      <div class="ledger" style="margin-top:16px;max-width:38em">
-        <div><span><b>1</b> 이름</span><span>대회 이름 하나로 만들기</span></div>
-        <div><span><b>2</b> 필요한 자리</span><span>몇 자리 필요한지 공개</span></div>
-        <div><span><b>3</b> 링크 공유</span><span>참가자·도와줄 사람에게 보내기</span></div>
-      </div>
-      <div class="cta">
-        <a class="btn" href="/app">내 대회 열기</a>
-        <a class="btn o" id="hero-join" href="#list">열린 대회 보기</a>
-        <label class="sr" for="q">대회 검색</label>
-        <input type="search" id="q" name="q" placeholder="대회 이름으로 찾기…" autocomplete="off" spellcheck="false">
-      </div>
-      <p class="grey" style="margin-top:12px;font-size:13px">기본값은 동네 모임 20명 · 6시간 · 혼자 참가입니다. 날짜·상금·세부 규칙은 만든 뒤 고칠 수 있습니다.</p>
+    <p class="eyebrow">동네에서 여는 하루짜리 해커톤</p>
+    <h1>하루 모여 앱 하나를 만들고,<br>그 자리에서 뽑습니다.</h1>
+    <p class="lead">코딩을 안 해 봤어도 됩니다. 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다.</p>
+    <div class="cta">
+      <a class="btn" id="hero-open" href="/app">대회 열기</a>
+      <a class="btn o" id="hero-go" href="#list">만들러 가기</a>
     </div>
-    <div class="hdots" aria-label="자리 점판 예시: 여섯 자리가 차례로 켜집니다">
-      <div class="t"><b id="hd-n">0/6 켜짐</b><span>선릉 · 20명 · 6시간</span></div>
-      <div class="r">
-        <i class="hd"></i><i class="hd"></i><i class="hd"></i><i class="hd"></i><i class="hd"></i><i class="hd"></i>
-      </div>
-      <ul>
-        <li><span>장소</span><b data-k="0">비어 있음</b></li>
-        <li><span>심사 3명</span><b data-k="1">비어 있음</b></li>
-        <li><span>상품</span><b data-k="4">비어 있음</b></li>
-        <li><span>간식</span><b data-k="5">비어 있음</b></li>
-      </ul>
-      <p>예시 화면입니다. 실제 대회에서는 운영자가 확인해야 점이 켜집니다.</p>
-</div>
   </div>
 </div>
 
 <main>
 <!-- 01 열린 대회 -->
 <section id="list">
-  <div class="wrap">
-    <div class="head"><div><h2>열린 대회 <span class="mono grey" id="count" style="font-size:14px;font-weight:400"></span></h2></div></div>
-    <div class="tools">
-      <button class="chip" type="button" data-filter="all" aria-pressed="true">전체</button>
-      <button class="chip" type="button" data-filter="open" aria-pressed="false">모집중</button>
-      <button class="chip" type="button" data-filter="live" aria-pressed="false">진행중</button>
-      <button class="chip" type="button" data-filter="done" aria-pressed="false">끝남</button>
-      <select id="sort" name="sort" aria-label="정렬">
-        <option value="near">마감 임박순</option>
-        <option value="new">최신순</option>
-        <option value="big">참가 많은 순</option>
-      </select>
-    </div>
-    <div id="grid" class="evs" aria-live="polite"></div>
-    <div id="empty" class="empty" hidden>
-      <b>아직 열린 대회가 없습니다.</b>
-      <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
-      <a class="btn s" href="/app" style="margin-left:10px">대회 열기</a>
-    </div>
+  <div class="head">
+    <h2>열린 대회 <span class="mono grey" id="count" style="font-size:14px;font-weight:400"></span></h2>
+    <p>마감이 가까운 순서입니다. 누르면 신청 칸이 바로 나옵니다.</p>
+  </div>
+  <div class="tools" id="tools" hidden>
+    <label class="sr" for="q">대회 검색</label>
+    <input type="search" id="q" name="q" placeholder="대회 이름으로 찾기" autocomplete="off" spellcheck="false">
+    <button class="chip" type="button" data-filter="all" aria-pressed="true">전체</button>
+    <button class="chip" type="button" data-filter="open" aria-pressed="false">모집중</button>
+    <button class="chip" type="button" data-filter="live" aria-pressed="false">진행중</button>
+    <button class="chip" type="button" data-filter="done" aria-pressed="false">끝남</button>
+    <select id="sort" name="sort" aria-label="정렬">
+      <option value="near">마감 임박순</option>
+      <option value="new">최신순</option>
+      <option value="big">참가 많은 순</option>
+    </select>
+  </div>
+  <div id="grid" class="evs" aria-live="polite"></div>
+  <div id="empty" class="empty" hidden>
+    <b>아직 열린 대회가 없습니다.</b>
+    <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
+    <a class="btn s" href="/app">대회 열기</a>
   </div>
 </section>
 
-<!-- 01.5 지난 대회 우수작 (운영자가 별표한 것만) -->
-<style>
-/* 쇼케이스 - 링크로 내보내지 않고 이 자리에서 연다 */
-.ev.shown{display:block;cursor:default}
-.shead{display:flex;align-items:center;gap:10px}
-.sname{flex:1;min-width:0}
-.sname .t,.sname .m{display:block}
-.trybox{margin-top:10px}
-.trybox iframe{width:100%;height:min(62vh,520px);border:1px solid var(--rule);
-  border-radius:12px;background:#fff;display:block}
-.trynote{font-size:13px;color:var(--ink3);margin-bottom:8px}
-@media(max-width:560px){ .shead{flex-wrap:wrap} .sname{flex:1 0 100%;order:-1} }
-</style>
+<!-- 02 지난 대회 우수작. 운영자 별표 + 만든 사람 동의 + 마감 뒤, 셋 다 있어야 서버가 준다. -->
 <section id="showcase" hidden>
-  <div class="wrap">
-    <div class="head"><div>
-      <h2>지난 대회 우수작</h2>
-      <p>운영자가 고른 팀만 올립니다. 시상식에서 끝나지 않게, 만든 것을 계속 보여 줍니다.</p>
-    </div></div>
-    <div id="showcase-grid" class="evs"></div>
+  <div class="head">
+    <h2>지난 대회 우수작</h2>
+    <p>만든 분이 동의한 것만 올립니다. 눌러서 그 자리에서 열어 볼 수 있습니다.</p>
   </div>
+  <div id="showcase-grid" class="evs"></div>
 </section>
 
-<!-- 02 기여 -->
-<section id="give">
-  <div class="wrap">
-    <div class="head"><div>
-      <h2>필요한 자리를 보고, 맡겠다고 신청합니다</h2>
-      <p>장소·심사·상품·멘토·간식처럼 운영자가 올린 자리마다 이름·소속·연락처·메모를 보냅니다. 연락처는 운영자에게만 전달되고, 운영자가 확인한 이름만 공개 장부에 올라갑니다.</p>
-    </div></div>
-    <div class="scroll"><table class="stack">
-      <thead><tr><th>내놓는 것</th><th>이만큼</th><th>가져가는 것</th><th></th></tr></thead>
-      <tbody>
-        <tr><td class="k">장소</td><td>필요한 곳 수</td><td>운영자가 올린 조건을 보고 맡겠다고 신청 · 확인되면 이름·소속 공개</td><td><a class="btn s o" href="#list">대회에서 보기</a></td></tr>
-        <tr><td class="k">심사</td><td>필요한 명 수</td><td>이름·소속·연락처·메모 전송 · 연락처는 운영자에게만</td><td><a class="btn s o" href="#list">대회에서 보기</a></td></tr>
-        <tr><td class="k">상품</td><td>필요한 수량/자리</td><td>확인 전에는 공개 장부에 나오지 않음</td><td><a class="btn s o" href="#list">대회에서 보기</a></td></tr>
-        <tr><td class="k">멘토</td><td>필요한 명 수</td><td>운영자 확인 뒤 공개 장부에 이름·소속 표시</td><td><a class="btn s o" href="#list">대회에서 보기</a></td></tr>
-        <tr><td class="k">간식</td><td>필요한 수량/자리</td><td>대회마다 필요한 수와 채워진 수를 함께 표시</td><td><a class="btn s o" href="#list">대회에서 보기</a></td></tr>
-      </tbody>
-    </table></div>
-    <p class="grey" style="margin-top:10px;font-size:13px">무료 행사는 절반이 안 오고 돈 낸 행사는 65%가 옵니다. 예치금 5,000원은 오시면 전액 돌려드립니다. 담보이지 참가비가 아닙니다.</p>
+<!-- 03 줄 수 있는 것. 입구 하나. -->
+<section id="give" class="give">
+  <div class="head">
+    <h2>줄 수 있는 것이 있으신가요</h2>
+    <p>장소, 돈, 심사, 멘토, 간식. 하나만 있어도 됩니다. 연락처는 운영자만 보고, 확인된 이름만 공개 장부에 남습니다.</p>
   </div>
+  <div class="cta">
+    <a class="btn" id="give-go" href="#list">내가 줄 수 있는 것</a>
+  </div>
+  <p class="mail">협찬 문의는 메일로도 받습니다. <a id="mail-link" href="#"></a></p>
 </section>
 
-<!-- 03 빈자리 -->
-<section id="need">
-  <div class="wrap">
-    <div class="head"><div>
-      <h2>대회마다 필요한 자리를 공개합니다</h2>
-      <p>운영자가 종류와 필요한 수를 직접 올리고, 채워진 수를 함께 보여 줍니다. ‘내가 맡겠다’ 신청은 확인 전까지 공개 장부에 나타나지 않습니다.</p>
-    </div></div>
-    <div class="scroll"><table class="stack" id="needs">
-      <thead><tr><th class="n">필요</th><th>자리</th><th>무엇을</th><th class="n">언제까지</th><th></th></tr></thead>
-      <tbody></tbody>
-    </table></div>
-  </div>
-</section>
-
-<!-- 04 당일 -->
-<section id="how">
-  <div class="wrap">
-    <div class="head"><div>
-      <h2>당일에 앱이 대신 하는 것</h2>
-      <p>주최자가 마이크 잡고 설명할 일을 없애는 게 전부입니다. 시각은 팀 수를 넣으면 프로그램이 잡습니다.</p>
-    </div></div>
-    <div class="scroll"><table class="stack">
-      <thead><tr><th>순서</th><th>앱이 하는 것</th></tr></thead>
-      <tbody>
-        <tr><td class="k">등록</td><td>닉과 열쇠로 확인. 개인정보·촬영 동의를 여기서 받고, 촬영 거부자는 표에 따로 뜹니다.</td></tr>
-        <tr><td class="k">팀 짜기</td><td>혼자 온 사람과 사람 찾는 팀을 큰 화면에 나란히. 연락처는 안 보여 줍니다. 얼굴 보고 정하는 편이 빠릅니다.</td></tr>
-        <tr><td class="k">만들기</td><td>큰 화면에 남은 시간·지금 순서·아직 안 낸 팀. “언제까지예요”를 아무도 안 묻게 됩니다.</td></tr>
-        <tr><td class="k">제출 마감</td><td>서버가 막습니다. 화면만 잠그면 주소를 아는 사람은 그냥 냅니다.</td></tr>
-        <tr><td class="k">심사</td><td>심사위원에겐 점수만 넣는 주소. 다른 팀 점수와 순위는 안 보냅니다. 순위가 보이면 점수가 끌려갑니다.</td></tr>
-        <tr><td class="k">시상</td><td>각 팀이 자기 점수 분해와 심사평을 봅니다. 2026 eGovPH는 이걸 안 줘서 항의를 받았고, Salesforce는 “큰 실수였다”고 인정했습니다.</td></tr>
-        <tr class="emph"><td class="k">+2주</td><td>행사 전에 팀마다 봐 줄 사람과 기한을 정해 둡니다. 기한을 넘기면 빨갛게 뜹니다. 안 지킨 것이 보여야 지킵니다.</td></tr>
-      </tbody>
-    </table></div>
-  </div>
-</section>
-
-<!-- 05 협찬 -->
-<section id="sponsor" class="band">
-  <div class="wrap">
-    <div class="head"><div>
-      <h2>협찬하시는 분께. 로고가 아니라 데이터를 가져가십니다</h2>
-      <p>후원이 아니라 거래입니다. 첫 칸은 언제나 귀사가 가져가는 것이고, “몇 명이 봤다”는 쓰지 않습니다.</p>
-    </div></div>
-    <div class="scroll"><table class="stack">
-      <thead><tr><th>묶음</th><th class="n">금액</th><th>가져가는 것</th><th>내주시는 것</th></tr></thead>
-      <tbody>
-        <tr><td class="k">리포트</td><td class="n">1,000,000</td><td>귀사 도구에서 정확히 어디서 막혔는지 · 완주율 · 2주 뒤에도 쓰고 있는지</td><td>참가자 1인 $30 상당 크레딧</td></tr>
-        <tr class="emph"><td class="k">세션 <span class="stamp mono" style="font-size:11px">가장 반깁니다</span></td><td class="n">3,000,000</td><td>리포트 전부 · 팀이 직접 쓴 후기 · 동의한 참가자 연락처 · 부문상에 귀사 이름</td><td>+ 실무자 한 분, 당일 세 시간 (세션 하나 + 심사)</td></tr>
-        <tr><td class="k">타이틀</td><td class="n">5,000,000</td><td>세션 전부 · 대회 이름에 회사명 · 결과 보고서 표지</td><td>+ 현금 상금</td></tr>
-      </tbody>
-    </table></div>
-
-    <div class="two" style="margin-top:34px">
-      <div>
-        <h3 style="font-size:16px">이 대회를 함께 만드는 곳</h3>
-        <div class="logos empty0" id="logos" style="margin-top:10px"></div>
-      </div>
-      <div>
-        <h3 style="font-size:16px">로고, 이렇게 붙습니다</h3>
-        <p class="grey" style="font-size:13.5px;margin-top:4px">회사 도메인만 넣어 보세요. 파일을 보내실 필요 없습니다.</p>
-        <div class="tryit">
-          <input type="search" id="logo-domain" name="domain" placeholder="openai.com" aria-label="회사 도메인" inputmode="url" autocomplete="off" spellcheck="false">
-          <button class="btn s" id="logo-try" type="button">미리 보기</button>
-        </div>
-        <div class="logos empty0" id="logo-preview" style="margin-top:10px" hidden aria-live="polite"></div>
-      </div>
-    </div>
-
-    <div style="margin-top:28px;display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-      <a class="btn" id="mail-link" href="#">협찬 문의 메일</a>
-      <span class="mono grey" id="mail-text" style="font-size:13px"></span>
-    </div>
-  </div>
-</section>
-
-<!-- 06 장부 -->
-<section id="ledger" class="tint">
-  <div class="wrap">
-    <div class="head"><div>
-      <h2>공개 장부에는 확인된 기여만 남습니다</h2>
-      <p>‘내가 맡겠다’ 신청은 먼저 운영자에게 들어가고, 확인된 장소·심사·상품·멘토·간식만 이름·소속과 함께 공개됩니다. 연락처와 메모는 공개하지 않습니다.</p>
-    </div></div>
-    <div class="two">
-      <div class="ledger">
-        <div><span>예치금</span><span>5,000 × 참가 → 출석 시 <b>전액 환급</b></span></div>
-        <div><span>사람들이 고른 상</span><span>개인 후원 합 <b>+ 매칭</b></span></div>
-        <div><span>매칭</span><span>후원자 수 × 10,000 · 상한 300,000 · 1인 1표</span></div>
-        <div><span>개인 후원</span><span>단건 ≤ 500,000 · 회차당 &lt; 10,000,000</span></div>
-        <div><span>사례비</span><span>심사·강사·스태프 · 행사 <b>전에</b> 장부에 먼저</span></div>
-        <div><span>내려받기</span><span>CSV · 언제든</span></div>
-      </div>
-      <div class="ledger" aria-label="1회차 판정선">
-        <div><span>1회차 판정선</span><span class="grey">결과는 행사 뒤 여기에</span></div>
-        <div><span>기업 후원 현금</span><span>≥ <b>1,000,000</b></span></div>
-        <div><span>후원 이행률</span><span>≥ <b>70%</b></span></div>
-        <div><span>노쇼</span><span>≤ <b>30%</b></span></div>
-        <div><span>개인 후원자</span><span>≥ <b>10명</b></span></div>
-        <div><span>“2회차도” 한 기업</span><span>≥ <b>1곳</b></span></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- 07 비교 -->
-<section>
-  <div class="wrap">
-    <div class="head"><div><h2>다른 곳과 뭐가 다른가</h2></div></div>
-    <div class="scroll"><table class="stack">
-      <thead><tr><th></th><th>공모전 사이트</th><th>해커톤 플랫폼</th><th>HACK:ON</th></tr></thead>
-      <tbody>
-        <tr><td class="k">누구를 위한</td><td class="grey">대학생 스펙</td><td class="grey">개발자</td><td><b>코딩 안 해 본 사람의 첫 판</b></td></tr>
-        <tr><td class="k">대회 열기</td><td class="grey">공고 등록 폼</td><td class="grey">문의 후 견적</td><td><b>이름 하나 · 5분</b></td></tr>
-        <tr><td class="k">참가 신청</td><td class="grey">회원가입</td><td class="grey">회원가입</td><td><b>로그인 없음 · 신청이 곧 기여</b></td></tr>
-        <tr><td class="k">돈의 흐름</td><td class="grey">안 보임</td><td class="grey">안 보임</td><td><b>장부 전부 공개</b></td></tr>
-        <tr><td class="k">끝난 뒤</td><td class="grey">없음</td><td class="grey">제출물 보관</td><td><b>2주 사후 지원 · 보고서</b></td></tr>
-        <tr><td class="k">어디서 열리나</td><td class="grey">기관</td><td class="grey">기업</td><td><b>동네 모임 · 회사 안 · 학과와 동아리</b></td></tr>
-      </tbody>
-    </table></div>
-    <div style="margin-top:26px;display:flex;flex-wrap:wrap;gap:8px">
-      <a class="btn" href="/app">대회 열기</a>
-      <a class="btn o" id="manual-link2" href="#">운영 매뉴얼 보기</a>
-    </div>
-    <p class="grey" style="margin-top:10px;font-size:13px">안 하는 것 — 기여의 포인트 환산, 참가자·주최자·공간 과금, 채용 수수료, 개인정보 보관, 포스터 요구.
-      운영 매뉴얼과 코드는 전부 공개입니다. 베껴 가셔도 됩니다.</p>
-  </div>
-</section>
+<details class="more" id="more">
+  <summary>이 서비스가 어떻게 돌아가는지 더 보기</summary>
+  <ul>
+    <li>대회를 연 사람이 필요한 자리(장소·심사·상품·간식)를 올리고, 맡겠다는 사람이 한 자리씩 채웁니다.</li>
+    <li>당일 등록, 팀 짜기, 남은 시간, 제출 마감, 심사 점수는 앱이 맡습니다. 주최자가 마이크 잡고 설명할 일이 줄어듭니다.</li>
+    <li>협찬한 곳은 대회 페이지에 이름이 실리고, 끝난 뒤 성과 보고서를 받습니다. 확인된 기여는 대회마다 공개 장부에 남습니다.</li>
+    <li>운영 방법과 코드는 전부 공개입니다. <a id="manual-link2" href="#">운영 매뉴얼 보기</a></li>
+  </ul>
+</details>
 </main>
 
 <footer>
@@ -568,13 +243,10 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <script>
 /* 링크는 '고치는 곳' 에서 받아 꽂는다 */
 ['nav-manual','manual-link2','foot-manual'].forEach(function(id){ document.getElementById(id).href = 매뉴얼; });
-document.getElementById('mail-link').href = 'mailto:' + 연락메일 + '?subject=' + encodeURIComponent('[협찬 문의] HACK:ON');
-document.getElementById('mail-text').textContent = 연락메일;
+var mailLink = document.getElementById('mail-link');
+mailLink.href = 'mailto:' + 연락메일 + '?subject=' + encodeURIComponent('[협찬 문의] HACK:ON');
+mailLink.textContent = 연락메일;
 document.getElementById('foot-mail').textContent = 연락메일;
-var heroDate = document.getElementById('hero-date'); if (heroDate) heroDate.textContent = 첫대회;
-var heroSize = document.getElementById('hero-size'); if (heroSize) heroSize.textContent = 첫대회인원 + '명';
-var heroPlace = document.getElementById('hero-place'); if (heroPlace) heroPlace.textContent = 첫대회장소;
-document.getElementById('foot-note').textContent = '1회차 ' + 첫대회;
 
 /* 오늘 날짜(YYYY-MM-DD). toISOString() 은 언제나 UTC 라서 한국 새벽 0~9시에 하루 전을 내놓는다. */
 function ymd(d){ d = d || new Date();
@@ -582,15 +254,10 @@ function ymd(d){ d = d || new Date();
 var esc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){
   return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); };
 var 돈 = function(n){ return (+n||0).toLocaleString('ko-KR'); };
-var 메일주소 = function(role, sub){
-  return 'mailto:' + 연락메일 + '?subject=' + encodeURIComponent('[HACK:ON 1회차 · ' + role + '] ' + sub); };
-
-/* 기여 단추. 메일 제목에 무엇을 내놓는지가 이미 적혀 있다. 상대가 한 줄만 쓰면 된다. */
-document.querySelectorAll('[data-mail]').forEach(function(a){ a.href = 메일주소(a.dataset.mail, a.dataset.sub); });
 
 /* ── 열린 대회 목록. 진짜 서버에서 받아 온다. 파일로 열면 예시. ── */
-var 예시 = [{ id:'demo1', title:'우리 동네 생활 불편 해커톤 1회', host:'유재원', starts:첫대회, ends:첫대회, prize:300000, teams:6 }];
-var 대회들 = [], 필터 = 'all', 열린곧 = null;   // 열린곧 = 가장 가까운 모집중 대회 id (인앱 도움 링크가 쓴다)
+var 예시 = [{ id:'demo1', title:'우리 동네 생활 불편 해커톤 1회', host:'유재원', starts:ymd(), ends:ymd(), prize:300000, teams:6 }];
+var 대회들 = [], 필터 = 'all', 열린곧 = null;   // 열린곧 = 가장 가까운 모집중 대회 id («줄 수 있는 것» 입구가 쓴다)
 function 상태(e){
   var t = ymd();
   if (t < e.starts) return { k:'모집중', c:'open' };
@@ -605,6 +272,8 @@ function 남은날(e){
 function 그리기(){
   var q = document.getElementById('q').value.trim();
   var 정렬 = document.getElementById('sort').value;
+  /* 검색·필터·정렬은 대회가 몇 개 안 될 때는 판단만 늘린다. 넷이 넘을 때만 보인다. */
+  document.getElementById('tools').hidden = 대회들.length <= 3;
   var 목록 = 대회들.filter(function(e){
     var s = 상태(e);
     if (필터 !== 'all' && s.c !== 필터) return false;
@@ -626,32 +295,19 @@ function 그리기(){
       '<span class="st ' + s.c + '">' + s.k + (d ? ' ' + d : '') + '</span>' +
       '<span><div class="t">' + esc(e.title) + '</div><div class="m">' + esc(e.host) + ' · ' +
         (e.pastEvents ? '지난 대회 ' + e.pastEvents + '번 · 완주율 ' + e.pastFinish + '%' : '첫 대회') + '</div></span>' +
-      '<span class="n">' + esc(e.starts) + (e.ends !== e.starts ? '~' + esc(e.ends).slice(5) : '') + '</span>' +
-      '<span class="n">' + (e.teams != null ? e.teams + '팀' : '—') + '</span>' +
-      '<span class="n">' + (e.prize ? 돈(e.prize) : '상금 없음') + '</span>' +
+      '<span class="n">' + esc(e.starts) + (e.ends !== e.starts ? '~' + esc(e.ends).slice(5) : '') +
+        ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') + '</span>' +
       '</a>';
   }).join('');
-  /* «열린 대회 보기» 는 말 그대로 목록으로 간다. 전에는 가장 가까운 대회로 바로 보냈는데,
-     대회가 하나뿐일 때 «보기» 를 눌렀더니 신청 페이지가 뜨는 꼴이 됐다 — 단추 이름과 다른 일을 하면
-     사람은 고장으로 읽는다. 목록은 마감 임박순이라 가장 가까운 대회가 어차피 맨 위다.
-     «시간으로 돕기»(give-time) 만 가장 가까운 대회의 신청으로 바로 간다 — 그 단추는 이름이 그렇다. */
+  /* «줄 수 있는 것» 은 가장 가까운 모집중 대회의 돕기 칸으로 간다. 열린 대회가 없으면 목록으로. */
   var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && e.id !== 'demo1'; })[0];
   열린곧 = 곧 ? 곧.id : null;
-  var gt = document.getElementById('give-time'); if (gt) gt.href = 곧 ? '/e/' + 곧.id : '#list';
-  /* 협찬도 열린 대회가 있으면 앱 안에서 자리로 제안. 없으면 메일로 떨어진다. */
-  var ml = document.getElementById('mail-link');
-  if (ml && 곧) { ml.href = '/e/' + 곧.id + '#help'; ml.textContent = '앱에서 협찬 제안'; }
-  if (곧) 로고띠(곧.id);
+  var gg = document.getElementById('give-go'); if (gg) gg.href = 곧 ? '/e/' + 곧.id + '#help' : '#list';
+  document.getElementById('foot-note').textContent = 곧 ? '다음 대회 ' + 곧.starts : '';
 }
 fetch('/api/events').then(function(r){ return r.json(); }).then(function(list){
-  대회들 = list; document.getElementById('n-list').textContent = list.length || ''; 그리기();
+  대회들 = list; 그리기();
 }).catch(function(){ 대회들 = 예시; 그리기(); });
-document.addEventListener('click', function(e){
-  var a = e.target.closest ? e.target.closest('.help-cta') : null;
-  if (!a) return;
-  e.preventDefault();
-  location.href = 열린곧 ? '/e/' + 열린곧 + '#help' : '#list';
-});
 document.getElementById('q').addEventListener('input', 그리기);
 document.getElementById('sort').addEventListener('change', 그리기);
 document.querySelectorAll('[data-filter]').forEach(function(b){
@@ -662,83 +318,7 @@ document.querySelectorAll('[data-filter]').forEach(function(b){
   };
 });
 
-/* ── 후원사 로고 띠. 공개 게시판이 주는 협찬 목록을 그대로 건다. 비어 있으면 빈 자리라고 말한다. ── */
-function 로고띠(id){
-  fetch('/api/events/' + id + '/board').then(function(r){ return r.json(); })
-    .then(function(d){ 로고그리기((d && d.sponsors) || []); }).catch(function(){ 로고그리기([]); });
-}
-function 로고태그(s){
-  var ok = function(u){ return /^https?:\/\//i.test(String(u||'')); };   // 스킴을 따로 본다
-  var inner = (ok(s.logo) ? '<img src="' + esc(s.logo) + '" alt="" height="20" loading="lazy">' : '') + esc(s.name) +
-    (s.kind ? ' <span class="grey">' + esc(s.kind) + '</span>' : '');
-  return ok(s.link) ? '<a class="logo" href="' + esc(s.link) + '" rel="noopener">' + inner + '</a>'
-                    : '<span class="logo">' + inner + '</span>';
-}
-function 로고그리기(sp){
-  var box = document.getElementById('logos');
-  box.classList.toggle('empty0', !sp.length);
-  box.innerHTML = sp.length ? sp.map(로고태그).join('') : '아직 비어 있습니다. 첫 칸은 첫 협찬사의 것입니다.';
-}
-로고그리기([]);
-
-/* 도메인 → 로고 미리 보기. 앱의 협찬 등록이 쓰는 그 함수(/api/logo)를 그대로 부른다. */
-function 로고보기(){
-  var d = document.getElementById('logo-domain').value.trim(), box = document.getElementById('logo-preview');
-  if (!d) return;
-  box.hidden = false;
-  fetch('/api/logo?domain=' + encodeURIComponent(d)).then(function(r){ return r.json(); }).then(function(l){
-    if (!l.ok) { box.classList.add('empty0'); box.textContent = '도메인 모양이 아닙니다. 예: openai.com'; return; }
-    box.classList.remove('empty0');
-    var NL = String.fromCharCode(10);
-    var body = '로고 도메인: ' + l.domain + NL + '묶음: (리포트 / 세션 / 타이틀)' + NL + '실무자 한 분 당일 3시간: (가능 / 어려움)' + NL;
-    box.innerHTML = 로고태그({ name: l.domain, logo: l.url }) +
-      '<a class="logo" href="mailto:' + 연락메일 + '?subject=' + encodeURIComponent('[협찬 문의] ' + l.domain) +
-      '&body=' + encodeURIComponent(body) + '">이 로고로 협찬 문의</a>';
-  }).catch(function(){ box.classList.add('empty0'); box.textContent = '지금은 미리 볼 수 없습니다. 도메인만 메일에 적어 주세요.'; });
-}
-document.getElementById('logo-try').onclick = 로고보기;
-document.getElementById('logo-domain').addEventListener('keydown', function(e){ if (e.key === 'Enter') 로고보기(); });
-
-/* ── 빈자리 판. 구하기 탭이 쓰는 그 계산(/api/find)을 공개 표로 뒤집는다. ── */
-var 예시자리 = [
-  { role:'협찬사 담당자', count:3, why:'현금 대신 실무자 세 시간을 먼저 부탁합니다. 그 한 분이 심사위원이자 사후 멘토가 됩니다', when:'6주 전' },
-  { role:'심사위원', count:3, why:'팀당 4분 시연을 보고 점수와 한 줄 심사평을 남깁니다', when:'3주 전' },
-  { role:'사전 교실 강사', count:1, why:'대회 2주 전 평일 저녁 두 시간. 잘 가르치는 사람보다 그날 올 사람이 낫습니다', when:'4주 전' },
-  { role:'현장 스태프', count:2, why:'등록 데스크와 시간 관리. 특별한 기술은 필요 없습니다', when:'2주 전' },
-  { role:'사후 지원 멘토', count:6, why:'끝나고 2주 안에 팀 하나를 한 시간 봐 주는 분', when:'행사 전에' },
-];
-function 자리그리기(need){
-  var 장소 = { role:'장소', count:1, why:'24명이 노트북을 놓고 앉을 곳. 콘센트 20개, 와이파이. 판매 없음, 원상복구', when:'8주 전' };
-  var rows = [장소].concat(need.filter(function(r){ return r.count > 0; }));
-  document.querySelector('#needs tbody').innerHTML = rows.map(function(r){
-    return '<tr>' +
-      '<td class="n stamp" style="font-weight:600">' + r.count + (r.role === '장소' ? '곳' : '명') + '</td>' +
-      '<td class="k">' + esc(r.role) + '</td>' +
-      '<td>' + esc(String(r.why).split('. ').slice(0, 2).join('. ')) + '</td>' +
-      '<td class="n grey">' + esc(String(r.when).split('.')[0]) + '</td>' +
-      '<td><a class="btn s o help-cta" href="#list">제가 할게요</a></td>' +
-      '</tr>';
-  }).join('');
-  머리글();
-}
-fetch('/api/find?size=' + 첫대회인원).then(function(r){ return r.json(); })
-  .then(function(f){ 자리그리기(f.need || 예시자리); })
-  .catch(function(){ 자리그리기(예시자리); });
-
-/* 좁은 화면에서 표를 세로로 펼 때 쓸 머리글을 칸마다 적어 둔다. */
-function 머리글(){
-  document.querySelectorAll('table.stack').forEach(function(t){
-    var hs = [].map.call(t.querySelectorAll('thead th'), function(th){ return th.textContent.trim(); });
-    t.querySelectorAll('tbody tr').forEach(function(tr){
-      [].forEach.call(tr.children, function(td, i){
-        if (hs[i] && !td.classList.contains('k') && td.textContent.trim()) td.setAttribute('data-h', hs[i]);
-      });
-    });
-  });
-}
-머리글();
-
-/* ── 지난 대회 우수작 쇼케이스. 운영자가 별표한 팀만 서버가 준다. 없으면 통째로 감춘다. ── */
+/* ── 지난 대회 우수작. 운영자 별표 + 본인 동의 + 마감 뒤인 팀만 서버가 준다. 없으면 통째로 감춘다. ── */
 fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list){
   if (!list || !list.length) return;
   document.getElementById('showcase').hidden = false;
@@ -749,7 +329,7 @@ fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list)
         '<span class="sname"><span class="t">' + esc(w.name) + '</span>' +
           '<span class="m">' + esc(w.eventTitle) +
           (w.note ? ' · ' + esc(w.note) : '') + '</span></span>' +
-        '<button class="btn sec sm" data-try="' + i + '">열어보기</button>' +
+        '<button class="btn o s" data-try="' + i + '">열어보기</button>' +
         '<a class="n grey" href="' + esc(w.url) + '" target="_blank" rel="noopener">새 창</a>' +
       '</div>' +
       '<div class="trybox" id="try-' + i + '" hidden></div>' +
@@ -788,24 +368,6 @@ fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
   el.style.display = '';
   if (a.loggedIn) { el.textContent = (a.name || '내 대회') + ' 보기'; el.href = '/app'; }
 }).catch(function(){});
-</script>
-
-<script>
-/* 표제 점판 예시 — 2초마다 한 자리씩 켠다. 움직임 줄이기면 다 켠 상태로 멈춘다. */
-(function(){
-  var dots = document.querySelectorAll('.hd'); if (!dots.length) return;
-  var n = document.getElementById('hd-n');
-  var names = ['동네 공유오피스','김○○','이○○','박○○','동네 카페','모임 선배'];
-  var labels = document.querySelectorAll('.hdots li b');
-  function show(k){
-    for (var i=0;i<dots.length;i++){ dots[i].className = 'hd' + (i<k ? ' on' : (i===k ? ' wait' : '')); }
-    if (n) n.textContent = k + '/' + dots.length + ' 켜짐';
-    labels.forEach(function(b){ var j=+b.dataset.k; if (j<k){ b.textContent = names[j] + ' 맡음'; b.className='on'; } else { b.textContent = j===k ? '확인 기다림' : '비어 있음'; b.className=''; } });
-  }
-  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { show(dots.length); return; }
-  var k = 0; show(0);
-  setInterval(function(){ k = k >= dots.length ? 0 : k + 1; show(k); }, 2000);
-})();
 </script>
 </body>
 </html>

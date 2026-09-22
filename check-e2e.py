@@ -105,19 +105,34 @@ with sync_playwright() as p:
         pg.goto(BASE + path)
         pg.wait_for_selector("body[data-ready='1']", timeout=8000)
 
-    # ── 0. 첫 화면 — 플랫폼 소개와 열린 대회 목록 ──────────
+    # ── 0. 첫 화면 — 토스식. 한 문장 + 단추 둘, 열린 대회, 우수작, «줄 수 있는 것» 입구 ──
+    # 4050 이 폰으로 열어 5초 안에 «대회 열기 / 만들러 가기» 둘 중 하나를 누른다.
+    # 그러려면 390px 폭에서 두 단추가 접힘(fold) 위에 있어야 한다. 픽셀로 잰다.
+    pg.set_viewport_size({"width": 390, "height": 844})
     pg.goto(BASE + "/")
     # 목록이 비면 grid 가 높이 0 이라 '보인다' 가 안 된다. 개수 표시가 채워지길 기다린다.
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
     htxt = pg.inner_text("body")
     for must in ["대회 찾기", "열린 대회", "대회 열기", "협찬"]:
-        A(must in htxt, f"첫 화면에 '{must}' 메뉴가 없다")
+        A(must in htxt, f"첫 화면에 '{must}' 가 없다")
+    for sel, href in (("#hero-open", "/app"), ("#hero-go", "#list")):
+        box = pg.locator(sel).bounding_box()
+        A(box is not None and box["y"] + box["height"] <= 844,
+          f"{sel} 가 폰 첫 화면 접힘 아래에 있다: {box}")
+        A(pg.get_attribute(sel, "href") == href, f"{sel} 가 {href} 로 안 간다")
+    A(pg.get_attribute("#nav-open", "href") == "/app", "대회 열기가 앱으로 안 간다")
+    # 검색·필터·정렬은 있되, 대회가 셋 이하면 숨긴다 — 판단을 늘리지 않는다
     A(pg.query_selector("#q") is not None, "검색 칸이 없다")
     A(len(pg.query_selector_all("[data-filter]")) == 4, "필터가 4개가 아니다")
     A(pg.query_selector("#sort") is not None, "정렬이 없다")
+    A(pg.is_hidden("#tools"), "대회가 셋 이하인데 검색·필터 줄이 보인다")
     A("아직 열린 대회가 없습니다" in htxt, f"빈 목록 안내가 없다: {htxt[:200]}")
-    A(pg.get_attribute("#nav-open", "href") == "/app", "대회 열기가 앱으로 안 간다")
-    ok("첫 화면 — 메뉴·검색·필터·정렬·빈 목록 안내")
+    A(pg.query_selector("#give-go") is not None, "«내가 줄 수 있는 것» 입구가 없다")
+    # 설명 절이 다시 늘어나면 여기서 빨갛다. 남긴 절: 열린 대회 · 우수작 · 줄 수 있는 것
+    nsec = pg.evaluate("document.querySelectorAll('main > section').length")
+    A(nsec <= 3, f"첫 화면 절이 {nsec}개다. 셋을 넘기면 다시 주저리주저리다")
+    pg.set_viewport_size({"width": 460, "height": 900})
+    ok("첫 화면 — 폰 폭에서 단추 둘이 접힘 위 · 열린 대회 · 줄 수 있는 것 입구 · 절 3개 이하")
 
     # ── 1. 화면이 서버에 붙었는가 ───────────────────────────
     visit()
@@ -257,7 +272,12 @@ with sync_playwright() as p:
     A(post(f"/api/events/{ev}/list", {"list": True}, OK)[0] == 200, "목록 공개 실패")
     A(len(api("/api/events")) == 1, "공개했는데 목록에 안 뜬다")
     A(post(f"/api/events/{ev}/list", {"list": True})[0] == 403, "열쇠 없이 목록 공개가 됐다")
-    ok("첫 화면 목록 — 이름만 넣은 대회는 안 뜬다. 올려야 뜬다")
+    # 첫 화면에서 실제로 그려지는가 — 대회가 있으면 «없습니다» 안내는 사라지고 제목이 보인다
+    pg.goto(BASE + "/")
+    pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
+    A(pg.is_hidden("#empty"), "대회가 있는데 «아직 열린 대회가 없습니다» 가 그대로 보인다")
+    A("우리 동네 문제 해결 해커톤" in pg.inner_text("#grid"), "올린 대회가 첫 화면 목록에 안 그려진다")
+    ok("첫 화면 목록 — 이름만 넣은 대회는 안 뜬다. 올려야 뜨고, 뜨면 빈 안내는 사라진다")
 
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
     visit(f"/app#{ev}")
