@@ -1679,6 +1679,9 @@ const SCREEN = {
            이미 손으로 자리를 올린 대회(10/31)는 «다시 나누기»가 그 자리를 건드리지 않는다 — 산식이 깐 줄만 갈아엎는다. */''}
       ${(() => {
         const manual = needs.filter(n => !n.auto).length;
+        /* 참가 신청이 이미 들어온 대회도 접는다. 10/31 처럼 모집 중인 판에서 맨 위 카드가
+           «돈을 정하라»가 되면 운영자의 손이 모집이 아니라 배분으로 간다. */
+        const busy = manual || (d.rows || []).length;
         const inner = `
         <div class="meta">금액 하나만 넣으면 장소·간식·상품·심사 자리를 카드로 깔아 드립니다.
           <b>숫자는 기본값(추정)입니다.</b> 먼저 미리 보여 드리고, 확인을 누른 뒤에만 판에 올립니다.
@@ -1695,8 +1698,8 @@ const SCREEN = {
           ${needs.some(n => n.held) ? ' · <span class="pill">손고침 있음</span>' : ''}</div>` : ''}`;
         /* 손으로 올린 자리가 있는 대회(10/31)는 이 카드가 맨 위에서 «돈을 정하라»고 시키면 안 된다.
            그 판의 급한 일은 모집이다. 접어 두고, 없는 대회에서만 펼친다. */
-        return manual
-          ? `<details id="bg-card"><summary>💰 예산으로 자리 나누기 <span class="when">손으로 올린 자리 있음 · 접어 둠</span></summary><div class="in">${inner}</div></details>`
+        return busy
+          ? `<details id="bg-card"><summary>💰 예산으로 자리 나누기 <span class="when">${manual ? '손으로 올린 자리 있음' : '모집 중'} · 접어 둠</span></summary><div class="in">${inner}</div></details>`
           : `<div class="card" id="bg-card" style="border-color:#AECFB8;background:var(--ok-l)">
               <h3>💰 예산으로 자리 나누기${e.mode === 'online' ? ' <span class="pill">온라인판</span>' : ''}</h3>${inner}</div>`;
       })()}
