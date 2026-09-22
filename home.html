@@ -214,7 +214,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <p>장소, 돈, 심사, 멘토, 간식. 하나만 있어도 됩니다. 연락처는 운영자만 보고, 확인된 이름만 공개 장부에 남습니다.</p>
   </div>
   <div class="cta">
-    <a class="btn" id="give-go" href="#list">내가 줄 수 있는 것</a>
+    <a class="btn" id="give-go" href="/give">내가 줄 수 있는 것</a>
   </div>
   <p class="mail">협찬 문의는 메일로도 받습니다. <a id="mail-link" href="#"></a></p>
 </section>
@@ -257,7 +257,7 @@ var 돈 = function(n){ return (+n||0).toLocaleString('ko-KR'); };
 
 /* ── 열린 대회 목록. 진짜 서버에서 받아 온다. 파일로 열면 예시. ── */
 var 예시 = [{ id:'demo1', title:'우리 동네 생활 불편 해커톤 1회', host:'유재원', starts:ymd(), ends:ymd(), prize:300000, teams:6 }];
-var 대회들 = [], 필터 = 'all', 열린곧 = null;   // 열린곧 = 가장 가까운 모집중 대회 id («줄 수 있는 것» 입구가 쓴다)
+var 대회들 = [], 필터 = 'all';
 function 상태(e){
   var t = ymd();
   if (t < e.starts) return { k:'모집중', c:'open' };
@@ -299,10 +299,7 @@ function 그리기(){
         ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') + '</span>' +
       '</a>';
   }).join('');
-  /* «줄 수 있는 것» 은 가장 가까운 모집중 대회의 돕기 칸으로 간다. 열린 대회가 없으면 목록으로. */
   var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && e.id !== 'demo1'; })[0];
-  열린곧 = 곧 ? 곧.id : null;
-  var gg = document.getElementById('give-go'); if (gg) gg.href = 곧 ? '/e/' + 곧.id + '#help' : '#list';
   document.getElementById('foot-note').textContent = 곧 ? '다음 대회 ' + 곧.starts : '';
 }
 fetch('/api/events').then(function(r){ return r.json(); }).then(function(list){

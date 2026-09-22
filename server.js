@@ -852,7 +852,7 @@ function open(file) {
     CREATE TABLE IF NOT EXISTS needs(
       id      INTEGER PRIMARY KEY,
       event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-      kind    TEXT NOT NULL DEFAULT 'other',   -- venue|judge|prize|mentor|snack|other
+      kind    TEXT NOT NULL DEFAULT 'other',   -- venue|cash|judge|prize|mentor|snack|other
       label   TEXT NOT NULL,
       qty     INTEGER NOT NULL DEFAULT 1,
       note    TEXT NOT NULL DEFAULT '',
@@ -879,7 +879,7 @@ function open(file) {
     CREATE TABLE IF NOT EXISTS offers(
       id      INTEGER PRIMARY KEY,
       event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-      kind    TEXT NOT NULL DEFAULT 'other',   -- venue|judge|prize|mentor|snack|other
+      kind    TEXT NOT NULL DEFAULT 'other',   -- venue|cash|judge|prize|mentor|snack|other
       name    TEXT NOT NULL,
       org     TEXT NOT NULL DEFAULT '',
       contact TEXT NOT NULL DEFAULT '',
@@ -1880,7 +1880,7 @@ function assign(db, event, b) {
 /* ── 빈자리 판 · 공개 장부 · 2주 확인 (PLAN.md §API) ──
    운영자가 필요한 자리를 올리고, 누구나 맡겠다고 신청하고, 운영자가 확인하면
    이름이 공개 장부에 남는다. contact 는 어느 공개 응답에도 실리지 않는다. */
-const NEED_KINDS = ['venue', 'judge', 'prize', 'mentor', 'snack', 'other'];
+const NEED_KINDS = ['venue', 'cash', 'judge', 'prize', 'mentor', 'snack', 'other'];
 const PLEDGE_STATUS = ['pending', 'ok', 'done', 'no'];
 /* 꺾쇠는 저장 전에 뺀다. JSON 응답을 화면이 그대로 그려도 돌지 않게 - esc 를 잊어도 안전하다 */
 const plain = (s, n) => String(s == null ? '' : s).replace(/[<>]/g, '').trim().slice(0, n);
@@ -1914,7 +1914,7 @@ function setPledge(db, id, b) {
 
 /* ── 자리 밖 제안(offer) — 메일 대신 앱에서 바로 ── */
 const OFFER_STATUS = ['pending', 'ok', 'no'];
-const OFFER_KIND_LABEL = { venue:'장소', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
+const OFFER_KIND_LABEL = { venue:'장소', cash:'돈', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
 function addOffer(db, event, b) {
   if (!db.prepare('SELECT 1 FROM events WHERE id=?').get(event)) throw new HttpError(404, '없는 대회입니다');
   const name = plain(b.name, 40);
@@ -2709,11 +2709,12 @@ function routes(db) {
       /* 주소가 셋 갈린다.
          /            첫 화면. 플랫폼 소개와 열린 대회 목록 (home.html)
          /app         대회를 열고 굴리는 곳 (hack-on.html)
-         /e /j /tv    공개·심사·현장 화면. 전부 같은 hack-on.html 이 주소를 보고 갈라진다 */
+         /e /j /tv    공개·심사·현장 화면. 전부 같은 hack-on.html 이 주소를 보고 갈라진다
+         /give        «줄 수 있는 것» 세 화면. 첫 화면 입구가 여기로 온다 (hack-on.html) */
       const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/) || p.match(/^\/j\/[a-z0-9]+$/)
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
-               || p === '/app';
+               || p === '/app' || p === '/give';
 
       /* 화면 파일은 /e/<id> 같은 깊은 주소에서도 그대로 나간다. 그 안의 <script src="qr.js">
          는 /e/qr.js 를 찾게 되고 404 가 난다. 파일로 열었을 때(file://)도 살아야 하니
@@ -3419,6 +3420,9 @@ function selftest() {
      '운영자가 자리를 올린다');
   ok(addNeed(db, nbEv.id, { kind: 'party', label: '이상한 종류' }).kind === 'other',
      '모르는 종류는 other 로 둔다');
+  /* «줄 수 있는 것» 칩의 «돈» 은 cash 종류다. 제안으로 들어와 확인되면 장부에 «돈 · …» 으로 남는다 */
+  ok(addNeed(db, nbEv.id, { kind: 'cash', label: '상금에 보탤 돈' }).kind === 'cash', '돈(cash) 종류가 있다');
+  ok(OFFER_KIND_LABEL.cash === '돈' && NEED_KINDS.includes('cash'), '제안 종류에도 돈이 있다');
   addNeed(db, nbEv.id, { kind: 'snack', label: '<script>alert(1)</script>간식',
                          note: '<img src=x onerror=alert(1)>' });
   ok(!JSON.stringify(needsOf(db, nbEv.id)).includes('<'), '라벨·메모의 꺾쇠는 저장 전에 뺀다');

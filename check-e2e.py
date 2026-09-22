@@ -127,7 +127,7 @@ with sync_playwright() as p:
     A(pg.query_selector("#sort") is not None, "정렬이 없다")
     A(pg.is_hidden("#tools"), "대회가 셋 이하인데 검색·필터 줄이 보인다")
     A("아직 열린 대회가 없습니다" in htxt, f"빈 목록 안내가 없다: {htxt[:200]}")
-    A(pg.query_selector("#give-go") is not None, "«내가 줄 수 있는 것» 입구가 없다")
+    A(pg.get_attribute("#give-go", "href") == "/give", "«내가 줄 수 있는 것» 입구가 /give 로 안 간다")
     # 설명 절이 다시 늘어나면 여기서 빨갛다. 남긴 절: 열린 대회 · 우수작 · 줄 수 있는 것
     nsec = pg.evaluate("document.querySelectorAll('main > section').length")
     A(nsec <= 3, f"첫 화면 절이 {nsec}개다. 셋을 넘기면 다시 주저리주저리다")
@@ -795,6 +795,57 @@ with sync_playwright() as p:
     A(len(api(f"/api/events/{ev}/ledger")) == before + 1, "제안을 두 번 확인하니 자리가 둘로 늘었다")
     ok("자리 밖 제안 — 손님이 앱에서 보내고, 운영자가 확인하면 공개 장부에 오른다 (연락처는 운영자만)")
 
+    # ── «줄 수 있는 것» 흐름 — 세 화면, 화면마다 판단 하나 (브라우저) ──
+    # 첫 화면 «내가 줄 수 있는 것» → /give: 무엇을(칩) → 어느 대회(열린 대회가 하나뿐이면 건너뜀) → 이름·연락처 → 끝.
+    # 대회 페이지 자리 카드 «이 자리 맡기» 는 이름·연락처만 묻는다. 연락처는 둘 다 운영자만 본다.
+    gctx = b.new_context(viewport={"width": 390, "height": 844})
+    gp = gctx.new_page()
+    gp.on("pageerror", lambda e: errs.append("give:" + str(e)))
+    gp.goto(BASE + "/give")
+    gp.wait_for_selector(".gchip[data-give-kind]")
+    A(len(gp.query_selector_all(".gchip[data-give-kind]")) == 6, "«무엇을» 칩이 여섯이 아니다")
+    A(gp.query_selector("#g-name") is None, "무엇을 고르기 전에 이름부터 묻는다")
+    gp.click('.gchip[data-give-kind="snack"]')
+    gp.wait_for_selector("#g-name, [data-give-event]")
+    open_n = len([e for e in api("/api/events") if e["ends"] >= datetime.now().strftime("%Y-%m-%d")])
+    if open_n == 1:
+        A(gp.query_selector("[data-give-event]") is None, "열린 대회가 하나뿐인데 «어느 대회에» 를 또 묻는다")
+    else:
+        gp.click(f'[data-give-event="{ev}"]')
+    gp.wait_for_selector("#g-name")
+    A("간식" in gp.inner_text("#give"), "고른 종류가 세 번째 화면에 안 보인다")
+    A(gp.query_selector("#g-what") is None, "간식인데 «무엇인가요» 를 또 묻는다 (기타일 때만)")
+    gp.click("#g-send"); gp.wait_for_timeout(300)
+    A(gp.query_selector("#g-name") is not None, "빈 채로 보냈는데 화면이 넘어갔다")
+    gp.fill("#g-name", "간식카페"); gp.fill("#g-contact", "snack-secret@example.com")
+    gp.click("#g-send"); gp.wait_for_timeout(900)
+    A("보냈습니다" in gp.inner_text("#give-wrap"), f"보낸 뒤 «보냈습니다» 가 안 뜬다: {gp.inner_text('#give-wrap')[:120]}")
+    offs = api(f"/api/events/{ev}/offers", key=OK)
+    A(any(o["kind"] == "snack" and o["name"] == "간식카페" and o["contact"] == "snack-secret@example.com" for o in offs),
+      f"/give 로 보낸 제안이 운영자 목록에 없다: {offs}")
+    A("snack-secret" not in json.dumps(api(f"/api/events/{ev}/needs"), ensure_ascii=False)
+      and "snack-secret" not in json.dumps(api(f"/api/events/{ev}/ledger"), ensure_ascii=False),
+      "제안자 연락처가 손님 응답으로 샜다")
+    # 자리 카드에서: 운영자가 자리를 올려 두면 «이 자리 맡기» 가 이름·연락처만 묻는다
+    st, nd = post(f"/api/events/{ev}/needs", {"kind": "venue", "label": "토요일 대관 한 곳", "qty": 1}, OK)
+    A(st == 201, f"자리를 못 올렸다: {st} {nd}")
+    gp.goto(BASE + f"/e/{ev}")
+    gp.wait_for_selector(f'[data-give-need="{nd["id"]}"]')
+    A(gp.query_selector("[data-p-name]") is None, "자리 카드에 옛 4칸 폼이 남아 있다")
+    gp.click(f'[data-give-need="{nd["id"]}"]')
+    gp.wait_for_selector("#g-name")
+    A(gp.query_selector(".gchip") is None and gp.query_selector("[data-give-event]") is None,
+      "자리 카드에서 왔는데 «무엇을»·«어느 대회에» 를 또 묻는다")
+    A("토요일 대관 한 곳" in gp.inner_text("#give"), "어느 자리를 맡는지 안 보인다")
+    gp.fill("#g-name", "동네공유오피스"); gp.fill("#g-contact", "office-secret@example.com")
+    gp.click("#g-send"); gp.wait_for_timeout(900)
+    pls = api(f"/api/events/{ev}/pledges", key=OK)
+    A(any(p["need"] == nd["id"] and p["name"] == "동네공유오피스" and p["contact"] == "office-secret@example.com" for p in pls),
+      f"자리 카드에서 보낸 신청이 운영자 목록에 없다: {pls}")
+    A("office-secret" not in json.dumps(api(f"/api/events/{ev}/needs"), ensure_ascii=False), "신청자 연락처가 손님 응답으로 샜다")
+    gctx.close()
+    ok("줄 수 있는 것 — /give 세 화면(간식 → 대회 건너뜀 → 이름·연락처), 자리 카드는 이름·연락처만, 연락처는 운영자만")
+
     # ── 추천작 + 첫 화면 쇼케이스 (기능 3/3) ──
     _, cev = post("/api/events", {"title": "쇼케이스시험"})
     CID, CK = cev["id"], cev["okey"]
@@ -1166,11 +1217,11 @@ with sync_playwright() as p:
     # 공개 화면에는 참가 신청 칸만 있어야 한다. 제출·심사·협찬·성과는 손댈 수 없다.
     for bad_id in ["#s-save", "#j-save", "#p-add", "#o-add", "#b-ext", "#f-save"]:
         A(pub.query_selector(bad_id) is None, f"공개 화면에 {bad_id} 가 있다")
-    ids = [el.get_attribute("id") for el in
-           pub.query_selector_all("#view input, #view textarea, #view select, #view button")]
-    # 공개 화면 칸은 참가 신청(t-)과 자리 밖 제안(of-) 둘뿐. 운영 칸은 위 bad_id 로 이미 막았다.
-    A(all(i and (i.startswith("t-") or i.startswith("of-")) for i in ids),
-      f"공개 화면에 신청·제안 말고 다른 칸이 있다: {ids}")
+    # 공개 화면 칸은 참가 신청(t-)과 «줄 수 있는 것»(g- 칸, data-give-* 단추) 둘뿐. 운영 칸은 위 bad_id 로 이미 막았다.
+    ids = pub.evaluate("""[...document.querySelectorAll('#view input, #view textarea, #view select, #view button')]
+        .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-')) || '?')""")
+    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") for i in ids),
+      f"공개 화면에 신청·줄 수 있는 것 말고 다른 칸이 있다: {ids}")
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
                  "함께한 곳", "오픈에이아이",
