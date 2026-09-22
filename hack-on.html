@@ -607,9 +607,9 @@ const kindOptions = (sel) => Object.entries(NEED_KIND)
 /* 자리 밖 제안 폼. 운영자가 안 올린 역할이라도 앱에서 바로 '제가 할 수 있어요'. 메일을 대신한다. */
 function offerForm(eid) {
   return `<div class="card" id="help">
-    <h3>🙋 자리 밖에서도 돕고 싶으신가요</h3>
-    <div class="meta">운영자가 아직 안 올린 역할이라도 제안할 수 있습니다.
-      운영자가 확인하면 그 자리가 생기고 공개 장부에 올라갑니다. 메일 안 쓰셔도 됩니다.</div>
+    <h3>🙋 다른 것으로 돕고 싶으신가요</h3>
+    <div class="meta">위 목록에 없는 것도 됩니다. 여기 적어 보내면
+      운영자가 확인하고, 그 자리가 생겨 공개 장부에 올라갑니다. 메일 안 쓰셔도 됩니다.</div>
     <label>무엇을 도울 수 있나요</label>
     <select id="of-kind">${kindOptions('other')}</select>
     <label>이름 <span class="pill">필수</span></label>
@@ -1678,7 +1678,7 @@ const SCREEN = {
         <div class="meta">장소·심사·상품·멘토·간식을 공개 페이지에 올립니다. 누가 맡겠다고 하면 여기서 연락처를 보고 확인하거나 거절합니다.</div>
         ${offers.filter(o => o.status === 'pending').length ? `<div class="card" style="margin-top:10px;border-left:3px solid var(--acc)">
           <h3>🙋 들어온 제안 <span class="pill">${offers.filter(o => o.status === 'pending').length}</span></h3>
-          <div class="meta">공개 페이지에서 '자리 밖에서도 돕고 싶어요' 로 온 것입니다. 확인하면 그 자리가 생겨 공개 장부에 올라갑니다.</div>
+          <div class="meta">공개 페이지의 '다른 것으로 돕고 싶으신가요' 에서 온 것입니다. 확인하면 그 자리가 생겨 공개 장부에 올라갑니다.</div>
           ${offers.filter(o => o.status === 'pending').map(o => `<div class="shrow" style="align-items:center;margin-top:9px">
             <div class="meta" style="flex:1"><b>${esc(needKind(o.kind))}</b> · <b>${esc(o.name)}</b>${o.org ? ' · ' + esc(o.org) : ''}
               ${o.note ? `<br>${esc(o.note)}` : ''}

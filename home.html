@@ -631,10 +631,13 @@ function 그리기(){
       '<span class="n">' + (e.prize ? 돈(e.prize) : '상금 없음') + '</span>' +
       '</a>';
   }).join('');
-  /* 표제의 '참가 신청' 은 가장 가까운 모집중 대회로 바로 보낸다. 없으면 목록으로. */
+  /* «열린 대회 보기» 는 말 그대로 목록으로 간다. 전에는 가장 가까운 대회로 바로 보냈는데,
+     대회가 하나뿐일 때 «보기» 를 눌렀더니 신청 페이지가 뜨는 꼴이 됐다 — 단추 이름과 다른 일을 하면
+     사람은 고장으로 읽는다. 목록은 마감 임박순이라 가장 가까운 대회가 어차피 맨 위다.
+     «시간으로 돕기»(give-time) 만 가장 가까운 대회의 신청으로 바로 간다 — 그 단추는 이름이 그렇다. */
   var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && e.id !== 'demo1'; })[0];
   열린곧 = 곧 ? 곧.id : null;
-  ['hero-join','give-time'].forEach(function(id){ var a = document.getElementById(id); if (a) a.href = 곧 ? '/e/' + 곧.id : '#list'; });
+  var gt = document.getElementById('give-time'); if (gt) gt.href = 곧 ? '/e/' + 곧.id : '#list';
   /* 협찬도 열린 대회가 있으면 앱 안에서 자리로 제안. 없으면 메일로 떨어진다. */
   var ml = document.getElementById('mail-link');
   if (ml && 곧) { ml.href = '/e/' + 곧.id + '#help'; ml.textContent = '앱에서 협찬 제안'; }
