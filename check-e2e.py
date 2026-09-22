@@ -817,6 +817,41 @@ with sync_playwright() as p:
     A(not any(w["event"] == CID for w in api("/api/showcase")), "추천작을 내렸는데 쇼케이스에 남았다")
     ok("추천작 — 운영자 별표 + 본인 동의 둘 다 있어야 뜨고, 마감 뒤에도 본인이 내릴 수 있다 (개인정보 없음)")
 
+    # ── 예산으로 자리 나누기 — 금액 하나로 카드가 깔리고, 손댄 줄은 안 바뀐다 ──
+    _, bev = post("/api/events", {"title": "예산시험", "budget": 500000, "cap": 20})
+    BID, BK = bev["id"], bev["okey"]
+    A(bev.get("alloc") and bev["alloc"]["tier"] == "mid" and bev["alloc"]["made"] == 4, f"50만원으로 열었는데 자리가 안 깔렸다: {bev.get('alloc')}")
+    bn = api(f"/api/events/{BID}/needs")
+    A(len(bn) == 4 and sum(n["amount"] * n["qty"] for n in bn) <= 500000, f"자리 4장·합≤예산이 아니다: {bn}")
+    A(all("contact" not in n for n in bn), "자리 목록에 연락처 칸이 있다")
+    venue = next(n for n in bn if n["kind"] == "venue")
+    # 손고침은 운영자만
+    A(post(f"/api/needs/{venue['id']}", {"amount": 77000}, method="PATCH")[0] == 403, "열쇠 없이 자리 금액이 고쳐졌다")
+    st, r = post(f"/api/needs/{venue['id']}", {"amount": 77000}, BK, method="PATCH")
+    A(st == 200 and r["amount"] == 77000 and r["held"] is True, f"운영자 손고침이 안 됐다: {st} {r}")
+    # 미리보기는 안 쓴다 · 다시 나누기는 손고침을 안 덮는다
+    st, dry = post(f"/api/events/{BID}/allocate?dry=1", {"budget": 900000}, BK)
+    A(st == 200 and dry["budget"] == 900000 and len(api(f"/api/events/{BID}/needs")) == 4, "미리보기가 자리를 건드렸다")
+    st, re_ = post(f"/api/events/{BID}/allocate", {"budget": 900000}, BK)
+    bn2 = api(f"/api/events/{BID}/needs")
+    A(st == 200 and next(n for n in bn2 if n["id"] == venue["id"])["amount"] == 77000, "다시 나누기가 손고침을 덮었다")
+    A(re_["kept"] == 1, f"손댄 줄 1개가 kept 로 안 잡혔다: {re_}")
+    # 0원을 주면 온라인판 + 관객 평가 켜짐
+    _, zev = post("/api/events", {"title": "영원시험", "budget": 0})
+    ze = api(f"/api/events/{zev['id']}")
+    A(ze["mode"] == "online" and ze["vmode"] == 1 and api(f"/api/events/{zev['id']}/needs") == [], f"0원이 온라인판이 아니다: {ze.get('mode')} {ze.get('vmode')}")
+    # 이름만 준 대회는 전과 같다 (위 2단계에서 만든 ev)
+    e0 = api(f"/api/events/{ev}")
+    A(e0["mode"] == "onsite" and e0["budget"] == 0 and e0["vmode"] == 0, "이름만 준 대회가 예산 규칙에 휘말렸다")
+    # 운영 화면에 예산 카드가 있고, 공개 페이지 자리 카드에 금액이 보인다
+    pg.evaluate(f"localStorage.setItem('hackon.okey.{BID}', '{BK}'); localStorage.setItem('hackon.event','{BID}')")
+    visit("/app"); pg.evaluate("tab='board'; render()"); pg.wait_for_selector("#bg-card")
+    A(pg.query_selector("#bg-go") is not None and pg.query_selector("[data-need-amount-save]") is not None, "운영 화면에 예산 카드·금액 저장 단추가 없다")
+    visit(f"/e/{BID}"); pg.wait_for_selector("body[data-ready]")
+    A("계획" in pg.inner_text("body") and "77,000원" in pg.inner_text("body"), "공개 페이지 자리 카드에 계획 금액이 안 보인다")
+    A("앱은 돈을 받지 않습니다" in pg.inner_text("body"), "정산 안내 문장이 없다")
+    ok("예산 나누기 — 금액 하나로 자리 4장, 손고침은 운영자만·다시 나눠도 안 덮임, 0원은 온라인판, 이름만 준 대회는 그대로")
+
     # ── 관객 평가 대안 (기능 2/3) — 심사위원 없을 때 관객이 폰으로 별점 ──
     _, vev = post("/api/events", {"title": "관객평가검사"})
     VID, VOK = vev["id"], vev["okey"]

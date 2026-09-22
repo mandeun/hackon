@@ -1554,6 +1554,7 @@ const SCREEN = {
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
           <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          ${e.mode === 'online' ? `<li><span class="ic">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
           <li><span class="ic">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
@@ -1673,6 +1674,33 @@ const SCREEN = {
                눈높이를 맞춘 뒤 이어 가시길 권합니다. (${esc(sp.top)} ↔ ${esc(sp.bottom)})`
             : '<br>눈높이가 맞는 편입니다.'}</div>
       </div>` : ''}
+      ${/* 예산 한 칸. 금액을 넣고 «나누기»를 누르면 산식이 자리 카드를 깔아 준다. 0원이면 온라인판.
+           이름 하나로 연 대회는 이 카드가 비어 있고, 안 눌러도 전과 똑같이 굴러간다.
+           이미 손으로 자리를 올린 대회(10/31)는 «다시 나누기»가 그 자리를 건드리지 않는다 — 산식이 깐 줄만 갈아엎는다. */''}
+      ${(() => {
+        const manual = needs.filter(n => !n.auto).length;
+        const inner = `
+        <div class="meta">금액 하나만 넣으면 장소·간식·상품·심사 자리를 카드로 깔아 드립니다.
+          <b>숫자는 기본값(추정)입니다.</b> 먼저 미리 보여 드리고, 확인을 누른 뒤에만 판에 올립니다.
+          손으로 고친 줄과 손으로 올린 자리는 다시 나눠도 안 바뀝니다.
+          <b>0원이면 온라인 제출 대회</b>가 되고 관객 평가가 켜집니다. 앱은 돈을 받지 않습니다 — 정산은 직접 하십니다.</div>
+        ${manual ? `<div class="meta" style="margin-top:6px"><b>손으로 올린 자리 ${manual}개가 있습니다.</b> 같은 종류는 산식이 건너뜁니다. 지금 모집 중이면 이 카드는 안 눌러도 됩니다.</div>` : ''}
+        <div class="shrow" style="margin-top:10px;align-items:center">
+          <input id="bg-in" type="number" min="0" step="10000" value="${+e.budget || ''}" placeholder="예) 300000" style="flex:1">
+          <button class="btn sm" id="bg-go">미리 보기</button>
+        </div>
+        <div id="bg-preview" hidden></div>
+        ${needs.some(n => n.auto) ? `<div class="meta" style="margin-top:8px">산식이 깐 자리 ·
+          ${needs.filter(n => n.auto).map(n => `${esc(needKind(n.kind))} <b>${n.amount ? won(n.amount) + (n.qty > 1 ? '×' + n.qty : '') : '무료'}</b>`).join(' · ')}
+          ${needs.some(n => n.held) ? ' · <span class="pill">손고침 있음</span>' : ''}</div>` : ''}`;
+        /* 손으로 올린 자리가 있는 대회(10/31)는 이 카드가 맨 위에서 «돈을 정하라»고 시키면 안 된다.
+           그 판의 급한 일은 모집이다. 접어 두고, 없는 대회에서만 펼친다. */
+        return manual
+          ? `<details id="bg-card"><summary>💰 예산으로 자리 나누기 <span class="when">손으로 올린 자리 있음 · 접어 둠</span></summary><div class="in">${inner}</div></details>`
+          : `<div class="card" id="bg-card" style="border-color:#AECFB8;background:var(--ok-l)">
+              <h3>💰 예산으로 자리 나누기${e.mode === 'online' ? ' <span class="pill">온라인판</span>' : ''}</h3>${inner}</div>`;
+      })()}
+
       <details open><summary>필요한 자리 <span class="when">${needs.reduce((a,n) => a + Math.max(0,(+n.qty||0)-(+n.filled||0)),0)}자리 남음</span></summary><div class="in">
         ${dotBoard(needs, '내 대회의 자리')}
         <div class="meta">장소·심사·상품·멘토·간식을 공개 페이지에 올립니다. 누가 맡겠다고 하면 여기서 연락처를 보고 확인하거나 거절합니다.</div>
@@ -1688,8 +1716,14 @@ const SCREEN = {
           </div>`).join('')}
         </div>` : ''}
         ${needs.length ? needs.map(n => `<div class="card" style="margin-top:9px">
-          <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)}</span></h3>
+          <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)}</span>
+            ${n.auto || n.amount ? `<span class="pill${n.amount ? '' : ' ok'}">${n.amount ? '계획 ' + won(n.amount) + (n.qty > 1 ? ' × ' + n.qty : '') : '무료로 내주실 분'}</span>` : ''}
+            ${n.held ? '<span class="pill">손고침</span>' : ''}</h3>
           ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
+          <div class="shrow" style="margin-top:8px;align-items:center">
+            <input type="number" min="0" step="1000" data-need-amount="${esc(n.id)}" value="${+n.amount || 0}" style="max-width:11em" aria-label="배정 금액">
+            <button class="btn sec sm" data-need-amount-save="${esc(n.id)}">금액 저장</button>
+          </div>
           ${(n.pledges || []).length ? `<div style="margin-top:8px">${(n.pledges || []).map(p => `<div class="shrow" style="align-items:center">
             <div class="meta" style="flex:1"><b>${esc(p.name)}</b>${p.org ? ' · ' + esc(p.org) : ''} · ${esc({pending:'확인 대기',ok:'확인함',done:'완료',no:'거절'}[p.status] || p.status)}
               ${pledgeInfo[p.id] && pledgeInfo[p.id].contact ? `<div class="contact">연락처 <b>${esc(pledgeInfo[p.id].contact)}</b>${pledgeInfo[p.id].note ? ' · ' + esc(pledgeInfo[p.id].note) : ''}</div>` : ''}</div>
@@ -1930,8 +1964,10 @@ const SCREEN = {
       ${needs.length ? `<h3>함께 여는 자리</h3>
       <p class="sub">한 자리씩 맡아서 같이 엽니다. 연락처는 운영자에게만 전달되고 공개 장부에는 나오지 않습니다.</p>
       ${dotBoard(needs, '이 대회를 함께 여는 자리')}
+      ${needs.some(n => n.auto || n.amount) ? '<p class="sub">«계획»이 적힌 자리는 <b>운영자가 그 자리에 쓰기로 계획한 돈</b>입니다. 실제 지출과 다를 수 있고, 정산은 운영자와 직접 하며, 앱은 돈을 받지 않습니다.</p>' : ''}
       ${needs.map(n => `<div class="card">
-        <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)} 채움</span></h3>
+        <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)} 채움</span>
+          ${n.auto || n.amount ? `<span class="pill${n.amount ? '' : ' ok'}">${n.amount ? '계획 ' + won(n.amount) + (n.qty > 1 ? ' × ' + n.qty : '') : '무료로 내주실 분 찾습니다'}</span>` : ''}</h3>
         ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
         ${confirmed(n).length ? `<div class="meta" style="margin-top:6px">확인됨 · ${confirmed(n).map(p => `<b>${esc(p.name)}</b>${p.org ? ' (' + esc(p.org) + ')' : ''}`).join(' · ')}</div>` : ''}
         ${(+n.filled||0) < (+n.qty||0) ? `<div style="height:12px"></div><button class="btn sec sm" data-pledge-open="${esc(n.id)}">🙌 내가 맡겠다</button>
@@ -2690,6 +2726,45 @@ function wire() {
   });
   const go = $('[data-go]'); if (go) go.onclick = () => { tab = go.dataset.go; render(); };
   const bpub = $('#b-pub'); if (bpub) bpub.onclick = () => { tab = 'pub'; render(); };
+
+  /* 예산 나누기 - 두 단계. 먼저 미리 보여 주고(dry), «판에 올리기»를 눌러야 굽는다.
+     손으로 올린 자리·손고침·맡은 사람 있는 줄은 서버가 안 건드린다. */
+  const bgo = $('#bg-go');
+  if (bgo) bgo.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    const v = $('#bg-in').value.trim();
+    if (v === '') return flash('금액을 넣어 주세요. 0 이면 온라인판이 됩니다', true);
+    try {
+      const a = await api(`/events/${cur}/allocate?dry=1`, { method: 'POST', body: { budget: +v } });
+      const box = $('#bg-preview'); box.hidden = false;
+      box.innerHTML = a.rows.length
+        ? `<table style="margin-top:10px"><tr><th>자리</th><th>수</th><th class="n">계획</th></tr>
+            ${a.rows.map(r => `<tr><td>${esc(needKind(r.kind))} · ${esc(r.label)}</td><td>${r.qty}</td><td class="n">${r.amount ? won(r.amount) : '무료'}</td></tr>`).join('')}
+            <tr><td colspan="2">남는 돈</td><td class="n">${won(a.left)}</td></tr></table>
+           <div class="meta" style="margin-top:6px">기본값(추정)입니다. 올린 뒤 카드마다 고칠 수 있습니다.</div>
+           <div style="height:8px"></div><button class="btn sm" id="bg-ok">이대로 판에 올리기</button>`
+        : `<div class="meta" style="margin-top:8px"><b>0원 — 온라인 제출 대회</b>가 됩니다. 자리 카드는 없고 관객 평가(별점)가 켜집니다.
+             올린 뒤 <b>제출 마감</b>을 꼭 정하세요.</div>
+           <div style="height:8px"></div><button class="btn sm" id="bg-ok">온라인판으로 바꾸기</button>`;
+      $('#bg-ok').onclick = async () => {
+        try {
+          const r = await api(`/events/${cur}/allocate`, { method: 'POST', body: { budget: +v } });
+          flash(r.tier === 'zero' ? '온라인 제출 대회로 바꿨습니다. 관객 평가가 켜졌습니다 — 제출 마감을 정하세요'
+            : `자리 ${r.made}장을 깔았습니다${r.kept ? ' · 손댄 ' + r.kept + '줄은 그대로' : ''}${r.skipped.length ? ' · 건너뜀 ' + r.skipped.map(needKind).join(',') + '(손으로 올린 자리 있음)' : ''}${r.over ? ' · ⚠️ 판 전체 합이 예산을 넘습니다' : ''}`, r.over);
+          render();
+        } catch (e) { flash(e.message, true); }
+      };
+    } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-need-amount-save]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.needAmountSave;
+    const inp = document.querySelector(`[data-need-amount="${id}"]`);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    try {
+      await api(`/needs/${id}`, { method: 'PATCH', body: { amount: +inp.value } });
+      flash('금액을 저장했습니다. 이 줄은 다시 나눠도 안 바뀝니다'); render();
+    } catch (e) { flash(e.message, true); }
+  });
 
   document.querySelectorAll('[data-pledge-open]').forEach(b => b.onclick = () => {
     const box = document.getElementById('pledge-' + b.dataset.pledgeOpen);

@@ -286,6 +286,93 @@ function follow(db, event, admin) {
 }
 
 /** 규모를 넣으면 필요한 것을 되돌려 준다. */
+/* ── 예산 배분 산식 ──
+   여는 사람이 «금액 하나»만 정하면 그 돈을 자리(장소·간식·상품·심사)로 나눠 카드로 깐다.
+   숫자는 전부 «기본값(추정)»이다. 근거가 있는 것만 적는다 -
+   구간 경계 30만(PLAN §2 «상금은 없거나 30만 원»)·100만(PLAN §3 «현금 소액 100만원 이하»),
+   간식 1인 6,000원, 심사위원은 열 팀 이하 3명(PLAN §12-1). 나머지 비율은 추정이라 화면에 그렇게 적는다.
+   앱은 돈을 만지지 않는다. «얼마를 어디에 쓰기로 했나»를 카드로 보여 줄 뿐이고 정산은 운영자와 제공자가 직접 한다.
+   한 곳에만 둔다 - 문서·화면·검사가 전부 여기를 본다. */
+const BUDGET_RULE = {
+  tiers: [['zero', 0], ['small', 300000], ['mid', 1000000], ['big', Infinity]],
+  snackPer: 6000,          // 간식 1인 (GUIDE §4)
+  judgeFee: { big: 200000 },   // 심사 사례 1인 «기본값(추정)». 큰 금액 구간에서만. 그 아래는 무보수가 표준
+  unit: 1000,              // 원 단위 내림
+};
+function tierOf(budget) {
+  const b = Math.max(0, Math.floor(+budget || 0));
+  for (const [k, max] of BUDGET_RULE.tiers) if (b <= max) return k;
+  return 'big';
+}
+/** 예산과 정원으로 자리 카드 초안을 만든다. 순수 함수 - DB 를 모른다.
+    반환하는 rows 의 amount 합은 절대 budget 을 넘지 않는다(검사가 잠근다). */
+function allocate(budget, cap) {
+  const B = Math.max(0, Math.floor(+budget || 0));
+  const n = Math.max(1, Math.min(2000, +cap || 20));
+  const R = BUDGET_RULE, u = R.unit;
+  const dn = x => Math.max(0, Math.floor(x / u) * u);
+  const tier = tierOf(B);
+  const rows = [];
+  const add = (kind, label, qty, amount, note) => rows.push({ kind, label, qty, amount: dn(amount), note });
+  if (tier === 'zero') return { tier, mode: 'online', budget: B, rows, left: 0 };
+  if (tier === 'small') {
+    const snack = Math.min(n * R.snackPer, B * 0.6);
+    add('venue', '장소', 1, 0, '무료로 내줄 곳을 찾는 판입니다. 돈은 간식·상품에만 씁니다');
+    add('judge', '심사위원', 2, 0, '무보수. 관객 평가(별점)를 같이 켭니다');
+    add('snack', '간식', 1, snack, `${n}명 × ${R.snackPer.toLocaleString()}원 기준`);
+    add('prize', '상품', 1, B - dn(snack), '남는 돈 전부. 상품권이 무난합니다');
+  } else if (tier === 'mid') {
+    const venue = B * 0.30, snack = Math.min(n * R.snackPer, B * 0.20);
+    add('venue', '장소', 1, venue, '30% 기본값(추정). 무료로 확보되면 이 돈은 상품으로');
+    add('snack', '간식', 1, snack, `${n}명 × ${R.snackPer.toLocaleString()}원 기준`);
+    /* 심사는 무보수가 소규모 커뮤니티 해커톤의 국제 표준(기획메모). 기본값을 사례비로 두면
+       한 번도 안 고친 운영자에게 문서와 반대되는 판이 깔린다. 사례를 주려면 고친다. */
+    add('judge', '심사위원', 3, 0, '무보수가 표준입니다. 사례를 주려면 금액을 고치세요');
+    const used = dn(venue) + dn(snack);
+    add('prize', '상품·상금', 1, B - used, '남는 돈 전부');
+  } else {
+    const judges = 3 + Math.floor(Math.max(0, n - 30) / 10);
+    const fee = Math.min(R.judgeFee.big, (B * 0.16) / judges);
+    const prize = B * 0.40, venue = B * 0.20, snack = Math.min(B * 0.12, n * R.snackPer * 2), promo = B * 0.08;
+    add('prize', '상금', 1, prize, '40% 기본값(추정)');
+    add('venue', '장소', 1, venue, '20% 기본값(추정)');
+    add('judge', '심사위원', judges, fee, '1인 사례 기본값(추정)');
+    add('snack', '식사·간식', 1, snack, `${n}명 기준`);
+    add('other', '홍보·기록', 1, promo, '포스터·사진·영상');
+    const used = rows.reduce((a, r) => a + r.amount * r.qty, 0);
+    add('other', '예비', 1, B - used, '남는 돈. 큰 금액은 운영자가 직접 나누세요');
+  }
+  const used = rows.reduce((a, r) => a + r.amount * r.qty, 0);
+  return { tier, mode: 'onsite', budget: B, rows, left: B - used };
+}
+
+/** 산식 결과를 needs 로 굽는다. 산식이 만든 줄(auto=1) 중 손대지 않은 것(held=0)과
+    아직 아무도 맡지 않은 것만 갈아엎는다. 손으로 올린 자리(auto=0)는 절대 안 건드린다. */
+function reallocate(db, event) {
+  const e = db.prepare('SELECT budget, cap, mode FROM events WHERE id=?').get(event);
+  if (!e) throw new HttpError(404, '없는 대회입니다');
+  const a = allocate(e.budget, e.cap);
+  const pledged = new Set(db.prepare('SELECT DISTINCT need FROM pledges WHERE event=?').all(event).map(r => r.need));
+  const olds = db.prepare('SELECT id, held FROM needs WHERE event=? AND auto=1').all(event);
+  let kept = 0;
+  for (const o of olds) {
+    if (o.held || pledged.has(o.id)) { kept++; continue; }
+    db.prepare('DELETE FROM needs WHERE id=?').run(o.id);
+  }
+  /* 손으로 올린 자리(auto=0)와 같은 종류는 안 깐다. 안 그러면 «장소»와 «장소 ₩X»가 한 판에 같이 산다.
+     그 종류는 건너뛰고 알린다 - 돈은 운영자가 그 손 자리에 직접 적으면 된다. */
+  const manualKinds = new Set(db.prepare('SELECT DISTINCT kind FROM needs WHERE event=? AND auto=0').all(event).map(r => r.kind));
+  const skipped = a.rows.filter(r => manualKinds.has(r.kind)).map(r => r.kind);
+  const ins = db.prepare('INSERT INTO needs(event,kind,label,qty,note,amount,auto) VALUES(?,?,?,?,?,?,1)');
+  let made = 0;
+  for (const r of a.rows) { if (manualKinds.has(r.kind)) continue; ins.run(event, r.kind, r.label, r.qty, r.note, r.amount); made++; }
+  /* 0원이면 온라인판. 심사 카드가 없으니 관객 평가를 같이 켠다(운영 화면에서 끌 수 있다). */
+  if (a.tier === 'zero') db.prepare("UPDATE events SET mode='online', vmode=1 WHERE id=?").run(event);
+  /* 산식 출력만 보면 합이 예산 이하지만, 손고침으로 남은 줄까지 더하면 넘을 수 있다. 판 전체를 다시 센다. */
+  const total = db.prepare('SELECT COALESCE(SUM(amount*qty),0) s FROM needs WHERE event=?').get(event).s;
+  return { ...a, kept, made, skipped, total, over: total > a.budget };
+}
+
 function findHelp(size) {
   const n = Math.max(1, Math.min(2000, +size || 24));
   const teams = Math.max(1, Math.ceil(n / 4));
@@ -882,6 +969,17 @@ function open(file) {
   /* 관객 평가. 심사위원 자리가 비면 켠다. 투표 열쇠도 심사 열쇠처럼 빈 것을 채운다. */
   try { db.exec('ALTER TABLE events ADD COLUMN vmode INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN vkey TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 예산 기반 개설. events.budget 은 여는 사람이 정한 총액(원), mode 는 판의 모양.
+     기본값이 'onsite' 인 것이 이관의 핵심이다 — 지금까지 연 대회는 전부 현장 대회였으니
+     옛 행이 «0원 = 온라인» 규칙에 소급되어 온라인판으로 뒤집히는 사고를 여기서 막는다. */
+  try { db.exec('ALTER TABLE events ADD COLUMN budget INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE events ADD COLUMN mode TEXT NOT NULL DEFAULT 'onsite'"); } catch {}
+  /* 자리마다 배정된 돈(amount). 0 = «무료로 내줄 분을 찾는» 카드.
+     held = 운영자가 손으로 고친 줄 - «다시 나누기»가 절대 덮어쓰지 않는다.
+     auto = 산식이 만든 줄 - 다시 나누기는 이것만 갈아엎는다. 손으로 올린 자리(auto=0)는 안 건드린다. */
+  try { db.exec('ALTER TABLE needs ADD COLUMN amount INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE needs ADD COLUMN held INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE needs ADD COLUMN auto INTEGER NOT NULL DEFAULT 0'); } catch {}
   try {
     const 빈투표 = db.prepare("SELECT id FROM events WHERE vkey=''").all();
     const 채움v = db.prepare('UPDATE events SET vkey=? WHERE id=?');
@@ -1108,6 +1206,11 @@ function editEvent(db, id, b) {
     set.push(`${k}=?`);
     val.push(k === 'prize' || k === 'cap' ? (+b[k] || 0) : String(b[k]));
   }
+  if (b.budget !== undefined) { set.push('budget=?'); val.push(Math.max(0, Math.floor(+b.budget || 0))); }
+  if (b.mode !== undefined) {
+    if (!['onsite', 'online'].includes(b.mode)) throw new HttpError(400, 'mode 는 onsite·online 중 하나입니다');
+    set.push('mode=?'); val.push(b.mode);
+  }
   if (Array.isArray(b.plan)) {
     set.push('plan=?');
     /* 시각과 할 일만 남긴다. 화면이 그리는 것이라 다른 게 섞이면 안 된다. */
@@ -1224,7 +1327,14 @@ function createEvent(db, b) {
   db.prepare('UPDATE events SET owner=? WHERE id=?').run(owner, id);
   db.prepare('UPDATE events SET okey=?, jkey=?, vkey=?, plan=? WHERE id=?')
     .run(okey, jkey, vkey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
-  return { id, okey, jkey, vkey, owner };
+  /* 예산을 «주었을 때만» 산식을 돌린다. 이름 하나로 여는 길은 전과 똑같이 현장 대회·자리 없음이다.
+     0원을 «주면» 온라인판이 된다 - 안 준 것과 0원을 준 것은 다르다(모름 ≠ 없음). */
+  let alloc = null;
+  if (b.budget !== undefined && b.budget !== null && b.budget !== '') {
+    db.prepare('UPDATE events SET budget=? WHERE id=?').run(Math.max(0, Math.floor(+b.budget || 0)), id);
+    alloc = reallocate(db, id);
+  }
+  return { id, okey, jkey, vkey, owner, alloc };
 }
 
 /** 운영자인가. 열쇠는 헤더나 쿼리로 온다. 없으면 손님이다.
@@ -1842,6 +1952,7 @@ function needsOf(db, event) {
   return db.prepare('SELECT * FROM needs WHERE event=? ORDER BY id').all(event)
     .map(n => ({
       id: n.id, kind: n.kind, label: n.label, qty: n.qty, note: n.note,
+      amount: +n.amount || 0, held: !!n.held, auto: !!n.auto,
       filled: pl.filter(p => p.need === n.id && (p.status === 'ok' || p.status === 'done')).length,
       pledges: pl.filter(p => p.need === n.id)
                  .map(p => ({ id: p.id, name: p.name, org: p.org, status: p.status })),
@@ -2436,6 +2547,40 @@ function routes(db) {
             return json(res, 201, addNeed(db, m[1], await body(req)));
           }
         }
+        /* 예산 배분. 미리보기(dry=1)는 안 쓰고 보여만 준다. 진짜 굽는 건 운영자만. */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/allocate$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);
+          const bd = await body(req);
+          if (bd.budget !== undefined) editEvent(db, m[1], { budget: bd.budget });
+          if (q.dry) {
+            const e2 = db.prepare('SELECT budget, cap FROM events WHERE id=?').get(m[1]);
+            return json(res, 200, allocate(e2.budget, e2.cap));
+          }
+          return json(res, 200, reallocate(db, m[1]));
+        }
+        /* 자리 한 줄 손고침. 금액을 고치면 held 가 켜져 «다시 나누기»가 못 덮는다. */
+        if ((m = p.match(/^\/api\/needs\/(\d+)$/)) && req.method === 'PATCH') {
+          const n = db.prepare('SELECT event FROM needs WHERE id=?').get(+m[1]);
+          if (!n) throw new HttpError(404, '없는 자리입니다');
+          needAdmin(db, n.event, key, owner);
+          const bd = await body(req);
+          const set = [], val = [];
+          if (bd.amount !== undefined) { set.push('amount=?', 'held=1'); val.push(Math.max(0, Math.floor(+bd.amount || 0))); }
+          if (bd.qty !== undefined) { set.push('qty=?', 'held=1'); val.push(Math.min(Math.max(+bd.qty || 1, 1), 99)); }
+          if (bd.held !== undefined) { set.push('held=?'); val.push(bd.held ? 1 : 0); }
+          if (!set.length) throw new HttpError(400, '고칠 것이 없습니다');
+          db.prepare(`UPDATE needs SET ${set.join(',')} WHERE id=?`).run(...val, +m[1]);
+          return json(res, 200, needsOf(db, n.event).find(x => x.id === +m[1]));
+        }
+        if ((m = p.match(/^\/api\/needs\/(\d+)$/)) && req.method === 'DELETE') {
+          const n = db.prepare('SELECT event FROM needs WHERE id=?').get(+m[1]);
+          if (!n) throw new HttpError(404, '없는 자리입니다');
+          needAdmin(db, n.event, key, owner);
+          if (db.prepare('SELECT 1 FROM pledges WHERE need=? LIMIT 1').get(+m[1]))
+            throw new HttpError(409, '맡겠다는 사람이 있는 자리는 지울 수 없습니다. 먼저 거절하세요');
+          db.prepare('DELETE FROM needs WHERE id=?').run(+m[1]);
+          return json(res, 200, { ok: true });
+        }
         if ((m = p.match(/^\/api\/needs\/(\d+)\/pledge$/)) && req.method === 'POST') {
           const n = db.prepare('SELECT event FROM needs WHERE id=?').get(+m[1]);
           if (!n) throw new HttpError(404, '없는 자리입니다');
@@ -2838,6 +2983,67 @@ function selftest() {
      '멀쩡한 주소는 앞뒤 공백만 떼고 그대로 들어간다');
   db.prepare('DELETE FROM events WHERE id=?').run(scEv2.id);
   db.prepare('DELETE FROM events WHERE id=?').run(scEv.id);
+
+  // 예산 배분 - 금액 하나로 자리 카드를 깐다
+  ok(tierOf(0) === 'zero' && tierOf(1) === 'small' && tierOf(300000) === 'small'
+     && tierOf(300001) === 'mid' && tierOf(1000000) === 'mid' && tierOf(1000001) === 'big',
+     '구간 경계가 0 / 30만 / 100만 이다');
+  for (const B of [0, 1, 999, 50000, 300000, 300001, 500000, 1000000, 1000001, 5000000, 123456789]) {
+    const a = allocate(B, 20);
+    const used = a.rows.reduce((s, r) => s + r.amount * r.qty, 0);
+    ok(used <= B && a.left === B - used, `배분 합이 예산을 안 넘는다 (${B})`);
+    ok(a.rows.every(r => r.amount % BUDGET_RULE.unit === 0), `금액이 원 단위 ${BUDGET_RULE.unit} 로 내림된다 (${B})`);
+    ok(a.rows.every(r => r.amount >= 0 && r.qty >= 1), `음수·0수량 줄이 없다 (${B})`);
+  }
+  ok(allocate(0, 20).rows.length === 0 && allocate(0, 20).mode === 'online', '0원이면 카드가 없고 온라인판이다');
+  ok(allocate(50000, 20).rows.some(r => r.kind === 'venue' && r.amount === 0), '소액이면 장소는 0원 «무료로 내줄 곳» 카드다');
+  ok(allocate(500000, 20).rows.find(r => r.kind === 'judge').qty === 3, '보통 구간 심사위원은 3명(PLAN §12-1)');
+  ok(allocate(50000, 20).rows.find(r => r.kind === 'snack').amount <= 20 * BUDGET_RULE.snackPer, '간식은 1인 단가 상한을 안 넘는다');
+
+  // 이름만 주면 전과 똑같다 - 자리 없음·현장·관객평가 꺼짐
+  const bEv0 = createEvent(db, { title: '이름만', starts: today(), ends: today() });
+  const r0 = db.prepare('SELECT budget, mode, vmode FROM events WHERE id=?').get(bEv0.id);
+  ok(r0.budget === 0 && r0.mode === 'onsite' && r0.vmode === 0 && needsOf(db, bEv0.id).length === 0 && bEv0.alloc === null,
+     '예산을 안 주면 자리도 안 깔리고 현장 대회 그대로다 (옛 대회 이관과 같은 상태)');
+  // 0원을 «주면» 온라인판
+  const bEvZ = createEvent(db, { title: '영원', starts: today(), ends: today(), budget: 0 });
+  const rZ = db.prepare('SELECT mode, vmode FROM events WHERE id=?').get(bEvZ.id);
+  ok(rZ.mode === 'online' && rZ.vmode === 1 && needsOf(db, bEvZ.id).length === 0, '0원을 주면 온라인판 + 관객 평가 켜짐');
+  // 예산을 주면 카드가 깔린다
+  const bEv = createEvent(db, { title: '오십만', starts: today(), ends: today(), budget: 500000, cap: 20 });
+  const bn1 = needsOf(db, bEv.id);
+  ok(bn1.length === 4 && bn1.every(n => n.auto) && bn1.reduce((s, n) => s + n.amount * n.qty, 0) <= 500000,
+     '50만원이면 자리 4장이 산식으로 깔리고 합이 예산 이하다');
+  ok(bEv.alloc && bEv.alloc.tier === 'mid' && bEv.alloc.made === 4, '만든 결과에 배분 요약이 실린다');
+  // 손으로 올린 자리는 다시 나누기가 안 건드린다
+  const manual = addNeed(db, bEv.id, { kind: 'mentor', label: '손으로 올린 멘토', qty: 2 });
+  // 손고침(held)·맡은 사람 있는 줄도 안 건드린다
+  const venue = bn1.find(n => n.kind === 'venue'), snack = bn1.find(n => n.kind === 'snack');
+  db.prepare('UPDATE needs SET amount=77000, held=1 WHERE id=?').run(venue.id);
+  addPledge(db, snack.id, bEv.id, { name: '간식 내주는 카페', contact: 'x@x.test' });
+  editEvent(db, bEv.id, { budget: 900000 });
+  const re = reallocate(db, bEv.id);
+  const bn2 = needsOf(db, bEv.id);
+  /* id 로 찾지 않는다 - SQLite 는 AUTOINCREMENT 가 없으면 지워진 마지막 rowid 를 다음 INSERT 가 다시 쓴다.
+     손 자리가 지워지고 새 산식 줄이 그 번호를 받으면 «id 가 있다»가 참이 되어 검사가 속는다. 라벨과 auto=0 으로 본다. */
+  ok(bn2.some(n => n.label === '손으로 올린 멘토' && !n.auto && n.qty === 2), '손으로 올린 자리는 다시 나누기에도 남는다');
+  const v2 = bn2.find(n => n.id === venue.id && n.kind === 'venue' && n.held);
+  ok(!!v2 && v2.amount === 77000, '손고침(held) 줄은 다시 나누기가 덮지 않는다');
+  ok(bn2.some(n => n.id === snack.id), '누가 맡은 줄은 다시 나누기가 지우지 않는다');
+  ok(re.kept === 2 && bn2.filter(n => n.auto).length === 4 + 2, '지운 건 손 안 댄 산식 줄뿐이고 새 카드가 다시 깔린다');
+  ok(typeof re.total === 'number' && re.over === (re.total > 900000), '판 전체 합과 예산 초과 여부를 같이 돌려준다');
+  const bEvM = createEvent(db, { title: '손장소', starts: today(), ends: today() });
+  addNeed(db, bEvM.id, { kind: 'venue', label: '손으로 올린 장소', qty: 1 });
+  editEvent(db, bEvM.id, { budget: 500000 });
+  const reM = reallocate(db, bEvM.id);
+  const bnM = needsOf(db, bEvM.id);
+  ok(reM.skipped.includes('venue') && bnM.filter(n => n.kind === 'venue').length === 1,
+     '손으로 올린 자리와 같은 종류는 산식이 안 깐다 - 장소 카드가 둘이 되지 않는다');
+  ok(reM.made === 3 && bnM.length === 4, '나머지 종류만 깔린다');
+  db.prepare('DELETE FROM events WHERE id=?').run(bEvM.id);
+  ok(allocate(500000, 20).rows.find(r => r.kind === 'judge').amount === 0, '보통 구간 심사는 0원(무보수 표준)이 기본값이다');
+  ok(!JSON.stringify(bn2).includes('x@x.test'), '자리 목록에 연락처가 안 실린다');
+  db.prepare('DELETE FROM events WHERE id IN (?,?,?)').run(bEv0.id, bEvZ.id, bEv.id);
 
   // 큰 화면 - 벽에 걸리는 것
   const tvEv = createEvent(db, { title: '큰화면시험', starts: today(), ends: today() });
@@ -3347,7 +3553,7 @@ if (require.main === module) {
     }
   });
 }
-module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, showConsent, score, board, outcomes,
+module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, showConsent, score, board, outcomes, allocate, tierOf, reallocate, BUDGET_RULE,
                    card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
                    dump, backup, isAdmin,
                    addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary,
