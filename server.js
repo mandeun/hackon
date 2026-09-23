@@ -1025,6 +1025,15 @@ function open(file) {
       at      TEXT NOT NULL DEFAULT (datetime('now'))
     )`);
   try { db.exec("ALTER TABLE teams ADD COLUMN request TEXT NOT NULL DEFAULT ''"); } catch {}   // 팀이 고른 주제·요청
+  /* 아이폰 앱의 푸시 토큰. 기기 하나가 대회 하나를 «따라가기» 하면 새 소식을 APNs 로 보낸다.
+     발송 열쇠(APNS_KEY 등)가 없으면 저장만 하고 보내지 않는다 — 계정이 생기면 켠다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS push_tokens(
+      id     INTEGER PRIMARY KEY,
+      token  TEXT NOT NULL,
+      event  TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      at     TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(token, event)
+    )`);
   try { db.exec("ALTER TABLE votes ADD COLUMN note TEXT NOT NULL DEFAULT ''"); } catch {}      // 별점 옆 한 줄
   /* 이 표가 생기기 전에 띄운 공지(events.notice)를 한 번 옮겨 둔다 — 안 그러면 큰 화면엔 공지가 있는데
      공개 페이지 «소식»은 비어 «있는 것을 없음으로» 그린다. 시각은 notice_at 그대로 */
@@ -1098,6 +1107,32 @@ function mdToHtml(md) {
 }
 /* 제목을 주소로 쓴다. 한글이 그대로 들어가도 되지만 공백과 기호는 뺀다. */
 const slug = s => String(s).trim().toLowerCase().replace(/[^\w가-힣]+/g, '-').replace(/^-|-$/g, '');
+
+function privacyPage() {
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HACK:ON 개인정보 처리방침</title>
+<style>body{font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;max-width:680px;margin:0 auto;padding:24px 20px;line-height:1.7;color:#191F28}h1{font-size:24px}h2{font-size:17px;margin-top:26px}li{margin:4px 0}</style></head><body>
+<h1>HACK:ON 개인정보 처리방침</h1>
+<p>HACK:ON(hackon.mandeun.com 과 같은 이름의 아이폰 앱)은 로그인 없이 씁니다. 아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
+<h2>1. 받는 것과 이유</h2>
+<ul>
+<li><b>참가 신청</b> — 이름(팀 이름), 이메일. 대회 운영·참가 확인·결과 안내·상금 지급. 협찬사 제공은 따로 동의한 사람만.</li>
+<li><b>자리 맡기·제안</b> — 이름, 소속(선택), 연락처. 운영자가 확인할 때만 씁니다. 공개 장부에는 이름·소속만 나갑니다.</li>
+<li><b>주제·문제 올리기(받는 사람)</b> — 공개될 이름, 연락처. 결과 안내에만 씁니다.</li>
+<li><b>앱 피드백</b> — 적은 글, 연락처(선택).</li>
+<li><b>푸시 알림</b> — 기기 토큰. 사람 정보가 아니며 «따라가기»를 끄면 지웁니다.</li>
+</ul>
+<h2>2. 보는 사람</h2>
+<p>연락처는 그 대회의 운영자만 봅니다. 공개 페이지·큰 화면·결과 보고서에는 연락처가 나가지 않습니다. 협찬사에는 «협찬사 제공 동의»를 한 참가자의 이메일만, 그 대회의 협찬사에만 갑니다.</p>
+<h2>3. 두는 기간</h2>
+<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다).</p>
+<h2>4. 앱이 쓰는 기기 기능</h2>
+<ul><li>카메라 — 심사·투표 링크의 QR 을 찍을 때만. 사진은 저장하지 않습니다.</li><li>알림 — 대회 전날·마감 30분 전·새 소식. 켜고 끄는 것은 본인이 정합니다.</li><li>저장 공간 — 마지막으로 받은 대회 정보를 기기에 두어 인터넷이 끊겨도 진행표를 보여 줍니다.</li></ul>
+<h2>5. 하지 않는 것</h2>
+<p>광고 추적, 제3자 분석 도구, 위치 수집, 연락처 접근, 앱 안 결제를 하지 않습니다.</p>
+<h2>6. 묻는 곳</h2>
+<p>tree8727@gmail.com · 개정 2026-09-23</p>
+</body></html>`;
+}
 
 function manualPage(md) {
   const body = mdToHtml(md);
@@ -2927,6 +2962,20 @@ function routes(db) {
           if (!canReceive(db, m[1], req.headers['x-rkey'] || '')) throw new HttpError(403, '받는 사람 열쇠가 필요합니다');
           return json(res, 200, setFollowup(db, m[1], await body(req)));
         }
+        /* 아이폰 앱 — 이 대회의 새 소식을 푸시로 받겠다. 토큰은 기기 것이고 사람 정보가 아니다 */
+        if (p === '/api/push/register' && req.method === 'POST') {
+          const b = await body(req);
+          const token = String(b.token || '').replace(/[^0-9a-f]/gi, '').slice(0, 200), event = String(b.event || '');
+          if (token.length < 32) throw new HttpError(400, '토큰 모양이 아닙니다');
+          if (!db.prepare('SELECT 1 FROM events WHERE id=?').get(event)) throw new HttpError(404, '없는 대회입니다');
+          db.prepare('INSERT OR IGNORE INTO push_tokens(token, event) VALUES(?,?)').run(token, event);
+          return json(res, 200, { ok: true, sending: !!process.env.APNS_KEY });
+        }
+        if (p === '/api/push/register' && req.method === 'DELETE') {
+          const b = await body(req);
+          db.prepare('DELETE FROM push_tokens WHERE token=? AND event=?').run(String(b.token || ''), String(b.event || ''));
+          return json(res, 200, { ok: true });
+        }
         /* ── 앱 피드백 — 누구나 한 줄. 우리(운영)만 열쇠로 읽는다 ── */
         if (p === '/api/feedback' && req.method === 'POST') {
           const b = await body(req);
@@ -3068,6 +3117,11 @@ function routes(db) {
       /* 운영 매뉴얼. 전에는 깃허브로 내보냈는데, 매뉴얼을 보려고 사이트를 떠나야 했다.
          읽을 것을 읽으러 밖으로 내보내면 대부분 안 돌아온다.
          GUIDE.md 를 그대로 읽어 만든다 - 문서가 두 벌이 되면 반드시 어긋난다. */
+      /* 개인정보 처리방침 — 앱스토어가 요구한다. 앱과 웹이 같은 것을 받는다 */
+      if (p === '/privacy') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+        return res.end(privacyPage());
+      }
       if (p === '/manual') {
         let md = '';
         try { md = fs.readFileSync(path.join(ROOT, 'GUIDE.md'), 'utf8'); }
@@ -3477,6 +3531,7 @@ function selftest() {
      && db.prepare('SELECT COUNT(*) c FROM notices WHERE event=?').get(rsEv.id).c === 1, '팀·제출·자리·신청·소식이 돌아온다');
   let rsDup = 0; try { restoreEvent(db, rsDump, rsOwner); } catch (e) { rsDup = e.code; }
   ok(rsDup === 409, '살아 있는 대회 위에 또 못 살린다');
+  ok(privacyPage().includes('개인정보 처리방침') && privacyPage().includes('6개월') && !privacyPage().includes('undefined'), '개인정보 처리방침 페이지가 있다');
   const dl = ledgerOf(db, dEv0 = createEvent(db, { title: '장부표시' }).id);
   ok(dl.length === 0, '빈 장부');
   const dN = addNeed(db, dEv0, { kind: 'snack', label: '간식' });
