@@ -958,6 +958,114 @@ with sync_playwright() as p:
     A("vkey" not in json.dumps(api(f"/api/events/{VID}"), ensure_ascii=False), "투표 열쇠가 손님 대회정보로 샜다")
     ok("관객 평가 — 운영자만 켜고, 투표 열쇠 든 관객만 한 팀 한 표, 순위는 표 평균 (열쇠 비노출)")
 
+    # ── 2026-09-23 대회 지우기 · 심사 넛지 · 상호평가 · 밖에서 구함 · 실시간 정보 ──
+    def delete(path, payload, key=None):
+        h = {"content-type": "application/json"}
+        if key: h["x-okey"] = key
+        req = urllib.request.Request(BASE + path, method="DELETE", data=json.dumps(payload).encode(), headers=h)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.load(r)
+        except urllib.error.HTTPError as e:
+            return e.code, None
+    # (1) 지우기 — 빈 대회는 바로, 자리만 있어도 제목 확인, 응답에 사본
+    _, de = post("/api/events", {"title": "지우기빈"}); DE, DK = de["id"], de["okey"]
+    A(delete(f"/api/events/{DE}", {})[0] == 403, "열쇠 없이 지워졌다")
+    st, r = delete(f"/api/events/{DE}", {}, DK)
+    A(st == 200 and r["dump"]["event"]["id"] == DE and str(r.get("saved", "")).endswith(".json"), f"빈 대회가 안 지워지거나 사본이 없다: {st} {r and r.get('saved')}")
+    A(code_of(f"/api/events/{DE}") == 404, "지운 대회가 아직 열린다")
+    _, dn = post("/api/events", {"title": "지우기자리"}); DN, DNK = dn["id"], dn["okey"]
+    post(f"/api/events/{DN}/needs", {"kind": "judge", "label": "심사위원", "qty": 1}, DNK)
+    A(delete(f"/api/events/{DN}", {}, DNK)[0] == 409, "자리만 있는 대회가 확인 없이 지워졌다 (팀·제출만 보면 놓친다)")
+    A(delete(f"/api/events/{DN}", {"confirm": "지우기자리 "}, DNK)[0] == 200, "제목이 맞는데 안 지워졌다")
+    # (2) 심사위원 상태 셋 — 운영자만 쓰고 손님에겐 안 나간다
+    _, je = post("/api/events", {"title": "넛지검사"}); JE, JK2 = je["id"], je["okey"]
+    A(post(f"/api/events/{JE}/judged", {"judged": "no"})[0] == 403, "열쇠 없이 심사위원 상태가 바뀌었다")
+    A(post(f"/api/events/{JE}/judged", {"judged": "maybe"}, JK2)[0] == 400, "이상한 상태 값이 들어갔다")
+    A(post(f"/api/events/{JE}/judged", {"judged": "no"}, JK2)[0] == 200, "운영자가 상태를 못 적는다")
+    A(api(f"/api/events/{JE}/board", key=JK2)["event"]["judged"] == "no", "운영자 board 에 상태가 없다")
+    A("judged" not in api(f"/api/events/{JE}") and "judged" not in api(f"/api/events/{JE}/board")["event"], "심사위원 상태가 손님에게 샜다")
+    # (3) 넛지 띠 — D-2 + 모름이면 질문, «아직» 이면 돌리기, 돌리면 사라짐, D-10 이면 없음 (브라우저)
+    d2 = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+    post(f"/api/events/{JE}", {"starts": d2, "ends": d2, "due": "2099-01-01T23:59"}, JK2, method="PATCH")
+    post(f"/api/events/{JE}/judged", {"judged": ""}, JK2)
+    pg.evaluate(f"localStorage.setItem('hackon.okey.{JE}', '{JK2}')")
+    visit(f"/app#{JE}")
+    A("구하셨나요" in pg.inner_text("#jband"), f"D-2·모름인데 질문 띠가 없다: {pg.inner_text('#view')[:120]}")
+    pg.click('#jband [data-judged="no"]'); pg.wait_for_timeout(700)
+    A("심사위원이 없습니다" in pg.inner_text("#jband") and pg.query_selector("#jb-aud") is not None, "«아직» 뒤에 돌리기 띠가 안 뜬다")
+    A(api(f"/api/events/{JE}/board", key=JK2)["event"]["judged"] == "no", "띠의 «아직» 이 저장되지 않았다")
+    A('data-bg-chip="300000"' in pg.content(), "예산 추천 칩이 없다")
+    pg.click('[data-bg-chip="300000"]'); pg.wait_for_timeout(900)
+    A(pg.input_value("#bg-in") == "300000" and pg.is_visible("#bg-preview"), "칩을 눌렀는데 예산 칸·미리 보기가 안 바뀐다")
+    pg.click("#jb-aud"); pg.wait_for_timeout(800)
+    A(pg.query_selector("#jband") is None and api(f"/api/events/{JE}")["vmode"] == 1, "돌렸는데 띠가 남거나 vmode 가 안 켜졌다")
+    post(f"/api/events/{JE}/vmode", {"on": 0}, JK2)
+    d10 = (datetime.now() + timedelta(days=10)).strftime("%Y-%m-%d")
+    post(f"/api/events/{JE}", {"starts": d10, "ends": d10}, JK2, method="PATCH")
+    visit(f"/app#{JE}")
+    A(pg.query_selector("#jband") is None, "D-10 인데 띠가 뜬다")
+    A(pg.query_selector("#gd-go") is not None and pg.is_enabled("#gd-go"), "빈 대회인데 지우기 단추가 잠겨 있다")
+    # (4) 마감 뒤엔 평가 방식·자리 나누기 못 바꾼다 (409)
+    _, ce = post("/api/events", {"title": "마감뒤"}); CE, CK2 = ce["id"], ce["okey"]
+    post(f"/api/events/{CE}", {"due": (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M")}, CK2, method="PATCH")
+    A(post(f"/api/events/{CE}/vmode", {"on": 1}, CK2)[0] == 409, "마감 뒤에 평가 방식이 바뀌었다")
+    A(post(f"/api/events/{CE}/allocate", {"budget": 0}, CK2)[0] == 409, "마감 뒤 0원 나누기로 vmode 가 켜졌다 (409 우회)")
+    # (5) 상호평가 — 팀 열쇠로만, 자기 팀 제외, 투표 열쇠·관객은 못 찍는다
+    A(post(f"/api/events/{VID}/vmode", {"on": 1, "peer": 1}, VOK)[0] == 200, "상호평가를 못 켰다")
+    A(api(f"/api/events/{VID}")["vpeer"] == 1, "vpeer 가 공개 응답에 없다")
+    A(codepost(f"/api/teams/{B1}/vote", {"voter": "u9", "score": 5}, vkey=VVK) == 403, "상호평가인데 투표 열쇠로 표가 들어갔다")
+    A(post(f"/api/teams/{A1}/vote", {"score": 5}, tkey=va["tkey"])[0] == 403, "자기 팀에 표가 들어갔다")
+    A(post(f"/api/teams/{B1}/vote", {"score": 4}, tkey=va["tkey"])[0] == 200, "다른 팀에 표를 못 줬다")
+    A(post(f"/api/teams/{B1}/vote", {"score": 4}, tkey="0000000000")[0] == 403, "엉뚱한 팀 열쇠로 표가 들어갔다")
+    vb2 = {r["name"]: r for r in api(f"/api/events/{VID}/board", key=VOK)["rows"]}
+    A(vb2["브이나"]["votes"] == 2, f"팀 표가 안 세졌다(관객 1 + 팀 1): {vb2['브이나']}")
+    # 상호평가 화면: 팀 열쇠 없는 브라우저는 표를 못 준다, 있으면 자기 팀이 목록에서 빠진다
+    vctx = b.new_context(viewport={"width": 412, "height": 900}); vp = vctx.new_page()
+    vp.goto(f"{BASE}/v/{VID}?k={VVK}"); vp.wait_for_selector("body[data-ready='1']")
+    A("신청한 브라우저에서만" in vp.inner_text("#view"), "팀 열쇠 없는 폰에 상호평가 별점이 열렸다")
+    vp.evaluate(f"localStorage.setItem('hackon.team.{VID}', '{A1}'); localStorage.setItem('hackon.tkey.{A1}', '{va['tkey']}')")
+    vp.goto(f"{BASE}/v/{VID}"); vp.wait_for_selector("[data-vote]")
+    A(vp.query_selector(f'[data-vote="{A1}"]') is None and vp.query_selector(f'[data-vote="{B1}"]') is not None, "자기 팀이 목록에 있거나 남의 팀이 없다")
+    vp.click(f'[data-vote="{B1}"] [data-vs="2"]'); vp.wait_for_timeout(700)
+    A({r["name"]: r for r in api(f"/api/events/{VID}/board", key=VOK)["rows"]}["브이나"]["votes"] == 2, "화면 표가 덮어쓰기가 아니라 늘었다")
+    vctx.close()
+    post(f"/api/events/{VID}/vmode", {"on": 1, "peer": 0}, VOK)
+    # (6) 밖에서 구한 사람 — 운영자만, 연락처 없이 확인된 기여로
+    _, on = post(f"/api/events/{ev}/needs", {"kind": "venue", "label": "밖에서구한장소", "qty": 1}, OK)
+    A(post(f"/api/needs/{on['id']}/outside", {"name": "옆집카페"})[0] == 403, "열쇠 없이 밖에서 구함이 올라갔다")
+    st, r = post(f"/api/needs/{on['id']}/outside", {"name": "옆집카페", "org": "선릉"}, OK)
+    A(st == 201 and r["status"] == "ok", f"밖에서 구함이 안 올라갔다: {st} {r}")
+    nn = [n for n in api(f"/api/events/{ev}/needs") if n["id"] == on["id"]][0]
+    A(nn["filled"] == 1 and "contact" not in nn["pledges"][0], "점판에 안 잡히거나 연락처가 샜다")
+    A(any(x["name"] == "옆집카페" for x in api(f"/api/events/{ev}/ledger")), "공개 장부에 안 올랐다")
+    A(post(f"/api/needs/{on['id']}/outside", {"name": "또"}, OK)[0] == 409, "다 찬 자리에 또 올라갔다 (점판이 2/1 이 된다)")
+    A(post(f"/api/needs/{on['id']}/outside", {"name": "남의열쇠"}, JK2)[0] == 403, "다른 대회 열쇠로 밖에서 구함이 올라갔다")
+    # (7) 오픈톡 링크 — javascript: 는 버리고 https 는 공개 페이지에 건다
+    A(post(f"/api/events/{ev}", {"chat": "https://x.test"}, method="PATCH")[0] == 403, "열쇠 없이 대화방 주소가 바뀌었다")
+    post(f"/api/events/{ev}", {"chat": "javascript:alert(1)"}, OK, method="PATCH")
+    A(api(f"/api/events/{ev}")["chat"] == "", "javascript: 대화방 주소가 저장됐다")
+    post(f"/api/events/{ev}", {"chat": "https://open.kakao.com/o/test"}, OK, method="PATCH")
+    # (8) 소식 — 공지가 쌓이고 최신이 위, 공개 페이지가 다시 그리지 않고 끼운다
+    post(f"/api/events/{ev}/notice", {"notice": "소식 하나"}, key=OK)
+    post(f"/api/events/{ev}/notice", {"notice": "소식 둘"}, key=OK)
+    nl = api(f"/api/events/{ev}/notices")
+    A(len(nl) >= 2 and nl[0]["text"] == "소식 둘" and nl[1]["text"] == "소식 하나" and nl[0]["at"], f"소식 목록이 틀렸다: {nl[:2]}")
+    nctx = b.new_context(viewport={"width": 412, "height": 900}); npg = nctx.new_page()
+    npg.goto(f"{BASE}/e/{ev}"); npg.wait_for_selector("#news-list")
+    A(npg.get_attribute("#chat-link", "href") == "https://open.kakao.com/o/test", "대화방 링크가 공개 페이지에 없다")
+    before_n = npg.evaluate("document.querySelectorAll('#news-list li').length")
+    A(before_n == len(nl), f"소식 개수가 다르다 {before_n} vs {len(nl)}")
+    npg.fill("#t-name", "입력중")
+    post(f"/api/events/{ev}/notice", {"notice": "소식 셋"}, key=OK)
+    npg.evaluate("pollNews()"); npg.wait_for_timeout(600)
+    A(npg.evaluate("document.querySelector('#news-list li').textContent").startswith("소식 셋"), "새 소식이 맨 위에 안 끼워졌다")
+    A(npg.input_value("#t-name") == "입력중", "소식을 끼우면서 입력 중인 칸이 날아갔다")
+    npg.evaluate("pollNews()"); npg.wait_for_timeout(500)
+    A(npg.evaluate("document.querySelectorAll('#news-list li').length") == before_n + 1, "새 소식 없이 다시 받았는데 같은 줄이 또 끼워졌다")
+    nctx.close()
+    ok("지우기(확인·사본) · 심사 넛지(질문→아직→돌리기, D-10 없음) · 마감 뒤 409 · 상호평가(팀 열쇠·자기 팀 제외) · 밖에서 구함 · 대화방 · 소식")
+
     # 참가자가 해야 하는 일은 열쇠 없이도 된다
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")
     # 심사 화면은 이제 심사 열쇠가 있어야 열린다 — 공개 링크만으로 아무나 점수를 넣던 것을 막았다
@@ -1220,8 +1328,8 @@ with sync_playwright() as p:
     # 공개 화면 칸은 참가 신청(t-)과 «줄 수 있는 것»(g- 칸, data-give-* 단추) 둘뿐. 운영 칸은 위 bad_id 로 이미 막았다.
     ids = pub.evaluate("""[...document.querySelectorAll('#view input, #view textarea, #view select, #view button')]
         .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-')) || '?')""")
-    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") for i in ids),
-      f"공개 화면에 신청·줄 수 있는 것 말고 다른 칸이 있다: {ids}")
+    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i == "nt-bell" for i in ids),
+      f"공개 화면에 신청·줄 수 있는 것·소식 알림 말고 다른 칸이 있다: {ids}")
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
                  "함께한 곳", "오픈에이아이",

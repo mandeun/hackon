@@ -369,6 +369,13 @@ input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
 .gev b{display:block;font-size:16px;color:var(--ink)}
 .gev span{font-size:13px;color:var(--ink3)}
 .lnk{background:none;border:0;color:var(--ink3);text-decoration:underline;cursor:pointer;font-family:inherit;font-size:13px}
+.news{list-style:none;margin:8px 0 0;padding:0}
+.news li{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--rule);font-size:14px}
+.news li .w{color:var(--ink3);font-size:12.5px;white-space:nowrap}
+.bgchips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 6px}
+.bgchip{border:1px solid var(--rule);background:#fff;color:var(--ink);border-radius:99px;padding:6px 12px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;min-height:36px}
+.bgchip.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.bgchip span{font-size:11px;opacity:.85;margin-left:4px}
 
 /* 숫자 칸 */
 .stat{gap:10px;margin:12px 0}
@@ -568,6 +575,7 @@ const jkeyOf = id => localStorage.getItem('hackon.jkey.' + id) || '';
 /* 관객 투표 열쇠. 투표 링크(/v/<id>?k=…)로 받아 두고, 표를 던질 때 같이 보낸다. */
 const vkeyOf = id => localStorage.getItem('hackon.vkey.' + id) || '';
 /* 이 브라우저의 투표자 표식. 이름 대신 무작위 토큰 하나 — 같은 사람이 한 팀에 한 번만. */
+let VOTE_TK = '';   // 상호평가일 때 표와 같이 보내는 팀 열쇠
 function voterId() {
   let v = localStorage.getItem('hackon.voter');
   if (!v) { v = 'v' + Math.random().toString(36).slice(2, 12); try { localStorage.setItem('hackon.voter', v); } catch (_) {} }
@@ -712,6 +720,52 @@ function wireGive() {
   };
 }
 const needKind = k => NEED_KIND[k] || k || '기타';
+/* 심사위원 상태 셋과 넛지 조건. 운영 화면의 띠·카드가 같은 계산을 쓴다 — 두 군데서 세면 어긋난다. */
+function judgeState(e, d, needs) {
+  const jseats = (needs || []).filter(n => n.kind === 'judge').reduce((a, n) => a + Math.min(+n.filled || 0, +n.qty || 0), 0);
+  const state = jseats > 0 ? 'yes:' + jseats : (e.judged || '');     // 'yes:n' 구함 · 'no' 못 구함 · '' 모름
+  const dleft = e.starts ? Math.round((new Date(e.starts) - new Date(ymd())) / 86400000) : null;
+  const scored = ((d && d.judges) || []).length > 0;
+  const open = !e.vmode && !scored && !(d && d.closed);
+  return { jseats, state, dleft,
+           band: open && dleft !== null && dleft >= 0 && dleft <= 3 && !state.startsWith('yes'),
+           urgent: open && !!e.starts && ymd() >= e.starts };
+}
+/* 소식 한 줄. at 은 서버(UTC) 시각이라 보는 사람 시간대로 바꾼다. 24시간 안이면 «새». */
+function newsRow(n) {
+  const t = new Date(String(n.at).replace(' ', 'T') + 'Z');
+  const fresh = Date.now() - t.getTime() < 86400000;
+  const w = isNaN(t) ? '' : `${t.getMonth() + 1}/${t.getDate()} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  return `<li data-nid="${esc(n.id)}"><span class="t">${esc(n.text)}</span><span class="w">${w}${fresh ? ' <b class="pill">새</b>' : ''}</span></li>`;
+}
+/* 공개 페이지가 열려 있는 동안 60초마다 소식만 다시 받는다. 전체를 다시 그리지 않는다 — 입력 중인 칸이 날아가면 안 된다. */
+let NEWS = { timer: null, top: 0 };
+function watchNews() {
+  if (NEWS.timer) { clearInterval(NEWS.timer); NEWS.timer = null; }
+  const list = $('#news-list'); if (!list || !LIVE) return;
+  NEWS.top = +((list.firstElementChild && list.firstElementChild.dataset.nid) || 0);
+  NEWS.timer = setInterval(pollNews, 60000);
+}
+async function pollNews() {
+  const list = $('#news-list'); if (!list) { clearInterval(NEWS.timer); NEWS.timer = null; return; }
+  if (document.hidden) return;
+  let notes; try { notes = await api(`/events/${cur}/notices`); } catch { return; }
+  const fresh = notes.filter(n => +n.id > NEWS.top).sort((a, b) => b.id - a.id);
+  if (!fresh.length) return;
+  list.insertAdjacentHTML('afterbegin', fresh.map(newsRow).join(''));
+  NEWS.top = +fresh[0].id;
+  const nn = $('#news-n'); if (nn) nn.textContent = list.children.length;
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { new Notification('새 소식', { body: fresh[0].text }); } catch (_) {}
+  }
+}
+/* 자리마다 카톡에 붙일 부탁 글. 서버 없이 화면이 만든다. */
+const ASK = {};
+function askText(e, n) {
+  const left = Math.max(0, (+n.qty || 0) - (+n.filled || 0));
+  return `[${e.title}] ${e.starts || ''} · ${needKind(n.kind)} «${n.label}» ${left}자리를 찾습니다.` +
+    (n.note ? ` (${n.note})` : '') + ` 맡아 주실 수 있으면 아래 링크에서 «이 자리 맡기»를 눌러 주세요.\n${shareBase()}/e/${e.id}#give`;
+}
 const needProgress = n => `${Math.min(+n.filled || 0, +n.qty || 0)}/${+n.qty || 0}`;
 /* 자리 점판. needs 의 qty 만큼 점을 그리고, 확인된 수만큼 켜고, 기다리는 수만큼 노랑 테두리. */
 function dotBoard(needs, title) {
@@ -1360,6 +1414,7 @@ async function render() {
   catch (e) { view.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   paintCta();
   wire();
+  watchNews();
   tickDue();
   document.body.dataset.ready = '1';   // 완주 테스트가 이 표시를 기다린다
 }
@@ -1656,6 +1711,19 @@ const SCREEN = {
         </div>` : '<button class="btn sec sm" id="b-pub" style="margin-top:14px">공개 페이지 미리보기</button>'}
       </section>
 
+      ${(() => {
+        /* 심사 넛지. 앱은 심사위원이 있는지 모른다 — 점수가 들어와야 센다. 그래서 상태는 셋이다:
+           구함(확인된 심사 자리가 있거나 운영자가 «네») · 못 구함(«아직») · 모름(답 없음).
+           D-3 부터 띠가 뜨되, 모름이면 «없습니다»가 아니라 질문을 한다. 이미 돌렸거나(vmode) 점수가 있거나 마감이 지났으면 안 뜬다. */
+        const J = judgeState(e, d, needs);
+        if (!J.band) return '';
+        if (J.state === 'no') return `<div class="notice" id="jband">심사위원이 없습니다. 이대로 두면 순위가 안 나옵니다.
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="jb-aud">관객 평가로 돌리기</button>
+          <a class="btn sec sm" href="#jcard" style="text-decoration:none">다른 방법 보기</a></div></div>`;
+        return `<div class="notice" id="jband">심사위원을 구하셨나요? 대회가 ${J.dleft === 0 ? '오늘' : 'D-' + J.dleft}입니다.
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" data-judged="yes">네, 구했어요</button>
+          <button class="btn sec sm" data-judged="no">아직</button></div></div>`;
+      })()}
       ${noWord ? nudge(`심사위원이 <b>${noWord}팀</b>에 점수만 넣고 심사평을 안 남겼습니다.
         참가자가 가장 아쉬워하는 것이 “왜 떨어졌는지 모른다” 입니다`) : ''}
       ${e.notice ? `<div class="notice">${esc(e.notice)}
@@ -1668,7 +1736,7 @@ const SCREEN = {
         <span class="when">${e.notice ? '띄워져 있습니다' : '큰 화면과 공개 페이지에 동시에'}</span>
         </summary><div class="in">
         <div class="meta">한 줄이면 <b>벽에 걸린 큰 화면</b>과 참가자 폰에 같이 뜹니다.
-          한 시간 뒤에 저절로 내려갑니다.</div>
+          한 시간 뒤에 저절로 내려갑니다. 지난 소식은 공개 페이지 «소식»에 시각과 함께 남습니다.</div>
         <div class="tags" style="margin-top:8px">
           ${NOTICES.map(x => `<button data-nt="${esc(x)}">${esc(x)}</button>`).join('')}
         </div>
@@ -1710,6 +1778,8 @@ const SCREEN = {
         <label>주제</label><input id="e-topic" value="${esc(e.topic)}" placeholder="예) 생활 불편">
         <label>와이파이 <span class="pill">큰 화면에 뜹니다</span></label>
         <input id="e-wifi" value="${esc(e.wifi || '')}" placeholder="이름 / 비밀번호">
+        <label>오픈 대화방 주소 <span class="pill">공개 페이지에 걸립니다</span></label>
+        <input id="e-chat" value="${esc(e.chat || '')}" placeholder="https://open.kakao.com/o/…" inputmode="url">
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
         <label>진행 순서 <span class="pill">현장 화면과 공개 페이지가 같이 씁니다</span></label>
         <div class="plan" id="e-plan"></div>
@@ -1729,6 +1799,20 @@ const SCREEN = {
         <button class="btn sm" id="e-save">저장</button>
       </div></details>`; })()}
 
+      ${/* 대회를 접는 두 길. 목록 내리기가 기본(파랑)이고 완전 삭제는 회색 뒤에. 빈 대회인지는 서버가 다시 판정한다 —
+            화면이 열려 있는 동안 신청이 들어올 수 있다. 백업도 서버가 맡는다(응답에 사본이 실려 온다). */''}
+      ${(() => { const busyDel = (d.rows || []).length || needs.length || offers.length;
+        return `<details id="gd"><summary>이 대회를 그만두려면 <span class="when">목록 내리기가 먼저</span></summary><div class="in">
+        <div class="card"><h3>목록에서 내리기 <span class="pill">권장</span></h3>
+          <div class="meta">첫 화면 목록에서 사라지고 링크로는 열립니다. 신청한 분 기록이 남고, 언제든 다시 올릴 수 있습니다.</div>
+          <div style="height:8px"></div>${e.listed ? '<button class="btn sm" id="gd-unlist">목록에서 내리기</button>' : '<span class="pill">지금 목록에 없습니다</span>'}</div>
+        <div class="card"><h3>완전히 지우기</h3>
+          <div class="meta">팀·제출·점수·투표·자리·제안이 함께 지워지고 되돌릴 수 없습니다. 지우기 직전 사본이 파일로 내려받아지고 서버에도 남습니다. 사본에는 연락처가 있으니 운영자만 보관하세요.</div>
+          ${busyDel ? `<label>확인하려면 대회 이름을 그대로 적으세요</label><input id="gd-name" placeholder="${esc(e.title)}">`
+                    : '<div class="meta" style="margin-top:6px">신청·자리·제안이 없는 빈 대회라 바로 지울 수 있습니다.</div>'}
+          <div style="height:8px"></div><button class="btn sm" id="gd-go" data-title="${esc(e.title)}" style="background:var(--bad)"${busyDel ? ' disabled' : ''}>완전히 지우기</button></div>
+      </div></details>`; })()}
+
       ${e.due ? `<button class="btn sec sm" id="b-ext">마감 30분 미루기</button>
         <div class="meta" style="margin:6px 0 12px">인터넷이 터졌을 때 진행자가 누릅니다.</div>` : ''}
       ${js.length ? `<div class="card" style="padding:11px 13px">
@@ -1737,21 +1821,36 @@ const SCREEN = {
             full < d.rows.length ? ' — 아직 남았습니다' : ' — 다 봤습니다'}</div>
       </div>` : ''}
 
-      ${/* 심사위원 자리가 비었을 때의 대안. 관객·참가자가 폰으로 별점을 준다. */''}
-      <div class="card" style="${e.vmode ? 'border-color:#AECFB8;background:var(--ok-l)' : ''}">
-        <h3>${e.vmode ? '⭐ 관객 평가 켜짐' : '심사위원을 못 구하셨나요'}</h3>
-        <div class="meta">${e.vmode
-          ? '심사위원 대신 관객·참가자가 폰으로 별점을 줍니다. 순위는 별점 평균으로 매겨집니다.'
-          : '심사위원 자리가 비면 관객 평가로 대신할 수 있습니다. 현장 사람들이 폰으로 작품에 별점을 주고, 그 평균으로 순위를 냅니다.'}</div>
+      ${(() => {
+        /* 심사 대안 카드. 기본은 심사(아무것도 안 누르면 그대로). 관객 평가·참가팀 상호평가로 막판에 바꿀 수 있고,
+           마감 뒤에는 순위가 공개된 뒤라 못 바꾼다(서버 409). 점수가 있으면 바꾸기 전에 묻는다. */
+        const J = judgeState(e, d, needs);
+        const on = !!e.vmode, peer = !!e.vpeer;
+        const title = on ? (peer ? '🤝 참가팀 상호평가 켜짐' : '⭐ 관객 평가 켜짐')
+                    : J.urgent ? '대회 날짜가 됐는데 심사 점수가 아직 없어요' : '심사위원을 못 구하셨나요';
+        const stateLine = J.state.startsWith('yes') ? `심사위원 <b>${J.state.slice(4)}명</b> 구함`
+                        : J.state === 'no' ? '심사위원 <b>아직 없음</b>'
+                        : `심사위원 구하셨나요? <button class="btn sec sm" data-judged="yes">네</button> <button class="btn sec sm" data-judged="no">아직</button>`;
+        return `<div class="card" id="jcard" style="${on || J.urgent ? 'border-color:#AECFB8;background:var(--ok-l)' : ''}">
+        <h3>${title}</h3>
+        <div class="meta">${on
+          ? (peer ? '참가팀이 서로 별점을 줍니다. 자기 팀은 못 찍고 팀당 한 표입니다. 순위는 별점 평균입니다.'
+                  : '심사위원 대신 관객·참가자가 폰으로 별점을 줍니다. 순위는 별점 평균으로 매겨집니다.')
+          : '기본은 심사위원 점수입니다. 심사위원 자리가 비면 관객 평가나 참가팀 상호평가로 돌릴 수 있습니다. 제출 마감 전까지 되돌릴 수 있습니다.'}</div>
+        ${on ? '' : `<div class="meta" style="margin-top:6px">${stateLine}${J.jseats ? ` · 확인된 심사 자리 ${J.jseats}` : (needs.some(n => n.kind === 'judge') ? '' : ' · 심사 자리를 올리지 않으셨어요')}</div>`}
+        ${js.length ? `<div class="meta" style="margin-top:6px">심사위원 ${js.length}명의 점수가 있습니다${on ? ' (점수는 남아 있습니다)' : ''}.</div>` : ''}
         <div style="height:10px"></div>
-        <button class="btn ${e.vmode ? 'sec' : ''} sm" id="b-vmode" data-on="${e.vmode ? 0 : 1}">${
-          e.vmode ? '관객 평가 끄기' : '관객 평가 켜기'}</button>
-        ${e.vmode ? `<div style="margin-top:12px">
-          <div class="meta"><b>투표 링크</b> — 큰 화면에 띄우거나 QR 을 보여 주세요. 열쇠가 들어 있습니다.</div>
-          ${linkBox(`${shareBase()}/v/${e.id}${e.vkey ? '?k=' + e.vkey : ''}`, 'vlink', 'b-copyv',
-            '<b>관객용.</b> 찍으면 별점 화면이 열립니다.')}
+        ${d.closed ? '<span class="pill">마감이 지나 평가 방식은 더 못 바꿉니다</span>'
+          : on ? `<button class="btn sec sm" id="b-vmode" data-on="0" data-judges="${js.length}">심사 점수로 되돌리기</button>`
+          : `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="b-vmode" data-on="1" data-judges="${js.length}">관객 평가 켜기</button>
+             <button class="btn sec sm" id="b-vpeer" data-judges="${js.length}">참가팀 상호평가로</button></div>
+             <div class="meta" style="margin-top:6px">관객 평가는 현장에 사람이 많을 때, 상호평가는 관객이 없는 온라인·소규모에 맞습니다.</div>`}
+        ${on ? `<div style="margin-top:12px">
+          <div class="meta"><b>투표 링크</b> — ${peer ? '참가팀에게 보내세요. 신청한 브라우저에서만 열립니다.' : '큰 화면에 띄우거나 QR 을 보여 주세요. 열쇠가 들어 있습니다.'}</div>
+          ${linkBox(`${shareBase()}/v/${e.id}${!peer && e.vkey ? '?k=' + e.vkey : ''}`, 'vlink', 'b-copyv',
+            peer ? '<b>참가팀용.</b> 자기 팀 말고 다른 팀에 별점을 줍니다.' : '<b>관객용.</b> 찍으면 별점 화면이 열립니다.')}
         </div>` : ''}
-      </div>
+      </div>`; })()}
 
       ${sp.rows.length > 1 ? `<div class="card" style="padding:11px 13px">
         <div class="meta"><b>심사 눈높이</b> · 운영자만 보입니다<br>
@@ -1776,6 +1875,12 @@ const SCREEN = {
           손으로 고친 줄과 손으로 올린 자리는 다시 나눠도 안 바뀝니다.
           <b>0원이면 온라인 제출 대회</b>가 되고 관객 평가가 켜집니다. 앱은 돈을 받지 않습니다 — 정산은 직접 하십니다.</div>
         ${manual ? `<div class="meta" style="margin-top:6px"><b>손으로 올린 자리 ${manual}개가 있습니다.</b> 같은 종류는 산식이 건너뜁니다. 지금 모집 중이면 이 카드는 안 눌러도 됩니다.</div>` : ''}
+        <div class="bgchips">
+          <button type="button" class="bgchip" data-bg-chip="0">온라인 0원</button>
+          <button type="button" class="bgchip on" data-bg-chip="300000">작은 대회 30만원 <span>권장</span></button>
+          <button type="button" class="bgchip" data-bg-chip="1000000">100만원</button>
+        </div>
+        <div class="meta" style="margin-bottom:6px">20명 안팎이면 30만원쯤을 권합니다(추정). 장소는 무료로 내줄 곳을 찾고 간식·상품에 씁니다. 칩은 미리 보기만 띄우고, «판에 올리기»를 눌러야 바뀝니다.</div>
         <div class="shrow" style="margin-top:10px;align-items:center">
           <input id="bg-in" type="number" min="0" step="10000" value="${+e.budget || ''}" placeholder="예) 300000" style="flex:1">
           <button class="btn sm" id="bg-go">미리 보기</button>
@@ -1821,6 +1926,14 @@ const SCREEN = {
             ${p.status === 'pending' ? `<button class="btn sm" data-pledge-status="${esc(p.id)}" data-status="ok">확인</button>
               <button class="btn sec sm" data-pledge-status="${esc(p.id)}" data-status="no">거절</button>` : ''}
           </div>`).join('')}</div>` : '<div class="meta" style="margin-top:7px">아직 맡겠다는 사람이 없습니다.</div>'}
+          ${(+n.filled||0) < (+n.qty||0) ? (ASK[n.id] = askText(e, n), `<div class="shrow" style="margin-top:8px;flex-wrap:wrap;gap:6px">
+            <button class="btn sec sm" data-out-open="${esc(n.id)}">밖에서 구했어요</button>
+            <button class="btn sec sm" data-ask="${esc(n.id)}">부탁 글 복사</button></div>
+            <div id="out-${esc(n.id)}" hidden style="margin-top:8px">
+              <div class="meta">앱 밖(카톡·전화)에서 구한 분을 바로 올립니다. 연락처는 받지 않습니다. 점판과 공개 장부에 바로 반영됩니다.</div>
+              <div class="row"><div><label>이름</label><input data-out-name="${esc(n.id)}" placeholder="이름 또는 가게·회사"></div>
+              <div><label>소속(선택)</label><input data-out-org="${esc(n.id)}" placeholder="선택"></div></div>
+              <div style="height:8px"></div><button class="btn sm" data-out-send="${esc(n.id)}">올리기</button></div>`) : ''}
         </div>`).join('') : '<div class="meta" style="margin-top:8px">아직 올린 자리가 없습니다.</div>'}
         <div class="card" style="margin-top:10px">
           <h3>자리 추가</h3>
@@ -1940,6 +2053,7 @@ const SCREEN = {
     const hrep = LIVE ? await api(`/events/${cur}/rep`).catch(() => null) : null;
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : DEMO.ledger;
+    const notes = LIVE ? await api(`/events/${cur}/notices`).catch(() => []) : [];
     const ended = statusOf(e).k === '끝남';
     /* 아래 바닥 단추. 화면을 그린 뒤 render() 가 붙인다. */
     CTA = ended ? null
@@ -1962,10 +2076,15 @@ const SCREEN = {
           <li><span class="ic">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
+          ${e.chat ? `<li><span class="ic">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
         </ul>
         ${dueBox(e)}
       </section>
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
+      ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
+        <div class="meta">운영자가 띄운 공지가 시각과 함께 남습니다. 이 페이지가 열려 있으면 1분마다 새 소식을 가져옵니다. 앱은 메일·문자를 보내지 않습니다.</div>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn sec sm" id="nt-bell">새 소식 알림 받기</button><span class="meta" id="nt-bell-s"></span></div>
+        <ul class="news" id="news-list">${notes.map(newsRow).join('')}</ul></div>` : ''}
 
       ${/* 신청 칸이 여기 있다 — 열네 개 섹션을 지나 맨 아래가 아니라, 대회 이름 바로 밑.
            이 페이지에 오는 사람이 할 일은 하나뿐이고(토스: 한 화면에 하나), 그 하나가
@@ -2374,16 +2493,25 @@ const SCREEN = {
         운영자가 큰 화면에 띄운 <b>투표 링크</b>(QR)를 여세요. 링크에 투표 열쇠가 들어 있습니다.</p>
       <label>투표 열쇠</label><input id="vk-in" placeholder="영문과 숫자 10자">
       <div style="height:12px"></div><button class="btn" id="vk-go">열기</button>`;
-    if (!vkeyOf(cur)) return keyPrompt('');
+    /* 상호평가면 투표 열쇠가 아니라 팀 열쇠다 — 신청한 브라우저에만 있다. 공개 대회 정보로 먼저 가른다. */
+    const pubE = LIVE ? await api(`/events/${cur}`).catch(() => null) : null;
+    const peer = !!(pubE && pubE.vpeer);
+    const myT = localStorage.getItem('hackon.team.' + cur);
+    const tk = myT ? tkeyOf(myT) : '';
+    if (peer && !tk) return `<h2>참가팀 상호평가</h2>
+      <p class="sub">참가 신청한 브라우저에서만 표를 줄 수 있습니다. 신청할 때 쓴 폰이나 노트북으로 이 링크를 여세요.</p>`;
+    if (!peer && !vkeyOf(cur)) return keyPrompt('');
     let d;
-    try { d = await api(`/events/${cur}/vote`); }
+    try { d = await api(`/events/${cur}/vote`, peer ? { tkey: tk } : {}); }
     catch (e) { return keyPrompt('아직 안 켜졌거나 열쇠가 맞지 않습니다.'); }
-    if (!d.teams.length) return `<h2>${esc(d.event.title)}</h2>
-      <p class="sub">아직 참가한 팀이 없습니다. 팀이 생기면 여기서 별점을 줄 수 있습니다.</p>`;
+    VOTE_TK = peer ? tk : '';
+    const teams = d.teams.filter(t => !d.me || t.id !== d.me);
+    if (!teams.length) return `<h2>${esc(d.event.title)}</h2>
+      <p class="sub">아직 별점을 줄 팀이 없습니다. 팀이 생기면 여기서 별점을 줄 수 있습니다.</p>`;
     return `<h2>${esc(d.event.title)}</h2>
-      <p class="sub">마음에 드는 작품에 별점을 주세요. 한 팀에 한 번, 언제든 고칠 수 있습니다.
-        누가 줬는지는 남기지 않습니다.</p>
-      ${d.teams.map(t => { const mine = +(localStorage.getItem('hackon.vote.' + t.id) || 0);
+      <p class="sub">${peer ? '참가팀끼리 서로 평가합니다. 자기 팀은 목록에 없고, 팀당 한 표라 팀원이 다시 찍으면 나중 것이 남습니다.'
+                           : '마음에 드는 작품에 별점을 주세요. 한 팀에 한 번, 언제든 고칠 수 있습니다. 누가 줬는지는 남기지 않습니다.'}</p>
+      ${teams.map(t => { const mine = +(localStorage.getItem('hackon.vote.' + t.id) || 0);
         return `<div class="card"><h3>${esc(t.name)}</h3>
         <div class="stars" data-vote="${t.id}">${[1, 2, 3, 4, 5].map(i =>
           `<button data-vs="${i}" class="${i <= mine ? 'on' : ''}">★</button>`).join('')}</div>
@@ -2959,6 +3087,7 @@ function wire() {
         starts: $('#e-starts').value, ends: $('#e-ends').value,
         prize: $('#e-prize').value, cap: $('#e-cap').value,
         wifi: $('#e-wifi') ? $('#e-wifi').value.trim() : undefined,
+        chat: $('#e-chat') ? $('#e-chat').value.trim() : undefined,
         topic: $('#e-topic').value, due: $('#e-due').value, plan } });
       flash('채웠습니다');
     } catch (e) { flash(e.message, true); }
@@ -3168,14 +3297,84 @@ function wire() {
     render();
   };
 
-  const bvmode = $('#b-vmode');
-  if (bvmode) bvmode.onclick = async () => {
+  /* 평가 방식 바꾸기. 점수가 이미 있으면 바꾸기 «전에» 묻는다 — 바꾼 뒤에 알려 주면 늦다. */
+  const switchVote = async (on, peer, judges) => {
     if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    if (on && judges > 0 && !confirm(`심사위원 ${judges}명의 점수가 있습니다. 돌리면 순위는 별점으로 바뀌고 점수는 남습니다. 계속할까요?`)) return;
     try {
-      const r = await api(`/events/${cur}/vmode`, { method: 'POST', body: { on: +bvmode.dataset.on } });
-      flash(r.vmode ? '관객 평가를 켰습니다. 큰 화면에 투표 링크를 띄우세요' : '관객 평가를 껐습니다');
+      const r = await api(`/events/${cur}/vmode`, { method: 'POST', body: { on, peer } });
+      flash(!r.vmode ? '심사 점수로 되돌렸습니다' : r.vpeer ? '참가팀 상호평가를 켰습니다. 참가팀에게 투표 링크를 보내세요' : '관객 평가를 켰습니다. 큰 화면에 투표 링크를 띄우세요');
     } catch (e) { flash(e.message, true); }
   };
+  const bvmode = $('#b-vmode');
+  if (bvmode) bvmode.onclick = () => switchVote(+bvmode.dataset.on, 0, +bvmode.dataset.judges || 0);
+  const bvpeer = $('#b-vpeer');
+  if (bvpeer) bvpeer.onclick = () => switchVote(1, 1, +bvpeer.dataset.judges || 0);
+  const jbaud = $('#jb-aud');
+  if (jbaud) jbaud.onclick = () => switchVote(1, 0, 0);
+  /* 심사위원 상태 — 운영자의 답. «네»면 몇 명인지 묻는다 */
+  document.querySelectorAll('[data-judged]').forEach(b => b.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    let v = b.dataset.judged;
+    if (v === 'yes') { const n = prompt('심사위원이 몇 명인가요?', '2'); if (n === null) return; v = 'yes:' + Math.min(99, Math.max(1, +n || 1)); }
+    try { await api(`/events/${cur}/judged`, { method: 'POST', body: { judged: v } }); flash(v === 'no' ? '알겠습니다. 대안을 아래 카드에 두었습니다' : '적어 두었습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  /* 대회 접기 — 목록 내리기 / 완전히 지우기 */
+  const gdu = $('#gd-unlist');
+  if (gdu) gdu.onclick = async () => {
+    try { await api(`/events/${cur}/list`, { method: 'POST', body: { list: false } }); flash('목록에서 내렸습니다. 링크로는 그대로 열립니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  const gdn = $('#gd-name'), gdg = $('#gd-go');
+  if (gdn && gdg) gdn.oninput = () => { gdg.disabled = gdn.value.trim() !== gdg.dataset.title; };
+  if (gdg) gdg.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    if (!gdn && !confirm('빈 대회를 지웁니다. 되돌릴 수 없습니다.')) return;
+    try {
+      const r = await api(`/events/${cur}`, { method: 'DELETE', body: { confirm: gdn ? gdn.value.trim() : '' } });
+      /* 응답에 실려 온 사본을 파일로. 서버에도 남지만 운영자 손에 하나 더 */
+      try {
+        const blob = new Blob([JSON.stringify(r.dump, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `hackon-${cur}-지운사본.json`;
+        document.body.appendChild(a); a.click(); a.remove();
+      } catch (_) {}
+      localStorage.removeItem('hackon.event'); cur = ''; tab = 'home';
+      flash('지웠습니다. 사본 파일을 내려받았습니다');
+    } catch (e) { flash(e.message, true); }
+  };
+  /* 밖에서 구한 사람 올리기 · 부탁 글 복사 */
+  document.querySelectorAll('[data-out-open]').forEach(b => b.onclick = () => { const box = $('#out-' + b.dataset.outOpen); if (box) box.hidden = !box.hidden; });
+  document.querySelectorAll('[data-out-send]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.outSend;
+    const name = (document.querySelector(`[data-out-name="${id}"]`) || {}).value || '';
+    const org = (document.querySelector(`[data-out-org="${id}"]`) || {}).value || '';
+    if (!name.trim()) return flash('이름을 넣어 주세요', true);
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try { await api(`/needs/${id}/outside`, { method: 'POST', body: { name: name.trim(), org: org.trim() } }); flash('올렸습니다. 점판과 공개 장부에 반영됐습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-ask]').forEach(b => b.onclick = async () => {
+    const t = ASK[b.dataset.ask] || '';
+    try { await navigator.clipboard.writeText(t); flash('부탁 글을 복사했습니다. 카톡에 붙여 넣으세요'); }
+    catch { prompt('복사해서 쓰세요', t); }
+  });
+  /* 예산 추천 칩 — 누르면 칸을 채우고 바로 미리 본다 */
+  document.querySelectorAll('[data-bg-chip]').forEach(b => b.onclick = () => {
+    const inp = $('#bg-in'); if (!inp) return;
+    inp.value = b.dataset.bgChip;
+    document.querySelectorAll('[data-bg-chip]').forEach(x => x.classList.toggle('on', x === b));
+    const go = $('#bg-go'); if (go) go.click();
+  });
+  /* 새 소식 브라우저 알림 — 탭이 열려 있는 동안만. 서버 푸시가 아니다 */
+  const bell = $('#nt-bell'), bells = $('#nt-bell-s');
+  if (bell) {
+    const paint = () => { if (!('Notification' in window)) { bell.hidden = true; bells.textContent = '이 브라우저는 알림을 지원하지 않습니다'; return; }
+      if (Notification.permission === 'granted') { bell.hidden = true; bells.textContent = '켜져 있습니다. 이 탭이 열려 있는 동안 새 소식이 오면 알립니다'; }
+      else if (Notification.permission === 'denied') { bell.hidden = true; bells.textContent = '브라우저에서 알림이 꺼져 있습니다'; } };
+    paint();
+    bell.onclick = async () => { try { await Notification.requestPermission(); } catch (_) {} paint(); };
+  }
   const copyv = $('#b-copyv');
   if (copyv) copyv.onclick = () => copyAny('#vlink', '투표 주소를 복사했습니다');
 
@@ -3193,7 +3392,7 @@ function wire() {
       const sc = +b.dataset.vs;
       box.querySelectorAll('button').forEach(x => x.classList.toggle('on', +x.dataset.vs <= sc));
       try {
-        await api(`/teams/${tid}/vote`, { method: 'POST', body: { voter: voterId(), score: sc } });
+        await api(`/teams/${tid}/vote`, { method: 'POST', body: { voter: voterId(), score: sc }, tkey: VOTE_TK || undefined });
         try { localStorage.setItem('hackon.vote.' + tid, sc); } catch (_) {}
         flash('별 ' + sc + '점 보냈습니다');
       } catch (e) { flash(e.message, true); }
