@@ -2017,7 +2017,54 @@ function dump(db, event) {
     outcomes: db.prepare('SELECT * FROM outcomes WHERE event=?').all(event),
     supporters: db.prepare('SELECT * FROM supporters WHERE event=?').all(event),
     assignments: db.prepare(`SELECT * FROM assignments WHERE team IN ${inIds}`).all(),
+    /* 2026-09-23 밤 — 되살리기(restore)가 쓰는 나머지 표. 이게 없으면 사본이 절반이다 */
+    needs: db.prepare('SELECT * FROM needs WHERE event=? ORDER BY id').all(event),
+    pledges: db.prepare('SELECT * FROM pledges WHERE event=? ORDER BY id').all(event),
+    offers: db.prepare('SELECT * FROM offers WHERE event=? ORDER BY id').all(event),
+    votes: db.prepare('SELECT * FROM votes WHERE event=? ORDER BY id').all(event),
+    notices: db.prepare('SELECT * FROM notices WHERE event=? ORDER BY id').all(event),
+    requests: db.prepare('SELECT * FROM requests WHERE event=? ORDER BY created, id').all(event),
+    verdicts: db.prepare(`SELECT v.* FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.event=?`).all(event),
   };
+}
+
+/* ── 지운 대회 되살리기 ──
+   사본(dump JSON)을 그대로 넣는다. 주최자 열쇠(owner)가 사본의 것과 같아야 한다 — 열쇠가 흘러 지워진 대회를
+   주최자가 되찾는 길이다(레드팀 길 3). 같은 id 의 대회가 살아 있으면 409.
+   SQLite 는 지워진 rowid 를 재사용하므로 팀·자리 id 는 새로 받고, 딸린 표는 새 id 로 다시 잇는다. */
+function restoreEvent(db, d, owner) {
+  if (!d || !d.event || !d.event.id) throw new HttpError(400, '사본 파일이 아닙니다');
+  const e = d.event;
+  if (!owner || !e.owner || owner !== e.owner) throw new HttpError(403, '이 사본을 만든 주최자 열쇠가 필요합니다');
+  if (db.prepare('SELECT 1 FROM events WHERE id=?').get(e.id)) throw new HttpError(409, '같은 id 의 대회가 살아 있습니다');
+  const cols = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
+  const okey = crypto.randomBytes(5).toString('hex');   // 사본엔 운영자 열쇠가 없다. 새로 준다
+  const row = { ...e, okey };
+  const keys = cols.filter(c => row[c] !== undefined);
+  db.prepare(`INSERT INTO events(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`).run(...keys.map(k => row[k]));
+  const ins = (table, r, drop = ['id']) => {
+    const tc = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+    const ks = tc.filter(c => !drop.includes(c) && r[c] !== undefined);
+    return Number(db.prepare(`INSERT INTO ${table}(${ks.join(',')}) VALUES(${ks.map(() => '?').join(',')})`).run(...ks.map(k => r[k])).lastInsertRowid);
+  };
+  const tmap = {}, nmap = {};
+  for (const t of d.teams || []) tmap[t.id] = ins('teams', t);
+  for (const n of d.needs || []) nmap[n.id] = ins('needs', n);
+  for (const x of d.submissions || []) if (tmap[x.team]) ins('submissions', { ...x, team: tmap[x.team] });
+  for (const x of d.scores || []) if (tmap[x.team]) ins('scores', { ...x, team: tmap[x.team] });
+  for (const x of d.reviews || []) if (tmap[x.team]) ins('reviews', { ...x, team: tmap[x.team] });
+  for (const x of d.assignments || []) if (tmap[x.team]) ins('assignments', { ...x, team: tmap[x.team] });
+  for (const x of d.votes || []) if (tmap[x.team]) ins('votes', { ...x, team: tmap[x.team] });
+  for (const x of d.pledges || []) if (nmap[x.need]) ins('pledges', { ...x, need: nmap[x.need] });
+  for (const x of d.offers || []) ins('offers', x);
+  for (const x of d.notices || []) ins('notices', x);
+  for (const x of d.sponsors || []) ins('sponsors', x);
+  for (const x of d.outcomes || []) ins('outcomes', x);
+  for (const x of d.supporters || []) ins('supporters', x);
+  for (const x of d.requests || []) if (!db.prepare('SELECT 1 FROM requests WHERE id=?').get(x.id)) ins('requests', x, []);
+  for (const x of d.verdicts || []) if (tmap[x.team]) ins('verdicts', { ...x, team: tmap[x.team] });
+  /* 팀이 고른 주제(teams.request)는 그대로 옮겨졌다(요청 id 는 안 바뀐다) */
+  return { id: e.id, okey, teams: Object.keys(tmap).length, needs: Object.keys(nmap).length };
 }
 
 /** DB 파일을 통째로 복사해 둔다. 몇 벌만 남기고 오래된 것은 지운다.
@@ -2686,7 +2733,12 @@ function routes(db) {
           if (closed(getEvent(db, m[1]))) throw new HttpError(409, '제출 마감이 지나 순위가 공개됐습니다. 평가 방식은 더 못 바꿉니다');
           const bd = await body(req);
           const on = bd.on ? 1 : 0, peer = on && bd.peer ? 1 : 0;
+          const was = db.prepare('SELECT vmode, vpeer FROM events WHERE id=?').get(m[1]);
           db.prepare('UPDATE events SET vmode=?, vpeer=? WHERE id=?').run(on, peer, m[1]);
+          /* 평가 방식을 바꾼 것은 참가자가 알아야 한다 — 소식에 자동으로 남긴다(레드팀: 마감 직전 전환) */
+          if (was && (was.vmode !== on || was.vpeer !== peer))
+            db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1],
+              !on ? '평가 방식을 심사위원 점수로 되돌렸습니다' : peer ? '평가 방식을 참가팀 상호평가로 바꿨습니다' : '평가 방식을 관객 평가로 바꿨습니다');
           return json(res, 200, { vmode: !!on, vpeer: !!peer, judges: board(db, m[1], true).judges.length });
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/vote$/)) && req.method === 'GET') {
@@ -2814,6 +2866,30 @@ function routes(db) {
           if (!(v === '' || v === 'no' || /^yes:\d{1,2}$/.test(v))) throw new HttpError(400, "judged 는 ''·'no'·'yes:n' 중 하나입니다");
           db.prepare('UPDATE events SET judged=? WHERE id=?').run(v, m[1]);
           return json(res, 200, { judged: v });
+        }
+        /* 지운 대회 되살리기 — 사본 JSON + 주최자 열쇠 */
+        if (p === '/api/events/restore' && req.method === 'POST')
+          return json(res, 201, restoreEvent(db, await body(req), owner));
+        /* 팀 링크 다시 보내기 — 운영자만. 참가자가 기기를 바꿨을 때 운영자가 연락처로 확인하고 준다 */
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/relink$/)) && req.method === 'POST') {
+          const t = db.prepare('SELECT id, event, tkey FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          needAdmin(db, t.event, key, owner);
+          return json(res, 200, { link: `/e/${t.event}?t=${t.tkey}` });
+        }
+        /* 팀 링크로 들어온 브라우저가 «내 팀»을 되찾는다. 열쇠가 맞을 때만 팀 id 를 준다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/claim$/)) && req.method === 'POST') {
+          const tk = String((await body(req)).tkey || '');
+          const t = tk ? db.prepare('SELECT id FROM teams WHERE event=? AND tkey=?').get(m[1], tk) : null;
+          if (!t) throw new HttpError(403, '팀 열쇠가 맞지 않습니다');
+          return json(res, 200, { id: t.id });
+        }
+        /* 받는 사람 열쇠 새로 — 링크가 흘렀을 때. 옛 열쇠로 새 열쇠를 받는다 */
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/rekey$/)) && req.method === 'POST') {
+          if (!canReceive(db, m[1], req.headers['x-rkey'] || '')) throw new HttpError(403, '받는 사람 열쇠가 필요합니다');
+          const nk = crypto.randomBytes(5).toString('hex');
+          db.prepare('UPDATE requests SET rkey=? WHERE id=?').run(nk, m[1]);
+          return json(res, 200, { rkey: nk });
         }
         /* ── 받는 사람(후원자·의뢰자) ── */
         if (p === '/api/requests' && req.method === 'POST')
@@ -3380,6 +3456,27 @@ function selftest() {
   ok(fuBad === 400, '없는 D+14 답은 400');
   ok(!('rkey' in publicRequest(db.prepare('SELECT * FROM requests WHERE id=?').get(rq.id))), '공개 요청에 열쇠 없음');
   ok(TIERS['현물'] && TIERS['현물'].length >= 2, '현물 후원 등급이 있다');
+  /* 되살리기 — 사본으로 왕복. 팀·자리 id 는 새로 받되 수는 같다 */
+  const rsEv = createEvent(db, { title: '되살리기검사' });
+  const rsOwner = db.prepare('SELECT owner FROM events WHERE id=?').get(rsEv.id).owner;
+  const rsT = joinTeam(db, rsEv.id, { name: '살팀', email: 'rs@x.test', agree: true });
+  db.prepare("UPDATE events SET due='2099-01-01T00:00' WHERE id=?").run(rsEv.id);
+  submit(db, rsT, { url: 'https://rs.example/app', note: '살아남기' });
+  const rsN = addNeed(db, rsEv.id, { kind: 'venue', label: '장소' });
+  setPledge(db, addPledge(db, rsN.id, rsEv.id, { name: '장소주인', contact: 'v@x.test' }).id, { status: 'ok' });
+  db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(rsEv.id, '살아라');
+  const rsDump = dump(db, rsEv.id);
+  ok(rsDump.needs.length === 1 && rsDump.pledges.length === 1 && rsDump.notices.length === 1, '사본에 자리·신청·소식이 들어간다');
+  deleteEvent(db, rsEv.id, { confirm: '되살리기검사' });
+  let rsBad = 0; try { restoreEvent(db, rsDump, 'wrong-owner'); } catch (e) { rsBad = e.code; }
+  ok(rsBad === 403 && !db.prepare('SELECT 1 FROM events WHERE id=?').get(rsEv.id), '남의 주최자 열쇠로는 못 살린다');
+  const rsRes = restoreEvent(db, rsDump, rsOwner);
+  ok(rsRes.id === rsEv.id && rsRes.okey.length === 10 && rsRes.teams === 1, '주최자 열쇠로 살리면 새 운영자 열쇠가 나온다');
+  const rsB = board(db, rsEv.id, true);
+  ok(rsB.rows.length === 1 && rsB.rows[0].url === 'https://rs.example/app' && needsOf(db, rsEv.id)[0].filled === 1
+     && db.prepare('SELECT COUNT(*) c FROM notices WHERE event=?').get(rsEv.id).c === 1, '팀·제출·자리·신청·소식이 돌아온다');
+  let rsDup = 0; try { restoreEvent(db, rsDump, rsOwner); } catch (e) { rsDup = e.code; }
+  ok(rsDup === 409, '살아 있는 대회 위에 또 못 살린다');
   const dl = ledgerOf(db, dEv0 = createEvent(db, { title: '장부표시' }).id);
   ok(dl.length === 0, '빈 장부');
   const dN = addNeed(db, dEv0, { kind: 'snack', label: '간식' });

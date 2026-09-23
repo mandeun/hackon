@@ -1161,6 +1161,46 @@ with sync_playwright() as p:
     A(next(x for x in led2 if x["name"] == "옆집카페")["direct"] == 1 and next(x for x in led2 if x["name"] == "동네카페")["direct"] == 0, "장부의 «운영자 등록» 표시가 틀렸다")
     ok("받는 사람(/ask 세 화면·열쇠·마감 전후·동의자만·판정·D+14·후보 붙이기·다섯 상한) · 한 줄 평가 · 피드백 · 현물 · 열쇠 새로 · 장부 표시")
 
+    # ── 되살리기 · 팀 링크 다시 보내기·되찾기 · 받는 사람 열쇠 새로 · 전환 소식 ──
+    # 전환 소식: 평가 방식을 바꾸면 소식에 자동으로 남는다
+    post(f"/api/events/{VID}/vmode", {"on": 0}, VOK)
+    A(any("심사위원 점수로 되돌렸습니다" in n["text"] for n in api(f"/api/events/{VID}/notices")), "평가 방식 전환이 소식에 안 남았다")
+    # 팀 링크: 운영자만 받는다 → ?t= 로 들어온 브라우저가 팀을 되찾는다 → 틀린 열쇠는 403
+    A(post(f"/api/teams/{rt['id']}/relink", {})[0] == 403, "열쇠 없이 팀 링크가 나왔다")
+    A(post(f"/api/teams/{rt['id']}/relink", {}, JK2)[0] == 403, "다른 대회 열쇠로 팀 링크가 나왔다")
+    st, rl = post(f"/api/teams/{rt['id']}/relink", {}, REK)
+    A(st == 200 and rl["link"].startswith(f"/e/{RE}?t="), f"팀 링크 모양이 아니다: {rl}")
+    A(post(f"/api/events/{RE}/claim", {"tkey": "0000000000"})[0] == 403, "틀린 팀 열쇠로 팀이 되찾아졌다")
+    cctx = b.new_context(viewport={"width": 390, "height": 844}); cp = cctx.new_page()
+    cp.goto(BASE + rl["link"]); cp.wait_for_timeout(1200)
+    A(cp.evaluate(f"localStorage.getItem('hackon.team.{RE}')") == str(rt["id"]), "팀 링크로 들어왔는데 내 팀이 안 잡혔다")
+    A("?t=" not in cp.url, "팀 열쇠가 주소창에 남아 있다")
+    cctx.close()
+    # 받는 사람 열쇠 새로 — 옛 열쇠는 죽고 새 열쇠로 열린다
+    old_rk = RK
+    st, nk = post(f"/api/requests/{RID}/rekey", {})
+    A(st == 403, "열쇠 없이 받는 사람 열쇠가 바뀌었다")
+    rq_req = urllib.request.Request(BASE + f"/api/requests/{RID}/rekey", method="POST", data=b"{}", headers={"content-type": "application/json", "x-rkey": RK})
+    with urllib.request.urlopen(rq_req) as r_: RK = json.load(r_)["rkey"]
+    A(RK != old_rk and len(RK) == 10, "받는 사람 열쇠가 안 바뀌었다")
+    try:
+        urllib.request.urlopen(urllib.request.Request(BASE + f"/api/requests/{RID}/view", headers={"x-rkey": old_rk})); A(False, "옛 받는 사람 열쇠가 아직 산다")
+    except urllib.error.HTTPError as e_: A(e_.code == 403, f"옛 열쇠 응답이 403 이 아니다: {e_.code}")
+    # 되살리기: 사본 + 주최자 열쇠. 남의 열쇠 403, 살아 있으면 409
+    _, rse = post("/api/events", {"title": "되살리기e2e"}); RSE, RSK, RSO = rse["id"], rse["okey"], rse["owner"]
+    post(f"/api/events/{RSE}/needs", {"kind": "snack", "label": "간식"}, RSK)
+    dmp = json.load(urllib.request.urlopen(urllib.request.Request(BASE + f"/api/events/{RSE}/dump", headers={"x-okey": RSK})))
+    A(post("/api/events/restore", dmp, )[0] == 403, "주최자 열쇠 없이 되살아났다")
+    A(delete(f"/api/events/{RSE}", {"confirm": "되살리기e2e"}, RSK)[0] == 200, "되살리기 준비 삭제가 안 됐다")
+    rreq = urllib.request.Request(BASE + "/api/events/restore", method="POST", data=json.dumps(dmp).encode(), headers={"content-type": "application/json", "x-owner": RSO})
+    with urllib.request.urlopen(rreq) as r_: rs = json.load(r_)
+    A(rs["id"] == RSE and rs["needs"] == 1 and len(rs["okey"]) == 10, f"되살리기 결과가 이상하다: {rs}")
+    A(api(f"/api/events/{RSE}")["title"] == "되살리기e2e" and len(api(f"/api/events/{RSE}/needs")) == 1, "되살린 대회에 자리가 없다")
+    try:
+        urllib.request.urlopen(rreq); A(False, "살아 있는 대회 위에 또 살아났다")
+    except urllib.error.HTTPError as e_: A(e_.code == 409, f"409 여야 하는데 {e_.code}")
+    ok("되살리기(사본+주최자 열쇠, 남의 열쇠 403, 중복 409) · 팀 링크(운영자만·되찾기·주소창 정리) · 받는 사람 열쇠 새로 · 전환 소식 자동")
+
     # 참가자가 해야 하는 일은 열쇠 없이도 된다
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")
     # 심사 화면은 이제 심사 열쇠가 있어야 열린다 — 공개 링크만으로 아무나 점수를 넣던 것을 막았다

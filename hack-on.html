@@ -1551,7 +1551,11 @@ const SCREEN = {
         <label>주최자 열쇠</label><input id="ow-in" placeholder="영문과 숫자 12자">
         <div style="height:10px"></div>
         <button class="btn sm" id="ow-go">찾기</button>
-      </div>`}`;
+      </div>`}
+      <details class="card" style="padding:14px 20px"><summary style="cursor:pointer;font-weight:700">지운 대회 되살리기</summary>
+        <div class="meta" style="margin-top:8px">지울 때 내려받은 사본 파일(hackon-…-지운사본.json)을 넣으면 그대로 돌아옵니다. 사본을 만든 주최자 열쇠가 이 기기에 있어야 합니다. 운영자 열쇠는 새로 나옵니다.</div>
+        <input type="file" id="rs-file" accept="application/json" style="margin-top:8px">
+        <div style="height:8px"></div><button class="btn sec sm" id="rs-go">되살리기</button></details>`;
     return mineBox + `<h2>열린 대회</h2><p class="sub">누르면 참가 신청과 순위를 볼 수 있습니다.</p>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
@@ -2100,9 +2104,11 @@ const SCREEN = {
         <td class="n">${e.vmode ? (r.votes ? r.vote + '★' : '—') : r.score}</td>
         <td class="n">${e.vmode ? (r.votes || 0) + '표' : r.judges + '명'}</td>
         <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
-          title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button></td></tr>`).join('')}</table>
+          title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
+          <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button></td></tr>`).join('')}</table>
       <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.
-        <b>☆</b> 를 누르면 추천작으로 표시돼 공개 페이지와 첫 화면 우수작에 뜹니다.</p>
+        <b>☆</b> 를 누르면 추천작으로 표시돼 공개 페이지와 첫 화면 우수작에 뜹니다.
+        <b>🔗</b> 은 기기를 바꿔 팀을 잃은 참가자에게 주는 링크입니다 — 연락처로 본인을 확인한 뒤 주세요.</p>
       <details${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
         <div class="meta">온 팀을 누르세요. 절반쯤 오는 게 정상입니다.</div>
         <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
@@ -2385,6 +2391,7 @@ const SCREEN = {
           <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" data-verdict="${t.id}" data-ok="1">이거면 됩니다</button><button class="btn sec sm" data-verdict="${t.id}" data-ok="0">아직 아니에요</button></div>
           <input data-vnote-r="${t.id}" value="${esc(t.verdict ? t.verdict.note : '')}" placeholder="한 줄 (선택)" style="margin-top:8px">
         </div>`).join('')}
+        <div class="card" style="padding:12px 16px"><div class="meta">이 링크가 남에게 흘렀으면 <button class="lnk" id="rk-new">열쇠 새로 만들기</button>. 옛 링크는 그 자리에서 죽습니다.</div></div>
         <div class="card"><h3>2주 뒤 — 아직 쓰고 계세요?</h3>
           <div class="meta">이 답이 다음 대회를 정합니다. 답이 없으면 «모름»으로 남습니다.${v.followup ? ' 지금 답: <b>' + esc((FU.find(x => x[0] === v.followup) || [])[1] || v.followup) + '</b>' : ''}</div>
           <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${FU.map(([k, l]) => `<button class="btn ${v.followup === k ? '' : 'sec'} sm" data-followup="${k}">${l}</button>`).join('')}</div></div>`}`}
@@ -3561,6 +3568,32 @@ function wire() {
     try { await api(`/events/${cur}/pick`, { method: 'POST', body: { request: b.dataset.pick, on: b.dataset.on === '1' } }); flash(b.dataset.on === '1' ? '이 대회 주제로 붙였습니다. 대회 페이지와 제출 폼에 실립니다' : '뗐습니다'); }
     catch (e) { flash(e.message, true); }
   });
+  const rsgo = $('#rs-go');
+  if (rsgo) rsgo.onclick = async () => {
+    const f = $('#rs-file').files[0]; if (!f) return flash('사본 파일을 고르세요', true);
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    let d; try { d = JSON.parse(await f.text()); } catch { return flash('사본 파일이 아닙니다', true); }
+    try { const r = await api('/events/restore', { method: 'POST', body: d });
+      try { localStorage.setItem('hackon.okey.' + r.id, r.okey); localStorage.setItem('hackon.event', r.id); } catch (_) {}
+      cur = r.id; tab = 'board'; flash('되살렸습니다. 팀 ' + r.teams + ' · 자리 ' + r.needs); }
+    catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-relink]').forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try { const r = await api(`/teams/${b.dataset.relink}/relink`, { method: 'POST' });
+      const url = shareBase() + r.link;
+      try { await navigator.clipboard.writeText(url); flash('팀 링크를 복사했습니다. 본인 확인한 뒤 그 사람에게만 주세요'); } catch { prompt('이 링크를 그 사람에게만 주세요', url); } }
+    catch (e) { flash(e.message, true); }
+  });
+  const rknew = $('#rk-new');
+  if (rknew) rknew.onclick = async () => {
+    if (!confirm('열쇠를 새로 만듭니다. 지금 주소는 더 열리지 않습니다. 새 주소를 적어 두세요.')) return;
+    try { const r = await api(`/requests/${curReq}/rekey`, { method: 'POST' });
+      try { localStorage.setItem('hackon.rkey.' + curReq, r.rkey); } catch (_) {} RKEY = r.rkey;
+      history.replaceState(null, '', `/r/${curReq}?k=${r.rkey}`); flash('새 열쇠입니다. 이 주소를 적어 두세요: ' + location.href); }
+    catch (e) { flash(e.message, true); }
+  };
   document.querySelectorAll('[data-rekey]').forEach(b => b.onclick = async () => {
     if (!LIVE) return flash('데모에서는 안 됩니다', true);
     const w = b.dataset.rekey;
@@ -4131,6 +4164,12 @@ else if (PUB || JUD || VOT || TVM) {
   /* 손님 화면. '서버 연결됨' 은 운영자 말이라 손님에게는 안 보인다. */
   document.body.classList.add('guest');
   /* 심사·투표 링크는 /j|v/<id>?k=<열쇠>. 열쇠를 받아 두면 다음에 주소만으로도 열린다. */
+  /* 팀 링크(?t=열쇠)로 들어오면 «내 팀»을 되찾는다. 서버가 열쇠를 확인한 뒤에만 팀 id 를 준다 */
+  if (PUB) { const tk = new URLSearchParams(location.search).get('t');
+             if (tk) fetch('/api/events/' + cur + '/claim', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tkey: tk }) })
+               .then(r => r.ok ? r.json() : null).then(r => { if (!r) return;
+                 try { localStorage.setItem('hackon.team.' + cur, r.id); localStorage.setItem('hackon.tkey.' + r.id, tk); } catch (_) {}
+                 history.replaceState(null, '', location.pathname); render(); }).catch(() => {}); }
   if (JUD) { const k = new URLSearchParams(location.search).get('k');
              if (k) try { localStorage.setItem('hackon.jkey.' + cur, k); } catch (_) {} }
   if (VOT) { const k = new URLSearchParams(location.search).get('k');
