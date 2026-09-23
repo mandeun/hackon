@@ -471,6 +471,8 @@ function pack(db, event, admin) {
                    aiuse: r.aiuse, aidrop: r.aidrop,
                    /* 연락해도 되는 팀인지. 동의한 팀만 true 다. */
                    reachable: !!r.sponsor_ok })) : [],
+    /* 끝난 뒤 설문(추천·좋았던 것·고칠 것). 세 건 미만이면 숫자 없음 */
+    survey: surveySummary(db, event, admin),
     minCell: MIN_CELL,
   };
 }
@@ -983,6 +985,37 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN judged TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE events ADD COLUMN vpeer INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN chat TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 2026-09-24 퍼실리테이션 자료(MLH 심사 계획·국민대 매뉴얼·복사용 루브릭) 반영.
+     safety — «문제가 생기면 이 사람에게» (운영자가 적는 공개 연락 한 줄. 행동강령의 신고 창구)
+     ranked — 순위를 심사위원별 등수로 보정(관대한 심사위원 하나가 순위를 흔드는 것을 막는다)
+     pledges/offers.pkey — 준 사람의 열쇠. /s/<ref>?k= 로 자기 후원 상태·결과를 본다(받는 사람 rkey 와 같은 모양)
+     surveys — 끝난 뒤 설문 3문항(추천 0~10·좋았던 것·고칠 것). 팀 열쇠로만, 팀당 하나
+     questions — 대회 안 묻고 답하기. 팀 열쇠로 묻고 운영자만 답한다. 익명 없음, 커뮤니티 아님 */
+  try { db.exec("ALTER TABLE events ADD COLUMN safety TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* teams.no — 자리 번호. 신청할 때 한 번 받고 그 뒤로는 안 바뀐다(팀이 빠져도 뒤가 안 당겨진다 — 인쇄한 자리표와 어긋나면 점수가 딴 팀에 붙는다).
+     이미 있는 팀은 신청 순으로 한 번 매긴다 */
+  try { db.exec('ALTER TABLE teams ADD COLUMN no INTEGER NOT NULL DEFAULT 0'); } catch {}
+  db.exec('UPDATE teams SET no = (SELECT COUNT(*) FROM teams t2 WHERE t2.event = teams.event AND t2.id <= teams.id) WHERE no = 0');
+  try { db.exec('ALTER TABLE events ADD COLUMN ranked INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE pledges ADD COLUMN pkey TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE offers ADD COLUMN pkey TEXT NOT NULL DEFAULT ''"); } catch {}
+  db.exec(`CREATE TABLE IF NOT EXISTS surveys(
+      event     TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      team      INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      recommend INTEGER NOT NULL,                  -- 0~10 «친구에게 추천하겠나»
+      good      TEXT NOT NULL DEFAULT '',
+      fix       TEXT NOT NULL DEFAULT '',
+      at        TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(event, team))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS questions(
+      id          INTEGER PRIMARY KEY,
+      event       TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      team        INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      text        TEXT NOT NULL,
+      answer      TEXT NOT NULL DEFAULT '',
+      hidden      INTEGER NOT NULL DEFAULT 0,      -- 운영자가 내린 것. 지우지 않고 감춘다
+      at          TEXT NOT NULL DEFAULT (datetime('now')),
+      answered_at TEXT NOT NULL DEFAULT '')`);
   /* 공지는 한 줄(events.notice, 큰 화면 띠)로 남기되 지난 소식도 쌓아 둔다 —
      참가자가 «지금 뭐가 바뀌었나»를 공개 페이지에서 시각과 함께 본다. */
   db.exec(`CREATE TABLE IF NOT EXISTS notices(
@@ -1267,23 +1300,34 @@ const DEFAULT_PLAN = [
      담당자 말 그대로: "단순히 아이디어가 좋다를 보는 것이 아니고,
      이 팀이 실제로 끝까지 실행할 준비가 되어 있는가를 핵심적으로 본다."
      대회가 창업·지원사업으로 이어지는 자리라면 이쪽이 맞다. */
+/* hint — 점수마다 «무엇이 그 점수인가». 가중치만 주면 7점이 심사위원마다 다르다.
+   복사용 루브릭(Rathour)의 2·5·9점 서술자를 이 앱의 0~100 눈금(20·50·90)으로 옮겼다. */
+const RUBRIC_HINT = {
+  idea: { low: '어디서 본 것', mid: '아는 문제를 다른 길로', high: '이 자리에서 처음 보는 접근' },
+  make: { low: '화면 그림뿐', mid: '준비한 입력으로는 돈다', high: '심사위원이 고른 입력으로도 돈다' },
+  use:  { low: '누가 쓸지 없음', mid: '쓸 사람이 있다', high: '그 사람이 오늘 쓰겠다고 할 만함' },
+  tell: { low: '무엇인지 못 알아듣겠다', mid: '3분 안에 문제·해법이 들린다', high: '질문에 바로 답하고 한계도 말한다' },
+  will: { low: '오늘로 끝', mid: '다음 할 일이 있다', high: '다음 주에 할 일과 사람이 정해졌다' },
+  real: { low: '슬라이드', mid: '준비한 입력으로는 돈다', high: '지금 주소를 열면 돈다' },
+  who:  { low: '모두', mid: '집단 하나', high: '이름 댈 수 있는 사람 다섯' },
+};
 const RUBRICS = {
   '만들기': {
     what: '그날 무엇을 만들어 냈는지를 봅니다. 하루짜리 해커톤 기본값입니다.',
     rows: [
-      { key: 'idea', label: '독창성', weight: 30 },
-      { key: 'make', label: '완성도', weight: 30 },
-      { key: 'use', label: '실용성', weight: 25 },
-      { key: 'tell', label: '전달력', weight: 15 },
+      { key: 'idea', label: '독창성', weight: 30, hint: RUBRIC_HINT.idea },
+      { key: 'make', label: '완성도', weight: 30, hint: RUBRIC_HINT.make },
+      { key: 'use', label: '실용성', weight: 25, hint: RUBRIC_HINT.use },
+      { key: 'tell', label: '전달력', weight: 15, hint: RUBRIC_HINT.tell },
     ],
   },
   '문제해결': {
     what: '끝까지 갈 팀인지를 봅니다. 창업 지원 사업의 실제 배점을 옮겼습니다.',
     rows: [
-      { key: 'will', label: '끝까지 갈 준비', weight: 40 },
-      { key: 'real', label: '실제로 돌아가나', weight: 30 },
-      { key: 'who', label: '누가 쓸지 정해졌나', weight: 20 },
-      { key: 'tell', label: '전달력', weight: 10 },
+      { key: 'will', label: '끝까지 갈 준비', weight: 40, hint: RUBRIC_HINT.will },
+      { key: 'real', label: '실제로 돌아가나', weight: 30, hint: RUBRIC_HINT.real },
+      { key: 'who', label: '누가 쓸지 정해졌나', weight: 20, hint: RUBRIC_HINT.who },
+      { key: 'tell', label: '전달력', weight: 10, hint: RUBRIC_HINT.tell },
     ],
   },
 };
@@ -1301,6 +1345,8 @@ function editEvent(db, id, b) {
   if (b.budget !== undefined) { set.push('budget=?'); val.push(Math.max(0, Math.floor(+b.budget || 0))); }
   /* 오픈 대화방 주소. http(s) 가 아니면 빈 값으로 — javascript: 같은 것이 공개 페이지에 걸리면 안 된다 */
   if (b.chat !== undefined) { set.push('chat=?'); val.push(webUrl(b.chat)); }
+  /* «문제가 생기면 이 사람에게». 참가자 화면에 그대로 나가는 공개 연락 한 줄이다 — 운영자가 스스로 적는다 */
+  if (b.safety !== undefined) { set.push('safety=?'); val.push(plain(b.safety, 120)); }
   if (b.mode !== undefined) {
     if (!['onsite', 'online'].includes(b.mode)) throw new HttpError(400, 'mode 는 onsite·online 중 하나입니다');
     set.push('mode=?'); val.push(b.mode);
@@ -1521,6 +1567,7 @@ function getEvent(db, id) {
   delete e.vkey;                     // 관객 투표 열쇠도 마찬가지
   delete e.judged;                   // 심사위원 상태는 운영자 화면에만 — 손님에게 «못 구함»을 보일 이유가 없다
   e.rubric = JSON.parse(e.rubric);
+  for (const r of e.rubric) if (!r.hint && RUBRIC_HINT[r.key]) r.hint = RUBRIC_HINT[r.key];
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
   e.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(id).c;
   e.sponsors = db.prepare('SELECT * FROM sponsors WHERE event=? ORDER BY amount DESC').all(id);
@@ -1562,6 +1609,8 @@ function joinTeam(db, event, b) {
            pid, Math.min(Math.max(+b.size || 1, 1), 9),
            JSON.stringify([{ n: String(b.name || '').slice(0, 20), g: false }]),
            crypto.randomBytes(5).toString('hex'), b.share && b.contact ? 1 : 0, b.share && b.contact ? now : '');
+  /* 자리 번호 — 이 대회에서 지금까지 나온 가장 큰 번호 + 1. 빠진 팀의 번호는 다시 안 쓴다(인쇄한 자리표와 어긋나지 않게) */
+  db.prepare('UPDATE teams SET no = (SELECT COALESCE(MAX(no),0)+1 FROM teams t2 WHERE t2.event=? AND t2.id<>teams.id) WHERE id=?').run(event, Number(r.lastInsertRowid));
     return Number(r.lastInsertRowid);
   } catch {
     throw new HttpError(409, '같은 이름의 팀이 있습니다');
@@ -1685,12 +1734,39 @@ function board(db, event, admin = false) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request,
-           t.agreed, t.photo, t.came, t.size, t.want,
+           t.agreed, t.photo, t.came, t.size, t.want, t.no,
            s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
-  const rows = teams.map(t => {
+  /* 심사위원별 등수 보정(MLH 의 stack ranking 을 눈금으로). 관대한 심사위원의 90점과 짠 심사위원의 70점이
+     같은 «1등»일 수 있다 — 각 심사위원 안에서 등수를 매겨 100~0 으로 펴고, 팀은 자기를 본 심사위원들의 평균을 받는다.
+     한 팀만 본 심사위원은 그 팀에 100 을 준다(비교가 없으니 «모름»이지만 0 으로 그리면 벌이 된다). */
+  const perJudge = {};
+  for (const sc of db.prepare(`SELECT s.team, s.judge, s.key, s.value FROM scores s
+                               JOIN teams t ON t.id = s.team WHERE t.event = ?`).all(event)) {
+    const w = (e.rubric.find(r => r.key === sc.key) || {}).weight || 0;
+    perJudge[sc.judge] = perJudge[sc.judge] || {};
+    perJudge[sc.judge][sc.team] = (perJudge[sc.judge][sc.team] || 0) + sc.value * w / 100;
+  }
+  const rankPts = {};   // team -> [points per judge]
+  for (const j of Object.keys(perJudge)) {
+    const ts = Object.entries(perJudge[j]).sort((a, b) => b[1] - a[1]);
+    /* 두 팀만 본 심사위원은 표본이 없어 1등·꼴찌로 벌어진다 — 셋 미만이면 보정에서 뺀다(대회에 팀이 셋 이상일 때).
+       동점은 평균 등수로 — 같은 점수를 줬는데 앞뒤가 갈리면 그건 입력 순서가 순위를 정한 것이다 */
+    if (ts.length < 3 && teams.length >= 3) continue;
+    let i = 0;
+    while (i < ts.length) {
+      let k = i; while (k + 1 < ts.length && ts[k + 1][1] === ts[i][1]) k++;
+      const pos = (i + k) / 2;
+      const pts = ts.length === 1 ? 100 : Math.round((1 - pos / (ts.length - 1)) * 1000) / 10;
+      for (let x = i; x <= k; x++) (rankPts[ts[x][0]] = rankPts[ts[x][0]] || []).push(pts);
+      i = k + 1;
+    }
+  }
+  const rows = teams.map((t, ti) => {
     let total = 0, judged = new Set();
+    const rp = rankPts[t.id] || [];
+    const rscore = rp.length ? Math.round(rp.reduce((a, b) => a + b, 0) / rp.length * 10) / 10 : 0;
     for (const r of e.rubric) {
       const g = db.prepare('SELECT AVG(value) a, COUNT(*) c FROM scores WHERE team=? AND key=?')
         .get(t.id, r.key);
@@ -1704,7 +1780,9 @@ function board(db, event, admin = false) {
                               WHERE team=? AND (good<>'' OR next<>'')`).get(t.id).c;
     /* 관객 평가. 심사위원 자리를 대신하는 표. 심사 점수와 별개다. */
     const v = db.prepare('SELECT AVG(score) a, COUNT(*) c FROM votes WHERE team=?').get(t.id);
-    const row = { ...t, score: Math.round(total * 10) / 10, judges: judged.size,
+    /* no — 자리 번호(신청 순). 과학전람회식 심사에서 심사위원이 찾아가는 번호이자 큰 화면·팀 화면이 같이 쓴다.
+       팀이 지워지면 뒤 번호가 당겨진다 — 그래서 대회 당일 아침 이후로는 팀을 지우지 말라고 매뉴얼에 적는다. */
+    const row = { ...t, no: t.no || ti + 1, score: Math.round(total * 10) / 10, rscore, judges: judged.size,
                   vote: v.c ? Math.round((v.a || 0) * 10) / 10 : 0, votes: v.c,
                   words, by: [...judged].sort(), done: !!t.url };
     /* 마감 전에는 제출 링크를 안 내려보낸다.
@@ -1719,7 +1797,8 @@ function board(db, event, admin = false) {
     return row;
   });
   /* 관객 평가 모드면 표 평균으로 줄 세운다. 아니면 심사 점수로. */
-  rows.sort((a, b) => e.vmode ? (b.vote - a.vote) || (b.votes - a.votes) : b.score - a.score);
+  rows.sort((a, b) => e.vmode ? (b.vote - a.vote) || (b.votes - a.votes)
+                    : e.ranked ? (b.rscore - a.rscore) || (b.score - a.score) : b.score - a.score);
   rows.forEach((r, i) => { r.rank = i + 1; });
   e.admin = admin;   // 화면이 운영 칸을 그릴지 말지 이걸로 정한다
   /* 이 대회에 한 번이라도 점수를 넣은 사람 전부. 화면이 '아직 안 본 사람' 을 계산하는 근거다. */
@@ -1728,7 +1807,7 @@ function board(db, event, admin = false) {
                              WHERE t.event = ? ORDER BY s.judge`).all(event).map(r => r.judge);
   /* 마감 전에는 점수도 안 준다. 심사 중에 순위가 보이면 심사위원이 그걸 보고 맞춘다.
      Kaggle 이 public/private 리더보드를 나눈 것과 같은 이유다. */
-  if (!admin && !closed(e)) for (const r of rows) { r.score = null; r.rank = null; r.vote = null; r.votes = null; }
+  if (!admin && !closed(e)) for (const r of rows) { r.score = null; r.rscore = null; r.rank = null; r.vote = null; r.votes = null; }
   /* 관객·참가팀이 별점 옆에 남긴 한 줄. 마감 뒤에만, 누가 썼는지는 없다 */
   if (closed(e)) for (const r of rows)
     r.words_public = db.prepare("SELECT note FROM votes WHERE team=? AND note<>'' ORDER BY at").all(r.id).map(x => x.note);
@@ -1814,7 +1893,7 @@ function crew(db, event) {
     연락처 같은 건 애초에 안 담는다. */
 function tv(db, event) {
   const e = getEvent(db, event);
-  const rows = db.prepare(`SELECT t.name, s.url FROM teams t
+  const rows = db.prepare(`SELECT t.name, t.no, s.url FROM teams t
                            LEFT JOIN submissions s ON s.team = t.id
                            WHERE t.event = ? ORDER BY t.id`).all(event);
   const b = board(db, event, false);
@@ -1834,7 +1913,9 @@ function tv(db, event) {
     /* 순위는 마감이 지나고 심사가 시작된 뒤에만 벽에 띄운다.
        그 전에 띄우면 심사위원이 보고 점수를 맞추고, 참가자는 압박만 받는다. */
     ranks: (judged && closed(e))
-      ? b.rows.slice(0, 5).map(r => ({ rank: r.rank, name: r.name, score: r.score })) : [],
+      ? b.rows.slice(0, 5).map(r => ({ rank: r.rank, name: r.name, score: e.ranked ? r.rscore : r.score })) : [],
+    /* 자리 번호 — 마감 뒤 심사 시간에 벽에 띄운다. 심사위원이 «몇 번 테이블»로 찾아간다 */
+    seats: closed(e) ? rows.map((r, i) => ({ no: r.no || i + 1, name: r.name })) : [],
     crew: crew(db, event),
     /* 협찬사 로고. 금액은 안 보낸다 - 벽에 걸리는 화면이다. */
     sponsors: db.prepare('SELECT name, kind, logo, link FROM sponsors WHERE event=? ORDER BY amount DESC')
@@ -1850,10 +1931,11 @@ function judgeView(db, event, judge, admin = false) {
      board() 와 같은 규칙. 안 그러면 경쟁 팀이 /j/<id> 로 남의 링크를 미리 본다. 심사는 마감 뒤라
      그때 링크가 열린다. 운영자(admin)는 언제든 본다. */
   const hideUrl = !admin && !closed(e);
-  const teams = db.prepare(`SELECT t.id, t.name, s.url, s.note, s.aiuse, s.aidrop
+  const teams = db.prepare(`SELECT t.id, t.name, t.no, s.url, s.note, s.aiuse, s.aidrop
                             FROM teams t LEFT JOIN submissions s ON s.team = t.id
                             WHERE t.event = ? ORDER BY t.id`).all(event);
   if (hideUrl) for (const t of teams) t.url = '';
+  teams.forEach((t, i) => { t.no = t.no || i + 1; });   // 자리 번호 — 신청 때 받은 고정 번호
   for (const t of teams) {
     t.mine = {};
     if (judge)
@@ -1871,6 +1953,8 @@ function judgeView(db, event, judge, admin = false) {
     event: { id: e.id, title: e.title, rubric: e.rubric, due: e.due,
              starts: e.starts, ends: e.ends },
     teams,
+    /* 첫 팀은 옆 심사위원과 같이 채점하라는 안내를 화면이 띄우는 근거 — 아직 아무 점수도 없을 때만 */
+    first: !db.prepare('SELECT 1 FROM scores s JOIN teams t ON t.id = s.team WHERE t.event = ? LIMIT 1').get(event),
     left: teams.filter(t => !t.doneByMe).length,
   };
 }
@@ -2060,6 +2144,8 @@ function dump(db, event) {
     notices: db.prepare('SELECT * FROM notices WHERE event=? ORDER BY id').all(event),
     requests: db.prepare('SELECT * FROM requests WHERE event=? ORDER BY created, id').all(event),
     verdicts: db.prepare(`SELECT v.* FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.event=?`).all(event),
+    surveys: db.prepare('SELECT * FROM surveys WHERE event=? ORDER BY at').all(event),
+    questions: db.prepare('SELECT * FROM questions WHERE event=? ORDER BY id').all(event),
   };
 }
 
@@ -2098,6 +2184,8 @@ function restoreEvent(db, d, owner) {
   for (const x of d.supporters || []) ins('supporters', x);
   for (const x of d.requests || []) if (!db.prepare('SELECT 1 FROM requests WHERE id=?').get(x.id)) ins('requests', x, []);
   for (const x of d.verdicts || []) if (tmap[x.team]) ins('verdicts', { ...x, team: tmap[x.team] });
+  for (const x of d.surveys || []) if (tmap[x.team]) ins('surveys', { ...x, team: tmap[x.team] });
+  for (const x of d.questions || []) if (tmap[x.team]) ins('questions', { ...x, team: tmap[x.team] });
   /* 팀이 고른 주제(teams.request)는 그대로 옮겨졌다(요청 id 는 안 바뀐다) */
   return { id: e.id, okey, teams: Object.keys(tmap).length, needs: Object.keys(nmap).length };
 }
@@ -2174,9 +2262,10 @@ function addNeed(db, event, b) {
 function addPledge(db, need, event, b) {
   const name = plain(b.name, 40);
   if (!name) throw new HttpError(400, '이름을 적어 주세요');
-  const r = db.prepare('INSERT INTO pledges(need,event,name,org,contact,note) VALUES(?,?,?,?,?,?)')
-    .run(need, event, name, plain(b.org, 60), plain(b.contact, 100), plain(b.note, 300));
-  return { id: Number(r.lastInsertRowid), status: 'pending' };
+  const pkey = crypto.randomBytes(5).toString('hex');   // 준 사람의 열쇠. 응답에서 한 번만 나간다
+  const r = db.prepare('INSERT INTO pledges(need,event,name,org,contact,note,pkey) VALUES(?,?,?,?,?,?,?)')
+    .run(need, event, name, plain(b.org, 60), plain(b.contact, 100), plain(b.note, 300), pkey);
+  return { id: Number(r.lastInsertRowid), status: 'pending', ref: 'p' + Number(r.lastInsertRowid), pkey };
 }
 
 function setPledge(db, id, b) {
@@ -2195,9 +2284,10 @@ function addOffer(db, event, b) {
   const name = plain(b.name, 40);
   if (!name) throw new HttpError(400, '이름을 적어 주세요');
   const kind = NEED_KINDS.includes(b.kind) ? b.kind : 'other';
-  const r = db.prepare('INSERT INTO offers(event,kind,name,org,contact,note) VALUES(?,?,?,?,?,?)')
-    .run(event, kind, name, plain(b.org, 60), plain(b.contact, 100), plain(b.note, 300));
-  return { id: Number(r.lastInsertRowid), status: 'pending' };
+  const pkey = crypto.randomBytes(5).toString('hex');
+  const r = db.prepare('INSERT INTO offers(event,kind,name,org,contact,note,pkey) VALUES(?,?,?,?,?,?,?)')
+    .run(event, kind, name, plain(b.org, 60), plain(b.contact, 100), plain(b.note, 300), pkey);
+  return { id: Number(r.lastInsertRowid), status: 'pending', ref: 'o' + Number(r.lastInsertRowid), pkey };
 }
 /* 운영자 전용 — contact 가 실린다 */
 function offersOf(db, event) {
@@ -2213,11 +2303,149 @@ function setOffer(db, id, b) {
     const label = plain(o.note, 80) || OFFER_KIND_LABEL[o.kind] || '기타';
     const nr = db.prepare('INSERT INTO needs(event,kind,label,qty,note) VALUES(?,?,?,1,?)')
       .run(o.event, o.kind, label, '제안으로 들어온 자리');
-    db.prepare("INSERT INTO pledges(need,event,name,org,contact,note,status) VALUES(?,?,?,?,?,?,'ok')")
-      .run(Number(nr.lastInsertRowid), o.event, o.name, o.org, o.contact, o.note);
+    db.prepare("INSERT INTO pledges(need,event,name,org,contact,note,status,pkey) VALUES(?,?,?,?,?,?,'ok',?)")
+      .run(Number(nr.lastInsertRowid), o.event, o.name, o.org, o.contact, o.note, o.pkey || '');
   }
   db.prepare('UPDATE offers SET status=? WHERE id=?').run(b.status, id);
   return { id, status: b.status };
+}
+
+/* ── 준 사람의 화면(/s/<ref>?k=). ref 는 p<pledge id> 또는 o<offer id>.
+   보는 것: 내 후원이 확인됐나(대기·확인·거절 — 모름은 «아직 확인 전»), 대회가 어디까지 왔나(신청·제출),
+   끝난 뒤엔 결과물 상위 셋·설문 요약·보고서 주소. 연락처는 어디에도 없다(공개 장부와 같은 선). */
+function giveView(db, ref, k) {
+  const m = /^([po])(\d+)$/.exec(String(ref || ''));
+  if (!m) throw new HttpError(404, '없는 후원입니다');
+  let row, kind, label;
+  if (m[1] === 'p') {
+    row = db.prepare(`SELECT p.*, n.kind AS nkind, n.label AS nlabel FROM pledges p JOIN needs n ON n.id = p.need WHERE p.id=?`).get(+m[2]);
+    if (row) { kind = row.nkind; label = row.nlabel; }
+  } else {
+    row = db.prepare('SELECT * FROM offers WHERE id=?').get(+m[2]);
+    if (row) { kind = row.kind; label = plain(row.note, 80) || OFFER_KIND_LABEL[row.kind] || '기타'; }
+  }
+  if (!row) throw new HttpError(404, '없는 후원입니다');
+  if (!row.pkey || !k || k !== row.pkey) throw new HttpError(403, '열쇠가 맞지 않습니다');
+  const e = getEvent(db, row.event);
+  const o = outcomes(db, row.event);
+  const isClosed = closed(e);
+  const pk = isClosed ? pack(db, row.event, false) : null;
+  /* 제안(offer)이 확인되면 같은 열쇠로 확정 기여(pledge)가 생긴다 — 그쪽 상태가 진짜다 */
+  let status = row.status;
+  if (m[1] === 'o' && row.status === 'ok') {
+    const pl = db.prepare('SELECT status FROM pledges WHERE pkey=? AND event=? ORDER BY id DESC').get(row.pkey, row.event);
+    if (pl) status = pl.status;
+  }
+  return {
+    gift: { ref, kind, label, name: row.name, org: row.org || '', status, at: row.created },
+    event: { id: e.id, title: e.title, host: e.host, starts: e.starts, ends: e.ends, due: e.due,
+             closed: isClosed, ended: !!e.ends && today() > e.ends,
+             teams: o.teams, finished: o.finished, finishRate: isClosed ? o.finishRate : null },
+    top: pk ? pk.top.map(t => ({ rank: t.rank, name: t.name, note: t.note, url: t.url })) : [],
+    survey: isClosed ? surveySummary(db, row.event) : null,
+    report: '/e/' + e.id + '/report',
+  };
+}
+
+/* ── 끝난 뒤 설문 3문항 — 국민대 매뉴얼의 «추천하겠나·좋았던 것·고칠 것». 팀 열쇠로만, 마감 뒤에만, 팀당 하나 ── */
+function addSurvey(db, event, b, req) {
+  const tk = String((req && req.headers && req.headers['x-tkey']) || b.tkey || '');
+  const team = tk ? db.prepare('SELECT id FROM teams WHERE event=? AND tkey=?').get(event, tk) : null;
+  if (!team) throw new HttpError(403, '팀 열쇠가 필요합니다');
+  if (!closed(getEvent(db, event))) throw new HttpError(409, '제출 마감 뒤에 답할 수 있습니다');
+  const rec = Number(b.recommend);
+  if (!Number.isInteger(rec) || rec < 0 || rec > 10) throw new HttpError(400, 'recommend 는 0~10 정수입니다');
+  db.prepare(`INSERT INTO surveys(event,team,recommend,good,fix) VALUES(?,?,?,?,?)
+              ON CONFLICT(event,team) DO UPDATE SET recommend=excluded.recommend, good=excluded.good, fix=excluded.fix, at=datetime('now')`)
+    .run(event, team.id, rec, plain(b.good, 200), plain(b.fix, 200));
+  return { ok: true };
+}
+/* 공개 요약. 세 건 미만이면 숫자를 안 낸다 — 두 팀의 점수는 «어느 팀이 몇 점»이 드러난다(모름≠0) */
+function surveySummary(db, event, admin = false) {
+  const rows = db.prepare('SELECT recommend, good, fix FROM surveys WHERE event=? ORDER BY at').all(event);
+  const n = rows.length;   // 팀 수다 — UNIQUE(event, team) 라 같은 팀이 두 번 답해도 하나
+  if (n < MIN_CELL) return { n, recommend: null, good: [], fix: [], minCell: MIN_CELL };
+  const avg = Math.round(rows.reduce((a, r) => a + r.recommend, 0) / n * 10) / 10;
+  /* 서술 원문(«총무가 …»)은 운영자만 본다. 공개 보고서와 후원자 화면에는 숫자와 «n팀»만 */
+  return { n, recommend: avg,
+           good: admin ? rows.map(r => r.good).filter(Boolean) : [],
+           fix: admin ? rows.map(r => r.fix).filter(Boolean) : [], minCell: MIN_CELL };
+}
+
+/* ── 대회 안 묻고 답하기. 커뮤니티가 아니다 — 팀 열쇠로 묻고 운영자만 답하고, 답은 소식에 쌓인다. ── */
+const ended = e => !!e.ends && today() > e.ends;
+function askQuestion(db, event, b, req) {
+  const tk = String((req && req.headers && req.headers['x-tkey']) || b.tkey || '');
+  const team = tk ? db.prepare('SELECT id FROM teams WHERE event=? AND tkey=?').get(event, tk) : null;
+  if (!team) throw new HttpError(403, '팀 열쇠가 필요합니다 — 신청한 브라우저에서 물어 주세요');
+  if (ended(getEvent(db, event))) throw new HttpError(409, '끝난 대회입니다. 읽기만 됩니다');
+  const text = plain(b.text, 200);
+  if (!text) throw new HttpError(400, '질문을 적어 주세요');
+  /* 도배 상한 — 답이 안 달린 질문이 셋이면 더 못 묻는다 */
+  const open = db.prepare("SELECT COUNT(*) c FROM questions WHERE event=? AND team=? AND answer='' AND hidden=0").get(event, team.id).c;
+  if (open >= 3) throw new HttpError(409, '답을 기다리는 질문이 셋입니다. 답이 달리면 더 물을 수 있습니다');
+  const r = db.prepare('INSERT INTO questions(event,team,text) VALUES(?,?,?)').run(event, team.id, text);
+  return { id: Number(r.lastInsertRowid) };
+}
+function answerQuestion(db, id, b) {
+  const q = db.prepare('SELECT * FROM questions WHERE id=? AND hidden=0').get(+id);
+  if (!q) throw new HttpError(404, '없는 질문입니다');
+  const answer = plain(b.answer, 300);
+  if (!answer) throw new HttpError(400, '답을 적어 주세요');
+  db.prepare("UPDATE questions SET answer=?, answered_at=datetime('now') WHERE id=?").run(answer, q.id);
+  /* 답은 묻지 않은 팀도 알아야 한다 — 소식에 자동으로. 물은 팀 이름은 안 싣는다 */
+  db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(q.event, plain('답변 · ' + q.text.slice(0, 30) + (q.text.length > 30 ? '…' : '') + ' → ' + answer, 200));
+  return { ok: true };
+}
+function hideQuestion(db, id) {
+  const q = db.prepare('SELECT event FROM questions WHERE id=?').get(+id);
+  if (!q) throw new HttpError(404, '없는 질문입니다');
+  db.prepare('UPDATE questions SET hidden=1 WHERE id=?').run(+id);
+  return { ok: true };
+}
+/* 팀이 자기 질문을 닫는다 — 답이 안 달린 것만. 열쇠를 본 사람이 셋을 채워 문을 잠가도 진짜 팀원이 연다 */
+function closeOwnQuestion(db, id, tk) {
+  const q = db.prepare('SELECT q.id, q.answer, t.tkey FROM questions q JOIN teams t ON t.id = q.team WHERE q.id=? AND q.hidden=0').get(+id);
+  if (!q) throw new HttpError(404, '없는 질문입니다');
+  if (!tk || tk !== q.tkey) throw new HttpError(403, '그 팀의 열쇠가 아닙니다');
+  if (q.answer) throw new HttpError(409, '답이 달린 질문은 닫을 수 없습니다');
+  db.prepare('UPDATE questions SET hidden=1 WHERE id=?').run(q.id);
+  return { ok: true };
+}
+/* 공개 목록. 팀 이름은 나간다(익명 없음) — 연락처는 없다. 24시간 넘게 답이 없으면 waiting */
+function questionsOf(db, event) {
+  return db.prepare(`SELECT q.id, q.text, q.answer, q.at, q.answered_at, t.name AS team
+                     FROM questions q JOIN teams t ON t.id = q.team
+                     WHERE q.event=? AND q.hidden=0 ORDER BY q.id DESC LIMIT 50`).all(event)
+    .map(q => ({ ...q, waiting: !q.answer && (Date.now() - new Date(q.at.replace(' ', 'T') + 'Z')) > 86400000 }));
+}
+
+/* ── 캘린더 파일. 종일 일정은 날짜만 적는다(시간대·오프셋을 붙이면 하루가 밀린다 — E38) ── */
+function icsOf(e, base) {
+  const d = s => String(s || '').replace(/-/g, '');
+  const next = s => { const t = new Date(s + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10).replace(/-/g, ''); };
+  const esc = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//HACK:ON//KO', 'BEGIN:VEVENT',
+    'UID:hackon-' + e.id + '@hackon.mandeun.com',
+    'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z',
+    'DTSTART;VALUE=DATE:' + d(e.starts), 'DTEND;VALUE=DATE:' + next(e.ends || e.starts),
+    'SUMMARY:' + esc(e.title), 'URL:' + base + '/e/' + e.id,
+    'DESCRIPTION:' + esc((e.topic ? '주제 ' + e.topic + '. ' : '') + (e.due ? '제출 마감 ' + e.due.replace('T', ' ') + '. ' : '') + base + '/e/' + e.id),
+    'END:VEVENT', 'END:VCALENDAR'].join('\r\n') + '\r\n';
+}
+
+/* ── 내보내기(CSV). 운영자만 — 연락처가 실린다. 첫 줄에 BOM 을 넣어 엑셀이 한글을 제대로 연다 ── */
+function csvOf(db, event, withContact = true) {
+  const b = board(db, event, true);
+  const cell = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  /* 스태프 방에 올릴 판은 «연락 빼고»로 받는다 — 연락처 열 자체가 없다 */
+  const head = ['자리', '팀', ...(withContact ? ['연락처'] : []), '역할', '체크인', '제출 주소', '점수', '보정 점수', '순위'];
+  const lines = [head.join(',')];
+  for (const r of b.rows) lines.push([r.no, r.name, ...(withContact ? [r.contact] : []), r.role, r.came, r.url || '', r.score, r.rscore, r.rank].map(cell).join(','));
+  lines.push('', ['자리 종류', '자리', '이름', '소속', '상태'].join(','));
+  for (const x of pledgesOf(db, event).filter(x => x.status === 'ok' || x.status === 'done'))
+    lines.push([x.kind, x.label, x.name, x.org, x.status].map(cell).join(','));
+  return '\ufeff' + lines.join('\n') + '\n';
 }
 
 /* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
@@ -2398,7 +2626,90 @@ function routes(db) {
         if (p === '/api/events' && req.method === 'POST') {
           const b = await body(req);
           if (owner) b.owner = owner;   // 이미 연 적이 있으면 그 사람 것으로 묶는다
-          return json(res, 201, createEvent(db, b));
+          /* «지난 대회에서 가져오기». 그 대회의 운영 열쇠(fromKey)나 주최자여야 한다 — 공개 id 만으로 남의 설정을 베끼는 길을 막는다.
+             가져오는 것: 기준표·주제·상금·정원·진행 순서·현장/온라인·대화방·신고 창구·자리(개수만). 사람은 안 가져온다. */
+          let src = null;
+          if (b.from) {
+            if (!isAdmin(db, String(b.from), String(b.fromKey || ''), owner)) throw new HttpError(403, '지난 대회의 운영 열쇠가 필요합니다');
+            src = getEvent(db, String(b.from));
+            b.rubric = src.rubric; b.topic = b.topic || src.topic; b.cap = src.cap; b.plan = src.plan;   // 상금·날짜는 안 가져온다 — 새로 정할 것
+          }
+          const made = createEvent(db, b);
+          if (src) {
+            editEvent(db, made.id, { mode: src.mode, chat: src.chat, safety: src.safety, wifi: src.wifi });
+            for (const n of db.prepare('SELECT kind, label, qty, note FROM needs WHERE event=? ORDER BY id').all(src.id))
+              db.prepare('INSERT INTO needs(event,kind,label,qty,note) VALUES(?,?,?,?,?)').run(made.id, n.kind, n.label, n.qty, n.note);
+            made.copied = src.id;
+          }
+          return json(res, 201, made);
+        }
+        /* 캘린더 파일 — 신청 뒤 «다음에 할 일»에서 내려받는다. 종일 일정이라 날짜만 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/ics$/)) && req.method === 'GET') {
+          const e = getEvent(db, m[1]);
+          res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8',
+                               'content-disposition': 'attachment; filename="hackon-' + e.id + '.ics"' });
+          return res.end(icsOf(e, SITE || ('http://' + (req.headers.host || 'localhost'))));
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/export\.csv$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner);   // 연락처가 실린다 — 운영자만
+          res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8',
+                               'content-disposition': 'attachment; filename="hackon-' + m[1] + '.csv"' });
+          return res.end(csvOf(db, m[1], q.contact !== '0'));
+        }
+        /* 후원 링크 다시 — 운영자가 연락처를 아니 새 열쇠를 만들어 그 사람에게만 보낸다. 옛 링크는 그 자리에서 죽는다 */
+        if ((m = p.match(/^\/api\/give\/([po])(\d+)\/rekey$/)) && req.method === 'POST') {
+          const table = m[1] === 'p' ? 'pledges' : 'offers';
+          const row = db.prepare(`SELECT id, event, pkey FROM ${table} WHERE id=?`).get(+m[2]);
+          if (!row) throw new HttpError(404, '없는 후원입니다');
+          needAdmin(db, row.event, key, owner);
+          const pkey = crypto.randomBytes(5).toString('hex');
+          db.prepare(`UPDATE ${table} SET pkey=? WHERE id=?`).run(pkey, row.id);
+          /* 제안이 확인돼 생긴 확정 기여도 같은 열쇠를 들고 있다 — 같이 바꾼다 */
+          if (table === 'offers' && row.pkey) db.prepare('UPDATE pledges SET pkey=? WHERE event=? AND pkey=?').run(pkey, row.event, row.pkey);
+          return json(res, 200, { link: `/s/${m[1]}${row.id}?k=${pkey}` });
+        }
+        /* 준 사람의 화면 — 열쇠는 쿼리(k)로 온다. 받는 사람(/r) 과 같은 모양 */
+        if ((m = p.match(/^\/api\/give\/([po]\d+)\/view$/)) && req.method === 'GET')
+          return json(res, 200, giveView(db, m[1], String(q.k || req.headers['x-pkey'] || '')));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/survey$/)) && req.method === 'GET')
+          return json(res, 200, surveySummary(db, m[1], isAdmin(db, m[1], key, owner)));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/survey$/)) && req.method === 'POST')
+          return json(res, 200, addSurvey(db, m[1], await body(req), req));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/questions$/)) && req.method === 'GET')
+          return json(res, 200, questionsOf(db, m[1]));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/questions$/)) && req.method === 'POST')
+          return json(res, 201, askQuestion(db, m[1], await body(req), req));
+        if ((m = p.match(/^\/api\/questions\/(\d+)\/answer$/)) && req.method === 'POST') {
+          const qq = db.prepare('SELECT event FROM questions WHERE id=?').get(+m[1]);
+          if (!qq) throw new HttpError(404, '없는 질문입니다');
+          needAdmin(db, qq.event, key, owner);
+          return json(res, 200, answerQuestion(db, m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/questions\/(\d+)$/)) && req.method === 'DELETE') {
+          const qq = db.prepare('SELECT event FROM questions WHERE id=?').get(+m[1]);
+          if (!qq) throw new HttpError(404, '없는 질문입니다');
+          if (req.headers['x-tkey'] && !isAdmin(db, qq.event, key, owner)) return json(res, 200, closeOwnQuestion(db, m[1], req.headers['x-tkey']));
+          needAdmin(db, qq.event, key, owner);
+          return json(res, 200, hideQuestion(db, m[1]));
+        }
+        /* 심사 진행 알림 — «심사 n/m 팀 봤습니다»를 소식에. 참가자가 기다리는 동안 어디까지 왔는지 안다(MLH) */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/progress$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);
+          const bd = board(db, m[1], true);
+          const seen = bd.rows.filter(r => r.judges > 0).length, total = bd.rows.filter(r => r.done).length || bd.rows.length;
+          db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1], `심사 진행 · ${seen}/${total}팀 봤습니다`);
+          return json(res, 200, { seen, total });
+        }
+        /* 순위 보정 켜고 끄기 — 마감 뒤엔 vmode 와 같은 이유로 못 바꾼다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/ranked$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);
+          if (closed(getEvent(db, m[1]))) throw new HttpError(409, '제출 마감이 지나 순위가 공개됐습니다. 산정 방식은 더 못 바꿉니다');
+          const on = (await body(req)).on ? 1 : 0;
+          const was = db.prepare('SELECT ranked FROM events WHERE id=?').get(m[1]).ranked;
+          db.prepare('UPDATE events SET ranked=? WHERE id=?').run(on, m[1]);
+          if (was !== on) db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1],
+            on ? '순위 산정을 심사위원별 등수 보정으로 바꿨습니다' : '순위 산정을 점수 평균으로 되돌렸습니다');
+          return json(res, 200, { ranked: !!on });
         }
         if (p === '/api/find' && req.method === 'GET')
           return json(res, 200, findHelp(q.size));
@@ -3139,7 +3450,8 @@ function routes(db) {
       const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/) || p.match(/^\/j\/[a-z0-9]+$/)
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
-               || p === '/app' || p === '/give' || p === '/ask' || p.match(/^\/r\/[a-z0-9]+$/);
+               || p === '/app' || p === '/give' || p === '/ask' || p.match(/^\/r\/[a-z0-9]+$/)
+               || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
 
       /* 화면 파일은 /e/<id> 같은 깊은 주소에서도 그대로 나간다. 그 안의 <script src="qr.js">
          는 /e/qr.js 를 찾게 되고 404 가 난다. 파일로 열었을 때(file://)도 살아야 하니
@@ -4051,6 +4363,89 @@ function selftest() {
   ok(!db.prepare('SELECT 1 FROM needs WHERE event=?').get(nbEv.id),
      '대회를 지우면 빈자리 판도 따라 지워진다');
 
+  /* ── 2026-09-24 퍼실리테이션 자료 반영 — 서술자·자리 번호·순위 보정·설문·질문·후원 열쇠·달력·CSV ── */
+  {
+    const fx = createEvent(db, { title: '자료반영', starts: today(), ends: today() });
+    ok(getEvent(db, fx.id).rubric.every(r => r.hint && r.hint.low && r.hint.high), '기본 기준표에 낮음·높음 서술자가 붙는다');
+    const tA = joinTeam(db, fx.id, { name: 'A', agree: true }), tB = joinTeam(db, fx.id, { name: 'B', agree: true }), tC = joinTeam(db, fx.id, { name: 'C', agree: true });
+    const nos = board(db, fx.id, true).rows.map(r => r.no);
+    ok(nos.join() === '1,2,3', '자리 번호는 신청 순 1·2·3');
+    db.prepare('DELETE FROM teams WHERE id=?').run(tB);
+    ok(board(db, fx.id, true).rows.map(r => r.no).join() === '1,3', '팀이 빠져도 뒤 자리 번호가 안 당겨진다');
+    const tD = joinTeam(db, fx.id, { name: 'D', agree: true });
+    ok(board(db, fx.id, true).rows.find(r => r.id === tD).no === 4, '새 팀은 비운 번호가 아니라 다음 번호를 받는다');
+    /* 순위 보정 — 짠 둘은 A>C>D, 후한 하나는 D 에만 100. 점수 평균은 D 가 이기고, 등수 보정은 A 가 이긴다 */
+    const sc = (t, j, v) => score(db, t, { judge: j, values: { idea: v, make: v, use: v, tell: v } });
+    sc(tA, '짠1', 62); sc(tC, '짠1', 61); sc(tD, '짠1', 60);
+    sc(tA, '짠2', 62); sc(tC, '짠2', 61); sc(tD, '짠2', 60);
+    sc(tA, '후한', 60); sc(tC, '후한', 61); sc(tD, '후한', 100);
+    let bd = board(db, fx.id, true);
+    ok(bd.rows[0].id === tD, '점수 평균으로는 후한 심사위원이 민 D 가 1위');
+    db.prepare('UPDATE events SET ranked=1 WHERE id=?').run(fx.id);
+    bd = board(db, fx.id, true);
+    ok(bd.rows[0].id === tA && bd.rows[0].rscore > bd.rows.find(r => r.id === tD).rscore, '등수 보정을 켜면 셋 중 둘이 1위로 본 A 가 1위');
+    ok(getEvent(db, fx.id).ranked === 1, 'ranked 칸이 있다');
+    /* 두 팀만 본 심사위원은 보정에서 빠진다 */
+    const fy = createEvent(db, { title: '보정표본', starts: today(), ends: today() });
+    const y1 = joinTeam(db, fy.id, { name: 'y1', agree: true }), y2 = joinTeam(db, fy.id, { name: 'y2', agree: true }), y3 = joinTeam(db, fy.id, { name: 'y3', agree: true });
+    score(db, y1, { judge: '둘만', values: { idea: 90, make: 90, use: 90, tell: 90 } });
+    score(db, y2, { judge: '둘만', values: { idea: 10, make: 10, use: 10, tell: 10 } });
+    ok(board(db, fy.id, true).rows.every(r => r.rscore === 0), '두 팀만 본 심사위원의 등수는 보정에 안 들어간다');
+    score(db, y3, { judge: '둘만', values: { idea: 50, make: 50, use: 50, tell: 50 } });
+    ok(board(db, fy.id, true).rows.find(r => r.id === y1).rscore === 100, '세 팀을 보면 들어간다');
+    /* 동점은 평균 등수 */
+    score(db, y2, { judge: '둘만', values: { idea: 90, make: 90, use: 90, tell: 90 } });
+    ok(board(db, fy.id, true).rows.find(r => r.id === y1).rscore === board(db, fy.id, true).rows.find(r => r.id === y2).rscore, '같은 점수는 같은 등수 점수');
+    /* 설문 — 마감 전 409, 팀당 하나, 셋 미만이면 숫자 없음, 서술은 운영자만 */
+    const tk = t => db.prepare('SELECT tkey FROM teams WHERE id=?').get(t).tkey;
+    let code = 0; try { addSurvey(db, fx.id, { recommend: 9 }, { headers: { 'x-tkey': tk(tA) } }); } catch (e) { code = e.code; }
+    ok(code === 409, '마감 전엔 설문을 못 받는다');
+    editEvent(db, fx.id, { due: '2020-01-01T00:00' });
+    addSurvey(db, fx.id, { recommend: 9, good: '좋', fix: '총무 갑질' }, { headers: { 'x-tkey': tk(tA) } });
+    addSurvey(db, fx.id, { recommend: 7 }, { headers: { 'x-tkey': tk(tA) } });
+    ok(surveySummary(db, fx.id).n === 1, '같은 팀이 두 번 답해도 하나로 센다');
+    addSurvey(db, fx.id, { recommend: 8 }, { headers: { 'x-tkey': tk(tC) } });
+    ok(surveySummary(db, fx.id).recommend === null, '두 팀이면 숫자를 안 낸다(모름≠0)');
+    addSurvey(db, fx.id, { recommend: 6, fix: '고칠 것' }, { headers: { 'x-tkey': tk(tD) } });
+    ok(surveySummary(db, fx.id).recommend === 7 && surveySummary(db, fx.id).fix.length === 0, '세 팀이면 평균이 나오고 서술은 공개에 안 실린다');
+    ok(surveySummary(db, fx.id, true).fix.includes('고칠 것'), '서술 원문은 운영자만');
+    code = 0; try { addSurvey(db, fx.id, { recommend: 11 }, { headers: { 'x-tkey': tk(tA) } }); } catch (e) { code = e.code; }
+    ok(code === 400, '11점은 안 받는다');
+    /* 질문 — 팀 열쇠, 열린 것 셋 상한, 답은 소식에 30자 미리보기, 본인 닫기 */
+    const qe = createEvent(db, { title: '질문', starts: '2099-01-01', ends: '2099-01-01' });
+    const qt = joinTeam(db, qe.id, { name: '묻는팀', agree: true });
+    code = 0; try { askQuestion(db, qe.id, { text: '?' }, { headers: {} }); } catch (e) { code = e.code; }
+    ok(code === 403, '팀 열쇠 없이 못 묻는다');
+    const q1 = askQuestion(db, qe.id, { text: '지금 몇 시에 시작하나요 길게 씁니다 연락처는 010-0000-0000 입니다' }, { headers: { 'x-tkey': tk(qt) } });   // 번호는 30자 뒤에
+    askQuestion(db, qe.id, { text: '둘' }, { headers: { 'x-tkey': tk(qt) } });
+    const q3 = askQuestion(db, qe.id, { text: '셋' }, { headers: { 'x-tkey': tk(qt) } });
+    code = 0; try { askQuestion(db, qe.id, { text: '넷' }, { headers: { 'x-tkey': tk(qt) } }); } catch (e) { code = e.code; }
+    ok(code === 409, '답 없는 질문이 셋이면 더 못 묻는다');
+    closeOwnQuestion(db, q3.id, tk(qt));
+    ok(askQuestion(db, qe.id, { text: '넷' }, { headers: { 'x-tkey': tk(qt) } }).id > 0, '자기 질문을 닫으면 다시 물을 수 있다');
+    code = 0; try { closeOwnQuestion(db, q1.id, 'nope'); } catch (e) { code = e.code; }
+    ok(code === 403, '남의 열쇠로는 못 닫는다');
+    answerQuestion(db, q1.id, { answer: '열 시' });
+    const nt = db.prepare('SELECT text FROM notices WHERE event=? ORDER BY id DESC').get(qe.id).text;
+    ok(nt.startsWith('답변 · ') && !nt.includes('0000-0000') && nt.endsWith('열 시'), '소식에는 질문 앞 30자만 실린다');
+    code = 0; try { closeOwnQuestion(db, q1.id, tk(qt)); } catch (e) { code = e.code; }
+    ok(code === 409, '답이 달린 질문은 못 닫는다');
+    /* 후원 열쇠 — 응답에 한 번, 틀린 열쇠 403, 화면에 연락처 없음, 마감 전엔 결과물 없음 */
+    const nd = addNeed(db, qe.id, { kind: 'cash', label: '상금', qty: 1 });
+    const pl = addPledge(db, nd.id, qe.id, { name: '포도가게', contact: '010-9' });
+    ok(/^p\d+$/.test(pl.ref) && /^[0-9a-f]{10}$/.test(pl.pkey), '후원하면 ref 와 열쇠를 받는다');
+    code = 0; try { giveView(db, pl.ref, 'x'); } catch (e) { code = e.code; }
+    ok(code === 403, '틀린 열쇠로는 후원 화면이 안 열린다');
+    const gv = giveView(db, pl.ref, pl.pkey);
+    ok(gv.gift.status === 'pending' && !JSON.stringify(gv).includes('010-9') && gv.top.length === 0, '후원 화면에 연락처가 없고 마감 전엔 결과물이 없다');
+    const of = addOffer(db, qe.id, { kind: 'snack', name: '커피집', contact: 'c@x.y' });
+    setOffer(db, of.id, { status: 'ok' });
+    ok(giveView(db, of.ref, of.pkey).gift.status === 'ok', '제안이 확인되면 같은 열쇠로 확정 상태가 보인다');
+    /* 달력·CSV */
+    const ics = icsOf(getEvent(db, qe.id), 'https://x.test');
+    ok(ics.includes('DTSTART;VALUE=DATE:20990101') && ics.includes('DTEND;VALUE=DATE:20990102') && !ics.includes('+09:00'), '종일 일정은 날짜만 — 시간대 없음');
+    ok(csvOf(db, fx.id).split('\n')[0].includes('연락처') && !csvOf(db, fx.id, false).includes('연락처'), '«연락 빼고» CSV 에는 연락처 열이 없다');
+  }
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
