@@ -576,6 +576,8 @@ const jkeyOf = id => localStorage.getItem('hackon.jkey.' + id) || '';
 const vkeyOf = id => localStorage.getItem('hackon.vkey.' + id) || '';
 /* 이 브라우저의 투표자 표식. 이름 대신 무작위 토큰 하나 — 같은 사람이 한 팀에 한 번만. */
 let VOTE_TK = '';   // 상호평가일 때 표와 같이 보내는 팀 열쇠
+let RKEY = '';      // 받는 사람(후원자·의뢰자) 열쇠. /r/<id>?k= 로 한 번 받아 둔다
+const rkeyOf = id => localStorage.getItem('hackon.rkey.' + id) || '';
 function voterId() {
   let v = localStorage.getItem('hackon.voter');
   if (!v) { v = 'v' + Math.random().toString(36).slice(2, 12); try { localStorage.setItem('hackon.voter', v); } catch (_) {} }
@@ -589,6 +591,7 @@ async function api(path, opt) {
                ...(opt?.tkey ? { 'x-tkey': opt.tkey } : {}),
                ...(cur && jkeyOf(cur) ? { 'x-jkey': jkeyOf(cur) } : {}),
                ...(cur && vkeyOf(cur) ? { 'x-vkey': vkeyOf(cur) } : {}),
+               ...(RKEY ? { 'x-rkey': RKEY } : {}),
                ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
@@ -615,7 +618,7 @@ const DEMO = {
   outcomes: { teams:3, finished:2, finishRate:66.7, interview:2, adoption:1, hired:0, followup:1, list:[] },
 };
 
-let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '';
+let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '', curReq = '';
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
 let AUTH = null;   // 카카오 로그인을 쓸 수 있는지, 지금 로그인했는지
@@ -668,6 +671,85 @@ function giveHtml() {
     <label>연락처 <span class="pill warn">운영자에게만 보입니다</span></label><input id="g-contact" placeholder="이메일 또는 전화">
     <div style="height:14px"></div><button class="btn" id="g-send">보내기</button>
     <div style="margin-top:10px;text-align:center"><button type="button" class="lnk" data-give-back="1">${G.need ? '다른 것을 주고 싶어요' : '뒤로'}</button></div></div>`;
+}
+/* «받는 사람» 흐름의 상태와 화면. ①누구로 오나 → ②주제 또는 질문 셋(한 화면에 하나) → ③이름·연락처·동의 → 끝(링크). */
+let Q = { step: 1, kind: '', topic: '', pain: '', now: '', done: '', name: '', contact: '', event: '', events: [], result: null };
+function askHtml() {
+  const steps = n => `<div class="gsteps">${['누구로', '무엇을', '연락처'].map((t, i) => `<span${i + 1 === n ? ' class="on"' : ''}>${i + 1} ${t}</span>`).join('<span class="sep">›</span>')}</div>`;
+  if (Q.result) return `<div class="card" id="ask" style="text-align:center;padding:28px 20px"><div style="font-size:40px;line-height:1">📬</div>
+    <h3 style="margin-top:12px">올라갔습니다</h3>
+    <div class="meta">이 주소를 적어 두세요. 대회가 끝나면 여기서 결과물을 보고 «됐다»를 누를 수 있습니다. 열쇠가 들어 있으니 남에게 주지 마세요.</div>
+    <div class="share" id="ask-link" style="margin-top:10px">${esc(location.origin)}/r/${esc(Q.result.id)}?k=${esc(Q.result.rkey)}</div>
+    <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn sm" id="ask-copy">주소 복사</button><a class="btn sec sm" href="/r/${esc(Q.result.id)}?k=${esc(Q.result.rkey)}" style="text-decoration:none">받는 화면 열기</a></div>
+    <div class="meta" style="margin-top:10px">${Q.event ? '이 대회 운영자가 주제로 고르면 대회 페이지에 실립니다.' : '운영자가 자기 대회 주제로 고르면 그때 대회에 붙습니다.'}</div></div>`;
+  if (Q.step === 1) return `<div class="card" id="ask">${steps(1)}<h3>어느 쪽이세요</h3>
+    <div class="gchips" style="grid-template-columns:1fr 1fr">
+      <button type="button" class="gchip${Q.kind === 'sponsor' ? ' on' : ''}" data-ask-kind="sponsor">후원하고 싶어요<br><span style="font-size:12px;font-weight:500">관심 주제를 냅니다</span></button>
+      <button type="button" class="gchip${Q.kind === 'requester' ? ' on' : ''}" data-ask-kind="requester">내 문제를 내고 싶어요<br><span style="font-size:12px;font-weight:500">번거로운 일을 적습니다</span></button></div>
+    <div class="meta" style="margin-top:10px">둘 다 마감 뒤 결과물을 받습니다. 후원 금액·상품은 앱 밖에서 운영자와 정합니다. 앱은 돈을 만지지 않습니다.</div></div>`;
+  if (Q.step === 2) {
+    if (Q.kind === 'sponsor') return `<div class="card" id="ask">${steps(2)}<h3>어떤 주제로 만든 것을 받고 싶으세요</h3>
+      <div class="meta">한 줄이면 됩니다. 예) 동네 가게 예약 · 음성으로 쓰는 메모 · 우리 도구를 쓴 것</div>
+      <input id="ask-topic" value="${esc(Q.topic)}" maxlength="120" placeholder="예) 우리 API 로 만든 음성 서비스">
+      <div style="height:12px"></div><button class="btn" id="ask-next">다음</button>
+      <div style="margin-top:8px;text-align:center"><button type="button" class="lnk" data-ask-back="1">뒤로</button></div></div>`;
+    const qs = [['pain', '요즘 뭐가 제일 번거로우세요?', '예) 모임 회비 낸 사람·안 낸 사람을 카톡 뒤져서 세는 게 번거로워요'],
+                ['now', '지금은 그걸 어떻게 하고 계세요?', '예) 카톡 올라온 걸 보고 수첩에 적어요'],
+                ['done', '이렇게 되면 「됐다」고 하실 수 있어요?', '예) 이름을 누르면 냈다/안 냈다가 바뀌고, 안 낸 사람만 보이면 돼요']];
+    const [k, title, ph] = qs[Q.sub || 0];
+    return `<div class="card" id="ask">${steps(2)}<div class="meta">${(Q.sub || 0) + 1} / 3</div><h3>${title}</h3>
+      <textarea id="ask-q" rows="3" maxlength="300" placeholder="${esc(ph)}">${esc(Q[k])}</textarea>
+      <div style="height:12px"></div><button class="btn" id="ask-next">다음</button>
+      <div style="margin-top:8px;text-align:center"><button type="button" class="lnk" data-ask-back="1">뒤로</button></div></div>`;
+  }
+  return `<div class="card" id="ask">${steps(3)}<h3>됐는지 알려드릴 곳</h3>
+    <label>공개될 이름 <span class="pill">필수</span></label><input id="ask-name" value="${esc(Q.name)}" maxlength="40" placeholder="가게·회사 이름 또는 별명">
+    <label>연락처 <span class="pill warn">운영자에게만 보입니다</span></label><input id="ask-contact" value="${esc(Q.contact)}" maxlength="100" placeholder="이메일 또는 전화">
+    ${!Q.event && Q.events.length ? `<label>어느 대회에 (선택)</label><select id="ask-event"><option value="">운영자가 고르게 둔다</option>${Q.events.map(e => `<option value="${esc(e.id)}">${esc(e.title)}</option>`).join('')}</select>` : ''}
+    <div class="agree" style="margin-top:12px"><label class="ck"><input type="checkbox" id="ask-agree"><span>개인정보 수집·이용에 동의합니다 (이름·연락처, 대회 운영·결과 안내, 대회 종료 뒤 6개월) <span class="pill">필수</span></span></label></div>
+    <div style="height:12px"></div><button class="btn" id="ask-send">올리기</button>
+    <div style="margin-top:8px;text-align:center"><button type="button" class="lnk" data-ask-back="1">뒤로</button></div></div>`;
+}
+function paintAsk() { const w = $('#ask-wrap'); if (!w) return; w.innerHTML = askHtml(); wireAsk(); const f = $('#ask-topic, #ask-q, #ask-name'); if (f) setTimeout(() => f.focus({ preventScroll: true }), 300); }
+function wireAsk() {
+  document.querySelectorAll('[data-ask-kind]').forEach(b => b.onclick = () => { Q.kind = b.dataset.askKind; Q.step = 2; Q.sub = 0; paintAsk(); });
+  document.querySelectorAll('[data-ask-back]').forEach(b => b.onclick = () => {
+    if (Q.step === 3) { Q.step = 2; Q.sub = Q.kind === 'requester' ? 2 : 0; }
+    else if (Q.step === 2 && Q.kind === 'requester' && (Q.sub || 0) > 0) Q.sub -= 1;
+    else Q.step = 1;
+    paintAsk();
+  });
+  const nx = $('#ask-next');
+  if (nx) nx.onclick = () => {
+    if (Q.kind === 'sponsor') { Q.topic = $('#ask-topic').value.trim(); if (!Q.topic) return flash('주제를 한 줄 적어 주세요', true); Q.step = 3; return paintAsk(); }
+    const k = ['pain', 'now', 'done'][Q.sub || 0]; Q[k] = $('#ask-q').value.trim();
+    if (!Q[k]) return flash('한 줄만 적어 주세요', true);
+    if ((Q.sub || 0) < 2) Q.sub = (Q.sub || 0) + 1; else Q.step = 3;
+    paintAsk();
+  };
+  const sd = $('#ask-send');
+  if (sd) sd.onclick = async () => {
+    Q.name = $('#ask-name').value.trim(); Q.contact = $('#ask-contact').value.trim();
+    if (!Q.name) return flash('공개될 이름을 적어 주세요', true);
+    if (!Q.contact) return flash('연락처를 적어 주세요. 결과를 알려드릴 곳입니다', true);
+    if (!$('#ask-agree').checked) return flash('개인정보 동의가 필요합니다', true);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    const ev = $('#ask-event') ? $('#ask-event').value : Q.event;
+    try {
+      Q.result = await api('/requests', { method: 'POST', body: { kind: Q.kind, name: Q.name, contact: Q.contact, topic: Q.topic, pain: Q.pain, now: Q.now, done: Q.done, event: ev || '' } });
+      Q.event = ev || ''; paintAsk();
+    } catch (e) { flash(e.message, true); }
+  };
+  const cp = $('#ask-copy');
+  if (cp) cp.onclick = async () => { const t = $('#ask-link').textContent.trim(); try { await navigator.clipboard.writeText(t); flash('주소를 복사했습니다'); } catch { prompt('복사해서 쓰세요', t); } };
+}
+/* 앱 피드백 한 줄. 서버에 쌓이고 우리(운영)만 열쇠로 본다. 답장은 약속하지 않는다 — 연락처는 선택 */
+function feedbackBox(page) {
+  return `<div class="card" id="fb" style="margin-top:14px"><h3>이 앱, 뭐가 불편했나요</h3>
+    <div class="meta">한 줄이면 됩니다. 만든 사람이 읽습니다. 연락처는 선택이고 답장을 약속하진 않습니다.</div>
+    <input id="fb-text" maxlength="300" placeholder="예) 신청 단추가 어디 있는지 못 찾았어요" style="margin-top:8px">
+    <input id="fb-contact" maxlength="100" placeholder="연락처 (선택)" style="margin-top:6px">
+    <div style="height:8px"></div><button class="btn sec sm" id="fb-send" data-page="${esc(page)}">보내기</button></div>`;
 }
 /* 대회 페이지에 넣는 상자. #help 는 옛 링크(첫 화면 «제가 할게요» 등)가 오던 자리라 남겨 둔다. */
 const giveBox = () => `<div id="give-wrap"><span id="help"></span>${giveHtml()}</div>`;
@@ -942,7 +1024,7 @@ function moreForm(t) {
   if (!need.length) return `<div class="card" id="apply" style="text-align:center;padding:28px 20px">
     <div style="font-size:40px;line-height:1">🎉</div>
     <h3 style="margin-top:12px">신청 완료</h3>
-    <div class="meta">필요한 것을 다 주셨습니다. 확정 메일을 기다려 주세요.</div></div>`;
+    <div class="meta">필요한 것을 다 주셨습니다. 확정 메일을 기다려 주세요.<br>이제 이 대회의 <b>켜는 사람</b>입니다 — 자리가 하나 켜졌습니다.</div></div>`;
   return `<div class="card" id="apply">
     <div class="pill ok" style="margin-bottom:10px">✓ 접수됨</div>
     <h3>신청됐습니다. 조금만 더</h3>
@@ -1646,6 +1728,9 @@ const SCREEN = {
     (LIVE ? await api(`/events/${cur}/pledges`).catch(() => []) : (DEMO.pledges || [])).forEach(p => { pledgeInfo[p.id] = p; });
     /* 자리 밖 제안. 아무나 메일 대신 앱에서 보낸 것. 운영자만 본다(연락처 포함). */
     const offers = LIVE ? await api(`/events/${cur}/offers`).catch(() => []) : [];
+    /* 주제·요청 — 붙은 것(운영자면 연락처 포함)과 후보 */
+    const reqsAll = LIVE ? await api(`/events/${cur}/requests`).catch(() => []) : [];
+    const reqsCand = LIVE ? await api('/requests').catch(() => []) : [];
     /* 열쇠가 없으면 순위와 공유 주소까지만 보여 준다. 연락처는 서버가 이미 안 준다. */
     if (LIVE && !e.admin) return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 참가 ${e.teams}팀</p>
@@ -1799,6 +1884,20 @@ const SCREEN = {
         <button class="btn sm" id="e-save">저장</button>
       </div></details>`; })()}
 
+      ${/* 올라온 주제·요청. 붙은 것(연락처는 운영자만)과 후보(아직 어느 대회에도 안 붙은 것). 한 대회 다섯 개까지, 올라온 순. */''}
+      ${(() => { const mine = reqsAll.filter(r => r.event === e.id), cands = reqsCand;
+        return `<details${mine.length ? ' open' : ''}><summary>주제 · 요청 <span class="when">${mine.length ? mine.length + '개 붙음' : cands.length ? '후보 ' + cands.length + '개' : '아직 없음'}</span></summary><div class="in">
+        <div class="meta">후원자·의뢰자가 낸 주제입니다. 붙이면 대회 페이지와 제출 폼에 실리고, 마감 뒤 그 사람이 결과물을 받습니다. 한 대회 다섯 개까지.</div>
+        ${mine.map(r => `<div class="card" style="margin-top:9px"><h3><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span> ${esc(r.topic || r.pain)}</h3>
+          <div class="meta">${esc(r.name)}${r.contact ? ' · <span class="contact">' + esc(r.contact) + '</span>' : ''}${r.done ? '<br>«됐다»의 기준: ' + esc(r.done) : ''}${r.teams ? '<br>' + r.teams + '팀이 골랐습니다' : ''}</div>
+          <div style="height:8px"></div><button class="btn sec sm" data-pick="${esc(r.id)}" data-on="0">떼기</button></div>`).join('')}
+        ${cands.length ? `<h3 style="margin-top:12px;font-size:15px">후보 — 아직 어느 대회에도 안 붙은 것</h3>
+          ${cands.map(r => `<div class="card" style="margin-top:9px"><h3><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span> ${esc(r.topic || r.pain)}</h3>
+            <div class="meta">${esc(r.name)}${r.done ? ' · «됐다»의 기준: ' + esc(r.done) : ''}</div>
+            <div style="height:8px"></div><button class="btn sm" data-pick="${esc(r.id)}" data-on="1">이 대회 주제로</button></div>`).join('')}` : ''}
+        <div class="meta" style="margin-top:10px">주제를 직접 부탁하려면 <a href="/ask?e=${esc(e.id)}">/ask</a> 링크를 그분께 보내세요.</div>
+      </div></details>`; })()}
+
       ${/* 대회를 접는 두 길. 목록 내리기가 기본(파랑)이고 완전 삭제는 회색 뒤에. 빈 대회인지는 서버가 다시 판정한다 —
             화면이 열려 있는 동안 신청이 들어올 수 있다. 백업도 서버가 맡는다(응답에 사본이 실려 온다). */''}
       ${(() => { const busyDel = (d.rows || []).length || needs.length || offers.length;
@@ -1839,6 +1938,8 @@ const SCREEN = {
           : '기본은 심사위원 점수입니다. 심사위원 자리가 비면 관객 평가나 참가팀 상호평가로 돌릴 수 있습니다. 제출 마감 전까지 되돌릴 수 있습니다.'}</div>
         ${on ? '' : `<div class="meta" style="margin-top:6px">${stateLine}${J.jseats ? ` · 확인된 심사 자리 ${J.jseats}` : (needs.some(n => n.kind === 'judge') ? '' : ' · 심사 자리를 올리지 않으셨어요')}</div>`}
         ${js.length ? `<div class="meta" style="margin-top:6px">심사위원 ${js.length}명의 점수가 있습니다${on ? ' (점수는 남아 있습니다)' : ''}.</div>` : ''}
+        ${(() => { const tv = (d.rows || []).reduce((a, r) => a + (+r.votes || 0), 0), n = (d.rows || []).length;
+            return on && n && tv > n * (n + 3) ? `<div class="meta late" style="margin-top:6px">표가 ${tv}장입니다. 참가 ${n}팀 규모치고 많습니다. 한 사람이 기기를 바꿔 여러 번 찍거나 밖에서 동원했을 수 있습니다. 순위 발표 전에 현장 인원과 견주어 보세요.</div>` : ''; })()}
         <div style="height:10px"></div>
         ${d.closed ? '<span class="pill">마감이 지나 평가 방식은 더 못 바꿉니다</span>'
           : on ? `<button class="btn sec sm" id="b-vmode" data-on="0" data-judges="${js.length}">심사 점수로 되돌리기</button>`
@@ -1983,6 +2084,9 @@ const SCREEN = {
             '<b>행사장 큰 화면용.</b>')}
           ${linkBox(`${shareBase()}/j/${e.id}${e.jkey ? '?k=' + e.jkey : ''}`, 'jlink', 'b-copyj',
             '<b>심사위원용.</b> 심사 열쇠가 들어 있습니다. 순위는 안 보입니다.')}
+          <div class="meta" style="margin-top:8px">링크가 대화방이나 공용 화면에 흘렀으면 열쇠를 새로 만드세요. 옛 링크는 그 자리에서 죽습니다.
+            <button class="btn sec sm" data-rekey="jkey" style="margin-left:6px">심사 열쇠 새로</button>
+            <button class="btn sec sm" data-rekey="vkey" style="margin-left:4px">투표 열쇠 새로</button></div>
         </div></details>
       </div></details>
       ${/* 이 브라우저로 신청한 사람에게만 펴 준다. 이어서 채울 칸이 있기 때문이다.
@@ -2054,6 +2158,7 @@ const SCREEN = {
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : DEMO.ledger;
     const notes = LIVE ? await api(`/events/${cur}/notices`).catch(() => []) : [];
+    const reqs = LIVE ? await api(`/events/${cur}/requests`).catch(() => []) : [];
     const ended = statusOf(e).k === '끝남';
     /* 아래 바닥 단추. 화면을 그린 뒤 render() 가 붙인다. */
     CTA = ended ? null
@@ -2085,6 +2190,12 @@ const SCREEN = {
         <div class="meta">운영자가 띄운 공지가 시각과 함께 남습니다. 이 페이지가 열려 있으면 1분마다 새 소식을 가져옵니다. 앱은 메일·문자를 보내지 않습니다.</div>
         <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn sec sm" id="nt-bell">새 소식 알림 받기</button><span class="meta" id="nt-bell-s"></span></div>
         <ul class="news" id="news-list">${notes.map(newsRow).join('')}</ul></div>` : ''}
+      ${(reqs.length || !ended) ? `<div class="card" id="reqs"><h3>이 대회의 주제 · 요청 <span class="pill">${reqs.length}</span></h3>
+        <div class="meta">후원자가 낸 관심 주제와 의뢰자가 낸 번거로운 일입니다. 올라온 순서이고 순위는 없습니다. 하나 고르거나 자유 주제로 만듭니다.</div>
+        ${reqs.map(r => `<div class="card" style="margin-top:9px">
+          <h3><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span> ${esc(r.topic || r.pain)}</h3>
+          <div class="meta">${esc(r.name)}${r.done ? ' · «됐다»의 기준: ' + esc(r.done) : ''}${r.teams ? ' · ' + r.teams + '팀이 만드는 중' : ''}</div></div>`).join('')}
+        ${!ended ? `<div style="margin-top:10px"><a class="btn sec sm" href="/ask?e=${esc(e.id)}" style="text-decoration:none">주제·문제 올리기</a></div>` : ''}</div>` : ''}
 
       ${/* 신청 칸이 여기 있다 — 열네 개 섹션을 지나 맨 아래가 아니라, 대회 이름 바로 밑.
            이 페이지에 오는 사람이 할 일은 하나뿐이고(토스: 한 화면에 하나), 그 하나가
@@ -2135,7 +2246,8 @@ const SCREEN = {
           ${made.map(r => `<div class="card"${r.featured ? ' style="border-left:3px solid var(--acc)"' : ''}>
             <h3>${r.featured ? '⭐ ' : ''}${esc(r.name)}${r.featured ? ' <span class="pill">추천작</span>' : ''}</h3>
             ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
-            ${r.url ? `<div class="share" style="margin-top:10px">${esc(r.url)}</div>` : ''}</div>`).join('')}`;
+            ${r.url ? `<div class="share" style="margin-top:10px">${esc(r.url)}</div>` : ''}
+            ${(r.words_public || []).length ? `<div class="meta" style="margin-top:8px"><b>사람들이 남긴 말</b><br>${r.words_public.map(w => '“' + esc(w) + '”').join('<br>')}</div>` : ''}</div>`).join('')}`;
       })()}
 
       ${sup.rows.length ? `<h3>끝난 뒤에도 봐 드립니다</h3>
@@ -2188,7 +2300,7 @@ const SCREEN = {
 
       ${ledger.length ? `<h3>공개 장부</h3>
       <p class="sub">운영자가 확인한 것만 이름과 함께 남습니다. 연락처는 공개하지 않습니다.</p>
-      <table><tr><th>자리</th><th>이름</th><th>소속</th></tr>${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
+      <table><tr><th>자리</th><th>이름</th><th>소속</th></tr>${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}${x.direct ? ' <span class="pill" title="운영자가 앱 밖에서 구해 직접 올린 줄">운영자 등록</span>' : ''}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
 
       ${!ended ? giveBox() : ''}
 
@@ -2225,7 +2337,58 @@ const SCREEN = {
       </div>` : ''}
 
       <div class="card"><h3>심사 기준</h3>${rubricBars(e.rubric)}</div>
-      ${rulesBox()}`;
+      ${rulesBox()}
+      ${feedbackBox('대회 페이지')}`;
+  },
+
+  /* /ask — «받는 사람». 후원자든 의뢰자든 주제(문제)를 내고, 마감 뒤 결과물과 동의한 제작자 연락을 열쇠 하나로 받는다.
+     한 화면에 판단 하나. 의뢰자는 질문 셋(번거로운 일 · 지금은 어떻게 · 이렇게 되면 됐다)을 한 화면에 하나씩.
+     상태는 Q 하나에 둔다(G 와 같은 이유 — flash 가 화면을 통째로 다시 그린다). */
+  async ask() {
+    if (!Q.events.length && LIVE) { try { Q.events = (await api('/events')).filter(e => statusOf(e).k !== '끝남'); } catch { Q.events = []; } }
+    const e0 = new URLSearchParams(location.search).get('e'); if (e0 && !Q.event) Q.event = e0;
+    return `<section class="hero"><h2>주제나 문제를 내고, 만든 것을 받으세요</h2>
+        <p class="sub" style="margin-bottom:0">후원하는 분은 관심 주제를, 의뢰하는 분은 번거로운 일을 냅니다. 대회가 끝나면 그 주제로 만든 결과물과 (동의한) 만든 분 연락처를 이 링크로 받습니다.</p>
+      </section>
+      <div id="ask-wrap">${askHtml()}</div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a></p>`;
+  },
+  async recv() {
+    const keyPrompt = err => `<h2>받는 화면</h2>
+      <p class="sub">${err ? '<b class="late">' + esc(err) + '</b><br>' : ''}주제·문제를 올릴 때 받은 <b>링크</b>를 여세요. 링크에 열쇠가 들어 있습니다.</p>
+      <label>받는 사람 열쇠</label><input id="rk-in" placeholder="영문과 숫자 10자">
+      <div style="height:12px"></div><button class="btn" id="rk-go">열기</button>`;
+    if (!RKEY) return keyPrompt('');
+    let v; try { v = await api(`/requests/${curReq}/view`); } catch (e) { return keyPrompt('열쇠가 맞지 않습니다.'); }
+    const r = v.request, ev = v.event;
+    const FU = [['using', '네, 쓰고 있어요'], ['sometimes', '몇 번 쓰다 말았어요'], ['no', '안 써요'], ['broken', '열리지가 않아요']];
+    return `<section class="hero">
+        <div class="top"><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span><span>${esc(r.name)}</span></div>
+        <h2>${esc(r.topic || r.pain)}</h2>
+        ${r.pain && r.topic !== r.pain ? `<p class="sub" style="margin-bottom:6px">${esc(r.pain)}</p>` : ''}
+        ${r.done ? `<p class="sub" style="margin-bottom:0"><b>«됐다»의 기준:</b> ${esc(r.done)}</p>` : ''}
+      </section>
+      ${!ev ? `<div class="card"><h3>아직 대회에 붙지 않았습니다</h3><div class="meta">운영자가 대회 주제로 고르면 여기에 대회와 만드는 팀이 보입니다. 이 주소를 적어 두세요.</div></div>`
+      : `<div class="card"><h3>${esc(ev.title)}</h3><div class="meta">${esc(ev.starts)}${ev.due ? ' · 제출 마감 ' + esc(ev.due.replace('T', ' ')) : ''} · <a href="/e/${esc(ev.id)}">대회 페이지</a></div></div>
+      ${!ev.closed ? `<div class="card"><h3>지금 ${v.teams.length}팀이 만들고 있습니다</h3>
+          <div class="meta">결과물 주소는 <b>제출 마감 뒤</b>에 여기서 열립니다. 먼저 낸 팀이 손해 보지 않게 하기 위해서입니다.</div>
+          ${v.teams.map(t => `<div class="meta" style="margin-top:6px"><b>${esc(t.name)}</b>${t.note ? ' · ' + esc(t.note) : ''}</div>`).join('')}</div>`
+      : `${v.teams.length ? '' : '<div class="card"><h3>이 주제로 만든 팀이 없었습니다</h3><div class="meta">다음 대회에 다시 올릴 수 있습니다.</div></div>'}
+        ${v.teams.map((t, i) => `<div class="card" id="rt-${t.id}">
+          <h3>${esc(t.name)}${t.verdict ? (t.verdict.ok ? ' <span class="pill ok">이거면 됩니다</span>' : ' <span class="pill warn">아직 아니에요</span>') : ''}</h3>
+          ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ''}
+          ${t.url ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec sm" data-rtry="${i}">열어보기</button><a class="btn sec sm" href="${esc(t.url)}" target="_blank" rel="noopener" style="text-decoration:none">새 창</a></div>
+            <div class="trybox" id="rtry-${i}" hidden></div>` : '<div class="meta" style="margin-top:6px">제출한 주소가 없습니다.</div>'}
+          ${t.contact ? `<div class="meta" style="margin-top:8px">만든 분 연락처(제공에 동의한 분) · <b>${esc(t.contact)}</b> — 쓰고 싶거나 사고 싶으면 직접 연락하세요. 앱은 돈을 만지지 않습니다.</div>`
+                      : '<div class="meta" style="margin-top:8px">만든 분이 연락처 제공에 동의하지 않았습니다.</div>'}
+          <label>판정 <span class="pill">점수표 없음</span></label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" data-verdict="${t.id}" data-ok="1">이거면 됩니다</button><button class="btn sec sm" data-verdict="${t.id}" data-ok="0">아직 아니에요</button></div>
+          <input data-vnote-r="${t.id}" value="${esc(t.verdict ? t.verdict.note : '')}" placeholder="한 줄 (선택)" style="margin-top:8px">
+        </div>`).join('')}
+        <div class="card"><h3>2주 뒤 — 아직 쓰고 계세요?</h3>
+          <div class="meta">이 답이 다음 대회를 정합니다. 답이 없으면 «모름»으로 남습니다.${v.followup ? ' 지금 답: <b>' + esc((FU.find(x => x[0] === v.followup) || [])[1] || v.followup) + '</b>' : ''}</div>
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${FU.map(([k, l]) => `<button class="btn ${v.followup === k ? '' : 'sec'} sm" data-followup="${k}">${l}</button>`).join('')}</div></div>`}`}
+      <p class="meta" style="margin:14px 4px">끝난 뒤 고쳐 달라는 부탁은 약속이 아닙니다. 만든 분은 무료 외주가 아닙니다.</p>`;
   },
 
   /* /give — 첫 화면 «내가 줄 수 있는 것» 이 오는 곳. 대회를 아직 안 고른 채 시작한다.
@@ -2515,6 +2678,7 @@ const SCREEN = {
         return `<div class="card"><h3>${esc(t.name)}</h3>
         <div class="stars" data-vote="${t.id}">${[1, 2, 3, 4, 5].map(i =>
           `<button data-vs="${i}" class="${i <= mine ? 'on' : ''}">★</button>`).join('')}</div>
+        <input data-vnote="${t.id}" maxlength="80" placeholder="한 줄 (선택) — 마감 뒤 공개, 누가 썼는지는 안 남습니다" style="margin-top:8px">
       </div>`; }).join('')}`;
   },
 
@@ -2670,6 +2834,7 @@ const SCREEN = {
     const t = d.rows.find(r => String(r.id) === String(curTeam)) || d.rows[0];
     if (!t) return `<h2>팀이 없습니다</h2>`;
     const cardData = LIVE ? await api(`/teams/${t.id}/card`) : null;
+    const reqs = LIVE ? await api(`/events/${cur}/requests`).catch(() => []) : [];
     return `<button class="btn sec sm" data-go="board">← 순위로</button>
       <h2 style="margin-top:12px">${esc(t.name)}</h2>
       <p class="sub">${t.rank}위 · ${t.score}점 · 심사 ${t.judges}명</p>
@@ -2714,6 +2879,9 @@ const SCREEN = {
           placeholder="예) 추천 로직을 제안했는데 우리 문제와 안 맞아서 버렸습니다">${esc(t.aidrop || '')}</textarea>
         <div class="meta">이 두 줄이 심사에서 가장 크게 보이는 곳입니다.
           만드는 것은 이제 누구나 합니다. <b>무엇을 버렸는지가 그 팀의 판단입니다.</b></div>
+        ${reqs.length ? `<label>어느 주제·요청으로 만들었나요 <span class="pill">선택</span></label>
+          <select id="s-request"><option value="">자유 주제</option>${reqs.map(r => `<option value="${esc(r.id)}"${t.request === r.id ? ' selected' : ''}>${esc(r.kind === 'sponsor' ? '후원자' : '의뢰자')} · ${esc(r.topic || r.pain)}</option>`).join('')}</select>
+          <div class="meta">고르면 그 주제를 낸 분이 마감 뒤 결과물을 받고 «됐다/아니다»를 답합니다.</div>` : ''}
         <div style="height:14px"></div>
         <label class="ck"><input type="checkbox" id="s-show"${t.show ? ' checked' : ''}>
           <span>대회가 끝난 뒤 <b>첫 화면에 내 결과물을 걸어도 좋습니다</b></span></label>
@@ -2847,7 +3015,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
         <label>회사 이름</label><input id="p-name" placeholder="예) 오픈에이아이">
         <div class="row">
           <div><label>무엇을 받았나</label>
-            <select id="p-kind"><option>크레딧</option><option>상품</option><option>멘토</option><option>현금</option></select></div>
+            <select id="p-kind"><option>크레딧</option><option>상품</option><option>멘토</option><option>현금</option><option>현물</option></select></div>
           <div><label>금액(원)</label><input id="p-amt" type="number" value="0"></div>
         </div>
         <label>회사 홈페이지 주소 <span class="pill">여기만 넣으면 됩니다</span></label>
@@ -3195,7 +3363,8 @@ function wire() {
       await api(`/teams/${curTeam}/submit`, { method: 'POST', tkey: tkeyOf(curTeam),
         body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim(),
                 aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(),
-                show: $('#s-show') ? $('#s-show').checked : undefined } });
+                show: $('#s-show') ? $('#s-show').checked : undefined,
+                request: $('#s-request') ? $('#s-request').value : undefined } });
       flash('제출했습니다');
     } catch (e) { flash(e.message, true); }
   };
@@ -3366,6 +3535,48 @@ function wire() {
     document.querySelectorAll('[data-bg-chip]').forEach(x => x.classList.toggle('on', x === b));
     const go = $('#bg-go'); if (go) go.click();
   });
+  wireAsk();
+  /* 받는 화면 — 열쇠 입력, 열어보기, 판정, D+14 */
+  const rkgo = $('#rk-go');
+  if (rkgo) rkgo.onclick = () => { const v = $('#rk-in').value.trim(); if (!v) return flash('열쇠를 넣어 주세요', true); try { localStorage.setItem('hackon.rkey.' + curReq, v); } catch (_) {} RKEY = v; render(); };
+  document.querySelectorAll('[data-rtry]').forEach(b => b.onclick = () => {
+    const box = $('#rtry-' + b.dataset.rtry); if (!box) return;
+    const url = b.parentElement.querySelector('a').getAttribute('href');
+    if (!box.hidden) { box.hidden = true; box.innerHTML = ''; b.textContent = '열어보기'; return; }
+    box.hidden = false; b.textContent = '접기';
+    box.innerHTML = `<div class="trynote">안 뜨면 만든 분이 다른 곳에서 못 열게 막아 둔 것입니다. 새 창으로 여세요.</div>
+      <iframe src="${esc(url)}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups allow-same-origin" style="width:100%;height:min(62vh,520px);border:1px solid var(--rule);border-radius:12px;background:#fff"></iframe>`;
+  });
+  document.querySelectorAll('[data-verdict]').forEach(b => b.onclick = async () => {
+    const tid = b.dataset.verdict, nt = document.querySelector(`[data-vnote-r="${tid}"]`);
+    try { await api(`/requests/${curReq}/verdict`, { method: 'POST', body: { team: +tid, ok: +b.dataset.ok, note: nt ? nt.value.trim() : '' } }); flash(+b.dataset.ok ? '«이거면 됩니다»로 남겼습니다' : '«아직 아니에요»로 남겼습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-followup]').forEach(b => b.onclick = async () => {
+    try { await api(`/requests/${curReq}/followup`, { method: 'POST', body: { status: b.dataset.followup } }); flash('답을 남겼습니다. 고맙습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-pick]').forEach(b => b.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try { await api(`/events/${cur}/pick`, { method: 'POST', body: { request: b.dataset.pick, on: b.dataset.on === '1' } }); flash(b.dataset.on === '1' ? '이 대회 주제로 붙였습니다. 대회 페이지와 제출 폼에 실립니다' : '뗐습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-rekey]').forEach(b => b.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    const w = b.dataset.rekey;
+    if (!confirm((w === 'jkey' ? '심사' : '투표') + ' 열쇠를 새로 만듭니다. 이미 보낸 링크는 더 열리지 않습니다. 계속할까요?')) return;
+    try { const r = await api(`/events/${cur}/rekey`, { method: 'POST', body: { which: w } });
+      try { localStorage.setItem('hackon.' + w + '.' + cur, r[w]); } catch (_) {}
+      flash('새 열쇠를 만들었습니다. 링크를 다시 보내세요'); }
+    catch (e) { flash(e.message, true); }
+  });
+  const fbs = $('#fb-send');
+  if (fbs) fbs.onclick = async () => {
+    const t = $('#fb-text').value.trim(); if (!t) return flash('한 줄 적어 주세요', true);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    try { await api('/feedback', { method: 'POST', body: { page: fbs.dataset.page, text: t, contact: $('#fb-contact').value.trim() } }); $('#fb-text').value = ''; $('#fb-contact').value = ''; flash('고맙습니다. 읽고 고치겠습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
   /* 새 소식 브라우저 알림 — 탭이 열려 있는 동안만. 서버 푸시가 아니다 */
   const bell = $('#nt-bell'), bells = $('#nt-bell-s');
   if (bell) {
@@ -3392,7 +3603,8 @@ function wire() {
       const sc = +b.dataset.vs;
       box.querySelectorAll('button').forEach(x => x.classList.toggle('on', +x.dataset.vs <= sc));
       try {
-        await api(`/teams/${tid}/vote`, { method: 'POST', body: { voter: voterId(), score: sc }, tkey: VOTE_TK || undefined });
+        const nt = document.querySelector(`[data-vnote="${tid}"]`);
+        await api(`/teams/${tid}/vote`, { method: 'POST', body: { voter: voterId(), score: sc, note: nt ? nt.value.trim() : '' }, tkey: VOTE_TK || undefined });
         try { localStorage.setItem('hackon.vote.' + tid, sc); } catch (_) {}
         flash('별 ' + sc + '점 보냈습니다');
       } catch (e) { flash(e.message, true); }
@@ -3905,6 +4117,8 @@ const JUD = location.pathname.match(/^\/j\/([a-z0-9]+)$/);
 const VOT = location.pathname.match(/^\/v\/([a-z0-9]+)$/);
 const TVM = location.pathname.match(/^\/tv\/([a-z0-9]+)$/);
 const GIV = location.pathname === '/give';   // «줄 수 있는 것» 세 화면. 첫 화면 입구가 온다
+const ASKP = location.pathname === '/ask';   // «받는 사람» — 후원자·의뢰자가 주제·문제를 올리는 세 화면
+const RCV = location.pathname.match(/^\/r\/([a-z0-9]+)$/);   // 받는 화면 /r/<id>?k=<열쇠>
 if (PRO) {
   curPerson = PRO[1];
   tab = 'prof';
@@ -3927,10 +4141,18 @@ if (TVM) {
   /* 아무도 안 만져도 되게. 10초마다 스스로 새로 받는다. */
   setInterval(() => render(), 10000);
 }
-else if (GIV) {
-  tab = 'give';
+else if (GIV || ASKP) {
+  tab = GIV ? 'give' : 'ask';
   document.querySelector('nav').style.display = 'none';
   document.body.classList.add('guest');
+}
+else if (RCV) {
+  curReq = RCV[1]; tab = 'recv';
+  document.querySelector('nav').style.display = 'none';
+  document.body.classList.add('guest');
+  const k = new URLSearchParams(location.search).get('k');
+  if (k) try { localStorage.setItem('hackon.rkey.' + curReq, k); } catch (_) {}
+  RKEY = rkeyOf(curReq);
 }
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
 

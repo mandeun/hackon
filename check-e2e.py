@@ -8,6 +8,7 @@
 마지막에 file:// 데모 모드가 안 깨졌는지도 본다 — 캡처와 발표가 그걸로 돈다.
 """
 import json
+import re
 import os
 from datetime import datetime, timedelta
 import subprocess
@@ -1066,6 +1067,100 @@ with sync_playwright() as p:
     nctx.close()
     ok("지우기(확인·사본) · 심사 넛지(질문→아직→돌리기, D-10 없음) · 마감 뒤 409 · 상호평가(팀 열쇠·자기 팀 제외) · 밖에서 구함 · 대화방 · 소식")
 
+    # ── 받는 사람(후원자·의뢰자) · 한 줄 평가 · 피드백 · 현물 · 열쇠 새로 · 장부 표시 ──
+    _, re_ = post("/api/events", {"title": "받는사람대회"}); RE, REK = re_["id"], re_["okey"]
+    post(f"/api/events/{RE}", {"due": "2099-01-01T23:59", "starts": "2099-01-01", "ends": "2099-01-01"}, REK, method="PATCH")
+    actx = b.new_context(viewport={"width": 390, "height": 844}); ap = actx.new_page()
+    ap.on("pageerror", lambda e: errs.append("ask:" + str(e)))
+    ap.goto(BASE + f"/ask?e={RE}"); ap.wait_for_selector('[data-ask-kind="requester"]')
+    A(ap.query_selector("#ask-name") is None, "누구인지 고르기 전에 이름부터 묻는다")
+    ap.click('[data-ask-kind="requester"]'); ap.wait_for_selector("#ask-q")
+    for txt in ["회비 낸 사람 세기가 번거로워요", "수첩에 적어요", "이름 누르면 냈다로 바뀌면 돼요"]:
+        ap.fill("#ask-q", txt); ap.click("#ask-next"); ap.wait_for_timeout(250)
+    ap.wait_for_selector("#ask-name")
+    ap.fill("#ask-name", "총무 김"); ap.fill("#ask-contact", "kim-secret@example.com")
+    ap.click("#ask-send"); ap.wait_for_timeout(400)
+    A(ap.query_selector("#ask-link") is None, "개인정보 동의 없이 올라갔다")
+    ap.check("#ask-agree"); ap.click("#ask-send"); ap.wait_for_selector("#ask-link")
+    link = ap.inner_text("#ask-link").strip()
+    mm = re.search(r"/r/([a-z0-9]+)\?k=([a-z0-9]+)", link); A(mm, f"받는 링크 모양이 아니다: {link}")
+    RID, RK = mm.group(1), mm.group(2)
+    pub_reqs = api(f"/api/events/{RE}/requests")
+    A(any(r["id"] == RID for r in pub_reqs), "대회에 붙은 요청이 공개 목록에 없다")
+    A("kim-secret" not in json.dumps(pub_reqs, ensure_ascii=False) and RK not in json.dumps(pub_reqs), "요청 목록에 연락처·열쇠가 샜다")
+    A(api(f"/api/events/{RE}/requests", key=REK)[0]["contact"] == "kim-secret@example.com", "운영자 목록에 연락처가 없다")
+    A(code_of(f"/api/requests/{RID}/view") == 403, "열쇠 없이 받는 화면이 열린다")
+    # 팀이 제출하며 주제를 고른다 → 마감 전 받는 화면엔 주소·연락처 없음 → 마감 뒤엔 있음(동의자만) → 판정·D+14
+    _, rt = post(f"/api/events/{RE}/teams", {"name": "회비팀", "email": "maker-secret@example.com", "agree": True, "share": True})
+    A(post(f"/api/teams/{rt['id']}/submit", {"url": "https://made.example/app", "note": "회비 체크", "request": "zzzzzzzz"}, tkey=rt["tkey"])[0] == 400, "남의 대회 주제가 붙었다")
+    A(post(f"/api/teams/{rt['id']}/submit", {"url": "https://made.example/app", "note": "회비 체크", "request": RID}, tkey=rt["tkey"])[0] == 200, "주제를 골라 제출 못 했다")
+    ap.goto(BASE + f"/r/{RID}?k={RK}"); ap.wait_for_selector("body[data-ready='1']")
+    vt = ap.inner_text("#view")
+    A("1팀이 만들고 있습니다" in vt and "made.example" not in vt and "maker-secret" not in vt, f"마감 전 받는 화면에 주소·연락처가 보인다: {vt[:200]}")
+    rq_h = {"content-type": "application/json", "x-rkey": RK}
+    rv0 = json.load(urllib.request.urlopen(urllib.request.Request(BASE + f"/api/requests/{RID}/view", headers=rq_h)))
+    A(rv0["teams"][0]["url"] == "" and rv0["teams"][0]["contact"] == "", f"마감 전 받는 화면 응답에 주소·연락처가 실린다 (화면이 안 그려도 응답에 있으면 샌 것): {rv0['teams'][0]}")
+    A(post(f"/api/requests/{RID}/verdict", {"team": rt["id"], "ok": 1}, )[0] == 403, "열쇠 없이 판정이 들어갔다")
+    post(f"/api/events/{RE}", {"due": (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M")}, REK, method="PATCH")
+    ap.goto(BASE + f"/r/{RID}?k={RK}"); ap.wait_for_selector("[data-verdict]")
+    vt = ap.inner_text("#view")
+    A("maker-secret@example.com" in vt and ap.query_selector("[data-rtry]") is not None, "마감 뒤 받는 화면에 동의한 제작자 연락·열어보기가 없다")
+    ap.fill(f'[data-vnote-r="{rt["id"]}"]', "이거면 됩니다. 당장 씁니다")
+    ap.click(f'[data-verdict="{rt["id"]}"][data-ok="1"]'); ap.wait_for_timeout(700)
+    ap.click('[data-followup="using"]'); ap.wait_for_timeout(600)
+    actx.close()
+    # 운영자 판정 열람은 아직 없다 — DB 대신 받는 화면 API 로 본다
+    rv = json.load(urllib.request.urlopen(urllib.request.Request(BASE + f"/api/requests/{RID}/view", headers=rq_h)))
+    A(rv["teams"][0]["verdict"]["ok"] is True and "당장 씁니다" in rv["teams"][0]["verdict"]["note"] and rv["followup"] == "using", f"판정·D+14 가 안 남았다: {rv}")
+    # 동의 안 한 제작자 연락은 마감 뒤에도 없다
+    _, rt2 = post(f"/api/events/{RE}/teams", {"name": "비동의팀", "email": "nope-secret@example.com", "agree": True, "share": False})
+    post(f"/api/teams/{rt2['id']}/submit", {"url": "https://made2.example/app", "request": RID}, tkey=rt2["tkey"])
+    rv = json.load(urllib.request.urlopen(urllib.request.Request(BASE + f"/api/requests/{RID}/view", headers=rq_h)))
+    A(all(t["contact"] == "" for t in rv["teams"] if t["name"] == "비동의팀"), "동의 안 한 제작자 연락이 나갔다")
+    # 대회 페이지에 주제 카드가 실린다
+    rp2 = b.new_page(); rp2.goto(BASE + f"/e/{RE}"); rp2.wait_for_selector("#reqs")
+    A("회비 낸 사람 세기" in rp2.inner_text("#reqs") and "kim-secret" not in rp2.content(), "대회 페이지 주제 카드가 없거나 연락처가 보인다")
+    rp2.close()
+    # 후보 → 운영자가 «이 대회 주제로», 다섯 개 상한, 다른 대회 열쇠 403
+    _, cand = post("/api/requests", {"kind": "sponsor", "name": "포도가게", "topic": "동네 가게 예약", "contact": "grape@example.com"})
+    A(any(r["id"] == cand["id"] for r in api("/api/requests")) and "grape@" not in json.dumps(api("/api/requests")), "후보 목록에 없거나 연락처가 샜다")
+    A(post(f"/api/events/{RE}/pick", {"request": cand["id"]})[0] == 403, "열쇠 없이 주제가 붙었다")
+    A(post(f"/api/events/{RE}/pick", {"request": cand["id"]}, JK2)[0] == 403, "다른 대회 열쇠로 주제가 붙었다")
+    A(post(f"/api/events/{RE}/pick", {"request": cand["id"]}, REK)[0] == 200, "운영자가 후보를 못 붙였다")
+    A(not any(r["id"] == cand["id"] for r in api("/api/requests")), "붙은 요청이 후보에 남아 있다")
+    for i in range(4):
+        _, cx = post("/api/requests", {"kind": "sponsor", "name": f"후보{i}", "topic": f"주제{i}", "contact": "x@x.test"})
+        post(f"/api/events/{RE}/pick", {"request": cx["id"]}, REK)
+    _, c6 = post("/api/requests", {"kind": "sponsor", "name": "여섯째", "topic": "넘침", "contact": "x@x.test"})
+    A(post(f"/api/events/{RE}/pick", {"request": c6["id"]}, REK)[0] == 409, "한 대회에 주제가 여섯 개 붙었다")
+    # (4) 한 줄 평가 — 별점 옆 한 줄은 마감 뒤에만 공개, 누가 썼는지 없음
+    A(codepost(f"/api/teams/{A1}/vote", {"voter": "u7", "score": 4, "note": "발표가 또렷했어요"}, vkey=VVK) == 200, "한 줄 평가가 안 들어갔다")
+    A("발표가 또렷" not in json.dumps(api(f"/api/events/{VID}/board"), ensure_ascii=False), "마감 전인데 한 줄 평가가 공개됐다")
+    post(f"/api/events/{VID}", {"due": (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M")}, VOK, method="PATCH")
+    vrow = [r for r in api(f"/api/events/{VID}/board")["rows"] if r["name"] == "브이가"][0]
+    A("발표가 또렷했어요" in vrow.get("words_public", []) and "u7" not in json.dumps(vrow), "마감 뒤 한 줄 평가가 없거나 투표자가 샜다")
+    post(f"/api/events/{VID}", {"due": "2099-01-01T23:59"}, VOK, method="PATCH")
+    # (5) 피드백 — 누구나 한 줄, 읽기는 열쇠(없으면 403)
+    A(post("/api/feedback", {"page": "검사", "text": "신청 단추를 못 찾았어요"})[0] == 201, "피드백이 안 들어갔다")
+    A(post("/api/feedback", {"page": "검사", "text": ""})[0] == 400, "빈 피드백이 들어갔다")
+    A(code_of("/api/feedback?k=nope") == 403, "열쇠 없이 피드백이 읽힌다")
+    # (6) 현물 후원 → 첫 화면 목록 «함께: ○○»
+    A(post(f"/api/events/{RE}/sponsors", {"name": "포도가게", "kind": "현물", "note": "포도 한 상자"}, REK)[0] in (200, 201), "현물 후원 등록이 안 된다")
+    post(f"/api/events/{RE}/list", {"list": True}, REK)
+    A("포도가게" in [n for e_ in api("/api/events") if e_["id"] == RE for n in e_.get("sponsors", [])], "첫 화면 목록에 함께한 곳이 없다")
+    post(f"/api/events/{RE}/list", {"list": False}, REK)
+    # (7) 열쇠 새로 만들기 — 옛 심사 링크가 죽는다
+    old_jk = JK
+    A(post(f"/api/events/{ev}/rekey", {"which": "jkey"})[0] == 403, "열쇠 없이 심사 열쇠가 바뀌었다")
+    st, rk = post(f"/api/events/{ev}/rekey", {"which": "jkey"}, OK)
+    A(st == 200 and len(rk["jkey"]) == 10 and rk["jkey"] != old_jk, f"심사 열쇠가 안 바뀌었다: {st} {rk}")
+    A(post(f"/api/teams/{top['id']}/score", {"judge": "옛열쇠", "values": sv}, jkey=old_jk)[0] == 403, "옛 심사 열쇠가 아직 산다")
+    JK = rk["jkey"]
+    # (8) 장부 — 운영자가 직접 올린 줄은 표시된다
+    led2 = api(f"/api/events/{ev}/ledger")
+    A(next(x for x in led2 if x["name"] == "옆집카페")["direct"] == 1 and next(x for x in led2 if x["name"] == "동네카페")["direct"] == 0, "장부의 «운영자 등록» 표시가 틀렸다")
+    ok("받는 사람(/ask 세 화면·열쇠·마감 전후·동의자만·판정·D+14·후보 붙이기·다섯 상한) · 한 줄 평가 · 피드백 · 현물 · 열쇠 새로 · 장부 표시")
+
     # 참가자가 해야 하는 일은 열쇠 없이도 된다
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")
     # 심사 화면은 이제 심사 열쇠가 있어야 열린다 — 공개 링크만으로 아무나 점수를 넣던 것을 막았다
@@ -1328,8 +1423,8 @@ with sync_playwright() as p:
     # 공개 화면 칸은 참가 신청(t-)과 «줄 수 있는 것»(g- 칸, data-give-* 단추) 둘뿐. 운영 칸은 위 bad_id 로 이미 막았다.
     ids = pub.evaluate("""[...document.querySelectorAll('#view input, #view textarea, #view select, #view button')]
         .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-')) || '?')""")
-    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i == "nt-bell" for i in ids),
-      f"공개 화면에 신청·줄 수 있는 것·소식 알림 말고 다른 칸이 있다: {ids}")
+    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i == "nt-bell" or i.startswith("fb-") for i in ids),
+      f"공개 화면에 신청·줄 수 있는 것·소식 알림·피드백 말고 다른 칸이 있다: {ids}")
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
                  "함께한 곳", "오픈에이아이",

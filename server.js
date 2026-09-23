@@ -401,6 +401,8 @@ const TIERS = {
   '멘토':   ['공개 페이지와 결과 보고서에 로고', '멘토 소개와 세션 시간 배정'],
   '현금':   ['공개 페이지와 결과 보고서에 로고', '과제 1개 출제',
              '심사위원 참여', '성과 보고서', '면접 연결'],
+  /* 포도 한 상자·커피·간식 같은 현물. 답례는 이름과 «○○ 제공» 현장 안내다. 작은 후원이 후원을 부른다 */
+  '현물':   ['공개 페이지와 첫 화면에 이름', '현장 안내에 «○○ 제공»', '결과 보고서에 이름'],
 };
 
 /* 작은 칸은 뭉갠다.
@@ -989,6 +991,41 @@ function open(file) {
       text  TEXT NOT NULL,
       at    TEXT NOT NULL DEFAULT (datetime('now'))
     )`);
+  /* ── 2026-09-23 밤 ── «받는 사람»(후원자·의뢰자), 한 줄 평가, 앱 피드백, 팀이 고른 주제 */
+  db.exec(`CREATE TABLE IF NOT EXISTS requests(
+      id      TEXT PRIMARY KEY,                 -- 공개 id (events.id 처럼 8자)
+      rkey    TEXT NOT NULL DEFAULT '',         -- 받는 사람 열쇠. 공개 응답에 절대 안 실린다
+      kind    TEXT NOT NULL DEFAULT 'requester',-- sponsor(후원자) | requester(의뢰자)
+      name    TEXT NOT NULL,                    -- 공개될 이름(가게·회사·별명)
+      topic   TEXT NOT NULL DEFAULT '',         -- 주제 한 줄 (후원자) / 요청 제목 (의뢰자)
+      pain    TEXT NOT NULL DEFAULT '',         -- 의뢰자 화면 1 «요즘 뭐가 제일 번거로우세요»
+      now     TEXT NOT NULL DEFAULT '',         -- 화면 2 «지금은 어떻게 하세요»
+      done    TEXT NOT NULL DEFAULT '',         -- 화면 3 «이렇게 되면 됐다고 하실 수 있어요» — 판정 기준
+      contact TEXT NOT NULL DEFAULT '',         -- 운영자만
+      event   TEXT NOT NULL DEFAULT '',         -- 어느 대회의 주제로 붙었나 ('' 이면 후보)
+      status  TEXT NOT NULL DEFAULT 'open',     -- open | closed
+      followup    TEXT NOT NULL DEFAULT '',     -- D+14: using | sometimes | no | broken ('' 모름)
+      followup_at TEXT NOT NULL DEFAULT '',
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS verdicts(
+      id      INTEGER PRIMARY KEY,
+      request TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+      team    INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      ok      INTEGER NOT NULL DEFAULT 0,       -- 1 이거면 됩니다 · 0 아직 아니에요
+      note    TEXT NOT NULL DEFAULT '',
+      at      TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(request, team)
+    );
+    CREATE TABLE IF NOT EXISTS feedback(
+      id      INTEGER PRIMARY KEY,
+      page    TEXT NOT NULL DEFAULT '',
+      text    TEXT NOT NULL,
+      contact TEXT NOT NULL DEFAULT '',
+      at      TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+  try { db.exec("ALTER TABLE teams ADD COLUMN request TEXT NOT NULL DEFAULT ''"); } catch {}   // 팀이 고른 주제·요청
+  try { db.exec("ALTER TABLE votes ADD COLUMN note TEXT NOT NULL DEFAULT ''"); } catch {}      // 별점 옆 한 줄
   /* 이 표가 생기기 전에 띄운 공지(events.notice)를 한 번 옮겨 둔다 — 안 그러면 큰 화면엔 공지가 있는데
      공개 페이지 «소식»은 비어 «있는 것을 없음으로» 그린다. 시각은 notice_at 그대로 */
   for (const r of db.prepare("SELECT id, notice, notice_at FROM events WHERE notice<>'' AND id NOT IN (SELECT event FROM notices)").all())
@@ -1520,6 +1557,14 @@ function submit(db, team, b) {
                 show=excluded.show, show_at=excluded.show_at, at=datetime('now')`)
     .run(team, webUrl(b.url), b.note || '',
          (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at);
+  /* 어느 주제·요청으로 만들었나. 이 대회에 붙은 요청만 고를 수 있다. 안 보내면 그대로 */
+  if (b.request !== undefined) {
+    const rq = String(b.request || '');
+    const t = db.prepare('SELECT event FROM teams WHERE id=?').get(team);
+    if (rq && !db.prepare('SELECT 1 FROM requests WHERE id=? AND event=?').get(rq, t.event))
+      throw new HttpError(400, '이 대회의 주제가 아닙니다');
+    db.prepare('UPDATE teams SET request=? WHERE id=?').run(rq, team);
+  }
 }
 
 /** 쇼케이스 동의만 켜고 끈다.
@@ -1604,7 +1649,7 @@ function closed(e) {
 function board(db, event, admin = false) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
-    SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured,
+    SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request,
            t.agreed, t.photo, t.came, t.size, t.want,
            s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
@@ -1649,6 +1694,9 @@ function board(db, event, admin = false) {
   /* 마감 전에는 점수도 안 준다. 심사 중에 순위가 보이면 심사위원이 그걸 보고 맞춘다.
      Kaggle 이 public/private 리더보드를 나눈 것과 같은 이유다. */
   if (!admin && !closed(e)) for (const r of rows) { r.score = null; r.rank = null; r.vote = null; r.votes = null; }
+  /* 관객·참가팀이 별점 옆에 남긴 한 줄. 마감 뒤에만, 누가 썼는지는 없다 */
+  if (closed(e)) for (const r of rows)
+    r.words_public = db.prepare("SELECT note FROM votes WHERE team=? AND note<>'' ORDER BY at").all(r.id).map(x => x.note);
   e.notice = noticeOf(e);
   return { event: e, rows, judges, closed: closed(e) };
 }
@@ -1872,6 +1920,84 @@ function deleteEvent(db, event, b) {
   return { ok: true, saved: path.basename(saved), dump: copy, load };
 }
 
+/* ── «받는 사람» — 후원자·의뢰자 역할 하나 ──
+   둘 다 주제(문제)를 내고, 마감 뒤 그 주제로 만든 결과물·동의한 제작자 연락을 열쇠 하나로 받는다.
+   다른 것은 돈이 앞에 오나(후원자) 안 오나(의뢰자)뿐이라 표 하나로 그린다.
+   열쇠 패턴은 okey·jkey 와 같다: 공개 응답에서 rkey·contact 를 지운다. 순위·인기순은 두지 않는다(올라온 순). */
+const REQUEST_KINDS = ['sponsor', 'requester'];
+function addRequest(db, b) {
+  const kind = REQUEST_KINDS.includes(b.kind) ? b.kind : 'requester';
+  const name = plain(b.name, 40);
+  const topic = plain(b.topic, 120), pain = plain(b.pain, 300), now = plain(b.now, 300), done = plain(b.done, 300);
+  if (!name) throw new HttpError(400, '공개될 이름을 적어 주세요');
+  if (!topic && !pain) throw new HttpError(400, '주제나 번거로운 일을 한 줄 적어 주세요');
+  let event = String(b.event || '');
+  if (event && !db.prepare('SELECT 1 FROM events WHERE id=?').get(event)) throw new HttpError(404, '없는 대회입니다');
+  const id = nid(), rkey = crypto.randomBytes(5).toString('hex');   // events 와 같은 모양: 공개 id 8자 + 열쇠 10자
+  db.prepare('INSERT INTO requests(id,rkey,kind,name,topic,pain,now,done,contact,event) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(id, rkey, kind, name, topic || pain.slice(0, 60), pain, now, done, plain(b.contact, 100), event);
+  return { id, rkey };
+}
+/* 공개가 봐도 되는 것만. rkey·contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
+function publicRequest(r) {
+  return { id: r.id, kind: r.kind, name: r.name, topic: r.topic, pain: r.pain, now: r.now, done: r.done,
+           event: r.event, status: r.status, created: r.created,
+           teams: r.teams === undefined ? undefined : r.teams };
+}
+function requestsOf(db, event, admin = false) {
+  const rows = db.prepare('SELECT * FROM requests WHERE event=? ORDER BY created, id').all(event);
+  const cnt = db.prepare("SELECT request, COUNT(*) c FROM teams WHERE event=? AND request<>'' GROUP BY request").all(event);
+  const by = {}; for (const c of cnt) by[c.request] = c.c;
+  return rows.map(r => { const o = publicRequest({ ...r, teams: by[r.id] || 0 }); if (admin) o.contact = r.contact; return o; });
+}
+/* 후보 — 아직 어느 대회에도 안 붙은 요청. 운영자가 «이 대회 주제로» 가져간다. 올라온 순 */
+function openRequests(db) {
+  return db.prepare("SELECT * FROM requests WHERE event='' AND status='open' ORDER BY created, id LIMIT 50").all().map(publicRequest);
+}
+function canReceive(db, id, rkey) {
+  const r = db.prepare('SELECT rkey FROM requests WHERE id=?').get(id);
+  return !!(r && r.rkey && rkey && rkey === r.rkey);
+}
+/* 받는 화면. 마감 전엔 «누가 만들고 있나»만, 마감 뒤엔 결과물 주소·동의한 제작자 연락까지.
+   연락은 참가 신청 때의 «협찬사 제공 동의»(sponsor_ok)를 한 사람만 — 동의 안 한 사람은 이름뿐이다. */
+function requestView(db, id) {
+  const r = db.prepare('SELECT * FROM requests WHERE id=?').get(id);
+  if (!r) throw new HttpError(404, '없는 요청입니다');
+  const e = r.event ? getEvent(db, r.event) : null;
+  const isClosed = e ? closed(e) : false;
+  const teams = r.event ? db.prepare(`SELECT t.id, t.name, t.contact, t.sponsor_ok, s.url, s.note, s.show
+                                       FROM teams t LEFT JOIN submissions s ON s.team = t.id
+                                       WHERE t.event=? AND t.request=? ORDER BY t.id`).all(r.event, r.id) : [];
+  const vd = {}; for (const v of db.prepare('SELECT team, ok, note, at FROM verdicts WHERE request=?').all(id)) vd[v.team] = v;
+  return {
+    request: publicRequest(r), followup: r.followup, followupAt: r.followup_at,
+    event: e ? { id: e.id, title: e.title, starts: e.starts, ends: e.ends, due: e.due, closed: isClosed } : null,
+    teams: teams.map(t => ({
+      id: t.id, name: t.name, note: t.note || '',
+      url: isClosed ? webUrl(t.url) : '',                       // 마감 전엔 링크 없음 — board 의 규칙과 같다
+      contact: isClosed && t.sponsor_ok ? t.contact : '',        // 동의한 사람만, 마감 뒤에만
+      verdict: vd[t.id] ? { ok: !!vd[t.id].ok, note: vd[t.id].note, at: vd[t.id].at } : null,
+    })),
+  };
+}
+function setVerdict(db, id, b) {
+  const r = db.prepare('SELECT event FROM requests WHERE id=?').get(id);
+  if (!r || !r.event) throw new HttpError(409, '아직 대회에 붙지 않은 요청입니다');
+  if (!closed(getEvent(db, r.event))) throw new HttpError(409, '제출 마감 뒤에 판정할 수 있습니다');
+  const t = db.prepare('SELECT id FROM teams WHERE id=? AND event=? AND request=?').get(+b.team, r.event, id);
+  if (!t) throw new HttpError(404, '이 요청으로 만든 팀이 아닙니다');
+  db.prepare(`INSERT INTO verdicts(request,team,ok,note) VALUES(?,?,?,?)
+              ON CONFLICT(request,team) DO UPDATE SET ok=excluded.ok, note=excluded.note, at=datetime('now')`)
+    .run(id, t.id, b.ok ? 1 : 0, plain(b.note, 200));
+  return { ok: !!b.ok };
+}
+const FOLLOWUPS = ['using', 'sometimes', 'no', 'broken'];   // 네 번째가 있어야 «모델이 죽었는지 물건이 죽었는지» 갈린다
+function setFollowup(db, id, b) {
+  if (!FOLLOWUPS.includes(b.status)) throw new HttpError(400, 'status 는 using·sometimes·no·broken 중 하나입니다');
+  db.prepare("UPDATE requests SET followup=?, followup_at=datetime('now') WHERE id=?").run(b.status, id);
+  return { followup: b.status };
+}
+
 /** 대회 하나를 통째로 담는다. 노트북이 죽으면 이걸로 살린다. */
 function dump(db, event) {
   const e = db.prepare('SELECT * FROM events WHERE id=?').get(event);
@@ -2050,7 +2176,9 @@ function showcase(db) {
 }
 
 function ledgerOf(db, event) {
-  return db.prepare(`SELECT n.kind, n.label, p.name, p.org, p.status, p.created AS at
+  /* direct — 운영자가 «밖에서 구했어요»로 직접 올린 줄. 신청을 거쳐 확인된 줄과 구분해 보여 준다(레드팀: 운영자 사칭) */
+  return db.prepare(`SELECT n.kind, n.label, p.name, p.org, p.status, p.created AS at,
+                            CASE WHEN p.note = '앱 밖에서 구함' THEN 1 ELSE 0 END AS direct
                      FROM pledges p JOIN needs n ON n.id = p.need
                      WHERE p.event = ? AND p.status IN ('ok','done')
                      ORDER BY n.id, p.id`).all(event);
@@ -2162,6 +2290,8 @@ function routes(db) {
              지난 실적을 카드에 미리 얹어 둔다. */
           for (const r of rows) {
             r.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(r.id).c;
+            /* 함께한 곳 — 포도 한 상자도 여기 이름이 실린다. 첫 화면이 «함께: ○○» 한 줄로 그린다 */
+            r.sponsors = db.prepare('SELECT name FROM sponsors WHERE event=? ORDER BY id LIMIT 4').all(r.id).map(x => x.name);
             const rec = record(db, r.id);
             if (rec) { r.pastEvents = rec.events; r.pastFinish = rec.finishRate; }
           }
@@ -2588,9 +2718,9 @@ function routes(db) {
           const sc = +b.score;
           if (!voter) throw new HttpError(400, '누가 주는 표인지가 없습니다');
           if (!(sc >= 1 && sc <= 5)) throw new HttpError(400, '표는 1~5 입니다');
-          db.prepare(`INSERT INTO votes(event,team,voter,score) VALUES(?,?,?,?)
-                      ON CONFLICT(event,team,voter) DO UPDATE SET score=excluded.score, at=datetime('now')`)
-            .run(t.event, +m[1], voter, sc);
+          db.prepare(`INSERT INTO votes(event,team,voter,score,note) VALUES(?,?,?,?,?)
+                      ON CONFLICT(event,team,voter) DO UPDATE SET score=excluded.score, note=excluded.note, at=datetime('now')`)
+            .run(t.event, +m[1], voter, sc, plain(b.note, 80));
           return json(res, 200, { ok: true });
         }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/feature$/)) && req.method === 'POST') {
@@ -2684,6 +2814,64 @@ function routes(db) {
           if (!(v === '' || v === 'no' || /^yes:\d{1,2}$/.test(v))) throw new HttpError(400, "judged 는 ''·'no'·'yes:n' 중 하나입니다");
           db.prepare('UPDATE events SET judged=? WHERE id=?').run(v, m[1]);
           return json(res, 200, { judged: v });
+        }
+        /* ── 받는 사람(후원자·의뢰자) ── */
+        if (p === '/api/requests' && req.method === 'POST')
+          return json(res, 201, addRequest(db, await body(req)));          // 누구나 — 열쇠는 여기서 딱 한 번
+        if (p === '/api/requests' && req.method === 'GET')
+          return json(res, 200, openRequests(db));                         // 후보 목록. 연락처·열쇠 없음
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/requests$/)) && req.method === 'GET')
+          return json(res, 200, requestsOf(db, m[1], isAdmin(db, m[1], key, owner)));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/pick$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);                                 // 운영자가 후보를 이 대회 주제로 붙인다/뗀다
+          const b = await body(req);
+          const r = db.prepare('SELECT id, event FROM requests WHERE id=?').get(String(b.request || ''));
+          if (!r) throw new HttpError(404, '없는 요청입니다');
+          if (b.on === false) {
+            if (r.event !== m[1]) throw new HttpError(403, '이 대회의 주제가 아닙니다');
+            db.prepare("UPDATE requests SET event='' WHERE id=?").run(r.id);
+            db.prepare("UPDATE teams SET request='' WHERE event=? AND request=?").run(m[1], r.id);
+            return json(res, 200, { picked: false });
+          }
+          if (r.event && r.event !== m[1]) throw new HttpError(409, '이미 다른 대회에 붙은 요청입니다');
+          if (db.prepare('SELECT COUNT(*) c FROM requests WHERE event=?').get(m[1]).c >= 5)
+            throw new HttpError(409, '한 대회에 주제는 다섯 개까지입니다');   // 설계 §7 상한
+          db.prepare('UPDATE requests SET event=? WHERE id=?').run(m[1], r.id);
+          return json(res, 200, { picked: true });
+        }
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/view$/)) && req.method === 'GET') {
+          if (!canReceive(db, m[1], req.headers['x-rkey'] || '')) throw new HttpError(403, '받는 사람 열쇠가 필요합니다');
+          return json(res, 200, requestView(db, m[1]));
+        }
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/verdict$/)) && req.method === 'POST') {
+          if (!canReceive(db, m[1], req.headers['x-rkey'] || '')) throw new HttpError(403, '받는 사람 열쇠가 필요합니다');
+          return json(res, 200, setVerdict(db, m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/followup$/)) && req.method === 'POST') {
+          if (!canReceive(db, m[1], req.headers['x-rkey'] || '')) throw new HttpError(403, '받는 사람 열쇠가 필요합니다');
+          return json(res, 200, setFollowup(db, m[1], await body(req)));
+        }
+        /* ── 앱 피드백 — 누구나 한 줄. 우리(운영)만 열쇠로 읽는다 ── */
+        if (p === '/api/feedback' && req.method === 'POST') {
+          const b = await body(req);
+          const text = plain(b.text, 300);
+          if (!text) throw new HttpError(400, '한 줄 적어 주세요');
+          db.prepare('INSERT INTO feedback(page,text,contact) VALUES(?,?,?)').run(plain(b.page, 80), text, plain(b.contact, 100));
+          return json(res, 201, { ok: true });
+        }
+        if (p === '/api/feedback' && req.method === 'GET') {
+          const fk = process.env.FEEDBACK_KEY || '';
+          if (!fk || q.k !== fk) throw new HttpError(403, '피드백 열쇠가 필요합니다');
+          return json(res, 200, db.prepare('SELECT * FROM feedback ORDER BY id DESC LIMIT 200').all());
+        }
+        /* 심사·투표 열쇠 새로 만들기 — 링크가 흘렀을 때(레드팀: 대화방·공용 화면). 운영자만. 옛 링크는 그 자리에서 죽는다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/rekey$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);
+          const which = (await body(req)).which;
+          if (!['jkey', 'vkey'].includes(which)) throw new HttpError(400, 'which 는 jkey·vkey 중 하나입니다');
+          const nk = crypto.randomBytes(5).toString('hex');
+          db.prepare(`UPDATE events SET ${which}=? WHERE id=?`).run(nk, m[1]);
+          return json(res, 200, { [which]: nk });
         }
         /* 지난 소식 — 공개. 최신이 위. 참가자 폰이 60초마다 이것만 다시 받는다 */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/notices$/)) && req.method === 'GET')
@@ -2821,7 +3009,7 @@ function routes(db) {
       const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/) || p.match(/^\/j\/[a-z0-9]+$/)
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
-               || p === '/app' || p === '/give';
+               || p === '/app' || p === '/give' || p === '/ask' || p.match(/^\/r\/[a-z0-9]+$/);
 
       /* 화면 파일은 /e/<id> 같은 깊은 주소에서도 그대로 나간다. 그 안의 <script src="qr.js">
          는 /e/qr.js 를 찾게 되고 404 가 난다. 파일로 열었을 때(file://)도 살아야 하니
@@ -3154,6 +3342,51 @@ function selftest() {
     db.prepare('INSERT INTO notices(event, text, at) VALUES(?,?,?)').run(r.id, r.notice, r.notice_at.replace('T', ' ').slice(0, 19));
   const bf = db.prepare('SELECT text, at FROM notices WHERE event=?').all(prEv.id);
   ok(bf.length === 1 && bf[0].text === '옛 공지' && bf[0].at === '2026-09-20 01:02:03', '옛 한 줄 공지는 소식 목록으로 옮겨진다(시각 보존)');
+
+  let dEv0;
+  /* ── 받는 사람(후원자·의뢰자) ── */
+  const rqEv = createEvent(db, { title: '받는사람검사' });
+  const rq = addRequest(db, { kind: 'requester', name: '총무 김', pain: '회비 낸 사람 세기가 번거로워요', now: '수첩에 적어요', done: '이름 누르면 냈다로 바뀌면', contact: 'kim@x.test' });
+  ok(rq.id.length === 8 && rq.rkey.length === 10, '요청을 올리면 공개 id 와 열쇠가 나온다');
+  ok(openRequests(db).some(r => r.id === rq.id) && !JSON.stringify(openRequests(db)).includes('kim@x.test') && !JSON.stringify(openRequests(db)).includes(rq.rkey),
+     '후보 목록엔 연락처·열쇠가 없다');
+  let rqThrew = 0; try { addRequest(db, { kind: 'sponsor', name: '', topic: 'x' }); } catch (e) { rqThrew = e.code; }
+  ok(rqThrew === 400, '이름 없는 요청은 400');
+  db.prepare('UPDATE requests SET event=? WHERE id=?').run(rqEv.id, rq.id);
+  ok(requestsOf(db, rqEv.id)[0].id === rq.id && requestsOf(db, rqEv.id)[0].contact === undefined && requestsOf(db, rqEv.id, true)[0].contact === 'kim@x.test',
+     '대회 요청 목록 — 손님엔 연락처 없음, 운영자엔 있음');
+  const rqT = joinTeam(db, rqEv.id, { name: '만든팀', email: 'maker@x.test', agree: true, share: true });
+  db.prepare("UPDATE events SET due='2099-01-01T00:00' WHERE id=?").run(rqEv.id);
+  submit(db, rqT, { url: 'https://made.example/app', note: '회비 체크', request: rq.id });
+  ok(db.prepare('SELECT request FROM teams WHERE id=?').get(rqT).request === rq.id, '제출 때 고른 주제가 팀에 남는다');
+  let rqBad = 0; try { submit(db, rqT, { url: 'https://made.example/app', request: 'zzzzzzzz' }); } catch (e) { rqBad = e.code; }
+  ok(rqBad === 400, '이 대회 주제가 아니면 400');
+  ok(!canReceive(db, rq.id, '') && !canReceive(db, rq.id, 'nope') && canReceive(db, rq.id, rq.rkey), '받는 화면은 열쇠로만');
+  const rqV1 = requestView(db, rq.id);
+  ok(rqV1.teams.length === 1 && rqV1.teams[0].url === '' && rqV1.teams[0].contact === '', '마감 전엔 주소·연락처가 안 나간다');
+  let vdThrew = 0; try { setVerdict(db, rq.id, { team: rqT, ok: 1 }); } catch (e) { vdThrew = e.code; }
+  ok(vdThrew === 409, '마감 전 판정은 409');
+  db.prepare("UPDATE events SET due='2000-01-01T00:00' WHERE id=?").run(rqEv.id);
+  const rqV2 = requestView(db, rq.id);
+  ok(rqV2.teams[0].url === 'https://made.example/app' && rqV2.teams[0].contact === 'maker@x.test', '마감 뒤엔 주소와 동의한 제작자 연락이 나간다');
+  db.prepare('UPDATE teams SET sponsor_ok=0 WHERE id=?').run(rqT);
+  ok(requestView(db, rq.id).teams[0].contact === '', '동의 안 한 제작자 연락은 마감 뒤에도 안 나간다');
+  setVerdict(db, rq.id, { team: rqT, ok: 1, note: '이거면 됩니다' });
+  setVerdict(db, rq.id, { team: rqT, ok: 0, note: '아직' });
+  const vds = db.prepare('SELECT * FROM verdicts WHERE request=?').all(rq.id);
+  ok(vds.length === 1 && vds[0].ok === 0 && vds[0].note === '아직', '한 요청에 한 팀 한 판정, 덮어쓴다');
+  ok(setFollowup(db, rq.id, { status: 'broken' }).followup === 'broken', 'D+14 네 단추 — 열리지가 않아요 도 있다');
+  let fuBad = 0; try { setFollowup(db, rq.id, { status: 'maybe' }); } catch (e) { fuBad = e.code; }
+  ok(fuBad === 400, '없는 D+14 답은 400');
+  ok(!('rkey' in publicRequest(db.prepare('SELECT * FROM requests WHERE id=?').get(rq.id))), '공개 요청에 열쇠 없음');
+  ok(TIERS['현물'] && TIERS['현물'].length >= 2, '현물 후원 등급이 있다');
+  const dl = ledgerOf(db, dEv0 = createEvent(db, { title: '장부표시' }).id);
+  ok(dl.length === 0, '빈 장부');
+  const dN = addNeed(db, dEv0, { kind: 'snack', label: '간식' });
+  setPledge(db, addPledge(db, dN.id, dEv0, { name: '직접', note: '앱 밖에서 구함' }).id, { status: 'ok' });
+  setPledge(db, addPledge(db, dN.id, dEv0, { name: '신청', contact: 'a@x.test' }).id, { status: 'ok' });
+  const dl2 = ledgerOf(db, dEv0);
+  ok(dl2.find(x => x.name === '직접').direct === 1 && dl2.find(x => x.name === '신청').direct === 0, '운영자가 직접 올린 줄은 장부에 표시된다');
   // 예산을 주면 카드가 깔린다
   const bEv = createEvent(db, { title: '오십만', starts: today(), ends: today(), budget: 500000, cap: 20 });
   const bn1 = needsOf(db, bEv.id);
@@ -3592,7 +3825,7 @@ function selftest() {
   const led = ledgerOf(db, nbEv.id);
   ok(led.length === 1 && led[0].name === '김실무' && led[0].status === 'ok' && !!led[0].at,
      '확인하면 공개 장부에 이름이 남는다');
-  ok(Object.keys(led[0]).sort().join() === 'at,kind,label,name,org,status', '장부 칸이 약속과 같다');
+  ok(Object.keys(led[0]).sort().join() === 'at,direct,kind,label,name,org,status', '장부 칸이 약속과 같다');
   const pg2 = addPledge(db, n1.id, nbEv.id, { name: '아직인사람', contact: 'wait@x.test' });
   ok(ledgerOf(db, nbEv.id).length === 1, '새 pending 는 장부에 안 나온다');
   setPledge(db, pg2.id, { status: 'no' });

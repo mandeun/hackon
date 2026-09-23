@@ -108,6 +108,15 @@ section{background:var(--card);border-radius:22px;padding:28px 26px;margin:14px 
 .trynote{font-size:13px;color:var(--grey);margin-bottom:8px}
 @media (max-width:560px){ .shead{flex-wrap:wrap} .sname{flex:1 0 100%;order:-1} }
 
+/* 점 — 이 앱의 캐릭터. 점판의 동그라미 하나. 자리가 켜지면 파랗게 차고 살짝 튄다. */
+.hd{display:inline-block;width:14px;height:14px;border-radius:50%;border:2.5px solid #AEB6C8;box-sizing:border-box;vertical-align:-2px;margin-right:8px}
+.hd.on{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 4px rgba(35,80,245,.18);animation:hdpop .6s ease-out}
+@keyframes hdpop{0%{transform:scale(.6)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){ .hd.on{animation:none} }
+/* 앱 피드백 한 줄 */
+.fb{background:transparent;padding:6px 6px 0}
+.fb form{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.fb input{flex:1 1 14em;min-height:44px;font-size:15px}
 /* «줄 수 있는 것» 입구. 단추 하나, 그 아래 메일 한 줄. */
 .give .cta{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .give .cta .btn{flex:1 1 auto}
@@ -160,7 +169,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <!-- 표제. 한 문장, 단추 둘. -->
 <div class="hero">
   <div class="wrap">
-    <p class="eyebrow">동네에서 여는 하루짜리 해커톤</p>
+    <p class="eyebrow"><i class="hd on" aria-hidden="true"></i>동네에서 여는 하루짜리 해커톤</p>
     <h1>하루 모여 앱 하나를 만들고,<br>그 자리에서 뽑습니다.</h1>
     <p class="lead">코딩을 안 해 봤어도 됩니다. 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다.</p>
     <div class="cta">
@@ -202,7 +211,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <section id="showcase" hidden>
   <div class="head">
     <h2>지난 대회 우수작</h2>
-    <p>만든 분이 동의한 것만 올립니다. 눌러서 그 자리에서 열어 볼 수 있습니다.</p>
+    <p>켜는 사람들이 만든 것 가운데 본인이 동의한 것만 올립니다. 눌러서 그 자리에서 열어 볼 수 있습니다.</p>
   </div>
   <div id="showcase-grid" class="evs"></div>
 </section>
@@ -218,6 +227,12 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   </div>
   <p class="mail">협찬 문의는 메일로도 받습니다. <a id="mail-link" href="#"></a></p>
 </section>
+
+<div class="fb" id="fb">
+  <p class="grey" style="font-size:14px;font-weight:700">이 앱, 뭐가 불편했나요</p>
+  <form id="fb-form"><input id="fb-text" maxlength="300" placeholder="한 줄이면 됩니다. 만든 사람이 읽습니다"><button class="btn s o" type="submit" id="fb-send">보내기</button></form>
+  <p class="grey" id="fb-done" style="font-size:13px;margin-top:6px" hidden>고맙습니다. 읽고 고치겠습니다.</p>
+</div>
 
 <details class="more" id="more">
   <summary>이 서비스가 어떻게 돌아가는지 더 보기</summary>
@@ -294,7 +309,8 @@ function 그리기(){
     return '<a class="ev" href="/e/' + esc(e.id) + '">' +
       '<span class="st ' + s.c + '">' + s.k + (d ? ' ' + d : '') + '</span>' +
       '<span><div class="t">' + esc(e.title) + '</div><div class="m">' + esc(e.host) + ' · ' +
-        (e.pastEvents ? '지난 대회 ' + e.pastEvents + '번 · 완주율 ' + e.pastFinish + '%' : '첫 대회') + '</div></span>' +
+        (e.pastEvents ? '지난 대회 ' + e.pastEvents + '번 · 완주율 ' + e.pastFinish + '%' : '첫 대회') +
+        ((e.sponsors || []).length ? ' · 함께: ' + e.sponsors.map(esc).join(', ') : '') + '</div></span>' +
       '<span class="n">' + esc(e.starts) + (e.ends !== e.starts ? '~' + esc(e.ends).slice(5) : '') +
         ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') + '</span>' +
       '</a>';
@@ -358,6 +374,14 @@ fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list)
   });
 }).catch(function(){});
 
+/* 앱 피드백 — 한 줄. 서버에 쌓이고 만든 사람이 읽는다. */
+document.getElementById('fb-form').addEventListener('submit', function(ev){
+  ev.preventDefault();
+  var t = document.getElementById('fb-text').value.trim(); if (!t) return;
+  fetch('/api/feedback', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ page:'첫 화면', text:t }) })
+    .then(function(r){ if (r.ok) { document.getElementById('fb-text').value = ''; document.getElementById('fb-done').hidden = false; } })
+    .catch(function(){});
+});
 /* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
   var el = document.getElementById('nav-login');
