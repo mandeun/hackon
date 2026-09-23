@@ -1339,6 +1339,23 @@ with sync_playwright() as p:
     A(pg.query_selector("#f-fromwrap") is not None and pg.query_selector("#f-host") is None and pg.query_selector("#f-prize") is None, "가져오기 칸이 없거나 만들기 화면이 이름 말고 다른 것을 묻는다")
     ok("퍼실리테이션 자료 반영 — 서술자·자리 번호·심사위원 수·신고 창구·다음 할 일·묻고 답하기·후원 화면·CSV·순위 보정·설문·가져오기")
 
+    # ── 접근성(axe) — 첫 화면·대회 페이지·줄 수 있는 것·심사·운영 화면에 critical·serious 0 ──
+    # 2026-09-24 처음 잰 값: 대회 페이지 serious 1(대비 22곳) · 심사 critical 1(라벨 4) · 운영 critical 2(라벨 17·select 1) serious 1(대비 29곳)
+    from axe_playwright_python.sync_playwright import Axe
+    pg.evaluate("localStorage.setItem('hackon.judge', '검사심사')")
+    for path in ["/", f"/e/{FE}", "/give", f"/j/{FE}?k={FJ}", f"/app#{FE}"]:
+        visit(path) if path != "/" else (pg.goto(BASE + "/"), pg.wait_for_timeout(1200))
+        pg.wait_for_timeout(500)
+        bad = [v for v in Axe().run(pg).response["violations"] if v["impact"] in ("critical", "serious")]
+        A(not bad, f"접근성 {path}: " + "; ".join(f"{v['id']}×{len(v['nodes'])}({v['nodes'][0]['target'][0][:40]})" for v in bad))
+    pg.evaluate("localStorage.removeItem('hackon.judge')")
+    # 발표 타이머 — 진행 순서의 «발표» 줄이 지금이면 큰 화면이 다음 줄까지 센다
+    now = datetime.now(); hm = lambda dt: dt.strftime("%H:%M")
+    post(f"/api/events/{FE}", {"plan": [{"at": hm(now - timedelta(minutes=2)), "what": "발표"}, {"at": hm(now + timedelta(minutes=8)), "what": "시상"}]}, FK, method="PATCH")
+    visit(f"/tv/{FE}"); pg.wait_for_timeout(1300)
+    A(pg.query_selector("#tv-pitch") is not None and "분" in pg.inner_text("#tv-pitch"), f"발표 타이머가 큰 화면에 없다: {pg.inner_text('.tvbig')[:60] if pg.query_selector('.tvbig') else '?'}")
+    ok("접근성 critical·serious 0 (다섯 화면) · 발표 타이머")
+
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")

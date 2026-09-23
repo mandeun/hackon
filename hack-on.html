@@ -18,7 +18,8 @@
   --navy:#141824; --navy-d:#0C0F18; --navy-l:#E8EDFB;   /* 먹. 큰 화면 바탕과 제목 */
   --acc:#2350F5;   /* 켜짐 파랑. 켜진 점·주 버튼·링크에만 쓴다 (BRAND.md) */
   --ok:#12A36B; --ok-l:#E3F5EC; --warn:#E8A317; --warn-l:#FDF3DC; --bad:#D6453D;
-  --ink:#141824; --ink2:#4A5163; --ink3:#8A91A3;
+  --ok-t:#0A6E49; --warn-t:#8A5A00;   /* 글자용. 연한 바탕 위에서 4.5:1 (axe color-contrast) — 점·막대는 위의 밝은 색 */
+  --ink:#141824; --ink2:#4A5163; --ink3:#5C6474;   /* 보조 글. 8A91A3 은 흰 바탕에서 3.1:1 이라 보조기기·4050 눈에 흐렸다 */
   --rule:#DDE2EC; --bg:#F4F6FA; --bg2:#EAEEF5;
   --kr:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif; --r:12px;
   --paper:#FFFFFF;
@@ -93,7 +94,7 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
 .seat{border:1px solid var(--rule);border-radius:999px;padding:5px 11px;font-size:12.5px;
   background:#fff;white-space:nowrap}
 .seat.g{border-style:dashed;color:var(--ink3)}
-.seat.free{border-style:dashed;border-color:var(--ok);color:var(--ok);font-weight:700}
+.seat.free{border-style:dashed;border-color:var(--ok);color:var(--ok-t);font-weight:700}
 /* 별점. 누르는 것 말고 다른 일을 시키지 않는다. */
 .stars{display:flex;gap:4px;margin-top:5px}
 .stars button{font-size:26px;line-height:1;color:var(--rule);padding:2px}
@@ -119,7 +120,7 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
 /* 놓치면 안 되는 줄. 참가자가 표를 훑을 때 눈이 여기 먼저 간다. */
 tr.row-hot td{color:var(--bad);font-weight:800}
 tr.row-key td{color:var(--navy);font-weight:700}
-.off{color:var(--warn);font-size:12.5px;font-weight:700;margin-top:6px;line-height:1.55}
+.off{color:var(--warn-t);font-size:12.5px;font-weight:700;margin-top:6px;line-height:1.55}
 .off b{color:var(--bad)}
 .logos{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}
 .logos > *{display:flex;align-items:center;gap:7px;padding:8px 12px;background:#fff;
@@ -140,7 +141,7 @@ header{padding:14px 16px 0;border-bottom:1px solid var(--rule);flex:none;backgro
 .logo:active{opacity:.35}
 .logo svg{height:19px;display:block}
 .chip{margin-left:auto;font-size:11px;padding:3px 8px;border-radius:99px;background:var(--bg2);color:var(--ink3)}
-.chip.live{background:var(--ok-l);color:var(--ok);font-weight:700}
+.chip.live{background:var(--ok-l);color:var(--ok-t);font-weight:700}
 
 main{flex:1;overflow:auto;padding:20px 16px 24px}
 /* 화면마다 큰 한 문장. 레퍼런스들이 전부 이걸로 시작한다. */
@@ -225,8 +226,8 @@ label{display:block;font-size:12.5px;color:var(--ink2);margin:10px 0 4px;font-we
 .btn.sec{background:var(--bg2);color:var(--ink);border:1px solid var(--rule)}
 .btn.sm{padding:7px 11px;font-size:13px;width:auto;border-radius:8px}
 .pill{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--navy-l);color:var(--navy);font-weight:700}
-.pill.ok{background:var(--ok-l);color:var(--ok)}
-.pill.warn{background:var(--warn-l);color:var(--warn)}
+.pill.ok{background:var(--ok-l);color:var(--ok-t)}
+.pill.warn{background:var(--warn-l);color:var(--warn-t)}
 .stat{display:flex;gap:8px;margin:12px 0}
 .stat div{flex:1;border:1px solid var(--rule);border-radius:10px;padding:9px 10px;background:var(--bg2)}
 .stat b{display:block;font-size:22px;color:var(--navy);line-height:1.15;letter-spacing:-.03em;
@@ -303,8 +304,8 @@ nav .i{font-size:17px}
    행사장 큰 화면(body.tv)은 건드리지 않는다. */
 :root{
   --pg:#F2F4F6; --card:#fff; --soft:#F9FAFB; --fill:#F2F4F6;
-  --ink:#191F28; --ink2:#4E5968; --ink3:#8B95A1; --rule:#E5E8EB;
-  --acc-l:#EDF1FE; --warn:#C27C0E; --warn-l:#FFF6E0; --bad:#E5484D; --bad-l:#FFEEEE;
+  --ink:#191F28; --ink2:#4E5968; --ink3:#5C6474; --rule:#E5E8EB;   /* 보조 글 대비 4.5:1 */
+  --acc-l:#EDF1FE; --warn:#8A5A00; --warn-l:#FFF6E0; --bad:#C4353A; --bad-l:#FFEEEE;   /* 글자 대비 4.5:1 (axe) */
   --r:20px;
 }
 body{background:#E9ECEF;font-size:16px;letter-spacing:-.01em}
@@ -320,7 +321,7 @@ h2{font-size:25px;line-height:1.35;letter-spacing:-.04em;margin:12px 4px 8px}
 h3{letter-spacing:-.03em}
 main > h3{font-size:19px;margin:28px 4px 10px !important}
 .sub{font-size:15px;color:var(--ink2);margin:0 4px 18px;line-height:1.65}
-.meta{font-size:14px;color:#6B7684;line-height:1.65}
+.meta{font-size:14px;color:#5C6474;line-height:1.65}   /* 연한 초록·노랑 카드 위에서도 4.5:1 */
 .meta b{color:var(--ink2)}
 label{font-size:14px;color:var(--ink2);margin:18px 0 8px}
 
@@ -355,8 +356,8 @@ input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
 .card .btn.sec,details .btn.sec{background:#F2F4F6}
 
 .pill{border-radius:6px;padding:3px 7px;font-size:12px;background:var(--acc-l);color:var(--acc);vertical-align:2px}
-.pill.ok{background:#E5F7EE;color:#0E8A57}
-.pill.warn{background:var(--warn-l);color:var(--warn)}
+.pill.ok{background:#E5F7EE;color:var(--ok-t)}
+.pill.warn{background:var(--warn-l);color:var(--warn-t)}
 
 /* «줄 수 있는 것» 세 화면. 칩은 손가락 크기, 한 줄에 셋. */
 #give-wrap{scroll-margin-top:72px}   /* 붙박이 머리글 아래로 굴러 들어오게 */
@@ -414,7 +415,7 @@ details details{background:var(--soft);border-radius:14px}
 .due{background:var(--card);border:0;border-radius:16px;padding:15px 18px;font-size:15px;color:var(--ink);
   display:flex;align-items:center;gap:8px;margin-bottom:12px}
 .due::before{content:'⏰';font-size:17px}
-.due.hot{background:#FFF1EC;color:#E5484D;border:0}
+.due.hot{background:#FFF1EC;color:#C4353A;border:0}
 .due.over{background:var(--bad-l);color:var(--bad);border:0}
 .late{color:var(--bad)}
 .notice{background:#FFF6E0;border:0;border-radius:16px;padding:16px 18px;color:#7A4E00}
@@ -445,7 +446,7 @@ details details{background:var(--soft);border-radius:14px}
 nav{position:sticky;bottom:0;z-index:20;background:rgba(255,255,255,.94);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-top:1px solid #F2F4F6;padding-bottom:env(safe-area-inset-bottom)}
-nav button{padding:9px 0 10px;font-size:11px;color:#B0B8C1;gap:4px;font-weight:600}
+nav button{padding:9px 0 10px;font-size:11px;color:#5C6474;gap:4px;font-weight:600}
 nav button.on{color:var(--ink);font-weight:700}
 nav .i{display:grid;place-items:center;height:24px}
 nav .i svg{width:24px;height:24px;display:block}
@@ -921,6 +922,25 @@ function dueText(due) {
           :          m + '분';
   return { t: '제출 마감까지 ' + t, c: ms < 3600000 ? 'hot' : '' };
 }
+/* 보조기기용 이름. <label>이 감싸지 않는 칸은 바로 다음 입력칸에 라벨 글을 aria-label 로 붙인다.
+   심사 슬라이더는 data-key 로 기준 이름을 받는다. 화면에 보이는 건 그대로다. */
+function labelize(root) {
+  const FIELD = 'input:not([type=hidden]):not([type=range]), select, textarea';
+  root.querySelectorAll('label').forEach(l => {
+    if (l.querySelector(FIELD) || l.htmlFor) return;
+    const txt = [...l.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim() || l.textContent.trim();
+    let el = l.nextElementSibling;
+    while (el && !el.matches(FIELD)) { const inner = el.matches('label, h2, h3') ? null : el.querySelector(FIELD); if (inner) { el = inner; break; } el = el.nextElementSibling; if (el && el.matches('label')) el = null; }
+    if (el && txt && !el.getAttribute('aria-label')) el.setAttribute('aria-label', txt);
+  });
+  root.querySelectorAll('input[type=range][data-key]').forEach(r => {
+    const lab = r.closest('.sl') && r.closest('.sl').previousElementSibling;
+    if (!r.getAttribute('aria-label')) r.setAttribute('aria-label', (lab && lab.textContent.trim()) || r.dataset.key);
+  });
+  root.querySelectorAll(FIELD).forEach(el => {   // 그래도 이름이 없으면 placeholder 로
+    if (!el.getAttribute('aria-label') && !el.id && el.placeholder) el.setAttribute('aria-label', el.placeholder);
+  });
+}
 /* 화면 전체를 다시 그리지 않고 그 칸의 글자만 갈아 끼운다. */
 function tickDue() {
   document.querySelectorAll('[data-due]').forEach(el => {
@@ -1336,8 +1356,8 @@ function repLine(label, r) {
 function planRow(at, what) {
   const el = document.createElement('div');
   el.className = 'prow';
-  el.innerHTML = `<input type="time" value="${esc(at || '')}">
-    <input class="what" value="${esc(what || '')}" placeholder="무엇을 하나요" maxlength="60">
+  el.innerHTML = `<input type="time" value="${esc(at || '')}" aria-label="시각">
+    <input class="what" value="${esc(what || '')}" placeholder="무엇을 하나요" maxlength="60" aria-label="할 일">
     <span class="len"></span>
     <button class="del" title="지우기">×</button>`;
   el.querySelector('.del').onclick = () => { el.remove(); planRedraw(); };
@@ -1517,7 +1537,7 @@ async function render() {
   // innerHTML 을 쓰되 서버에서 온 값은 전부 esc() 를 거친다. 화면 조립이 문자열 한 곳에
   // 모여 있어야 라켓온처럼 "서버 호출이 사라졌는지"를 검사로 셀 수 있다.
   CTA = null;
-  try { view.innerHTML = head() + await SCREEN[tab](); }
+  try { view.innerHTML = head() + await SCREEN[tab](); labelize(view); }
   catch (e) { view.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   paintCta();
   wire();
@@ -2567,7 +2587,10 @@ const SCREEN = {
 
       <div class="tvmid">
         <div class="tvbig">
-          ${d.due
+          ${(cur1 && nxt && /발표|피칭|데모|시연/.test(cur1.what))
+            ? `<div class="tvlabel">${esc(cur1.what)} · 다음(${esc(nxt.at)} ${esc(nxt.what)})까지</div>
+               <div class="tvclock" id="tv-pitch" data-due="${ymd()}T${esc(nxt.at)}"></div>`
+            : d.due
             ? `<div class="tvlabel">제출 마감까지</div>
                <div class="tvclock" data-due="${esc(d.due)}"></div>`
             : `<div class="tvlabel">오늘</div>
