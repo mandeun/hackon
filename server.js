@@ -709,6 +709,48 @@ function spreadHosts(rows) {
   return out;
 }
 
+/* 팀에 딸린 표를 이름으로 찾는다 — 스키마가 늘어도 휴지통이 반쪽이 안 되게. */
+function teamChildTables(db) {
+  return db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('teams','team_trash')").all()
+    .map(r => r.name)
+    .filter(n => db.prepare(`PRAGMA table_info(${n})`).all().some(c => c.name === 'team'));
+}
+function trashTeam(db, teamId, by) {
+  const t = db.prepare('SELECT * FROM teams WHERE id=?').get(teamId);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  const kids = {};
+  for (const n of teamChildTables(db)) kids[n] = db.prepare(`SELECT * FROM ${n} WHERE team=?`).all(teamId);
+  const r = db.prepare('INSERT INTO team_trash(team,event,name,tkey,json,by) VALUES(?,?,?,?,?,?)')
+    .run(teamId, t.event, t.name, t.tkey, JSON.stringify({ team: t, kids }), by || '');
+  for (const n of Object.keys(kids)) db.prepare(`DELETE FROM ${n} WHERE team=?`).run(teamId);
+  db.prepare('DELETE FROM teams WHERE id=?').run(teamId);
+  return Number(r.lastInsertRowid);
+}
+function untrashTeam(db, trashId) {
+  const row = db.prepare('SELECT * FROM team_trash WHERE id=?').get(trashId);
+  if (!row) throw new HttpError(404, '휴지통에 없습니다');
+  const d = JSON.parse(row.json);
+  const ins = (table, r) => {
+    const ks = Object.keys(r);
+    return Number(db.prepare(`INSERT INTO ${table}(${ks.join(',')}) VALUES(${ks.map(() => '?').join(',')})`)
+      .run(...ks.map(k => r[k])).lastInsertRowid);
+  };
+  /* 같은 id 로 돌아오는 게 목표(팀 링크가 산다). 그 사이 누가 그 id 를 썼으면 새 id 로. 이름이 부딪히면 못 살린다. */
+  let id;
+  try { id = ins('teams', d.team); }
+  catch {
+    const { id: _drop, ...rest } = d.team;
+    try { id = ins('teams', rest); }
+    catch { throw new HttpError(409, '같은 이름의 팀이 새로 생겨 되살릴 수 없습니다. 그 팀 이름을 바꾼 뒤 다시 하세요'); }
+  }
+  for (const [n, rows] of Object.entries(d.kids || {})) for (const r of rows) {
+    const { id: _k, ...rest } = r;
+    try { ins(n, { ...rest, team: id }); } catch {}
+  }
+  db.prepare('DELETE FROM team_trash WHERE id=?').run(trashId);
+  return { id, same: id === row.team, name: row.name };
+}
+
 /* 첫 화면 · 매뉴얼 · 아직 안 끝난 공개 대회. 끝난 대회는 빼서 검색에 죽은 링크가 안 남게 한다 */
 /* ───────────────────────── 유입 ───────────────────────── */
 /* 경로를 뭉친다. /e/ab12 가 천 줄 쌓이면 보이는 게 없다.
@@ -1061,6 +1103,13 @@ function open(file) {
   /* 참석 재확인. 대회 며칠 전 «올 거예요/못 가요». '' 미응답 · ISO시각 = 온다 · 'no' = 못 온다.
      노쇼는 이걸로 «미리» 잡는다 — 당일 came 는 사후 기록일 뿐이다. */
   try { db.exec("ALTER TABLE teams ADD COLUMN confirmed TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 팀 휴지통. 지우면 팀 행과 딸린 것(제출·점수·심사평·투표…)을 JSON 으로 옮겨 둔다.
+     되살리면 같은 id 로 돌아오니 참가자가 저장해 둔 팀 링크(tkey)가 그대로 산다.
+     teams 를 읽는 SQL 이 80군데라 «지운 표시» 열을 넣으면 80곳을 다 고쳐야 한다 — 그래서 옮긴다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS team_trash(
+    id INTEGER PRIMARY KEY, team INTEGER NOT NULL, event TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '', tkey TEXT NOT NULL DEFAULT '', json TEXT NOT NULL,
+    at TEXT NOT NULL DEFAULT (datetime('now')), by TEXT NOT NULL DEFAULT '')`);
   /* 쇼케이스 동의 칸. 옛 배포판에는 없다. 없으면 0(=동의 안 함)으로 시작한다 -
      «모름» 을 «있음» 으로 그리지 않는다(오답노트 E22). 동의는 본인이 켜야 생긴다. */
   try { db.exec("ALTER TABLE submissions ADD COLUMN show INTEGER NOT NULL DEFAULT 0"); } catch {}
@@ -3011,7 +3060,8 @@ function routes(db) {
           const bd = board(db, m[1], adm);
           /* 심사 링크를 만들려면 운영자에게 심사 열쇠가 필요하다. 손님에겐 절대 안 준다. */
           if (adm) { const kk = db.prepare('SELECT jkey, vkey, judged FROM events WHERE id=?').get(m[1]);
-                     bd.event.jkey = kk.jkey; bd.event.vkey = kk.vkey; bd.event.judged = kk.judged; }
+                     bd.event.jkey = kk.jkey; bd.event.vkey = kk.vkey; bd.event.judged = kk.judged;
+                     bd.trash = db.prepare('SELECT id, team, name, at, by FROM team_trash WHERE event=? ORDER BY id DESC').all(m[1]); }
           return json(res, 200, bd);
         }
 
@@ -3403,6 +3453,48 @@ function routes(db) {
           needAdmin(db, t.event, key, owner);
           return json(res, 200, { link: `/e/${t.event}?t=${t.tkey}` });
         }
+        /* 팀 지우기 — 운영자(열쇠) 또는 그 팀(팀 열쇠). 휴지통으로 가고, 되살리면 같은 id 로 돌아온다. */
+        if ((m = p.match(/^\/api\/teams\/(\d+)$/)) && req.method === 'DELETE') {
+          const t = db.prepare('SELECT id, event, tkey FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          const tk = String(req.headers['x-tkey'] || '');
+          let by = 'team';
+          if (!tk || tk !== t.tkey) { needAdmin(db, t.event, key, owner); by = 'admin'; }
+          return json(res, 200, { trash: trashTeam(db, t.id, by) });
+        }
+        /* 팀 이름 고치기 — 운영자 또는 그 팀 */
+        if ((m = p.match(/^\/api\/teams\/(\d+)$/)) && req.method === 'PATCH') {
+          const b = await body(req);
+          const t = db.prepare('SELECT id, event, tkey FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          const tk = String(req.headers['x-tkey'] || b.tkey || '');
+          if (!tk || tk !== t.tkey) needAdmin(db, t.event, key, owner);
+          const name = String(b.name || '').trim().slice(0, 40);
+          if (!name) throw new HttpError(400, '팀 이름을 넣어 주세요');
+          try { db.prepare('UPDATE teams SET name=? WHERE id=?').run(name, t.id); }
+          catch { throw new HttpError(409, '같은 이름의 팀이 있습니다'); }
+          return json(res, 200, { name });
+        }
+        /* 휴지통 — 운영자가 본다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/trash$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner);
+          return json(res, 200, db.prepare('SELECT id, team, name, at, by FROM team_trash WHERE event=? ORDER BY id DESC').all(m[1]));
+        }
+        /* 되살리기 — 운영자, 또는 그 팀 열쇠를 든 참가자 */
+        if ((m = p.match(/^\/api\/trash\/(\d+)\/restore$/)) && req.method === 'POST') {
+          const row = db.prepare('SELECT id, event, tkey FROM team_trash WHERE id=?').get(+m[1]);
+          if (!row) throw new HttpError(404, '휴지통에 없습니다');
+          const tk = String(req.headers['x-tkey'] || '');
+          if (!tk || tk !== row.tkey) needAdmin(db, row.event, key, owner);
+          return json(res, 200, untrashTeam(db, row.id));
+        }
+        /* 참가자가 «신청 취소»를 되돌린다. 팀 열쇠만 있으면 된다 — 휴지통 번호는 몰라도 된다. */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/trash\/mine$/)) && req.method === 'POST') {
+          const tk = String(req.headers['x-tkey'] || (await body(req)).tkey || '');
+          const row = tk ? db.prepare('SELECT id FROM team_trash WHERE event=? AND tkey=? ORDER BY id DESC').get(m[1], tk) : null;
+          if (!row) throw new HttpError(404, '취소된 신청이 없습니다');
+          return json(res, 200, untrashTeam(db, row.id));
+        }
         /* 팀 링크로 들어온 브라우저가 «내 팀»을 되찾는다. 열쇠가 맞을 때만 팀 id 를 준다 */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/claim$/)) && req.method === 'POST') {
           const tk = String((await body(req)).tkey || '');
@@ -3682,6 +3774,23 @@ function selftest() {
   ok(secretOf(db) === secretOf(db), '서명 열쇠는 다시 만들지 않는다');
   const signed = sign(db, evR.owner);
   ok(unsign(db, signed) === evR.owner, '서명한 쿠키를 되읽는다');
+  {
+    /* 팀 휴지통 — 지우면 빠지고, 되살리면 같은 id·같은 열쇠로 돌아온다 */
+    const tv = createEvent(db, { title: '휴지통 검사', host: 'ㅎ' });
+    const ta = joinTeam(db, tv.id, { name: '지울팀', agree: true, email: 'trash@x.test' });
+    joinTeam(db, tv.id, { name: '남을팀', agree: true, email: 'stay@x.test' });
+    const tkeyA = db.prepare('SELECT tkey FROM teams WHERE id=?').get(ta).tkey;
+    const before = board(db, tv.id, true).rows.length;
+    const trId = trashTeam(db, ta, 'admin');
+    ok(board(db, tv.id, true).rows.length === before - 1, '지우면 표에서 빠진다');
+    ok(db.prepare('SELECT COUNT(*) c FROM team_trash WHERE event=?').get(tv.id).c === 1, '휴지통에 한 줄 남는다');
+    const back = untrashTeam(db, trId);
+    ok(back.same && back.id === ta, '되살리면 같은 id 로 돌아온다 — 팀 링크가 산다');
+    ok(board(db, tv.id, true).rows.length === before, '되살리면 표 수가 돌아온다');
+    ok(db.prepare('SELECT tkey FROM teams WHERE id=?').get(ta).tkey === tkeyA, '팀 열쇠도 그대로다');
+    let dup = false; try { db.prepare('UPDATE teams SET name=? WHERE id=?').run('남을팀', ta); } catch { dup = true; }
+    ok(dup, '이름 고치기가 같은 이름과 부딪히면 막힌다');
+  }
   {
     /* 줄 세우기 — 깊은 신호가 가벼운 신호를 이긴다. 숫자를 박지 말고 점수끼리 비교한다. */
     const mk = (o) => Object.assign({ host: 'ㄱ', teams: 0, filled: 0, sponsors: [],

@@ -2278,8 +2278,12 @@ const SCREEN = {
         <td class="n">${e.vmode ? (r.votes || 0) + '표' : r.judges + '명'}</td>
         <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
           title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
-          <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button></td></tr>`).join('')}</table>
-      <p class="sub" style="margin-top:12px">팀을 누르면 제출·심사 화면이 열립니다. <b>☆</b> 추천작 · <b>🔗</b> 팀을 잃은 참가자에게 주는 링크(본인 확인 뒤).</p>
+          <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button>
+          <button class="btn sec sm" data-rename="${r.id}" title="팀 이름 고치기" style="padding:4px 8px">✏️</button>
+          <button class="btn sec sm" data-trash="${r.id}" title="지우기 — 휴지통으로 가고 되살릴 수 있다" style="padding:4px 8px">🗑</button></td></tr>`).join('')}</table>
+      ${(d.trash || []).length ? `<details style="margin-top:8px"><summary>지운 팀 ${d.trash.length} <span class="when">되살릴 수 있습니다</span></summary><div class="in">
+        ${d.trash.map(t => `<div class="shrow" style="margin-top:6px;align-items:center"><span>${esc(t.name)} <span class="meta">${esc(String(t.at).slice(0, 16))}${t.by === 'team' ? ' · 본인이 취소' : ''}</span></span><button class="btn sec sm" data-untrash="${t.id}">되살리기</button></div>`).join('')}</div></details>` : ''}
+      <p class="sub" style="margin-top:12px">팀을 누르면 제출·심사 화면이 열립니다. <b>☆</b> 추천작 · <b>🔗</b> 팀을 잃은 참가자에게 주는 링크(본인 확인 뒤) · <b>✏️</b> 이름 고치기 · <b>🗑</b> 지우기(휴지통에서 되살릴 수 있습니다).</p>
       <details${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
         <div class="meta">절반쯤 오는 게 정상입니다.</div>
         <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
@@ -2401,6 +2405,11 @@ const SCREEN = {
       ${(() => {
         /* 신청한 뒤 «다음에 뭘 하나»가 없으면 처음 온 사람은 여기서 멈춘다. 팀 링크(열쇠)는 이 브라우저에만 있으니
            잃기 전에 본인에게 보내 두게 한다 — 앱은 메일·문자를 안 보내니 복사·공유 단추뿐이다. */
+        /* 팀이 목록에 없는데 이 브라우저에 열쇠가 있다 — 본인이 취소했거나 운영자가 지웠다. 되돌릴 수 있다. */
+        if (!mine && myId && tkeyOf(myId) && !ended) return `<div class="card" id="next-gone">
+          <h3>이 팀이 목록에 없습니다</h3>
+          <div class="meta">신청을 취소했거나 운영자가 지웠습니다. 실수였다면 되돌릴 수 있고, 팀 링크도 그대로 살아납니다.</div>
+          <div style="margin-top:8px"><button class="btn sm" id="nx-undo">되돌리기</button></div></div>`;
         if (!mine || ended) return '';
         const tk = tkeyOf(mine.id); if (!tk) return '';
         const link = `${shareBase()}/e/${e.id}?t=${tk}`;
@@ -2419,6 +2428,7 @@ const SCREEN = {
             3. 내기 전에 <b>새 창에서 열리는지</b> 확인합니다.</div>
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
           <div style="margin-top:8px"><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
+          <div style="margin-top:10px"><button class="btn sec sm" id="nx-rename">팀 이름 고치기</button> <button class="btn sec sm" id="nx-cancel">신청 취소</button></div>
         </div>`; })()}
 
       ${whoBox()}
@@ -3514,6 +3524,25 @@ function wire() {
   if ($('#cf-yes')) $('#cf-yes').onclick = cfGo(true);
   if ($('#cf-no')) $('#cf-no').onclick = cfGo(false);
 
+  /* 참가자 쪽 — 취소·되돌리기·이름 고치기. 전부 그 팀 열쇠로만. */
+  if ($('#nx-cancel')) $('#nx-cancel').onclick = async () => {
+    if (!confirm('신청을 취소할까요? 이 화면에서 되돌릴 수 있습니다.')) return;
+    const myId = localStorage.getItem('hackon.team.' + cur);
+    try { await api(`/teams/${myId}`, { method: 'DELETE', tkey: tkeyOf(myId) }); flash('취소했습니다'); setTimeout(() => location.reload(), 600); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#nx-rename')) $('#nx-rename').onclick = async () => {
+    const name = prompt('새 팀 이름'); if (!name) return;
+    const myId = localStorage.getItem('hackon.team.' + cur);
+    try { await api(`/teams/${myId}`, { method: 'PATCH', tkey: tkeyOf(myId), body: { name } }); flash('고쳤습니다'); setTimeout(() => location.reload(), 600); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#nx-undo')) $('#nx-undo').onclick = async () => {
+    const myId = localStorage.getItem('hackon.team.' + cur);
+    try { await api(`/events/${cur}/trash/mine`, { method: 'POST', tkey: tkeyOf(myId) }); flash('되돌렸습니다'); setTimeout(() => location.reload(), 600); }
+    catch (e) { flash(e.message, true); }
+  };
+
   const msave = $('#m-save');
   if (msave) msave.onclick = async () => {
     const id = localStorage.getItem('hackon.team.' + cur);
@@ -3869,6 +3898,23 @@ function wire() {
       cur = r.id; tab = 'board'; flash('되살렸습니다. 팀 ' + r.teams + ' · 자리 ' + r.needs); }
     catch (e) { flash(e.message, true); }
   };
+  /* 팀 지우기·이름 고치기·되살리기 — 운영자. 지우기는 휴지통이라 겁낼 것 없다. */
+  document.querySelectorAll('[data-trash]').forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    if (!confirm('이 팀을 지울까요? 휴지통으로 가고, 아래 «지운 팀»에서 되살릴 수 있습니다.')) return;
+    try { await api(`/teams/${b.dataset.trash}`, { method: 'DELETE' }); flash('휴지통으로 옮겼습니다'); render(); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-rename]').forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    const name = prompt('새 팀 이름'); if (!name) return;
+    try { await api(`/teams/${b.dataset.rename}`, { method: 'PATCH', body: { name } }); flash('고쳤습니다'); render(); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-untrash]').forEach(b => b.onclick = async () => {
+    try { const r = await api(`/trash/${b.dataset.untrash}/restore`, { method: 'POST' }); flash(r.same ? '되살렸습니다. 팀 링크도 그대로입니다' : '되살렸습니다'); render(); }
+    catch (e) { flash(e.message, true); }
+  });
   document.querySelectorAll('[data-relink]').forEach(b => b.onclick = async (ev) => {
     ev.stopPropagation();
     if (!LIVE) return flash('데모에서는 안 됩니다', true);
