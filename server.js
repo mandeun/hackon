@@ -646,6 +646,16 @@ function pickVenues(rows, size, area) {
 const KAKAO = process.env.KAKAO_KEY || '';
 const KAKAO_SECRET = process.env.KAKAO_SECRET || '';
 const SITE = (process.env.SITE || '').replace(/\/$/, '');
+/* 주소가 여럿이다(hackon.kr · hackon.mandeun.com). 돌아갈 주소를 SITE 하나로
+   박으면 hackon.kr 에서 로그인한 사람이 다른 도메인으로 튕긴다. 들어온 주소로
+   되돌린다. host 는 사용자가 보내는 값이라 목록에 있는 것만 쓴다. */
+const SITES = (process.env.SITES || SITE).split(',')
+  .map((x) => x.trim().replace(/\/$/, '')).filter(Boolean);
+const siteOf = (req) => {
+  const h = String(req.headers.host || '').toLowerCase();
+  return SITES.find((x) => x.toLowerCase().replace(/^https?:\/\//, '') === h)
+      || SITE || `http://${h || 'localhost'}`;
+};
 
 /* ───────────────────────── DB ───────────────────────── */
 /* #region reuse:db-open — sqlite 열기(WAL+FK). 파일 경로만 바꾸면 어느 프로젝트든 그대로 쓴다 */
@@ -2652,7 +2662,7 @@ function routes(db) {
           const e = getEvent(db, m[1]);
           res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8',
                                'content-disposition': 'attachment; filename="hackon-' + e.id + '.ics"' });
-          return res.end(icsOf(e, SITE || ('http://' + (req.headers.host || 'localhost'))));
+          return res.end(icsOf(e, siteOf(req)));
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/export\.csv$/)) && req.method === 'GET') {
           needAdmin(db, m[1], key, owner);   // 연락처가 실린다 — 운영자만
@@ -3368,7 +3378,7 @@ function routes(db) {
       /* ── 카카오 로그인 ────────────────────────────────
          키가 없으면 이 자리는 통째로 없는 것과 같다. */
       if (p === '/auth/kakao' && KAKAO) {
-        const back = SITE || `http://${req.headers.host}`;
+        const back = siteOf(req);
         const u = 'https://kauth.kakao.com/oauth/authorize'
           + `?client_id=${encodeURIComponent(KAKAO)}`
           + `&redirect_uri=${encodeURIComponent(back + '/auth/kakao/done')}`
@@ -3377,7 +3387,7 @@ function routes(db) {
         return res.end();
       }
       if (p === '/auth/kakao/done' && KAKAO) {
-        const back = SITE || `http://${req.headers.host}`;
+        const back = siteOf(req);
         const code = u.searchParams.get('code');
         if (!code) { res.writeHead(302, { location: '/app' }); return res.end(); }
         const form = new URLSearchParams({
@@ -3418,7 +3428,7 @@ function routes(db) {
           location: '/app',
           'set-cookie': [
             `hackon_s=${encodeURIComponent(sign(db, oid))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`
-            + (SITE.startsWith('https') ? '; Secure' : ''),
+            + (back.startsWith('https') ? '; Secure' : ''),
             'hackon_pre=; Path=/; Max-Age=0',
           ],
         });
@@ -3500,6 +3510,16 @@ function selftest() {
   ok(secretOf(db) === secretOf(db), '서명 열쇠는 다시 만들지 않는다');
   const signed = sign(db, evR.owner);
   ok(unsign(db, signed) === evR.owner, '서명한 쿠키를 되읽는다');
+  {
+    const saved = SITES.slice();
+    SITES.length = 0; SITES.push('https://hackon.kr', 'https://hackon.mandeun.com');
+    const at = (h) => siteOf({ headers: { host: h } });
+    ok(at('hackon.kr') === 'https://hackon.kr', '들어온 주소로 되돌린다');
+    ok(at('hackon.mandeun.com') === 'https://hackon.mandeun.com', '다른 주소도 제 주소로 되돌린다');
+    ok(at('HACKON.KR') === 'https://hackon.kr', '대소문자가 달라도 같은 주소다');
+    ok(at('evil.example') !== 'https://evil.example', '목록에 없는 host 는 따라가지 않는다');
+    SITES.length = 0; SITES.push(...saved);
+  }
   ok(unsign(db, evR.owner + '.deadbeef') === '', '서명이 틀리면 안 읽힌다');
   ok(!isAdmin(db, ev, '', 'nope'), '남의 주최자 열쇠로는 안 열린다');
 
