@@ -661,17 +661,17 @@ function giveHtml() {
   if (G.done) return `<div class="card" id="give" style="text-align:center;padding:28px 20px">
     <div style="font-size:40px;line-height:1">🙌</div>
     <h3 style="margin-top:12px">보냈습니다</h3>
-    <div class="meta">운영자가 확인하면 공개 장부에 이름이 올라갑니다. 연락처는 운영자만 봅니다.</div>
-    ${G.ref && G.pkey ? `<div class="meta" style="margin-top:10px"><b>내 후원 화면</b> — 확인됐는지, 대회가 어디까지 왔는지, 끝나면 결과물과 보고서를 여기서 봅니다. 열쇠가 들어 있으니 적어 두세요.</div>
+    <div class="meta">확인되면 공개 장부에 이름이 오릅니다.</div>
+    ${G.ref && G.pkey ? `<div class="meta" style="margin-top:10px"><b>내 후원 화면</b> — 확인 여부·진행·결과물을 여기서 봅니다. 열쇠가 들어 있으니 적어 두세요.</div>
     <div class="share" id="give-link" style="margin-top:8px">${esc(location.origin)}/s/${esc(G.ref)}?k=${esc(G.pkey)}</div>
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn sm" id="g-copy">주소 복사</button><a class="btn sec sm" href="/s/${esc(G.ref)}?k=${esc(G.pkey)}" style="text-decoration:none">내 후원 화면 열기</a></div>` : ''}
     <div style="height:14px"></div><button type="button" class="btn sec sm" data-give-again="1">다른 것도 줄 수 있어요</button></div>`;
   if (G.step === 1) {
     if (!G.fixed && !G.events.length) return `<div class="card" id="give"><h3>지금 열린 대회가 없습니다</h3>
-      <div class="meta">대회가 열리면 여기서 줄 수 있는 것을 고릅니다. 직접 여실 수도 있습니다. 이름 하나면 됩니다.</div>
+      <div class="meta">대회가 열리면 여기서 줄 수 있는 것을 고릅니다.</div>
       <div style="height:14px"></div><a class="btn" href="/app" style="display:block;text-align:center;text-decoration:none">대회 열기</a></div>`;
     return `<div class="card" id="give">${steps(1)}<h3>무엇을 줄 수 있나요</h3>
-      <div class="meta">하나만 고르세요. 연락처는 운영자만 봅니다.</div>
+      
       <div class="gchips">${GIVE_KINDS.map(([k, v]) =>
         `<button type="button" class="gchip${G.kind === k ? ' on' : ''}" data-give-kind="${k}">${v}</button>`).join('')}</div>
       <details class="more" id="give-recv" style="margin-top:10px"><summary>주면 무엇을 받나요</summary>
@@ -696,7 +696,7 @@ function askHtml() {
   const steps = n => `<div class="gsteps">${['누구로', '무엇을', '연락처'].map((t, i) => `<span${i + 1 === n ? ' class="on"' : ''}>${i + 1} ${t}</span>`).join('<span class="sep">›</span>')}</div>`;
   if (Q.result) return `<div class="card" id="ask" style="text-align:center;padding:28px 20px"><div style="font-size:40px;line-height:1">📬</div>
     <h3 style="margin-top:12px">올라갔습니다</h3>
-    <div class="meta">이 주소를 적어 두세요. 대회가 끝나면 여기서 결과물을 보고 «됐다»를 누를 수 있습니다. 열쇠가 들어 있으니 남에게 주지 마세요.</div>
+    <div class="meta">이 주소를 적어 두세요 — 끝나면 여기서 결과물을 봅니다. 열쇠라서 남에게 주지 마세요.</div>
     <div class="share" id="ask-link" style="margin-top:10px">${esc(location.origin)}/r/${esc(Q.result.id)}?k=${esc(Q.result.rkey)}</div>
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn sm" id="ask-copy">주소 복사</button><a class="btn sec sm" href="/r/${esc(Q.result.id)}?k=${esc(Q.result.rkey)}" style="text-decoration:none">받는 화면 열기</a></div>
     <div class="meta" style="margin-top:10px">${Q.event ? '이 대회 운영자가 주제로 고르면 대회 페이지에 실립니다.' : '운영자가 자기 대회 주제로 고르면 그때 대회에 붙습니다.'}</div></div>`;
@@ -704,10 +704,10 @@ function askHtml() {
     <div class="gchips" style="grid-template-columns:1fr 1fr">
       <button type="button" class="gchip${Q.kind === 'sponsor' ? ' on' : ''}" data-ask-kind="sponsor">후원하고 싶어요<br><span style="font-size:12px;font-weight:500">관심 주제를 냅니다</span></button>
       <button type="button" class="gchip${Q.kind === 'requester' ? ' on' : ''}" data-ask-kind="requester">내 문제를 내고 싶어요<br><span style="font-size:12px;font-weight:500">번거로운 일을 적습니다</span></button></div>
-    <div class="meta" style="margin-top:10px">둘 다 마감 뒤 결과물을 받습니다. 후원 금액·상품은 앱 밖에서 운영자와 정합니다. 앱은 돈을 만지지 않습니다.</div></div>`;
+    <div class="meta" style="margin-top:10px">둘 다 마감 뒤 결과물을 받습니다.</div></div>`;
   if (Q.step === 2) {
     if (Q.kind === 'sponsor') return `<div class="card" id="ask">${steps(2)}<h3>어떤 주제로 만든 것을 받고 싶으세요</h3>
-      <div class="meta">한 줄이면 됩니다. 예) 동네 가게 예약 · 음성으로 쓰는 메모 · 우리 도구를 쓴 것</div>
+      <div class="meta">예) 동네 가게 예약 · 음성 메모</div>
       <input id="ask-topic" value="${esc(Q.topic)}" maxlength="120" placeholder="예) 우리 API 로 만든 음성 서비스">
       <div style="height:12px"></div><button class="btn" id="ask-next">다음</button>
       <div style="margin-top:8px;text-align:center"><button type="button" class="lnk" data-ask-back="1">뒤로</button></div></div>`;
@@ -764,7 +764,7 @@ function wireAsk() {
 /* 앱 피드백 한 줄. 서버에 쌓이고 우리(운영)만 열쇠로 본다. 답장은 약속하지 않는다 — 연락처는 선택 */
 function feedbackBox(page) {
   return `<div class="card" id="fb" style="margin-top:14px"><h3>이 앱, 뭐가 불편했나요</h3>
-    <div class="meta">한 줄이면 됩니다. 만든 사람이 읽습니다. 연락처는 선택이고 답장을 약속하진 않습니다.</div>
+    <div class="meta">한 줄이면 됩니다.</div>
     <input id="fb-text" maxlength="300" placeholder="예) 신청 단추가 어디 있는지 못 찾았어요" style="margin-top:8px">
     <input id="fb-contact" maxlength="100" placeholder="연락처 (선택)" style="margin-top:6px">
     <div style="height:8px"></div><button class="btn sec sm" id="fb-send" data-page="${esc(page)}">보내기</button></div>`;
@@ -1056,8 +1056,7 @@ function applyForm() {
     </div>
     <div style="height:16px"></div>
     <button class="btn" id="t-join">참가 신청하기</button>
-    <div class="meta" style="margin-top:10px;text-align:center">지금은 이름과 이메일만 받습니다.
-      나머지는 신청한 뒤에 여쭙겠습니다.</div>`;
+    <div class="meta" style="margin-top:10px;text-align:center">지금은 이름과 이메일만 받습니다.</div>`;
 }
 
 /* 신청을 마친 사람에게만 보이는 두 번째 칸. 여기서 진짜 정보를 받는다. */
@@ -1069,13 +1068,11 @@ function moreForm(t) {
   if (!need.length) return `<div class="card" id="apply" style="text-align:center;padding:28px 20px">
     <div style="font-size:40px;line-height:1">🎉</div>
     <h3 style="margin-top:12px">신청 완료</h3>
-    <div class="meta">필요한 것을 다 주셨습니다. 확정 메일을 기다려 주세요.<br>이제 이 대회의 <b>켜는 사람</b>입니다 — 자리가 하나 켜졌습니다.</div></div>`;
+    <div class="meta">다 주셨습니다. 확정 메일을 기다려 주세요. 이제 이 대회의 <b>켜는 사람</b>입니다.</div></div>`;
   return `<div class="card" id="apply">
     <div class="pill ok" style="margin-bottom:10px">✓ 접수됨</div>
     <h3>신청됐습니다. 조금만 더</h3>
-    <div class="meta">${esc(t.name)} 팀으로 접수됐습니다.
-      아래를 채워 주시면 확정 안내를 드리고 팀을 짜 드릴 수 있습니다.
-      안 채우셔도 신청은 유효합니다.</div>
+    <div class="meta">${esc(t.name)} 팀으로 접수됐습니다. 아래를 채우면 팀을 짜 드립니다. 안 채워도 신청은 유효합니다.</div>
     ${!t.contact ? `<label>연락처 <span class="pill warn">확정 안내를 여기로 보냅니다</span></label>
       <input id="m-contact" placeholder="이메일 또는 전화">` : ''}
     ${!t.role ? `<div class="row">
@@ -1105,7 +1102,7 @@ function moreForm(t) {
     <label class="ck"><input type="checkbox" id="m-spon"${t.sponsor_ok ? ' checked' : ''}>
       <span>협찬사가 채용·인턴·협업 제안으로 연락하는 것에 동의합니다
         <span class="pill ok">선택</span></span></label>
-    <div class="meta">동의하신 분의 연락처만 전달됩니다. 언제든 끌 수 있습니다.</div>
+    <div class="meta">동의하신 분의 연락처만 전달되고, 언제든 끌 수 있습니다.</div>
     <div style="height:16px"></div>
     <button class="btn" id="m-save">보내기</button>
   </div>`;
@@ -1588,8 +1585,7 @@ const SCREEN = {
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>
       ${my ? '' : `<div class="card">
         <h3>전에 연 대회를 찾으시나요</h3>
-        <div class="meta">주최자 열쇠를 넣으면 내가 연 대회가 다 나옵니다.
-          로그인은 없습니다.</div>
+        <div class="meta">주최자 열쇠를 넣으면 내가 연 대회가 다 나옵니다.</div>
         ${AUTH && AUTH.kakao ? `<div style="height:8px"></div>
           <a class="kko" href="/auth/kakao">카카오로 로그인</a>
           <div class="meta" style="margin-top:8px">또는 열쇠로 찾기</div>` : ''}
@@ -1598,10 +1594,10 @@ const SCREEN = {
         <button class="btn sm" id="ow-go">찾기</button>
       </div>`}
       <details class="card" style="padding:14px 20px"><summary style="cursor:pointer;font-weight:700">지운 대회 되살리기</summary>
-        <div class="meta" style="margin-top:8px">지울 때 내려받은 사본 파일(hackon-…-지운사본.json)을 넣으면 그대로 돌아옵니다. 사본을 만든 주최자 열쇠가 이 기기에 있어야 합니다. 운영자 열쇠는 새로 나옵니다.</div>
+        <div class="meta" style="margin-top:8px">사본 파일을 넣으면 돌아오고, 주최자 열쇠가 이 기기에 있어야 합니다.</div>
         <input type="file" id="rs-file" accept="application/json" style="margin-top:8px">
         <div style="height:8px"></div><button class="btn sec sm" id="rs-go">되살리기</button></details>`;
-    return mineBox + `<h2>열린 대회</h2><p class="sub">누르면 참가 신청과 순위를 볼 수 있습니다.</p>` +
+    return mineBox + `<h2>열린 대회</h2>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
         <div class="body"><h3>${esc(e.title)}</h3>
@@ -1622,7 +1618,7 @@ const SCREEN = {
       ${(() => { const ids = Object.keys(localStorage).filter(k => k.startsWith('hackon.okey.')).map(k => k.slice(12)); if (!ids.length || !LIVE) return '';
         return `<details class="more" id="f-fromwrap" style="margin-top:8px"><summary>지난 대회에서 가져오기 <span class="when">기준표·주제·진행 순서·자리</span></summary>
           <div class="in"><select id="f-from"><option value="">가져오지 않음</option>${ids.map(id => `<option value="${esc(id)}">${esc(id)}</option>`).join('')}</select>
-          <div class="meta">이 브라우저에 운영 열쇠가 있는 대회만 보입니다. 사람(참가팀·후원)은 안 가져옵니다.</div></div></details>`; })()}
+          <div class="meta">이 브라우저에 운영 열쇠가 있는 대회만 보입니다.</div></div></details>`; })()}
       <div class="row">
         <div><label>기본 인원</label><input value="20명" disabled></div>
         <div><label>기본 시간</label><input value="6시간" disabled></div>
@@ -1631,8 +1627,7 @@ const SCREEN = {
       <input type="hidden" id="f-kind" value="당일">
       <div style="height:12px"></div>
       <button class="btn" id="f-save">1단계 · 대회 만들기</button>
-      <div class="meta" style="margin-top:8px">만들면 바로 운영 화면으로 갑니다. 거기서 <b>필요한 자리</b>를 올리고 공개 링크를 복사하면 됩니다.
-        날짜·상금·마감은 나중에 고쳐도 됩니다.${myKey() ? '<br>전에 연 대회와 같은 주최자로 묶입니다.' : ''}</div>
+      <div class="meta" style="margin-top:8px">만들면 운영 화면으로 갑니다. 날짜·상금·마감은 나중에 고쳐도 됩니다.${myKey() ? '<br>전에 연 대회와 같은 주최자로 묶입니다.' : ''}</div>
 
 `;
   },
@@ -1642,7 +1637,7 @@ const SCREEN = {
     const n = +(localStorage.getItem('hackon.size') || 0) || 24;
     const f = LIVE ? await api(`/find?size=${n}`) : null;
     if (!f) return `<h2>구하기</h2>
-      <p class="sub">서버로 열어야 합니다. 파일로 열면 이 화면은 계산하지 않습니다.</p>`;
+      <p class="sub">서버로 열어야 합니다.</p>`;
     const ev = (LIVE && cur) ? await api(`/events/${cur}`).catch(() => null) : null;
     const lead = (LIVE && cur && ev && ev.admin)
       ? await api(`/events/${cur}/leads`).catch(() => null) : null;
@@ -1656,8 +1651,7 @@ const SCREEN = {
       <div class="card">
         <label>참가 인원 (몇 명 올 예정인가요)</label>
         <input id="f-n" type="number" value="${f.size}" min="1">
-        <div class="meta" style="margin-top:8px">무료 행사는 신청자의 절반쯤 옵니다.
-          스물넷을 채우려면 마흔여덟까지 받으세요.</div>
+        <div class="meta" style="margin-top:8px">신청자의 절반쯤 오니, 스물넷을 채우려면 마흔여덟까지 받으세요.</div>
       </div>
 
       <div class="stat">
@@ -1665,8 +1659,7 @@ const SCREEN = {
         <div><b>${f.room.area}㎡</b><span>필요한 자리</span></div>
         <div><b>${f.room.outlets}</b><span>콘센트</span></div>
       </div>
-      <p class="sub">콘센트는 노트북 한 대에 하나로 셌습니다. 모자라면 멀티탭으로 메웁니다.
-        와이파이는 동시 ${f.room.wifi}대가 붙습니다. 휴대폰까지 세면 두 배입니다.</p>
+      <p class="sub">콘센트는 노트북 한 대에 하나. 와이파이는 동시 ${f.room.wifi}대, 휴대폰까지면 두 배입니다.</p>
 
       <h3 style="margin-top:18px">지금 빌릴 수 있는 곳</h3>
       ${vn && vn.rows.length ? `
@@ -1704,8 +1697,7 @@ const SCREEN = {
           아래 창구로 직접 물어보세요.</p>`}
 
       <h3 style="margin-top:18px">그 밖에 물어볼 곳</h3>
-      <p class="sub">공공 예약에 안 올라오는 곳들입니다.
-        <b>빈자리와 가격은 저희가 알 수 없습니다</b> — 어디에 물어보면 되는지까지가 여기 일입니다.</p>
+      <p class="sub">공공 예약에 안 올라오는 곳입니다. <b>빈자리와 가격은 저희가 알 수 없습니다</b> — 직접 물어보세요.</p>
       ${f.places.length ? '' : `<div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
         <div class="meta"><b>이 인원을 받는 무료 공간이 거의 없습니다.</b>
           협찬을 먼저 잡거나, 나눠서 두 번 여는 편이 낫습니다.</div>
@@ -1738,8 +1730,7 @@ const SCREEN = {
       <div id="f-mail"></div>
 
       ${lead ? `<h3 style="margin-top:18px">연락한 곳</h3>
-        <p class="sub">혼자 열면 어디에 보냈는지를 잊습니다.
-          같은 데 두 번 보내는 것보다, 아무 데도 안 보낸 채 날짜가 오는 게 더 흔합니다.</p>
+        <p class="sub">혼자 열면 어디에 보냈는지를 잊습니다.</p>
         ${lead.rows.length ? `<table><tr><th>무엇</th><th>어디</th><th>상태</th><th></th></tr>
           ${lead.rows.map(r => `<tr>
             <td>${esc(r.kind)}</td>
@@ -1749,7 +1740,7 @@ const SCREEN = {
             <td><button class="btn sec sm" data-drop="${r.id}" style="padding:4px 9px">지움</button></td>
           </tr>`).join('')}</table>
           <p class="sub">상태를 누르면 보냄 → 답장 → 확정 → 거절 순으로 바뀝니다.</p>`
-        : '<p class="sub">아직 없습니다. 위에서 넣거나 아래에 직접 적으세요.</p>'}
+        : ''}
         <div class="card">
           <div class="row">
             <div><label>무엇</label><select id="l-kind">
@@ -1768,7 +1759,7 @@ const SCREEN = {
 
   async board() {
     if (!cur && !LIVE) cur = 'demo01';
-    if (!cur) return `<h2>대회를 먼저 고르세요</h2><p class="sub">‘대회’ 탭에서 하나 누르면 됩니다.</p>`;
+    if (!cur) return `<h2>대회를 먼저 고르세요</h2>`;
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const qas = LIVE ? await api(`/events/${cur}/questions`).catch(() => []) : [];
     const e = d.event;
@@ -1796,7 +1787,7 @@ const SCREEN = {
         <div style="height:10px"></div>
         <button class="btn sm" id="ok-go">열기</button>
       </div>
-      <p class="sub">참가자와 협찬사에게 보낼 주소</p>
+      
       <div class="share">${shareBase()}/e/${esc(e.id)}</div>`;
 
     const sp = LIVE ? await api(`/events/${cur}/spread`) : { rows: [], gap: 0 };
@@ -1878,8 +1869,7 @@ const SCREEN = {
       <details><summary>전체 공지
         <span class="when">${e.notice ? '띄워져 있습니다' : '큰 화면과 공개 페이지에 동시에'}</span>
         </summary><div class="in">
-        <div class="meta">한 줄이면 <b>벽에 걸린 큰 화면</b>과 참가자 폰에 같이 뜹니다.
-          한 시간 뒤에 저절로 내려갑니다. 지난 소식은 공개 페이지 «소식»에 시각과 함께 남습니다.</div>
+        <div class="meta">한 줄이 <b>큰 화면</b>과 참가자 폰에 같이 뜨고, 한 시간 뒤 내려갑니다.</div>
         <div class="tags" style="margin-top:8px">
           ${NOTICES.map(x => `<button data-nt="${esc(x)}">${esc(x)}</button>`).join('')}
         </div>
@@ -1908,7 +1898,7 @@ const SCREEN = {
       ${(() => { return `<details${폄('정보')}>
         <summary>${todo ? '아직 안 정한 것' : '대회 정보 고치기'}
           <span class="when">${todo ? '여는 중' : '날짜 · 상금 · 진행 순서'}</span></summary><div class="in">
-        <div class="meta">비워 둬도 대회는 돌아갑니다. 정해지는 대로 채우세요.</div>
+        <div class="meta">비워 둬도 대회는 돌아갑니다.</div>
         <div class="row">
           <div><label>시작</label><input id="e-starts" type="date" value="${esc(e.starts)}"></div>
           <div><label>끝</label><input id="e-ends" type="date" value="${esc(e.ends)}"></div>
@@ -1925,7 +1915,7 @@ const SCREEN = {
         <input id="e-chat" value="${esc(e.chat || '')}" placeholder="https://open.kakao.com/o/…" inputmode="url">
         <label>문제가 생기면 이 사람에게 <span class="pill">참가자 화면에 그대로 보입니다</span></label>
         <input id="e-safety" value="${esc(e.safety || '')}" maxlength="120" placeholder="예) 운영진 공용 help@… · 익명 신고 폼 forms.gle/…">
-        <div class="meta">개인 이름·번호보다 <b>운영진 공용 주소</b>와 <b>익명으로 알릴 길</b>을 적어 주세요. 가해자가 운영진일 때도 갈 곳이 있어야 합니다.</div>
+        <div class="meta">개인 이름·번호보다 <b>운영진 공용 주소</b>와 <b>익명으로 알릴 길</b>을 적어 주세요.</div>
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
         <label>진행 순서 <span class="pill">현장 화면과 공개 페이지가 같이 씁니다</span></label>
         <div class="plan" id="e-plan"></div>
@@ -1948,7 +1938,7 @@ const SCREEN = {
       ${/* 올라온 주제·요청. 붙은 것(연락처는 운영자만)과 후보(아직 어느 대회에도 안 붙은 것). 한 대회 다섯 개까지, 올라온 순. */''}
       ${(() => { const mine = reqsAll.filter(r => r.event === e.id), cands = reqsCand;
         return `<details${mine.length ? ' open' : ''}><summary>주제 · 요청 <span class="when">${mine.length ? mine.length + '개 붙음' : cands.length ? '후보 ' + cands.length + '개' : '아직 없음'}</span></summary><div class="in">
-        <div class="meta">후원자·의뢰자가 낸 주제입니다. 붙이면 대회 페이지와 제출 폼에 실리고, 마감 뒤 그 사람이 결과물을 받습니다. 한 대회 다섯 개까지.</div>
+        <div class="meta">한 대회 다섯 개까지, 마감 뒤 그 사람이 결과물을 받습니다.</div>
         ${mine.map(r => `<div class="card" style="margin-top:9px"><h3><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span> ${esc(r.topic || r.pain)}</h3>
           <div class="meta">${esc(r.name)}${r.contact ? ' · <span class="contact">' + esc(r.contact) + '</span>' : ''}${r.done ? '<br>«됐다»의 기준: ' + esc(r.done) : ''}${r.teams ? '<br>' + r.teams + '팀이 골랐습니다' : ''}</div>
           <div style="height:8px"></div><button class="btn sec sm" data-pick="${esc(r.id)}" data-on="0">떼기</button></div>`).join('')}
@@ -1964,10 +1954,10 @@ const SCREEN = {
       ${(() => { const busyDel = (d.rows || []).length || needs.length || offers.length;
         return `<details id="gd"><summary>이 대회를 그만두려면 <span class="when">목록 내리기가 먼저</span></summary><div class="in">
         <div class="card"><h3>목록에서 내리기 <span class="pill">권장</span></h3>
-          <div class="meta">첫 화면 목록에서 사라지고 링크로는 열립니다. 신청한 분 기록이 남고, 언제든 다시 올릴 수 있습니다.</div>
+          <div class="meta">첫 화면 목록에서 사라지고 링크로는 열립니다.</div>
           <div style="height:8px"></div>${e.listed ? '<button class="btn sm" id="gd-unlist">목록에서 내리기</button>' : '<span class="pill">지금 목록에 없습니다</span>'}</div>
         <div class="card"><h3>완전히 지우기</h3>
-          <div class="meta">팀·제출·점수·투표·자리·제안이 함께 지워지고 되돌릴 수 없습니다. 지우기 직전 사본이 파일로 내려받아지고 서버에도 남습니다. 사본에는 연락처가 있으니 운영자만 보관하세요.</div>
+          <div class="meta">팀·제출·점수·투표가 함께 지워집니다. 지우기 직전 사본이 내려받아집니다.</div>
           ${busyDel ? `<label>확인하려면 대회 이름을 그대로 적으세요</label><input id="gd-name" placeholder="${esc(e.title)}">`
                     : '<div class="meta" style="margin-top:6px">신청·자리·제안이 없는 빈 대회라 바로 지울 수 있습니다.</div>'}
           <div style="height:8px"></div><button class="btn sm" id="gd-go" data-title="${esc(e.title)}" style="background:var(--bad)"${busyDel ? ' disabled' : ''}>완전히 지우기</button></div>
@@ -1999,17 +1989,17 @@ const SCREEN = {
           : '기본은 심사위원 점수입니다. 심사위원 자리가 비면 관객 평가나 참가팀 상호평가로 돌릴 수 있습니다. 제출 마감 전까지 되돌릴 수 있습니다.'}</div>
         ${on ? '' : `<div class="meta" style="margin-top:6px">${stateLine}${J.jseats ? ` · 확인된 심사 자리 ${J.jseats}` : (needs.some(n => n.kind === 'judge') ? '' : ' · 심사 자리를 올리지 않으셨어요')}${J.need ? ` · 참가 ${J.teams}팀이면 <b>${J.need}명</b>이면 됩니다` : ''}</div>`}
         ${(!on && J.state.startsWith('yes') && J.dleft !== null && J.dleft >= 0 && J.dleft <= 7) ? `<div class="meta" style="margin-top:6px">행사 주입니다. 심사위원에게 <button class="btn sec sm" id="jb-confirm" data-title="${esc(e.title)}" data-starts="${esc(e.starts)}">확인 부탁 글 복사</button> — 예비 심사위원 한두 분도 이때 잡아 두세요.</div>` : ''}
-        ${js.length ? `<div class="meta" style="margin-top:6px">심사위원 ${js.length}명의 점수가 있습니다${on ? ' (점수는 남아 있습니다)' : ''}. <button class="btn sec sm" id="b-progress">심사 진행 알리기</button> <span class="meta">— «n/m 팀 봤습니다»가 소식에 뜹니다. 기다리는 참가자가 어디까지 왔는지 압니다.</span></div>` : ''}
-        ${(!on) ? `<div class="meta" style="margin-top:6px" id="rank-row">${e.ranked ? '<b>순위 보정 켜짐</b> — 심사위원마다 등수를 매겨 100~0 으로 편 뒤 평균합니다. 후한 분과 짠 분의 점수 차가 순위를 안 흔듭니다.' : '순위는 점수 평균입니다.' + (sp.warn ? ' <span class="late">심사 눈높이 차이가 큽니다 — 순위 보정을 켜면 등수로 셉니다.</span>' : '')}
+        ${js.length ? `<div class="meta" style="margin-top:6px">심사위원 ${js.length}명의 점수가 있습니다${on ? ' (점수는 남아 있습니다)' : ''}. <button class="btn sec sm" id="b-progress">심사 진행 알리기</button> <span class="meta">— «n/m 팀 봤습니다»가 소식에 뜹니다.</span></div>` : ''}
+        ${(!on) ? `<div class="meta" style="margin-top:6px" id="rank-row">${e.ranked ? '<b>순위 보정 켜짐</b> — 심사위원마다 등수로 셉니다.' : '순위는 점수 평균입니다.' + (sp.warn ? ' <span class="late">심사 눈높이 차이가 큽니다 — 순위 보정을 켜 보세요.</span>' : '')}
           ${d.closed ? '' : ` <button class="btn sec sm" id="b-ranked" data-on="${e.ranked ? 0 : 1}">${e.ranked ? '점수 평균으로 되돌리기' : '순위로 보정 켜기'}</button>`}</div>` : ''}
         ${(() => { const tv = (d.rows || []).reduce((a, r) => a + (+r.votes || 0), 0), n = (d.rows || []).length;
-            return on && n && tv > n * (n + 3) ? `<div class="meta late" style="margin-top:6px">표가 ${tv}장입니다. 참가 ${n}팀 규모치고 많습니다. 한 사람이 기기를 바꿔 여러 번 찍거나 밖에서 동원했을 수 있습니다. 순위 발표 전에 현장 인원과 견주어 보세요.</div>` : ''; })()}
+            return on && n && tv > n * (n + 3) ? `<div class="meta late" style="margin-top:6px">표가 ${tv}장 — 참가 ${n}팀 규모치고 많습니다. 발표 전에 현장 인원과 견주어 보세요.</div>` : ''; })()}
         <div style="height:10px"></div>
         ${d.closed ? '<span class="pill">마감이 지나 평가 방식은 더 못 바꿉니다</span>'
           : on ? `<button class="btn sec sm" id="b-vmode" data-on="0" data-judges="${js.length}">심사 점수로 되돌리기</button>`
           : `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="b-vmode" data-on="1" data-judges="${js.length}">관객 평가 켜기</button>
              <button class="btn sec sm" id="b-vpeer" data-judges="${js.length}">참가팀 상호평가로</button></div>
-             <div class="meta" style="margin-top:6px">관객 평가는 현장에 사람이 많을 때, 상호평가는 관객이 없는 온라인·소규모에 맞습니다.</div>`}
+             <div class="meta" style="margin-top:6px">관객 평가는 현장에, 상호평가는 온라인·소규모에 맞습니다.</div>`}
         ${on ? `<div style="margin-top:12px">
           <div class="meta"><b>투표 링크</b> — ${peer ? '참가팀에게 보내세요. 신청한 브라우저에서만 열립니다.' : '큰 화면에 띄우거나 QR 을 보여 주세요. 열쇠가 들어 있습니다.'}</div>
           ${linkBox(`${shareBase()}/v/${e.id}${!peer && e.vkey ? '?k=' + e.vkey : ''}`, 'vlink', 'b-copyv',
@@ -2019,7 +2009,7 @@ const SCREEN = {
 
       ${(() => { const qs = qas || []; if (!qs.length) return '';
         return `<div class="card" id="qa-op"><h3>질문 <span class="pill">${qs.filter(q => !q.answer).length} 대기</span></h3>
-        <div class="meta">참가팀이 팀 열쇠로 물은 것입니다. 답하면 소식에 «답변»으로 올라가 모든 참가자가 봅니다. 내리면 화면에서 사라집니다.</div>
+        <div class="meta">참가팀이 팀 열쇠로 물은 것입니다. 답하면 소식에 «답변»으로 올라갑니다.</div>
         ${qs.map(q => `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)">
           <div><b>${esc(q.team)}</b> · ${esc(q.text)}${q.waiting && !q.answer ? ' <span class="pill warn">하루 넘게 기다림</span>' : ''}</div>
           ${q.answer ? `<div class="meta" style="margin-top:4px">답 · ${esc(q.answer)}</div>`
@@ -2044,17 +2034,14 @@ const SCREEN = {
            «돈을 정하라»가 되면 운영자의 손이 모집이 아니라 배분으로 간다. */
         const busy = manual || (d.rows || []).length;
         const inner = `
-        <div class="meta">금액 하나만 넣으면 장소·간식·상품·심사 자리를 카드로 깔아 드립니다.
-          <b>숫자는 기본값(추정)입니다.</b> 먼저 미리 보여 드리고, 확인을 누른 뒤에만 판에 올립니다.
-          손으로 고친 줄과 손으로 올린 자리는 다시 나눠도 안 바뀝니다.
-          <b>0원이면 온라인 제출 대회</b>가 되고 관객 평가가 켜집니다. 앱은 돈을 받지 않습니다 — 정산은 직접 하십니다.</div>
-        ${manual ? `<div class="meta" style="margin-top:6px"><b>손으로 올린 자리 ${manual}개가 있습니다.</b> 같은 종류는 산식이 건너뜁니다. 지금 모집 중이면 이 카드는 안 눌러도 됩니다.</div>` : ''}
+        <div class="meta">금액 하나면 장소·간식·상품·심사 자리를 카드로 깔아 드립니다. <b>숫자는 추정</b>이고 확인을 누른 뒤에만 올라갑니다. 앱은 돈을 받지 않습니다.</div>
+        ${manual ? `<div class="meta" style="margin-top:6px"><b>손으로 올린 자리 ${manual}개</b>는 산식이 건너뜁니다. 모집 중이면 안 눌러도 됩니다.</div>` : ''}
         <div class="bgchips">
           <button type="button" class="bgchip" data-bg-chip="0">온라인 0원</button>
           <button type="button" class="bgchip on" data-bg-chip="300000">작은 대회 30만원 <span>권장</span></button>
           <button type="button" class="bgchip" data-bg-chip="1000000">100만원</button>
         </div>
-        <div class="meta" style="margin-bottom:6px">20명 안팎이면 30만원쯤을 권합니다(추정). 장소는 무료로 내줄 곳을 찾고 간식·상품에 씁니다. 칩은 미리 보기만 띄우고, «판에 올리기»를 눌러야 바뀝니다.</div>
+        <div class="meta" style="margin-bottom:6px">20명 안팎이면 30만원쯤을 권합니다(추정).</div>
         <div class="shrow" style="margin-top:10px;align-items:center">
           <input id="bg-in" type="number" min="0" step="10000" value="${+e.budget || ''}" placeholder="예) 300000" style="flex:1">
           <button class="btn sm" id="bg-go">미리 보기</button>
@@ -2073,10 +2060,10 @@ const SCREEN = {
 
       <details open><summary>필요한 자리 <span class="when">${needs.reduce((a,n) => a + Math.max(0,(+n.qty||0)-(+n.filled||0)),0)}자리 남음</span></summary><div class="in">
         ${dotBoard(needs, '내 대회의 자리')}
-        <div class="meta">장소·심사·상품·멘토·간식을 공개 페이지에 올립니다. 누가 맡겠다고 하면 여기서 연락처를 보고 확인하거나 거절합니다.</div>
+        <div class="meta">장소·심사·상품·멘토·간식을 공개 페이지에 올립니다.</div>
         ${offers.filter(o => o.status === 'pending').length ? `<div class="card" style="margin-top:10px;border-left:3px solid var(--acc)">
           <h3>🙋 들어온 제안 <span class="pill">${offers.filter(o => o.status === 'pending').length}</span></h3>
-          <div class="meta">공개 페이지의 «줄 수 있는 것» 에서 온 것입니다. 확인하면 그 자리가 생겨 공개 장부에 올라갑니다.</div>
+          <div class="meta">확인하면 그 자리가 생겨 공개 장부에 올라갑니다.</div>
           ${offers.filter(o => o.status === 'pending').map(o => `<div class="shrow" style="align-items:center;margin-top:9px">
             <div class="meta" style="flex:1"><b>${esc(needKind(o.kind))}</b> · <b>${esc(o.name)}</b>${o.org ? ' · ' + esc(o.org) : ''}
               ${o.note ? `<br>${esc(o.note)}` : ''}
@@ -2105,7 +2092,7 @@ const SCREEN = {
             <button class="btn sec sm" data-out-open="${esc(n.id)}">밖에서 구했어요</button>
             <button class="btn sec sm" data-ask="${esc(n.id)}">부탁 글 복사</button></div>
             <div id="out-${esc(n.id)}" hidden style="margin-top:8px">
-              <div class="meta">앱 밖(카톡·전화)에서 구한 분을 바로 올립니다. 연락처는 받지 않습니다. 점판과 공개 장부에 바로 반영됩니다.</div>
+              <div class="meta">앱 밖(카톡·전화)에서 구한 분을 바로 올립니다.</div>
               <div class="row"><div><label>이름</label><input data-out-name="${esc(n.id)}" placeholder="이름 또는 가게·회사"></div>
               <div><label>소속(선택)</label><input data-out-org="${esc(n.id)}" placeholder="선택"></div></div>
               <div style="height:8px"></div><button class="btn sm" data-out-send="${esc(n.id)}">올리기</button></div>`) : ''}
@@ -2148,17 +2135,14 @@ const SCREEN = {
           <button class="btn sec sm" id="b-tv">행사장 큰 화면 띄우기</button>
           <button class="btn sec sm" id="b-jopen">심사위원 화면 열기</button>
         </div>
-        <div class="meta" style="margin-top:6px">
-          큰 화면은 당일 아침에 이 노트북에서 열고 F11 을 누르세요.
-          <b>심사 링크에는 심사 열쇠가 들어 있습니다 — 심사위원에게만 주세요.</b>
-          심사 직전에 심사위원 폰으로 QR 을 찍게 하면 됩니다.</div>
+        <div class="meta" style="margin-top:6px">당일 아침 이 노트북에서 큰 화면을 열고 F11. <b>심사 링크는 심사위원에게만</b> — 열쇠가 들어 있습니다.</div>
 
         <details style="margin-top:12px"><summary>주소를 직접 복사해야 한다면</summary><div class="in">
           ${linkBox(`${shareBase()}/tv/${e.id}`, 'tvlink', 'b-copyt',
             '<b>행사장 큰 화면용.</b>')}
           ${linkBox(`${shareBase()}/j/${e.id}${e.jkey ? '?k=' + e.jkey : ''}`, 'jlink', 'b-copyj',
             '<b>심사위원용.</b> 심사 열쇠가 들어 있습니다. 순위는 안 보입니다.')}
-          <div class="meta" style="margin-top:8px">링크가 대화방이나 공용 화면에 흘렀으면 열쇠를 새로 만드세요. 옛 링크는 그 자리에서 죽습니다.
+          <div class="meta" style="margin-top:8px">링크가 흘렀으면 열쇠를 새로 만드세요. 옛 링크는 바로 죽습니다.
             <button class="btn sec sm" data-rekey="jkey" style="margin-left:6px">심사 열쇠 새로</button>
             <button class="btn sec sm" data-rekey="vkey" style="margin-left:4px">투표 열쇠 새로</button></div>
         </div></details>
@@ -2176,11 +2160,9 @@ const SCREEN = {
         <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
           title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
           <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button></td></tr>`).join('')}</table>
-      <p class="sub" style="margin-top:12px">팀을 누르면 제출과 심사 화면이 열립니다.
-        <b>☆</b> 를 누르면 추천작으로 표시돼 공개 페이지와 첫 화면 우수작에 뜹니다.
-        <b>🔗</b> 은 기기를 바꿔 팀을 잃은 참가자에게 주는 링크입니다 — 연락처로 본인을 확인한 뒤 주세요.</p>
+      <p class="sub" style="margin-top:12px">팀을 누르면 제출·심사 화면이 열립니다. <b>☆</b> 추천작 · <b>🔗</b> 팀을 잃은 참가자에게 주는 링크(본인 확인 뒤).</p>
       <details${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
-        <div class="meta">온 팀을 누르세요. 절반쯤 오는 게 정상입니다.</div>
+        <div class="meta">절반쯤 오는 게 정상입니다.</div>
         <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
         ${d.rows.map(r => `<tr>
           <td>${esc(r.name)}</td>
@@ -2198,21 +2180,20 @@ const SCREEN = {
             안 눌러도 되는 것은 안 눌러도 된다고 적는다. */''}
       <details${폄('정산')}><summary>끝난 뒤에 <span class="when">시상 · 정산</span></summary><div class="in">
         <h3 style="font-size:15px;margin-bottom:3px">1. 결과 공개</h3>
-        <div class="meta">시상이 끝난 뒤에 켜세요. 각 팀이 자기 점수와 심사평만 봅니다.${
-          d.rows.length ? ` 지금 <b>${d.rows.length}팀</b>이 이걸 기다립니다.` : ''}</div>
+        <div class="meta">시상 뒤에 켜세요. 각 팀이 자기 점수와 심사평만 봅니다.${
+          d.rows.length ? ` <b>${d.rows.length}팀</b>이 기다립니다.` : ''}</div>
         <div style="height:10px"></div>
         <button class="btn ${e.opened ? 'sec' : ''}" id="b-open">${
           e.opened ? '공개 중 — 다시 닫기' : '결과 공개하기'}</button>
 
         <h3 style="font-size:15px;margin:20px 0 3px">2. 협찬사와 참가자에게 보낼 것</h3>
-        <div class="meta">협찬사에게는 보고서 하나면 됩니다. 명단은 정산이나 다음 회차 모집에 씁니다.</div>
+        <div class="meta">명단은 정산이나 다음 회차 모집에 씁니다.</div>
         <div style="height:10px"></div>
         <button class="btn sec sm" id="b-report">결과 보고서 보기</button>
         <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>
 
         <h3 style="font-size:15px;margin:20px 0 3px">3. 백업</h3>
-        <div class="meta">서버가 10분마다 알아서 받아 둡니다. <b>안 눌러도 됩니다.</b>
-          이 컴퓨터에도 한 벌 두고 싶을 때만 쓰세요.</div>
+        <div class="meta">서버가 10분마다 받아 둡니다. <b>안 눌러도 됩니다.</b></div>
         <div style="height:10px"></div>
         <button class="btn sec sm" id="b-dump">통째로 내려받기 (백업)</button>
       </div></details>`;
@@ -2265,7 +2246,7 @@ const SCREEN = {
       </section>
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
       ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
-        <div class="meta">운영자가 띄운 공지가 시각과 함께 남습니다. 이 페이지가 열려 있으면 1분마다 새 소식을 가져옵니다. 앱은 메일·문자를 보내지 않습니다.</div>
+        <div class="meta">운영자가 띄운 공지가 시각과 함께 남습니다.</div>
         <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn sec sm" id="nt-bell">새 소식 알림 받기</button><span class="meta" id="nt-bell-s"></span></div>
         <ul class="news" id="news-list">${notes.map(newsRow).join('')}</ul></div>` : ''}
       ${(() => {
@@ -2276,13 +2257,13 @@ const SCREEN = {
         return `<div class="card" id="qa"><h3>질문 <span class="pill">${qs.length}</span></h3>
           <div class="meta">참가팀이 묻고 운영자가 답합니다. 답은 소식에도 올라갑니다.${e.chat ? ' 지금 급한 것은 <b>대화방</b>으로.' : ''}</div>
           ${canAsk ? `<div class="shrow" style="margin-top:8px"><input id="q-in" maxlength="200" placeholder="한 줄로 (200자)"><button class="btn sm" id="q-go">묻기</button></div>` : ''}
-          ${canAsk ? '<div class="meta" style="margin-top:4px">연락처는 적지 마세요 — 질문은 참가자 모두가 봅니다. 답 없는 질문은 셋까지, 내 것은 닫을 수 있습니다.</div>' : ''}
+          ${canAsk ? '<div class="meta" style="margin-top:4px">연락처는 적지 마세요 — 모두가 봅니다. 답 없는 질문은 셋까지.</div>' : ''}
           ${qs.map(q => `<div class="qrow" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)">
             <div><b>${esc(q.team)}</b> · ${esc(q.text)}</div>
             ${q.answer ? `<div class="meta" style="margin-top:4px">↳ ${esc(q.answer)}</div>` : `<div class="meta" style="margin-top:4px">${q.waiting ? '답을 기다리는 중 (하루 넘음)' : '답을 기다리는 중'}${canAsk && q.team === mine.name ? ` <button class="lnk" data-qclose="${q.id}">내 질문 닫기</button>` : ''}</div>`}
           </div>`).join('')}</div>`; })()}
       ${(reqs.length || !ended) ? `<div class="card" id="reqs"><h3>이 대회의 주제 · 요청 <span class="pill">${reqs.length}</span></h3>
-        <div class="meta">후원자가 낸 관심 주제와 의뢰자가 낸 번거로운 일입니다. 올라온 순서이고 순위는 없습니다. 하나 고르거나 자유 주제로 만듭니다.</div>
+        <div class="meta">후원자가 낸 관심 주제와 의뢰자가 낸 번거로운 일입니다.</div>
         ${reqs.map(r => `<div class="card" style="margin-top:9px">
           <h3><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span> ${esc(r.topic || r.pain)}</h3>
           <div class="meta">${esc(r.name)}${r.done ? ' · «됐다»의 기준: ' + esc(r.done) : ''}${r.teams ? ' · ' + r.teams + '팀이 만드는 중' : ''}</div></div>`).join('')}
@@ -2295,7 +2276,7 @@ const SCREEN = {
           ? (mine
               ? moreForm(mine)
               : `<div class="card" id="apply"><h3>참가 신청</h3>
-                   <div class="meta">이 페이지에서 바로 신청합니다. 1분이면 됩니다.</div>
+                   
                    ${applyForm()}</div>`)
           : ''}
       ${(() => {
@@ -2306,9 +2287,9 @@ const SCREEN = {
         const link = `${shareBase()}/e/${e.id}?t=${tk}`;
         return `<div class="card" id="next">
           <h3>다음에 할 일</h3>
-          <div class="meta">1. 아래 <b>내 팀 링크</b>를 <b>나에게만</b> 보내 두세요(팀 방·오픈톡에는 올리지 마세요 — 열쇠라서 아는 사람이 곧 팀입니다). 폰을 바꾸거나 브라우저를 지워도 이 링크로 내 팀을 되찾습니다.<br>
-            2. 당일 ${esc(e.starts)} 에 이 페이지로 들어와 ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : '마감 전에'} 결과물 주소를 냅니다.<br>
-            3. 내기 전에 그 주소가 <b>새 창에서 열리는지</b> 한 번 확인합니다.</div>
+          <div class="meta">1. <b>내 팀 링크</b>를 <b>나에게만</b> 보내 두세요(팀 방에는 올리지 마세요). 폰을 바꿔도 이 링크로 되찾습니다.<br>
+            2. 당일 ${esc(e.starts)} ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : '마감 전에'} 여기서 결과물 주소를 냅니다.<br>
+            3. 내기 전에 <b>새 창에서 열리는지</b> 확인합니다.</div>
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
           <div style="margin-top:8px"><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
         </div>`; })()}
@@ -2364,9 +2345,7 @@ const SCREEN = {
 
       ${(cw.solo.length || cw.looking.length) ? `<div class="card">
         <h3>같이 할 사람 찾기</h3>
-        <div class="meta">연락처는 공개하지 않습니다.
-          <b>당일 팀 짜는 시간에 이 목록을 보고 얼굴 보며 정합니다.</b>
-          혼자 오셔도 팀이 생깁니다.</div>
+        <div class="meta"><b>당일 팀 짜는 시간에 얼굴 보며 정합니다.</b> 혼자 오셔도 팀이 생깁니다.</div>
         ${cw.solo.length ? `<div style="margin-top:14px">
           <b style="font-size:14px">혼자 오시는 분 ${cw.solo.length}명</b>
           <table>${cw.solo.map(r => `<tr>
@@ -2392,9 +2371,9 @@ const SCREEN = {
       ${/* 필요한 자리는 참가자가 아니라 '도와줄 사람' 몫이다. 참가자가 먼저 볼 것(언제·누가·순서)
             뒤로 보낸다. 올린 자리가 없으면 통째로 안 그린다 — 빈 점판은 '아무도 안 돕는다' 로 읽힌다. */''}
       ${needs.length ? `<h3>함께 여는 자리</h3>
-      <p class="sub">한 자리씩 맡아서 같이 엽니다. 연락처는 운영자에게만 전달되고 공개 장부에는 나오지 않습니다.</p>
+      <p class="sub">한 자리씩 맡아서 같이 엽니다.</p>
       ${dotBoard(needs, '이 대회를 함께 여는 자리')}
-      ${needs.some(n => n.auto || n.amount) ? '<p class="sub">«계획»이 적힌 자리는 <b>운영자가 그 자리에 쓰기로 계획한 돈</b>입니다. 실제 지출과 다를 수 있고, 정산은 운영자와 직접 하며, 앱은 돈을 받지 않습니다.</p>' : ''}
+      ${needs.some(n => n.auto || n.amount) ? '<p class="sub">«계획»은 운영자가 그 자리에 쓰려는 돈입니다. 정산은 운영자와 직접 하고, 앱은 돈을 받지 않습니다.</p>' : ''}
       ${needs.map(n => `<div class="card">
         <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)} 채움</span>
           ${n.auto || n.amount ? `<span class="pill${n.amount ? '' : ' ok'}">${n.amount ? '계획 ' + won(n.amount) + (n.qty > 1 ? ' × ' + n.qty : '') : '무료로 내주실 분 찾습니다'}</span>` : ''}</h3>
@@ -2404,7 +2383,7 @@ const SCREEN = {
       </div>`).join('')}` : ''}
 
       ${ledger.length ? `<h3>공개 장부</h3>
-      <p class="sub">운영자가 확인한 것만 이름과 함께 남습니다. 연락처는 공개하지 않습니다.</p>
+      <p class="sub">운영자가 확인한 것만 남고, 연락처는 공개하지 않습니다.</p>
       <table><tr><th>자리</th><th>이름</th><th>소속</th></tr>${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}${x.direct ? ' <span class="pill" title="운영자가 앱 밖에서 구해 직접 올린 줄">운영자 등록</span>' : ''}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
 
       ${!ended ? giveBox() : ''}
@@ -2419,7 +2398,7 @@ const SCREEN = {
 
       ${(d.closed && mine && tkeyOf(mine.id)) ? `<div class="card" id="sv">
         <h3>세 가지만 여쭙니다</h3>
-        <div class="meta">참가팀만 답합니다. 세 팀 이상 답하면 보고서에 숫자로 실립니다. 팀 이름은 안 실립니다.</div>
+        <div class="meta">참가팀만, 세 팀 이상이면 보고서에 숫자로 실립니다.</div>
         <label>다음에 이 대회가 또 열리면 친구에게 추천하시겠어요 <span class="pill">0 전혀 · 10 꼭</span></label>
         <div class="gchips" id="sv-rec" style="grid-template-columns:repeat(11,1fr)">${Array.from({ length: 11 }, (_, i) => `<button type="button" class="gchip" data-rec="${i}">${i}</button>`).join('')}</div>
         <label>좋았던 것</label><input id="sv-good" maxlength="200" placeholder="한 줄">
@@ -2428,8 +2407,7 @@ const SCREEN = {
       </div>` : ''}
       ${d.closed ? `<div class="card">
         <h3>이 대회 어떠셨나요</h3>
-        <div class="meta">참가하신 분만 남길 수 있습니다. <b>안 하셔도 됩니다.</b>
-          다음 참가자가 이 주최자를 고를 때 씁니다.</div>
+        <div class="meta">참가하신 분만, <b>안 하셔도 됩니다.</b> 다음 참가자가 주최자를 고를 때 씁니다.</div>
         <label>참가할 때 쓴 연락처</label>
         <input id="rv-c" value="${esc(myContact())}" placeholder="본인 확인용. 저장하지 않습니다">
         <label>운영이 매끄러웠나요</label>${stars('run', 0)}
@@ -2446,11 +2424,10 @@ const SCREEN = {
           완주율 <b>${rec.finishRate}%</b>${rec.promised
             ? ` · 끝나고 한 약속 ${rec.promised}건 중 <b>${rec.keptRate}%</b>를 지켰습니다` : ''}
         </div>
-        <div class="meta" style="margin-top:6px">
-          해커톤은 시상식에서 끝나지 않습니다. 이 숫자가 그 증거입니다.</div>
+        
       </div>` : ''}
 
-      <div class="card"><h3>심사 기준</h3><div class="meta">기준은 대회 전에 공개합니다. 점수마다 무엇을 보는지도 같이 둡니다 — 참가팀은 채점되는 쪽으로 만듭니다.</div>${rubricBars(e.rubric, true)}</div>
+      <div class="card"><h3>심사 기준</h3><div class="meta">기준은 대회 전에 공개합니다.</div>${rubricBars(e.rubric, true)}</div>
       ${rulesBox()}
       ${feedbackBox('대회 페이지')}`;
   },
@@ -2478,7 +2455,7 @@ const SCREEN = {
         <div class="meta">${esc(ev.host)} 주최 · ${esc(ev.starts)}${ev.due ? ' · 제출 마감 ' + esc(ev.due.replace('T', ' ')) : ''} · <a href="/e/${esc(ev.id)}">대회 페이지</a></div>
         <div class="meta" style="margin-top:6px">참가 <b>${ev.teams}</b>팀${ev.closed ? ` · 완주 <b>${ev.finished}</b>팀${ev.finishRate !== null ? ' · 완주율 <b>' + ev.finishRate + '%</b>' : ''}` : ''}</div></div>
       <div class="card"><h3>받으시는 것</h3><div class="meta">${esc(RECEIVE[g.kind] || RECEIVE.other)}</div></div>
-      ${!ev.closed ? `<div class="card"><h3>결과물은 마감 뒤에</h3><div class="meta">제출 마감이 지나면 여기에 완주 상위 셋과 결과 보고서 주소가 열립니다. 먼저 낸 팀이 손해 보지 않게 그때 한꺼번에 엽니다.</div></div>`
+      ${!ev.closed ? `<div class="card"><h3>결과물은 마감 뒤에</h3><div class="meta">마감이 지나면 상위 셋과 결과 보고서 주소가 열립니다.</div></div>`
       : `<div class="card"><h3>완주 상위 셋</h3>
           ${v.top.length ? v.top.map(t => `<div class="meta" style="margin-top:6px"><b>${t.rank}위 · ${esc(t.name)}</b>${t.note ? ' · ' + esc(t.note) : ''}${t.url ? ` · <a href="${esc(t.url)}" target="_blank" rel="noopener">열기</a>` : ''}</div>`).join('') : '<div class="meta">제출한 팀이 아직 없습니다.</div>'}
           <div style="margin-top:10px"><a class="btn sm" id="gift-report" href="${esc(v.report)}" style="text-decoration:none">결과 보고서 열기</a></div>
@@ -2490,7 +2467,7 @@ const SCREEN = {
     if (!Q.events.length && LIVE) { try { Q.events = (await api('/events')).filter(e => statusOf(e).k !== '끝남'); } catch { Q.events = []; } }
     const e0 = new URLSearchParams(location.search).get('e'); if (e0 && !Q.event) Q.event = e0;
     return `<section class="hero"><h2>주제나 문제를 내고, 만든 것을 받으세요</h2>
-        <p class="sub" style="margin-bottom:0">후원하는 분은 관심 주제를, 의뢰하는 분은 번거로운 일을 냅니다. 대회가 끝나면 그 주제로 만든 결과물과 (동의한) 만든 분 연락처를 이 링크로 받습니다.</p>
+        <p class="sub" style="margin-bottom:0">끝나면 그 주제의 결과물과 (동의한) 만든 분 연락처를 받습니다.</p>
       </section>
       <div id="ask-wrap">${askHtml()}</div>
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a></p>`;
@@ -2510,18 +2487,18 @@ const SCREEN = {
         ${r.pain && r.topic !== r.pain ? `<p class="sub" style="margin-bottom:6px">${esc(r.pain)}</p>` : ''}
         ${r.done ? `<p class="sub" style="margin-bottom:0"><b>«됐다»의 기준:</b> ${esc(r.done)}</p>` : ''}
       </section>
-      ${!ev ? `<div class="card"><h3>아직 대회에 붙지 않았습니다</h3><div class="meta">운영자가 대회 주제로 고르면 여기에 대회와 만드는 팀이 보입니다. 이 주소를 적어 두세요.</div></div>`
+      ${!ev ? `<div class="card"><h3>아직 대회에 붙지 않았습니다</h3><div class="meta">운영자가 대회 주제로 고르면 여기에 대회와 만드는 팀이 보입니다.</div></div>`
       : `<div class="card"><h3>${esc(ev.title)}</h3><div class="meta">${esc(ev.starts)}${ev.due ? ' · 제출 마감 ' + esc(ev.due.replace('T', ' ')) : ''} · <a href="/e/${esc(ev.id)}">대회 페이지</a></div></div>
       ${!ev.closed ? `<div class="card"><h3>지금 ${v.teams.length}팀이 만들고 있습니다</h3>
-          <div class="meta">결과물 주소는 <b>제출 마감 뒤</b>에 여기서 열립니다. 먼저 낸 팀이 손해 보지 않게 하기 위해서입니다.</div>
+          <div class="meta">결과물 주소는 <b>제출 마감 뒤</b>에 여기서 열립니다.</div>
           ${v.teams.map(t => `<div class="meta" style="margin-top:6px"><b>${esc(t.name)}</b>${t.note ? ' · ' + esc(t.note) : ''}</div>`).join('')}</div>`
-      : `${v.teams.length ? '' : '<div class="card"><h3>이 주제로 만든 팀이 없었습니다</h3><div class="meta">다음 대회에 다시 올릴 수 있습니다.</div></div>'}
+      : `${v.teams.length ? '' : '<div class="card"><h3>이 주제로 만든 팀이 없었습니다</h3></div>'}
         ${v.teams.map((t, i) => `<div class="card" id="rt-${t.id}">
           <h3>${esc(t.name)}${t.verdict ? (t.verdict.ok ? ' <span class="pill ok">이거면 됩니다</span>' : ' <span class="pill warn">아직 아니에요</span>') : ''}</h3>
           ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ''}
           ${t.url ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec sm" data-rtry="${i}">열어보기</button><a class="btn sec sm" href="${esc(t.url)}" target="_blank" rel="noopener" style="text-decoration:none">새 창</a></div>
             <div class="trybox" id="rtry-${i}" hidden></div>` : '<div class="meta" style="margin-top:6px">제출한 주소가 없습니다.</div>'}
-          ${t.contact ? `<div class="meta" style="margin-top:8px">만든 분 연락처(제공에 동의한 분) · <b>${esc(t.contact)}</b> — 쓰고 싶거나 사고 싶으면 직접 연락하세요. 앱은 돈을 만지지 않습니다.</div>`
+          ${t.contact ? `<div class="meta" style="margin-top:8px">만든 분 연락처(동의한 분) · <b>${esc(t.contact)}</b> — 직접 연락하세요. 앱은 돈을 만지지 않습니다.</div>`
                       : '<div class="meta" style="margin-top:8px">만든 분이 연락처 제공에 동의하지 않았습니다.</div>'}
           <label>판정 <span class="pill">점수표 없음</span></label>
           <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" data-verdict="${t.id}" data-ok="1">이거면 됩니다</button><button class="btn sec sm" data-verdict="${t.id}" data-ok="0">아직 아니에요</button></div>
@@ -2531,7 +2508,7 @@ const SCREEN = {
         <div class="card"><h3>2주 뒤 — 아직 쓰고 계세요?</h3>
           <div class="meta">이 답이 다음 대회를 정합니다. 답이 없으면 «모름»으로 남습니다.${v.followup ? ' 지금 답: <b>' + esc((FU.find(x => x[0] === v.followup) || [])[1] || v.followup) + '</b>' : ''}</div>
           <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${FU.map(([k, l]) => `<button class="btn ${v.followup === k ? '' : 'sec'} sm" data-followup="${k}">${l}</button>`).join('')}</div></div>`}`}
-      <p class="meta" style="margin:14px 4px">끝난 뒤 고쳐 달라는 부탁은 약속이 아닙니다. 만든 분은 무료 외주가 아닙니다.</p>`;
+      <p class="meta" style="margin:14px 4px">끝난 뒤 고쳐 달라는 부탁은 약속이 아닙니다.</p>`;
   },
 
   /* /give — 첫 화면 «내가 줄 수 있는 것» 이 오는 곳. 대회를 아직 안 고른 채 시작한다.
@@ -2543,7 +2520,7 @@ const SCREEN = {
     if (G.event && !G.events.some(e => e.id === G.event)) { G.event = ''; G.step = 1; }
     return `<section class="hero">
         <h2>줄 수 있는 것이 있으신가요</h2>
-        <p class="sub" style="margin-bottom:0">장소, 돈, 심사, 멘토, 간식. 하나만 있어도 됩니다. 세 번만 고르면 끝납니다.</p>
+        <p class="sub" style="margin-bottom:0">하나만 있어도 되고, 세 번만 고르면 끝납니다.</p>
       </section>
       ${giveBox()}
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a></p>`;
@@ -2646,8 +2623,7 @@ const SCREEN = {
        운영자가 보낸 /j/<id>?k=… 를 열면 열쇠가 자동으로 담긴다. 직접 받은 열쇠를 넣어도 된다. */
     const keyPrompt = (err) => `<h2>심사위원 화면</h2>
       <p class="sub">${err ? '<b class="late">' + esc(err) + '</b><br>' : ''}
-        운영자에게 받은 <b>심사 링크</b>를 여세요. 링크에 심사 열쇠가 들어 있습니다.<br>
-        열쇠만 따로 받으셨다면 여기에 넣으세요.</p>
+        운영자에게 받은 <b>심사 링크</b>를 여세요. 열쇠만 받으셨다면 여기에 넣으세요.</p>
       <label>심사 열쇠</label><input id="jk-in" placeholder="영문과 숫자 10자">
       <div style="height:12px"></div>
       <button class="btn" id="jk-go">열기</button>`;
@@ -2658,8 +2634,7 @@ const SCREEN = {
       try { e = await api(`/events/${cur}/judge`); }
       catch (err) { return keyPrompt('열쇠가 맞지 않습니다. 다시 확인해 주세요.'); }
       return `<h2>${esc(e.event.title)}</h2>
-        <p class="sub">심사위원 화면입니다. 이름을 넣으면 시작합니다.<br>
-          같은 이름으로 다시 들어오면 넣던 점수를 이어서 고칠 수 있습니다.</p>
+        <p class="sub">이름을 넣으면 시작합니다. 같은 이름으로 다시 들어오면 이어서 고칩니다.</p>
         <label>심사위원 이름</label><input id="jn" placeholder="이름">
         <div style="height:10px"></div>
         <button class="btn" id="jn-go">시작</button>`;
@@ -2680,8 +2655,7 @@ const SCREEN = {
           (a, r) => a + (t.mine[r.key] ?? 0) * r.weight / 100, 0),
       })).sort((a, b) => b.sum - a.sum);
       return `<h2>${esc(d.event.title)}</h2>${head}
-        <p class="sub">제가 준 점수만 보입니다. 다른 분 점수와 최종 순위는 안 보입니다.<br>
-          팀을 누르면 그 팀으로 가서 고칠 수 있습니다.</p>
+        <p class="sub">제가 준 점수만 보입니다. 팀을 누르면 고칠 수 있습니다.</p>
         <table><tr><th>팀</th><th class="n">내 점수</th></tr>
         ${my.map(x => `<tr data-jgo="${x.t.id}" style="cursor:pointer">
           <td>${esc(x.t.name)}${x.t.doneByMe ? '' : ' <span class="pill warn">아직</span>'}</td>
@@ -2735,8 +2709,7 @@ const SCREEN = {
           `<button data-tag="jn2-${esc(t.id)}" data-txt="${esc(x)}">${esc(x)}</button>`).join('')}</div>
         <textarea class="jn2-${esc(t.id)}" rows="2"
           placeholder="위에서 누르거나 직접 쓰세요">${esc(t.review.next)}</textarea>
-        <div class="meta">참가자가 가장 아쉬워하는 것이 “왜 떨어졌는지 모른다” 입니다.
-          이름 없이 전달됩니다.</div>
+        <div class="meta">참가자가 가장 아쉬워하는 것이 “왜 떨어졌는지 모른다” 입니다.</div>
       </div>
 
       <div class="shrow">
@@ -2767,8 +2740,7 @@ const SCREEN = {
       <div class="card">
         <h3>다른 참가자가 준 평가</h3>
         <div class="meta">${repLine('실력', d.skill)}<br>${repLine('매너', d.manner)}</div>
-        <div class="meta" style="margin-top:7px">누가 줬는지는 아무에게도 안 보입니다.
-          같은 대회에 있던 분만 남길 수 있습니다.</div>
+        <div class="meta" style="margin-top:7px">누가 줬는지는 안 보이고, 같은 대회에 있던 분만 남깁니다.</div>
       </div>
 
       ${d.history.length ? `<h3 style="margin-top:16px">나온 대회</h3>
@@ -2810,7 +2782,7 @@ const SCREEN = {
     const myT = localStorage.getItem('hackon.team.' + cur);
     const tk = myT ? tkeyOf(myT) : '';
     if (peer && !tk) return `<h2>참가팀 상호평가</h2>
-      <p class="sub">참가 신청한 브라우저에서만 표를 줄 수 있습니다. 신청할 때 쓴 폰이나 노트북으로 이 링크를 여세요.</p>`;
+      <p class="sub">참가 신청한 브라우저에서만 표를 줄 수 있습니다.</p>`;
     if (!peer && !vkeyOf(cur)) return keyPrompt('');
     let d;
     try { d = await api(`/events/${cur}/vote`, peer ? { tkey: tk } : {}); }
@@ -2818,7 +2790,7 @@ const SCREEN = {
     VOTE_TK = peer ? tk : '';
     const teams = d.teams.filter(t => !d.me || t.id !== d.me);
     if (!teams.length) return `<h2>${esc(d.event.title)}</h2>
-      <p class="sub">아직 별점을 줄 팀이 없습니다. 팀이 생기면 여기서 별점을 줄 수 있습니다.</p>`;
+      <p class="sub">아직 별점을 줄 팀이 없습니다.</p>`;
     return `<h2>${esc(d.event.title)}</h2>
       <p class="sub">${peer ? '참가팀끼리 서로 평가합니다. 자기 팀은 목록에 없고, 팀당 한 표라 팀원이 다시 찍으면 나중 것이 남습니다.'
                            : '마음에 드는 작품에 별점을 주세요. 한 팀에 한 번, 언제든 고칠 수 있습니다. 누가 줬는지는 남기지 않습니다.'}</p>
@@ -2859,7 +2831,7 @@ const SCREEN = {
         ${e.topic ? '· 주제 ' + esc(e.topic) : ''}</p>
 
       ${(pk && pk.top && pk.top.length) ? `<h3>${S()}. 이런 것이 나왔습니다</h3>
-        <p class="sub">숫자보다 이게 먼저입니다. 완주한 팀 중 위에서 셋입니다.</p>
+        
         ${pk.top.map(t => `<div class="card">
           <h3>${t.rank}위 · ${esc(t.name)}
             ${t.reachable ? '<span class="pill ok">연락 받겠다고 했습니다</span>' : ''}</h3>
@@ -2869,8 +2841,7 @@ const SCREEN = {
             <b>AI 가 준 것 중 버린 판단</b> ${esc(t.aidrop)}</div>` : ''}
         </div>`).join('')}
         ${pk.top.some(t => t.reachable) ? `<p class="sub">
-          <b>연락 받겠다고 한 팀이 있습니다.</b> 주최자에게 말씀하시면 연결해 드립니다.
-          참가자가 미리 동의한 경우에만 연결합니다.</p>` : ''}` : ''}
+          <b>연락 받겠다고 한 팀이 있습니다.</b> 주최자에게 말씀하시면 연결해 드립니다.</p>` : ''}` : ''}
 
       <h3>${S()}. 무엇을 했나</h3>
       <div class="stat">
@@ -2909,7 +2880,7 @@ const SCREEN = {
           : '<p class="sub">이번 회차는 협찬 없이 진행했습니다.</p>'}
 
       <h3>${S()}. 돌려드리는 숫자</h3>
-      <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다. 아래로 정산합니다.</p>
+      <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다.</p>
       <table>
         <tr><th>항목</th><th class="n">건수</th></tr>
         <tr><td>완주 (끝까지 결과물을 낸 팀)</td><td class="n">${o.finished}/${o.teams}</td></tr>
@@ -2920,20 +2891,16 @@ const SCREEN = {
             <td class="n">${fw.alive12}/${fw.asked12}</td></tr>
           <tr><td>낸 결과물이 아직 열리는 팀</td><td class="n">${fw.liveNow}</td></tr>` : ''}
       </table>
-      <p class="sub">표시 없는 숫자는 앱이 직접 센 것입니다.
-        ${how('hand')} 는 주최자가 확인해 넣은 것입니다. 노출 수는 쓰지 않습니다.</p>
+      <p class="sub">${how('hand')} 는 주최자가 넣은 숫자, 나머지는 앱이 센 것입니다. 노출 수는 쓰지 않습니다.</p>
 
       ${(pk && pk.mix.role.length) ? `<h3>${S()}. 어떤 분들이 왔나</h3>
-        <p class="sub">이름과 연락처는 담지 않습니다.
-          ${pk.minCell}건 미만인 항목은 뭉쳐서 씁니다 — 작은 행사에서는 ‘1팀’이 곧 한 사람입니다.</p>
+        <p class="sub">이름과 연락처는 담지 않습니다. ${pk.minCell}건 미만은 뭉쳐서 씁니다.</p>
         <table><tr><th>맡은 일</th><th class="n">팀</th></tr>
         ${pk.mix.role.map(r => `<tr><td>${esc(r.k)}</td><td class="n">${r.c}</td></tr>`).join('')}
         </table>` : ''}
 
       ${fw && fw.asked12 ? `<h3>${S()}. 90일 뒤에 다시 물어봤습니다</h3>
-        <p class="sub">해커톤 결과물은 대개 시상식에서 끝납니다.
-          한 연구에서는 해커톤 코드의 <b>3분의 1만</b> 다시 쓰였습니다.
-          그래서 끝나고 2주 · 6주 · 12주에 세 번 물어봤습니다.</p>
+        <p class="sub">결과물이 시상식에서 끝나지 않게, 끝난 뒤 2주 · 6주 · 12주에 세 번 물었습니다.</p>
         <div class="stat">
           <div><b>${fw.aliveRate}%</b><span>90일 생존</span></div>
           <div><b>${fw.liveNow}</b><span>링크 살아있음</span></div>
@@ -2970,9 +2937,7 @@ const SCREEN = {
           : ''}</p>
 
       <h3>${S()}. 다음 회차</h3>
-      <p class="sub">이번 숫자를 그대로 다음 제안서의 첫 줄로 씁니다.
-        완주율 ${o.finishRate}% · 면접 ${o.interview}건 · 도입 검토 ${o.adoption}건.
-        같은 조건으로 한 번 더 하실 의향이 있으시면 알려 주십시오.</p>
+      <p class="sub">완주율 ${o.finishRate}% · 면접 ${o.interview}건 · 도입 검토 ${o.adoption}건. 같은 조건으로 한 번 더 하실 의향이 있으시면 알려 주십시오.</p>
       <p class="meta">${esc(e.title)} · 작성 ${new Date().toISOString().slice(0, 10)}</p>`;
   },
 
@@ -3013,8 +2978,7 @@ const SCREEN = {
             <input id="st-n" placeholder="이름 (밖에서 구했으면 비우세요)">
             <button class="btn sec sm" id="st-add">채우기</button>
           </div>
-          <div class="meta">이름을 비우고 누르면 <b>게스트</b>로 자리만 잡습니다.
-            빈자리는 공개 화면에 보여서 현장에서 채울 수 있습니다.</div>
+          <div class="meta">이름을 비우고 누르면 <b>게스트</b>로 자리만 잡습니다.</div>
           <div style="height:12px"></div>` : ''}
         <label>설명</label>
         <textarea id="s-note" rows="3"
@@ -3025,17 +2989,14 @@ const SCREEN = {
         <label>AI 가 준 것 중 버리거나 고친 판단이 있나요</label>
         <textarea id="s-aidrop" rows="2"
           placeholder="예) 추천 로직을 제안했는데 우리 문제와 안 맞아서 버렸습니다">${esc(t.aidrop || '')}</textarea>
-        <div class="meta">이 두 줄이 심사에서 가장 크게 보이는 곳입니다.
-          만드는 것은 이제 누구나 합니다. <b>무엇을 버렸는지가 그 팀의 판단입니다.</b></div>
+        <div class="meta">심사에서 가장 크게 보이는 두 줄입니다. <b>무엇을 버렸는지</b>가 그 팀의 판단입니다.</div>
         ${reqs.length ? `<label>어느 주제·요청으로 만들었나요 <span class="pill">선택</span></label>
           <select id="s-request"><option value="">자유 주제</option>${reqs.map(r => `<option value="${esc(r.id)}"${t.request === r.id ? ' selected' : ''}>${esc(r.kind === 'sponsor' ? '후원자' : '의뢰자')} · ${esc(r.topic || r.pain)}</option>`).join('')}</select>
-          <div class="meta">고르면 그 주제를 낸 분이 마감 뒤 결과물을 받고 «됐다/아니다»를 답합니다.</div>` : ''}
+          <div class="meta">고르면 마감 뒤 결과물을 받고 «됐다/아니다»를 답합니다.</div>` : ''}
         <div style="height:14px"></div>
         <label class="ck"><input type="checkbox" id="s-show"${t.show ? ' checked' : ''}>
           <span>대회가 끝난 뒤 <b>첫 화면에 내 결과물을 걸어도 좋습니다</b></span></label>
-        <div class="meta">건 뒤에도 여기서 체크를 풀면 바로 내려갑니다.
-          마감이 지나도 이 체크만은 언제든 바꿀 수 있습니다.
-          링크와 팀 이름, 설명만 올라갑니다 — <b>연락처는 올라가지 않습니다.</b></div>
+        <div class="meta">체크를 풀면 바로 내려갑니다. 링크·팀 이름·설명만 올라가고 <b>연락처는 올라가지 않습니다.</b></div>
         <div style="height:10px"></div>
         <button class="btn sm" id="s-save">제출하기</button>
       </div>
@@ -3053,13 +3014,11 @@ const SCREEN = {
             ${r.good ? `<div class="meta"><b>좋았던 점</b> ${esc(r.good)}</div>` : ''}
             ${r.next ? `<div class="meta"><b>더 하면</b> ${esc(r.next)}</div>` : ''}
           </div>`).join('')}</div>` : ''}
-      </div>` : `<div class="card"><div class="meta">
-        결과는 아직 공개되지 않았습니다. 공개되면 항목별 점수와 심사평을 여기서 보실 수 있습니다.
-      </div></div>`) : ''}
+      </div>` : `<div class="card"><div class="meta">결과가 공개되면 항목별 점수와 심사평이 여기 보입니다.</div></div>`) : ''}
 
       <div class="card">
         <h3>2주 뒤 한 줄 확인</h3>
-        <div class="meta">협찬 도구를 지금도 쓰는지만 알려 주세요. 이름 대신 팀 열쇠로 확인합니다.</div>
+        <div class="meta">협찬 도구를 지금도 쓰는지만 알려 주세요.</div>
         <label>어떤 도구</label>
         <select id="fu-tool">${(d.event.sponsors || []).length
           ? d.event.sponsors.map(sp => `<option>${esc(sp.name + (sp.kind ? ' ' + sp.kind : ''))}</option>`).join('')
@@ -3095,7 +3054,7 @@ const SCREEN = {
     const fw = LIVE ? await api(`/events/${cur}/follow`).catch(() => null) : null;
     const fs = LIVE ? await api(`/events/${cur}/followup-summary`).catch(() => ({ tools:[] })) : DEMO.followupSummary;
     return `<h2>협찬사에게 주는 숫자</h2>
-      <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다. 아래 넷으로 정산합니다.</p>
+      <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다.</p>
       <div class="stat">
         <div><b>${o.finishRate}%</b><span>완주율</span></div>
         <div><b>${o.came ?? 0}/${o.teams}</b><span>온 팀</span></div>
@@ -3109,11 +3068,10 @@ const SCREEN = {
         <div><b>${pk.numbers.aliveRate}%</b><span>90일 생존</span></div>
         <div><b>${pk.numbers.liveDemo}</b><span>링크 살아있음</span></div>
       </div>
-      <p class="sub">이 두 칸이 다른 곳에는 없습니다.
-        끝나고 세 번 물어본 곳만 쓸 수 있는 숫자입니다.</p>` : ''}
+      <p class="sub">끝나고 세 번 물어본 곳만 쓸 수 있는 숫자입니다.</p>` : ''}
       <div class="card">
         <h3>2주 뒤에도 쓰는 팀</h3>
-        <div class="meta">참가팀이 D+14 한 줄 설문에서 답한 결과입니다. 개인 이름과 이메일은 포함하지 않습니다.</div>
+        <div class="meta">참가팀이 D+14 한 줄 설문에서 답한 결과입니다.</div>
         ${fs.tools && fs.tools.length ? `<table style="margin-top:8px"><tr><th>도구</th><th class="n">응답 팀</th><th class="n">계속 씀</th></tr>
           ${fs.tools.map(x => `<tr><td>${esc(x.tool)}</td><td class="n">${+x.teams || 0}</td><td class="n"><b>${+x.still_using || 0}</b></td></tr>`).join('')}</table>`
           : '<div class="meta" style="margin-top:8px">아직 응답이 없습니다.</div>'}
@@ -3177,7 +3135,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
 
         <label class="ck"><input type="checkbox" id="p-perm">
           <span>이 로고를 쓰기로 <b>협찬사와 합의했습니다</b></span></label>
-        <div class="meta">회사 로고는 상표권 대상입니다. 합의 없이 올리면 문제가 됩니다.</div>
+        <div class="meta">회사 로고는 상표권 대상입니다. 합의 뒤에 올리세요.</div>
         <label>눌렀을 때 갈 곳</label>
         <input id="p-link" placeholder="https://회사홈페이지">
         <div style="height:10px"></div>
@@ -3188,8 +3146,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
         <span class="when">${fw.next.length ? fw.next.length + '건 물어볼 때가 됐습니다'
           : fw.asked12 ? fw.aliveRate + '% 살아 있음' : '2 · 6 · 12주'}</span>
         </summary><div class="in">
-        <div class="meta">해커톤 코드의 <b>3분의 1만</b> 다시 쓰입니다.
-          끝나고 세 번 물어보는 것이 그 숫자를 바꾸는 유일한 방법입니다.</div>
+        <div class="meta">해커톤 코드의 <b>3분의 1만</b> 다시 쓰입니다. 끝나고 세 번 묻습니다.</div>
         ${fw.asked12 ? `<div class="stat" style="margin-top:10px">
           <div><b>${fw.aliveRate}%</b><span>90일 생존</span></div>
           <div><b>${fw.liveNow}</b><span>링크 살아있음</span></div>
@@ -3202,8 +3159,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
             data-chk="${r.id}" data-w="${w.w}"
             title="${esc(w.due)}까지">${w.asked ? (w.alive ? '이어감' : '중단') : '·'}</button></td>`).join('')}
         </tr>`).join('')}</table>
-        <div class="meta">칸을 누르면 <b>안 물어봄 → 이어감 → 중단</b> 순으로 바뀝니다.
-          ‘이어감’은 낸 링크가 아직 열릴 때만 누르세요.</div>
+        <div class="meta">칸을 누르면 <b>안 물어봄 → 이어감 → 중단</b> 순으로 바뀝니다.</div>
       </div></details>` : ''}
 
       ${LIVE ? `<details><summary>사후 지원 <span class="when">행사 전에 정해 둔다</span></summary>
@@ -3249,7 +3205,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
       </div></details>` : ''}
 
 <details open><summary>성과 기록하기</summary><div class="in">
-        <div class="meta">행사 뒤 2주 동안 여기에 쌓습니다. 이게 다음 해 제안서의 근거가 됩니다.</div>
+        <div class="meta">행사 뒤 2주 동안 여기에 쌓습니다.</div>
         <label>무엇</label>
         <select id="o-kind"><option>면접</option><option>도입검토</option><option>채용</option><option>후속미팅</option></select>
         <label>어느 회사</label><input id="o-who" placeholder="회사 이름">
@@ -3287,10 +3243,9 @@ function wire() {
         ? `<table style="margin-top:10px"><tr><th>자리</th><th>수</th><th class="n">계획</th></tr>
             ${a.rows.map(r => `<tr><td>${esc(needKind(r.kind))} · ${esc(r.label)}</td><td>${r.qty}</td><td class="n">${r.amount ? won(r.amount) : '무료'}</td></tr>`).join('')}
             <tr><td colspan="2">남는 돈</td><td class="n">${won(a.left)}</td></tr></table>
-           <div class="meta" style="margin-top:6px">기본값(추정)입니다. 올린 뒤 카드마다 고칠 수 있습니다.</div>
+           <div class="meta" style="margin-top:6px">추정값입니다. 올린 뒤 고칠 수 있습니다.</div>
            <div style="height:8px"></div><button class="btn sm" id="bg-ok">이대로 판에 올리기</button>`
-        : `<div class="meta" style="margin-top:8px"><b>0원 — 온라인 제출 대회</b>가 됩니다. 자리 카드는 없고 관객 평가(별점)가 켜집니다.
-             올린 뒤 <b>제출 마감</b>을 꼭 정하세요.</div>
+        : `<div class="meta" style="margin-top:8px"><b>0원 — 온라인 제출 대회</b>가 되고 관객 평가가 켜집니다. 올린 뒤 <b>제출 마감</b>을 정하세요.</div>
            <div style="height:8px"></div><button class="btn sm" id="bg-ok">온라인판으로 바꾸기</button>`;
       $('#bg-ok').onclick = async () => {
         try {
@@ -4152,8 +4107,7 @@ function wire() {
     const box = $('#f-mail');
     box.innerHTML = `<div class="card" style="border-color:#AECFB8;background:var(--ok-l)">
       <h3>${esc(b.dataset.place)}에 보낼 메일</h3>
-      <div class="meta">받는 곳 주소는 <b>예약 페이지</b>에 있습니다.
-        온라인 신청이 되는 곳이면 메일 없이 거기서 바로 신청해도 됩니다.</div>
+      <div class="meta">받는 곳 주소는 <b>예약 페이지</b>에 있습니다.</div>
       <textarea id="f-mailtx" rows="16" style="font-size:13px;margin-top:9px">${esc(txt)}</textarea>
       <div style="height:9px"></div>
       <button class="btn sm" id="f-mailcp">복사</button>
@@ -4183,8 +4137,7 @@ function wire() {
     const box = $('#f-mail');
     box.innerHTML = `<div class="card" style="border-color:#AECFB8;background:var(--ok-l)">
       <h3>${esc(b.dataset.mail)}에게 보낼 메일</h3>
-      <div class="meta">그대로 보내지 마세요. <b>괄호 안을 채우고 한 줄은 직접 고치세요.</b>
-        받는 사람은 복사한 메일을 압니다.</div>
+      <div class="meta"><b>괄호 안을 채우고 한 줄은 직접 고치세요.</b> 받는 사람은 복사한 메일을 압니다.</div>
       <textarea id="f-mailtx" rows="16"
         style="font-size:13px;margin-top:9px">${esc(txt)}</textarea>
       <div style="height:9px"></div>
