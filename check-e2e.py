@@ -1428,6 +1428,11 @@ with sync_playwright() as p:
     A(st == 200 and rs and rs.get("id") == FT["id"], f"되살린 팀 id 가 다르다: {rs}")
     A(len(api(f"/api/events/{FE}/board", key=FK)["rows"]) == n0, "되살렸는데 표 수가 안 돌아왔다")
     ok("팀 휴지통 — 지우기·되살리기가 같은 id 로 왕복한다")
+    dmp = api(f"/api/events/{FE}/dump", key=FK)
+    A(isinstance(dmp, dict) and dmp.get("teams") is not None, "운영자 사본(dump)이 안 내려온다")
+    visit(f"/app#{FE}")
+    A(pg.query_selector("#gd-dump") is not None, "운영 화면에 «사본 내려받기» 단추가 없다")
+    ok("사본 내려받기 — 운영 화면 단추 + JSON 한 파일")
     # (6b) «이 문제로 내 대회 열기» — 의뢰 올린 사람이 기다리지 않고 직접 연다
     _, rq = post("/api/requests", {"kind": "requester", "name": "총무 최", "pain": "회비 낸 사람 세기", "done": "이름 누르면 냈다로", "contact": "choi@example.com"})
     A(any(q["id"] == rq["id"] for q in api("/api/requests")), "올린 의뢰가 후보 목록에 없다")

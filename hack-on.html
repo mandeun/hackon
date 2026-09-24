@@ -2068,6 +2068,9 @@ const SCREEN = {
             화면이 열려 있는 동안 신청이 들어올 수 있다. 백업도 서버가 맡는다(응답에 사본이 실려 온다). */''}
       ${(() => { const busyDel = (d.rows || []).length || needs.length || offers.length;
         return `<details id="gd"><summary>이 대회를 그만두려면 <span class="when">목록 내리기가 먼저</span></summary><div class="in">
+        <div class="card"><h3>사본 내려받기</h3>
+          <div class="meta">팀·제출·점수·자리·의뢰까지 JSON 한 파일. 연락처가 들어 있으니 운영자만 보관하세요. 지우지 않아도 언제든 받을 수 있습니다 — 여기 갇히지 않습니다.</div>
+          <div style="margin-top:8px"><button class="btn sec sm" id="gd-dump">사본 내려받기</button></div></div>
         <div class="card"><h3>목록에서 내리기 <span class="pill">권장</span></h3>
           <div class="meta">첫 화면 목록에서 사라지고 링크로는 열립니다.</div>
           <div style="height:8px"></div>${e.listed ? '<button class="btn sm" id="gd-unlist">목록에서 내리기</button>' : '<span class="pill">지금 목록에 없습니다</span>'}</div>
@@ -3938,6 +3941,14 @@ function wire() {
     try { await api(`/events/${cur}/pick`, { method: 'POST', body: { request: b.dataset.pick, on: b.dataset.on === '1' } }); flash(b.dataset.on === '1' ? '이 대회 주제로 붙였습니다. 대회 페이지와 제출 폼에 실립니다' : '뗐습니다'); }
     catch (e) { flash(e.message, true); }
   });
+  /* 사본 — 잠긴 툴에 갇힌 사람들의 불만(조사_불만원문)에 대한 답. 열쇠는 주소에 안 싣고 헤더로 */
+  if ($('#gd-dump')) $('#gd-dump').onclick = async () => {
+    try {
+      const d = await api(`/events/${cur}/dump`);
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }));
+      a.download = `hackon-${cur}-사본.json`; a.click(); flash('사본을 내려받았습니다');
+    } catch (e) { flash(e.message, true); }
+  };
   const rsgo = $('#rs-go');
   if (rsgo) rsgo.onclick = async () => {
     const f = $('#rs-file').files[0]; if (!f) return flash('사본 파일을 고르세요', true);
