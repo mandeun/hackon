@@ -3440,7 +3440,11 @@ function routes(db) {
           headers: { 'content-type': 'application/x-www-form-urlencoded;charset=utf-8' },
           body: form.toString(),
         })).json();
-        if (!tk.access_token) throw new HttpError(400, '카카오 로그인에 실패했습니다');
+        if (!tk.access_token) {
+          /* 카카오가 준 코드(KOE010=비밀키 불일치, KOE303=redirect_uri 불일치, KOE320=코드 만료)를 같이 보여준다. 없으면 장님이다 */
+          console.error('kakao token', back, tk.error_code || tk.error, tk.error_description || '');
+          throw new HttpError(400, '카카오 로그인에 실패했습니다 (' + (tk.error_code || tk.error || '?') + ')');
+        }
         const me = await (await fetch('https://kapi.kakao.com/v2/user/me', {
           headers: { authorization: 'Bearer ' + tk.access_token },
         })).json();
