@@ -3285,6 +3285,26 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   });
 
+  /* 자리 종류를 고르면 «무엇을 얼마나» 를 미리 채운다. 빈 칸을 채우라고 하면 대개 안 채운다 —
+     고칠 문장이 이미 있으면 고친다. 맡는 쪽은 역할이 모호하면 안 나선다. */
+  const NOTE_HINT = {
+    venue:  '20명 · 6시간 · 콘센트와 와이파이가 있으면 됩니다',
+    judge:  '오후에 한 시간 · 점수만 매겨 주시면 됩니다',
+    mentor: '중간에 한 번 둘러봐 주시면 됩니다 · 한 시간',
+    prize:  '1등 상품 하나면 됩니다',
+    snack:  '20명분 · 오후에 한 번',
+    cash:   '얼마든 괜찮습니다 · 쓴 곳은 장부에 남깁니다',
+    other:  '',
+  };
+  const nkind = $('#n-kind'), nnote = $('#n-note');
+  if (nkind && nnote) {
+    const isHint = (v) => v === '' || Object.values(NOTE_HINT).includes(v);
+    nkind.onchange = () => {
+      if (!isHint(nnote.value.trim())) return;   /* 사람이 쓴 건 안 건드린다 */
+      nnote.value = NOTE_HINT[nkind.value] || '';
+    };
+  }
+
   const nadd = $('#n-add');
   if (nadd) nadd.onclick = async () => {
     const label = $('#n-label').value.trim(), qty = Math.max(1, +$('#n-qty').value || 1);

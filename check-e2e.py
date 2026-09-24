@@ -847,6 +847,28 @@ with sync_playwright() as p:
     gctx.close()
     ok("줄 수 있는 것 — /give 세 화면(간식 → 대회 건너뜀 → 이름·연락처), 자리 카드는 이름·연락처만, 연락처는 운영자만")
 
+    # 자리를 올릴 때 «무엇을 얼마나» 가 미리 채워진다. 역할이 모호하면 맡겠다는 사람이 줄어든다.
+    visit(f"/app#{ev}")
+    pg.evaluate("() => document.querySelectorAll('#view details').forEach(d => d.open = true)")
+    pg.wait_for_selector("#n-kind", timeout=8000)
+    pg.select_option("#n-kind", "judge")
+    pg.dispatch_event("#n-kind", "change")
+    pg.wait_for_timeout(200)
+    judge_hint = pg.input_value("#n-note")
+    A(judge_hint.strip() != "", "심사 자리를 골랐는데 메모가 비어 있다")
+    pg.select_option("#n-kind", "venue")
+    pg.dispatch_event("#n-kind", "change")
+    pg.wait_for_timeout(200)
+    venue_hint = pg.input_value("#n-note")
+    A(venue_hint.strip() != "" and venue_hint != judge_hint,
+      f"종류를 바꿨는데 메모가 그대로다: {venue_hint!r}")
+    pg.fill("#n-note", "손으로 쓴 메모")
+    pg.select_option("#n-kind", "snack")
+    pg.dispatch_event("#n-kind", "change")
+    pg.wait_for_timeout(200)
+    A(pg.input_value("#n-note") == "손으로 쓴 메모", "사람이 쓴 메모를 기본값이 덮었다")
+    ok("자리 메모 — 종류를 고르면 «무엇을 얼마나» 가 채워지고, 사람이 쓴 건 안 덮는다")
+
     # ── 추천작 + 첫 화면 쇼케이스 (기능 3/3) ──
     _, cev = post("/api/events", {"title": "쇼케이스시험"})
     CID, CK = cev["id"], cev["okey"]
