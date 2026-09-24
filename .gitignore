@@ -6,3 +6,4 @@ node_modules/
 작업로그.md
 __pycache__/
 backlog/.locks/
+.claude/worktrees/
