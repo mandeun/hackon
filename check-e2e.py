@@ -127,10 +127,7 @@ with sync_playwright() as p:
     A(len(pg.query_selector_all("[data-filter]")) == 4, "필터가 4개가 아니다")
     A(pg.query_selector("#sort") is not None, "정렬이 없다")
     A(pg.is_hidden("#tools"), "대회가 셋 이하인데 검색·필터 줄이 보인다")
-    # 진짜 대회가 하나도 없을 때 첫 화면이 텅 비면 «죽은 곳» 으로 보인다.
-    # 대신 둘러보기용 하나가 뜨되, 진짜인 척하면 안 된다.
-    A("둘러보기" in htxt, f"진짜 대회가 없는데 둘러보기용 카드가 없다: {htxt[:200]}")
-    A("진짜 대회가 아닙니다" in htxt, "둘러보기용이 진짜 대회인 척한다")
+    A("아직 열린 대회가 없습니다" in htxt, f"빈 목록 안내가 없다: {htxt[:200]}")
     A(pg.get_attribute("#give-go", "href") == "/give", "«내가 줄 수 있는 것» 입구가 /give 로 안 간다")
     # 설명 절이 다시 늘어나면 여기서 빨갛다. 남긴 절: 열린 대회 · 우수작 · 줄 수 있는 것
     nsec = pg.evaluate("document.querySelectorAll('main > section').length")
@@ -276,15 +273,12 @@ with sync_playwright() as p:
     ok(f"제출 · 심사 저장 — 1등 {top['name']} {top['score']}점 · AI 사용 기록까지")
 
     # 목록 공개 — 이름만 넣은 대회는 첫 화면에 안 뜬다
-    # 숫자를 박지 않는다. «진짜 대회가 하나도 안 떴나» 만 본다 — 둘러보기용 하나는 떠 있어야 맞다.
-    A([e for e in api("/api/events") if not e.get("demo")] == [], "공개 안 한 대회가 첫 화면 목록에 떴다")
+    A(api("/api/events") == [], "공개 안 한 대회가 첫 화면 목록에 떴다")
     visit(f"/app#{ev}")
     vtxt = pg.inner_text("#view")
     A("아직 첫 화면 목록에 안 보입니다" in vtxt, f"공개 안내가 없다: {vtxt[:150]}")
     A(post(f"/api/events/{ev}/list", {"list": True}, OK)[0] == 200, "목록 공개 실패")
-    pub = api("/api/events")
-    A([e["id"] for e in pub] == [ev], f"공개했는데 목록이 이상하다: {[e['id'] for e in pub]}")
-    A(not any(e.get("demo") for e in pub), "진짜 대회가 떴는데 둘러보기용이 안 빠졌다")
+    A([e["id"] for e in api("/api/events")] == [ev], "공개했는데 목록에 안 뜬다")
     A(post(f"/api/events/{ev}/list", {"list": True})[0] == 403, "열쇠 없이 목록 공개가 됐다")
     # 첫 화면에서 실제로 그려지는가 — 대회가 있으면 «없습니다» 안내는 사라지고 제목이 보인다
     pg.goto(BASE + "/")

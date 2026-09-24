@@ -739,46 +739,10 @@ function visitsOf(db, days) {
                      WHERE day >= date('now', ?) ORDER BY day DESC, n DESC`).all('-' + d + ' days');
 }
 
-/* ─────────────────── 둘러보기용 대회 ─────────────────── */
-/* 첫 화면에 열린 대회가 0개면 들어온 사람이 «죽은 곳이구나» 하고 나간다.
-   그렇다고 가짜 숫자를 지어내지는 않는다 — 눌러서 진짜로 열어 볼 수 있는 대회 하나를
-   «둘러보기» 라고 이름 붙여 두고, 진짜 대회가 하나라도 올라오면 목록에서 스스로 빠진다.
-   운영 열쇠는 아무도 모른다(createEvent 가 만들고 버린다). 보기만 되고 못 고친다. */
-function demoId(db) {
-  const r = db.prepare("SELECT v FROM meta WHERE k='demo'").get();
-  return r ? r.v : '';
-}
-
-function seedDemo(db) {
-  const soon = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-  let id = demoId(db);
-  if (id && db.prepare('SELECT 1 FROM events WHERE id=?').get(id)) {
-    /* 날짜가 지나면 «끝남» 으로 굳어 버린다. 계속 2주 뒤로 민다. */
-    db.prepare('UPDATE events SET starts=?, ends=? WHERE id=?').run(soon, soon, id);
-    return id;
-  }
-  const made = createEvent(db, {
-    title: '둘러보기용 예시 대회', host: 'HACK:ON',
-    topic: '동네에서 불편한 것 아무거나', starts: soon, ends: soon });
-  id = made.id;
-  db.prepare("INSERT INTO meta(k,v) VALUES('demo',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(id);
-  db.prepare('UPDATE events SET listed=1 WHERE id=?').run(id);
-  for (const nm of ['빵집 앞 세 사람', '2층 사람들', '늦게 온 팀'])
-    try { joinTeam(db, id, { name: nm, agree: true }); } catch { /* 정원·중복은 그냥 넘긴다 */ }
-  return id;
-}
-
-/* 진짜 대회가 하나라도 있으면 둘러보기용은 뺀다. 둘 다 없으면 둘러보기용만 남긴다. */
-function dropDemo(rows, demo) {
-  const real = rows.filter((r) => r.id !== demo);
-  return real.length ? real : rows;
-}
-
 function sitemap(db) {
   const base = CANON();
   const urls = ['/', '/manual'].concat(
     db.prepare("SELECT id FROM events WHERE listed=1 AND ends >= date('now') ORDER BY ends").all()
-      .filter((r) => r.id !== demoId(db))            // 둘러보기용은 구글에 안 싣는다
       .map((r) => '/e/' + r.id));
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
     + urls.map((x) => '<url><loc>' + base + x + '</loc></url>').join('\n') + '\n</urlset>\n';
@@ -2781,11 +2745,8 @@ function routes(db) {
             const want = db.prepare('SELECT COALESCE(SUM(qty),0) t FROM needs WHERE event=?').get(r.id).t;
             r.openNeeds = Math.max(0, want - r.filled);
           }
-          const demo = demoId(db);
-          const shown = dropDemo(rows, demo);
-          for (const r of shown) if (r.id === demo) r.demo = 1;   // 화면이 «둘러보기» 라고 표시한다
-          shown.sort((a, b) => rankScore(b) - rankScore(a));
-          const ranked = spreadHosts(shown);
+          rows.sort((a, b) => rankScore(b) - rankScore(a));
+          const ranked = spreadHosts(rows);
           for (const r of ranked) { delete r.ageDays; delete r.dueDays; }
           return json(res, 200, ranked);
         }
@@ -4703,16 +4664,6 @@ function selftest() {
     ok(!JSON.stringify(vs).includes('q='), '유입 기록에 주소 뒤에 붙은 것이 안 남는다');
     ok(visitsOf(db, 999).length === 1 && visitsOf(db, -5).length === 1, '며칠치인지는 1~90 로 막는다');
 
-    /* 둘러보기용 대회 — 첫 화면이 텅 비는 것만 막고, 진짜가 생기면 빠진다 */
-    const dm = seedDemo(db);
-    ok(dm && dm === seedDemo(db), '둘러보기용 대회는 두 번 켜도 하나다');
-    ok(db.prepare('SELECT listed FROM events WHERE id=?').get(dm).listed === 1, '둘러보기용은 목록에 실린다');
-    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(dm).c === 3, '둘러보기용에 팀이 들어 있다');
-    ok(db.prepare('SELECT ends FROM events WHERE id=?').get(dm).ends > today(), '둘러보기용은 날짜가 지나지 않는다');
-    ok(dropDemo([{ id: dm }], dm).length === 1, '진짜 대회가 없으면 둘러보기용을 보여 준다');
-    ok(dropDemo([{ id: dm }, { id: 'real' }], dm).map((r) => r.id).join() === 'real',
-       '진짜 대회가 하나라도 있으면 둘러보기용은 목록에서 빠진다');
-    ok(!sitemap(db).includes('/e/' + dm), '둘러보기용은 구글에 안 싣는다');
   }
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
@@ -4733,11 +4684,7 @@ if (require.main === module) {
 
   /* 10분마다 통째로 복사해 둔다. 심사 도중에 노트북이 죽는 일이 실제로 생긴다.
      최근 12벌이면 두 시간 치다. 그 이상은 지운다. */
-  const tick = () => {
-    try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); }
-    /* 둘러보기용 대회 날짜를 계속 앞으로 민다. 켤 때만 밀면 오래 안 껐다 켠 서버에서 «끝남» 이 된다. */
-    try { seedDemo(db); } catch (e) { console.error('둘러보기 대회 실패', e.message); }
-  };
+  const tick = () => { try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); } };
   tick();
   setInterval(tick, 10 * 60 * 1000).unref();
 
@@ -4756,6 +4703,6 @@ if (require.main === module) {
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, showConsent, score, board, outcomes, allocate, tierOf, reallocate, BUDGET_RULE,
                    card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
                    dump, backup, isAdmin,
-                   visitPath, visitRef, countVisit, visitsOf, seedDemo, demoId, dropDemo,
+                   visitPath, visitRef, countVisit, visitsOf,
                    addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary,
                    pledgesOf, needsSummary };

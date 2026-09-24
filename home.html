@@ -318,12 +318,6 @@ function 그리기(){
   document.getElementById('empty').hidden = 목록.length > 0;
   document.getElementById('grid').innerHTML = 목록.map(function(e){
     var s = 상태(e), d = 남은날(e);
-    /* 둘러보기용은 진짜 대회인 척하면 안 된다. 칩도 설명줄도 따로 쓴다. */
-    if (e.demo) return '<a class="ev" href="/e/' + esc(e.id) + '">' +
-      '<span class="st open">둘러보기</span>' +
-      '<span><div class="t">' + esc(e.title) + '</div>' +
-      '<div class="m">진짜 대회가 아닙니다. 눌러서 어떻게 생겼는지 보세요</div></span>' +
-      '<span class="n">예시</span></a>';
     return '<a class="ev" href="/e/' + esc(e.id) + '">' +
       '<span class="st ' + s.c + '">' + s.k + (d ? ' ' + d : '') + '</span>' +
       '<span><div class="t">' + esc(e.title) + '</div><div class="m">' + esc(e.host) + ' · ' +
@@ -333,7 +327,7 @@ function 그리기(){
         ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') + '</span>' +
       '</a>';
   }).join('');
-  var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && !e.demo && e.id !== 'demo1'; })[0];
+  var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && e.id !== 'demo1'; })[0];
   document.getElementById('foot-note').textContent = 곧 ? '다음 대회 ' + 곧.starts : '';
 }
 fetch('/api/events').then(function(r){ return r.json(); }).then(function(list){

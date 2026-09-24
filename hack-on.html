@@ -1565,8 +1565,7 @@ async function render() {
 
 const SCREEN = {
   async home() {
-    /* 둘러보기용 예시는 첫 화면에서만 쓴다. 대회를 굴리는 화면에 섞이면 방해다. */
-    const list = (LIVE ? await api('/events') : DEMO.events).filter((e) => !e.demo);
+    const list = LIVE ? await api('/events') : DEMO.events;
     let my = null;
     if (LIVE && myKey()) { try { my = await api('/mine'); } catch { my = null; } }
     const mineBox = my && my.events.length ? `
@@ -2535,8 +2534,7 @@ const SCREEN = {
   /* /give — 첫 화면 «내가 줄 수 있는 것» 이 오는 곳. 대회를 아직 안 고른 채 시작한다.
      열린 대회(끝나지 않은 것)만 고를 수 있고, 하나뿐이면 그 화면은 건너뛴다. */
   async give() {
-    /* 둘러보기용 예시는 첫 화면에서만 쓴다. 대회를 굴리는 화면에 섞이면 방해다. */
-    const list = (LIVE ? await api('/events') : DEMO.events).filter((e) => !e.demo);
+    const list = LIVE ? await api('/events') : DEMO.events;
     G.fixed = false;
     G.events = list.filter(e => statusOf(e).k !== '끝남');
     if (G.event && !G.events.some(e => e.id === G.event)) { G.event = ''; G.step = 1; }
