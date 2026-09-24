@@ -161,7 +161,7 @@ footer a{color:inherit}
 <body>
 <script>
 /* ═══════════════ 고치는 곳 ═══════════════ */
-var 연락메일 = 'tree8727@gmail.com';
+var 연락메일 = 'hi@mandeun.com';
 /* 매뉴얼은 이 사이트 안에서 바로 열린다. 파일로 열었을 때만 저장소로 보낸다. */
 var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://github.com/mandeun/hackon';
 /* ═════════════ 고치는 곳 끝 ═════════════ */
@@ -187,8 +187,8 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <div class="hero">
   <div class="wrap">
     <p class="eyebrow"><i class="hd on" aria-hidden="true"></i>동네에서 여는 하루짜리 해커톤</p>
-    <h1>하루 모여 앱 하나를 만들고,<br>그 자리에서 뽑습니다.</h1>
-    <p class="lead">코딩을 안 해 봤어도 됩니다. 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다.</p>
+    <h1>이름 하나 적으면,<br>대회가 열립니다.</h1>
+    <p class="lead">하루 모여 만들고 그 자리에서 뽑습니다. 코딩은 안 해 봤어도 됩니다.</p>
     <div class="cta">
       <a class="btn" id="hero-open" href="/app">대회 열기</a>
       <a class="btn o" id="hero-go" href="#list">만들러 가기</a>
@@ -201,7 +201,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <section id="list">
   <div class="head">
     <h2>열린 대회 <span class="mono grey" id="count" style="font-size:14px;font-weight:400"></span></h2>
-    <p>마감이 가까운 순서입니다. 누르면 신청 칸이 바로 나옵니다.</p>
+    <p>사람이 모이고, 자리가 채워지고, 마감이 가까운 순서입니다. 누르면 신청 칸이 바로 나옵니다.</p>
   </div>
   <div class="tools" id="tools" hidden>
     <label class="sr" for="q">대회 검색</label>
@@ -245,12 +245,6 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   <p class="mail">협찬 문의는 메일로도 받습니다. <a id="mail-link" href="#"></a></p>
 </section>
 
-<div class="fb" id="fb">
-  <p class="grey" style="font-size:14px;font-weight:700">이 앱, 뭐가 불편했나요</p>
-  <form id="fb-form"><input id="fb-text" maxlength="300" placeholder="한 줄이면 됩니다. 만든 사람이 읽습니다"><button class="btn s o" type="submit" id="fb-send">보내기</button></form>
-  <p class="grey" id="fb-done" style="font-size:13px;margin-top:6px" hidden>고맙습니다. 읽고 고치겠습니다.</p>
-</div>
-
 <details class="more" id="more">
   <summary>이 서비스가 어떻게 돌아가는지 더 보기</summary>
   <ul>
@@ -265,9 +259,10 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <footer>
   <div class="wrap">
     <span translate="no" style="font-weight:700;color:var(--ink)">HACK<span class="stamp">:</span>ON</span>
-    <span>서강대 경영학과 학생 한 명이 만들고 굴립니다.</span>
-    <span id="foot-mail"></span>
+    <span>코드와 운영 방법이 전부 공개입니다.</span>
     <a id="foot-manual" href="#">운영 매뉴얼</a>
+    <a href="https://github.com/mandeun/hackon" rel="noopener">소스 보기</a>
+    <span id="foot-mail"></span>
     <span class="mono" id="foot-note" style="margin-left:auto"></span>
   </div>
 </footer>
@@ -391,14 +386,6 @@ fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list)
   });
 }).catch(function(){});
 
-/* 앱 피드백 — 한 줄. 서버에 쌓이고 만든 사람이 읽는다. */
-document.getElementById('fb-form').addEventListener('submit', function(ev){
-  ev.preventDefault();
-  var t = document.getElementById('fb-text').value.trim(); if (!t) return;
-  fetch('/api/feedback', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ page:'첫 화면', text:t }) })
-    .then(function(r){ if (r.ok) { document.getElementById('fb-text').value = ''; document.getElementById('fb-done').hidden = false; } })
-    .catch(function(){});
-});
 /* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
   var el = document.getElementById('nav-login');

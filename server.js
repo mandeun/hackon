@@ -673,6 +673,37 @@ function robots() {
   return 'User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /j/\nDisallow: /p/\nDisallow: /r/\nDisallow: /s/\n'
     + (CANON() ? 'Sitemap: ' + CANON() + '/sitemap.xml\n' : '');
 }
+/* 열린 대회 줄 세우기.
+   X 가 공개한 랭킹에서 하나를 빌렸다 — «가볍게 누른 것»과 «깊이 관여한 것»의 무게가
+   스무 배 넘게 다르다(like 1 · reply 13.5 · retweet 20 · 글쓴이가 답하면 150).
+   우리도 같다. 구경하러 온 사람보다 «한 자리 맡겠다»가 훨씬 센 신호다.
+   신선도 감쇠는 해커뉴스 식(점수 / (나이+2)^중력)인데, 대회는 트윗보다 오래 살아서
+   중력을 시간이 아니라 «일» 에 약하게 건다. */
+const RANK = { team: 1, filled: 12, sponsor: 8, openSeat: 6, gravity: 0.45 };
+
+function rankScore(r) {
+  const engage = RANK.team * Math.min(r.teams || 0, 30)
+    + RANK.filled * (r.filled || 0)
+    + RANK.sponsor * Math.min((r.sponsors || []).length, 4)
+    + (r.openNeeds > 0 ? RANK.openSeat : 0);
+  const soon = r.dueDays <= 3 ? 1.6 : (r.dueDays <= 7 ? 1.25 : 1);
+  const live = r.dueDays >= 0 ? 1 : 0.02;        /* 끝난 대회는 맨 아래로 */
+  return live * soon * (1 + engage) / Math.pow(Math.max(r.ageDays, 0) + 2, RANK.gravity);
+}
+
+/* 저자 다양성(X 도 같은 이름으로 건다). 한 사람 대회가 연달아 오면
+   목록이 «한 사람 놀이터»로 읽힌다. 다음 자리는 다른 주최자에게 먼저 준다. */
+function spreadHosts(rows) {
+  const rest = rows.slice(); const out = []; let last = null;
+  while (rest.length) {
+    let i = rest.findIndex((r) => r.host !== last);
+    if (i < 0) i = 0;
+    const [x] = rest.splice(i, 1);
+    out.push(x); last = x.host;
+  }
+  return out;
+}
+
 /* 첫 화면 · 매뉴얼 · 아직 안 끝난 공개 대회. 끝난 대회는 빼서 검색에 죽은 링크가 안 남게 한다 */
 function sitemap(db) {
   const base = CANON();
@@ -1199,7 +1230,7 @@ function privacyPage() {
 <h2>5. 하지 않는 것</h2>
 <p>광고 추적, 제3자 분석 도구, 위치 수집, 연락처 접근, 앱 안 결제를 하지 않습니다.</p>
 <h2>6. 묻는 곳</h2>
-<p>tree8727@gmail.com · 개정 2026-09-23</p>
+<p>hi@mandeun.com · 개정 2026-09-24</p>
 </body></html>`;
 }
 
@@ -2646,8 +2677,10 @@ function routes(db) {
              들어온 사람이 "여긴 빈 곳이구나" 하고 나간다. */
         {
           const rows = db.prepare(
-            `SELECT id,title,host,starts,ends,prize FROM events
-             WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all();
+            `SELECT id,title,host,starts,ends,prize,
+                    (julianday('now') - julianday(created)) AS ageDays,
+                    (julianday(ends)  - julianday('now'))   AS dueDays
+             FROM events WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all();
           /* 고를 근거를 목록에 같이 싣는다.
              설명회에서 "어느 기관이 유명한가, 경쟁률이 낮은가만 보고 고르지 말고
              프로필을 확인하라" 고 했는데, 확인하러 들어가야 하면 아무도 안 한다.
@@ -2658,8 +2691,16 @@ function routes(db) {
             r.sponsors = db.prepare('SELECT name FROM sponsors WHERE event=? ORDER BY id LIMIT 4').all(r.id).map(x => x.name);
             const rec = record(db, r.id);
             if (rec) { r.pastEvents = rec.events; r.pastFinish = rec.finishRate; }
+            /* 깊은 신호. 확인된 기여는 «한 자리 맡겠다»가 운영자 확인까지 간 것이다. */
+            r.filled = db.prepare(
+              "SELECT COUNT(*) c FROM pledges WHERE event=? AND status IN ('ok','done')").get(r.id).c;
+            const want = db.prepare('SELECT COALESCE(SUM(qty),0) t FROM needs WHERE event=?').get(r.id).t;
+            r.openNeeds = Math.max(0, want - r.filled);
           }
-          return json(res, 200, rows);
+          rows.sort((a, b) => rankScore(b) - rankScore(a));
+          const ranked = spreadHosts(rows);
+          for (const r of ranked) { delete r.ageDays; delete r.dueDays; }
+          return json(res, 200, ranked);
         }
 
         const key = req.headers['x-okey'] || q.k || '';
@@ -3554,6 +3595,27 @@ function selftest() {
   ok(secretOf(db) === secretOf(db), '서명 열쇠는 다시 만들지 않는다');
   const signed = sign(db, evR.owner);
   ok(unsign(db, signed) === evR.owner, '서명한 쿠키를 되읽는다');
+  {
+    /* 줄 세우기 — 깊은 신호가 가벼운 신호를 이긴다. 숫자를 박지 말고 점수끼리 비교한다. */
+    const mk = (o) => Object.assign({ host: 'ㄱ', teams: 0, filled: 0, sponsors: [],
+                                      openNeeds: 0, ageDays: 1, dueDays: 30 }, o);
+    const 구경만 = mk({ teams: 12 });
+    const 맡은사람 = mk({ teams: 1, filled: 2 });
+    ok(rankScore(맡은사람) > rankScore(구경만), '확인된 기여가 참가팀 수를 이긴다');
+    ok(rankScore(mk({ teams: 1, openNeeds: 3 })) > rankScore(mk({ teams: 1 })),
+       '아직 도울 자리가 남은 대회를 위로 올린다');
+    ok(rankScore(mk({ teams: 3, dueDays: 2 })) > rankScore(mk({ teams: 3, dueDays: 20 })),
+       '마감이 가까우면 위로 온다');
+    ok(rankScore(mk({ teams: 3, ageDays: 40 })) < rankScore(mk({ teams: 3, ageDays: 1 })),
+       '오래된 대회는 내려간다');
+    ok(rankScore(mk({ teams: 30, dueDays: -1 })) < rankScore(mk({ teams: 0, dueDays: 5 })),
+       '끝난 대회는 사람이 많아도 맨 아래다');
+    const spread = spreadHosts([mk({ host: 'ㄱ' }), mk({ host: 'ㄱ' }), mk({ host: 'ㄴ' })]);
+    ok(spread[0].host === 'ㄱ' && spread[1].host === 'ㄴ' && spread[2].host === 'ㄱ',
+       '같은 주최자 대회가 연달아 오지 않는다');
+    ok(spreadHosts([mk({ host: 'ㄱ' }), mk({ host: 'ㄱ' })]).length === 2,
+       '전부 같은 주최자여도 빠뜨리지 않는다');
+  }
   {
     const saved = SITES.slice();
     SITES.length = 0; SITES.push('https://hackon.kr', 'https://hackon.mandeun.com');
