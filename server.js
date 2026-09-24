@@ -465,6 +465,11 @@ function pack(db, event, admin) {
     sponsors,
     /* 협찬사가 원하는 것은 엑셀이 아니라 인재와 유스케이스다.
        완주한 팀 중 위에서 셋. 마감이 지난 뒤에만 나간다. */
+    /* 후원자·의뢰자에게 상위 셋만 보였다. 준 사람이 결과물 «전체»를 볼 수 있어야
+       후원의 «받는 것»이 생긴다. 연락처는 여기에도 없다 — 공개 장부와 같은 선. */
+    all: closed(e) ? board(db, event, true).rows
+      .filter(r => r.url)
+      .map(r => ({ rank: r.rank, name: r.name, note: r.note, url: r.url })) : [],
     top: closed(e) ? board(db, event, true).rows
       .filter(r => r.url).slice(0, 3)
       .map(r => ({ rank: r.rank, name: r.name, note: r.note, url: r.url,
@@ -2470,6 +2475,7 @@ function giveView(db, ref, k) {
              closed: isClosed, ended: !!e.ends && today() > e.ends,
              teams: o.teams, finished: o.finished, finishRate: isClosed ? o.finishRate : null },
     top: pk ? pk.top.map(t => ({ rank: t.rank, name: t.name, note: t.note, url: t.url })) : [],
+    all: pk ? pk.all : [],
     survey: isClosed ? surveySummary(db, row.event) : null,
     report: '/e/' + e.id + '/report',
   };
@@ -4269,6 +4275,9 @@ function selftest() {
 
   // 협찬사에게 넘길 한 벌 — 개인 식별 정보가 한 칸도 없어야 한다
   const pk = pack(db, ev, true);
+  ok(Array.isArray(pk.all) && pk.all.length >= pk.top.length
+     && pk.all.every(r => !('contact' in r) && !('email' in r)),
+     '후원자 열람은 상위 셋 밖 전체 제출물까지 — 연락처는 여기에도 없다');
   ok(pk.numbers.teams === outcomes(db, ev).teams, '협찬사 한 벌에 참가 팀 수가 실린다');
   ok(!JSON.stringify(pk).includes('@'), '협찬사 한 벌에 연락처가 안 실린다');
   ok(pk.mix.role.every(r => r.c >= 3 || r.merged), '세 건 미만인 칸은 뭉쳐서 나간다');
@@ -4678,6 +4687,7 @@ function selftest() {
     ok(code === 403, '틀린 열쇠로는 후원 화면이 안 열린다');
     const gv = giveView(db, pl.ref, pl.pkey);
     ok(gv.gift.status === 'pending' && !JSON.stringify(gv).includes('010-9') && gv.top.length === 0, '후원 화면에 연락처가 없고 마감 전엔 결과물이 없다');
+    ok(Array.isArray(gv.all) && gv.all.length === 0, '마감 전엔 전체 제출물도 비어 있다');
     const of = addOffer(db, qe.id, { kind: 'snack', name: '커피집', contact: 'c@x.y' });
     setOffer(db, of.id, { status: 'ok' });
     ok(giveView(db, of.ref, of.pkey).gift.status === 'ok', '제안이 확인되면 같은 열쇠로 확정 상태가 보인다');

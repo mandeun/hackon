@@ -1681,7 +1681,7 @@ const SCREEN = {
     if (!list.length && my && my.events.length) return mineBox + `
       <div class="card">
         <h3>다음에 할 일</h3>
-        <ol class="steps"><li>날짜와 제출 마감 정하기</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
+        <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 0원도 됩니다. 넣으면 자리가 저절로 깔립니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
       </div>`;
     if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>
@@ -2574,6 +2574,7 @@ const SCREEN = {
       ${!ev.closed ? `<div class="card"><h3>결과물은 마감 뒤에</h3><div class="meta">마감이 지나면 상위 셋과 결과 보고서 주소가 열립니다.</div></div>`
       : `<div class="card"><h3>완주 상위 셋</h3>
           ${v.top.length ? v.top.map(t => `<div class="meta" style="margin-top:6px"><b>${t.rank}위 · ${esc(t.name)}</b>${t.note ? ' · ' + esc(t.note) : ''}${t.url ? ` · <a href="${esc(t.url)}" target="_blank" rel="noopener">열기</a>` : ''}</div>`).join('') : '<div class="meta">제출한 팀이 아직 없습니다.</div>'}
+          ${v.all && v.all.length > v.top.length ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:700">제출물 전체 ${v.all.length}팀 보기</summary>${v.all.slice(v.top.length).map(t => `<div class="meta" style="margin-top:6px"><b>${t.rank}위 · ${esc(t.name)}</b>${t.note ? ' · ' + esc(t.note) : ''}${t.url ? ` · <a href="${esc(t.url)}" target="_blank" rel="noopener">열기</a>` : ''}</div>`).join('')}</details>` : ''}
           <div style="margin-top:10px"><a class="btn sm" id="gift-report" href="${esc(v.report)}" style="text-decoration:none">결과 보고서 열기</a></div>
           ${v.survey ? `<div class="meta" style="margin-top:8px">${v.survey.recommend === null ? `참가팀 설문은 ${v.survey.minCell}팀 이상 답하면 숫자로 보입니다 (지금 ${v.survey.n}팀).` : `참가팀 추천 점수 <b>${v.survey.recommend}</b>/10 (${v.survey.n}팀)`}</div>` : ''}
         </div>`}`;
