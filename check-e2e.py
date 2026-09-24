@@ -244,7 +244,14 @@ with sync_playwright() as p:
     pg.wait_for_selector("#s-url")
     pg.fill("#s-url", "https://example.com/walk")
     pg.fill("#s-note", "보행 장벽을 미리 알려 주는 지도")
-    pg.fill("#s-aiuse", "화면 만들 때 썼습니다")
+    # AI 기록은 글쓰기가 아니라 누르기다 — 지친 참가자에게 서술을 시키면 안 채운다
+    pg.click('#s-ai-picks .pick[data-ai="화면"]')
+    pg.click('#s-ai-picks .pick[data-ai="코드"]')
+    A(pg.input_value("#s-aiuse") == "화면 · 코드", f'칩이 숨은 칸에 안 모인다: {pg.input_value("#s-aiuse")!r}')
+    pg.click('#s-ai-picks .pick[data-ai="안 썼어요"]')
+    A(pg.input_value("#s-aiuse") == "안 썼어요", "«안 썼어요» 가 나머지를 안 끈다")
+    pg.click('#s-ai-picks .pick[data-ai="안 썼어요"]')
+    pg.click('#s-ai-picks .pick[data-ai="화면"]')
     pg.fill("#s-aidrop", "추천 로직은 우리 문제와 안 맞아 버렸습니다")
     pg.click("#s-save")
     pg.wait_for_timeout(700)
@@ -261,7 +268,7 @@ with sync_playwright() as p:
     # 95*.30 + 90*.30 + 85*.25 + 80*.15 = 88.75 → 88.8
     A(abs(top["score"] - 88.8) < 0.05, f"가중 평균이 틀렸다: {top['score']}")
     A(rows[1]["score"] == 0, "심사 안 한 팀이 점수를 받았다")
-    A(top["aiuse"] == "화면 만들 때 썼습니다" and "버렸습니다" in top["aidrop"],
+    A(top["aiuse"] == "화면" and "버렸습니다" in top["aidrop"],
       f"AI 사용 기록이 안 남았다: {top.get('aiuse')} / {top.get('aidrop')}")
     ok(f"제출 · 심사 저장 — 1등 {top['name']} {top['score']}점 · AI 사용 기록까지")
 

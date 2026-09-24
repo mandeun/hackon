@@ -142,6 +142,17 @@ header{padding:14px 16px 0;border-bottom:1px solid var(--rule);flex:none;backgro
 .logo svg{height:19px;display:block}
 .chip{margin-left:auto;font-size:11px;padding:3px 8px;border-radius:99px;background:var(--bg2);color:var(--ink3)}
 .chip.live{background:var(--ok-l);color:var(--ok-t);font-weight:700}
+/* 받는 것 — 대회 전·중·후 한 줄. 작은 글씨 설명을 세 칸으로 바꾼 자리다 */
+.gets{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 2px}
+.gets>div{background:var(--bg2);border-radius:10px;padding:9px 10px;min-width:0}
+.gets s{display:block;font-size:11px;color:var(--ink3);font-weight:700;text-decoration:none;margin-bottom:3px}
+.gets b{font-size:13px;line-height:1.35;display:block;word-break:keep-all}
+.gets>div.off{opacity:.45}
+/* 눌러서 고르는 칩. .chip 은 이미 «작은 배지»라 이름을 따로 쓴다 */
+.picks{display:flex;flex-wrap:wrap;gap:7px;margin:6px 0 2px}
+.pick{font-size:13px;font-weight:600;padding:8px 13px;border-radius:99px;
+      border:1.5px solid var(--rule);background:#fff;color:var(--ink2);cursor:pointer;min-height:38px}
+.pick.on{background:var(--acc);border-color:var(--acc);color:#fff}
 
 main{flex:1;overflow:auto;padding:20px 16px 24px}
 /* 화면마다 큰 한 문장. 레퍼런스들이 전부 이걸로 시작한다. */
@@ -640,14 +651,23 @@ const NEED_KIND = { venue:'장소', cash:'돈', judge:'심사', prize:'상품', 
    단계를 DOM 에만 두면 «보냈습니다» 대신 첫 화면이 돌아온다. */
 const GIVE_KINDS = [['venue','장소'], ['cash','돈'], ['judge','심사'], ['mentor','멘토'], ['snack','간식'], ['other','기타']];
 /* 주면 받는 것 — 종류마다 다르다. 이 문장이 없으면 «장부에 이름» 한 줄뿐이라 왜 주는지 화면이 말하지 않는다(데시: 예고된 대가는 안에서 나온 마음을 밀어내지만, 받는 것을 감추는 건 다른 문제다) */
+/* 지쳐서 나가는 참가자에게 서술을 시키면 안 채운다. 누르는 것으로 바꾼다. */
+const AI_WHERE = ['안 썼어요', '화면', '코드', '데이터', '글·기획'];
+
 const RECEIVE = {
-  venue: '공개 장부에 «장소: ○○» 으로 남고, 대회 페이지와 큰 화면에 함께한 곳으로 실립니다. 끝나면 결과 보고서와 완주율을 받습니다.',
-  cash: '공개 장부에 이름이 남고 «함께: ○○» 으로 대회 페이지에 실립니다. 끝나면 결과 보고서(완주율·결과물 상위 셋·설문)를 링크 하나로 받습니다.',
-  judge: '장부에 «심사: ○○» 으로 남습니다. 결과물은 운영자가 보내는 심사 링크로 마감 직후 봅니다(이 화면이 아니라 심사 화면에서). 남긴 심사평은 이름 없이 참가팀에게 전달됩니다.',
-  mentor: '장부에 «멘토: ○○» 으로 남고, 당일 팀들을 만납니다. 끝나면 결과물과 보고서를 받습니다.',
-  snack: '장부에 «간식: ○○» 으로 남고 큰 화면에 함께한 곳으로 실립니다. 끝나면 결과 보고서를 받습니다.',
-  other: '장부에 이름이 남고 대회 페이지에 함께한 곳으로 실립니다. 끝나면 결과 보고서를 받습니다.',
+  venue:  { tag: '장소', pre: '대회 페이지에 이름', mid: '행사장 큰 화면에 이름', post: '결과 보고서' },
+  cash:   { tag: '함께', pre: '대회 페이지에 이름', mid: '행사장 큰 화면에 이름', post: '결과 보고서' },
+  judge:  { tag: '심사', pre: '대회 페이지에 이름', mid: '결과물을 마감 직후 먼저', post: '심사평이 팀에게' },
+  mentor: { tag: '멘토', pre: '대회 페이지에 이름', mid: '당일 팀들을 만납니다', post: '결과물과 보고서' },
+  snack:  { tag: '간식', pre: '대회 페이지에 이름', mid: '행사장 큰 화면에 이름', post: '결과 보고서' },
+  other:  { tag: '함께', pre: '대회 페이지에 이름', mid: '', post: '결과 보고서' },
 };
+function getsBox(kind) {
+  const r = RECEIVE[kind] || RECEIVE.other;
+  const cell = (label, v) => `<div${v ? '' : ' class="off"'}><s>${label}</s><b>${esc(v || '해당 없음')}</b></div>`;
+  return `<div class="meta"><b>주시면 받는 것</b> — 공개 장부에 «${esc(r.tag)}: 이름» 으로 남습니다</div>
+    <div class="gets">${cell('대회 전', r.pre)}${cell('대회 중', r.mid)}${cell('끝난 뒤', r.post)}</div>`;
+}
 let G = { step: 1, kind: '', event: '', fixed: false, need: null, needLabel: '', events: [], done: false };
 function giveReset(keepEvent) {
   G = { step: 1, kind: '', event: keepEvent ? G.event : '', fixed: keepEvent ? G.fixed : false,
@@ -682,7 +702,7 @@ function giveHtml() {
       <div style="height:12px"></div><button type="button" class="btn sec sm" data-give-back="1">뒤로</button></div>`;
   return `<div class="card" id="give">${steps(3)}
     <h3>${esc(kindName(G.kind))}${G.needLabel ? ' · ' + esc(G.needLabel) : ''}${ev && !G.fixed ? ' → ' + esc(ev.title) : ''}</h3>
-    <div class="meta" id="g-recv"><b>주시면 받는 것</b> — ${esc(RECEIVE[G.kind] || RECEIVE.other)}</div>
+    <div id="g-recv">${getsBox(G.kind)}</div>
     ${G.kind === 'other' && !G.need ? `<label>무엇인가요 <span class="pill">필수</span></label>
       <input id="g-what" maxlength="80" placeholder="예) 20명 들어갈 카페를 토요일에 빌려드릴 수 있어요">` : ''}
     <label>이름 <span class="pill">필수</span></label><input id="g-name" placeholder="이름 또는 가게·회사 이름">
@@ -981,8 +1001,8 @@ function rulesBox() {
   return `<div class="card"><h3>규칙</h3><ul class="checks">
     <li><span><b>만든 것은 팀의 것입니다.</b> 주최 측은 결과물의 권리를 가져가지 않습니다.
       홍보에 쓸 때도 먼저 물어봅니다.</span></li>
-    <li><span><b>생성형 AI 를 써도 됩니다.</b> 대신 <b>어디에 썼고 무엇을 버렸는지</b>를 적어 주세요.
-      그게 심사에서 가장 크게 보는 곳입니다.</span></li>
+    <li><span><b>생성형 AI 를 써도 됩니다.</b> 제출할 때 <b>어디에 썼는지 눌러만</b> 주세요.
+      버린 판단이 있으면 한 줄이면 됩니다.</span></li>
     <li><span>중간에 떨어뜨리는 라운드가 없습니다. 모든 팀이 같은 시간을 씁니다.</span></li>
     <li><span>심사 기준은 시작 전에 공개하고, 시작한 뒤에는 바꾸지 않습니다.</span></li>
     <li><span>멘토의 조언은 참고 사항입니다. 무엇을 만들지는 팀이 정합니다.</span></li>
@@ -2983,13 +3003,15 @@ const SCREEN = {
         <label>설명</label>
         <textarea id="s-note" rows="3"
           placeholder="가장 중요한 것을 첫 줄에. 길게 쓰는 게 좋은 게 아닙니다">${esc(t.note || '')}</textarea>
-        <label>AI 를 어느 단계에서 쓰셨나요 <span class="pill ok">막지 않습니다</span></label>
-        <textarea id="s-aiuse" rows="2"
-          placeholder="예) 화면 만들 때. 데이터 정리할 때">${esc(t.aiuse || '')}</textarea>
-        <label>AI 가 준 것 중 버리거나 고친 판단이 있나요</label>
-        <textarea id="s-aidrop" rows="2"
-          placeholder="예) 추천 로직을 제안했는데 우리 문제와 안 맞아서 버렸습니다">${esc(t.aidrop || '')}</textarea>
-        <div class="meta">심사에서 가장 크게 보이는 두 줄입니다. <b>무엇을 버렸는지</b>가 그 팀의 판단입니다.</div>
+        <label>AI 를 어디에 쓰셨나요 <span class="pill ok">눌러만 주세요</span></label>
+        <div class="picks" id="s-ai-picks">${AI_WHERE.map((w) => {
+          const on = (t.aiuse || '').split('·').map((x) => x.trim()).includes(w);
+          return `<button type="button" class="pick${on ? ' on' : ''}" data-ai="${esc(w)}">${esc(w)}</button>`;
+        }).join('')}</div>
+        <input type="hidden" id="s-aiuse" value="${esc(t.aiuse || '')}">
+        <label>버린 판단이 있으면 한 줄 <span class="pill">선택</span></label>
+        <input id="s-aidrop" maxlength="200"
+          placeholder="예) 추천 로직이 우리 문제와 안 맞아서 버렸습니다" value="${esc(t.aidrop || '')}">
         ${reqs.length ? `<label>어느 주제·요청으로 만들었나요 <span class="pill">선택</span></label>
           <select id="s-request"><option value="">자유 주제</option>${reqs.map(r => `<option value="${esc(r.id)}"${t.request === r.id ? ' selected' : ''}>${esc(r.kind === 'sponsor' ? '후원자' : '의뢰자')} · ${esc(r.topic || r.pain)}</option>`).join('')}</select>
           <div class="meta">고르면 마감 뒤 결과물을 받고 «됐다/아니다»를 답합니다.</div>` : ''}
@@ -3343,6 +3365,18 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
 
+
+  /* AI 칩 — «안 썼어요» 는 혼자만, 나머지는 여러 개. 고른 것을 숨은 칸에 모은다. */
+  document.querySelectorAll('#s-ai-picks .pick').forEach((b) => {
+    b.onclick = () => {
+      const none = b.dataset.ai === AI_WHERE[0];
+      if (none) document.querySelectorAll('#s-ai-picks .pick').forEach((x) => { if (x !== b) x.classList.remove('on'); });
+      else { const n = document.querySelector(`#s-ai-picks .pick[data-ai="${AI_WHERE[0]}"]`); if (n) n.classList.remove('on'); }
+      b.classList.toggle('on');
+      const box = $('#s-aiuse');
+      if (box) box.value = [...document.querySelectorAll('#s-ai-picks .pick.on')].map((x) => x.dataset.ai).join(' · ');
+    };
+  });
 
   const msave = $('#m-save');
   if (msave) msave.onclick = async () => {
