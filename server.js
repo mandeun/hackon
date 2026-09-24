@@ -705,10 +705,80 @@ function spreadHosts(rows) {
 }
 
 /* 첫 화면 · 매뉴얼 · 아직 안 끝난 공개 대회. 끝난 대회는 빼서 검색에 죽은 링크가 안 남게 한다 */
+/* ───────────────────────── 유입 ───────────────────────── */
+/* 경로를 뭉친다. /e/ab12 가 천 줄 쌓이면 보이는 게 없다.
+   목록에 없는 것(그림·스크립트·없는 주소)은 아예 안 센다 — 숫자가 의미를 잃는다. */
+function visitPath(p) {
+  if (/^\/e\//.test(p)) return '/e/';
+  if (/^\/j\//.test(p)) return '/j/';
+  if (/^\/tv\//.test(p)) return '/tv/';
+  return ['/', '/app', '/manual'].includes(p) ? p : '';
+}
+
+/* 보낸 곳은 도메인만 남긴다. 주소 뒤에 붙는 것에 남의 개인 정보가 실려 올 수 있다.
+   우리 사이트 안에서 넘어온 것은 «내부» 로 묶는다 — 유입이 아니다. */
+function visitRef(ref, host) {
+  if (!ref) return '직접';
+  try {
+    const from = new URL(ref).hostname.replace(/^www\./, '');
+    const here = String(host || '').split(':')[0].replace(/^www\./, '');
+    return from === here ? '내부' : from.slice(0, 60);
+  } catch { return '직접'; }
+}
+
+function countVisit(db, p, ref, host) {
+  const where = visitPath(p);
+  if (!where) return;
+  db.prepare(`INSERT INTO visits(day,path,ref,n) VALUES(date('now'),?,?,1)
+              ON CONFLICT(day,path,ref) DO UPDATE SET n = n + 1`).run(where, visitRef(ref, host));
+}
+
+function visitsOf(db, days) {
+  const d = Math.min(90, Math.max(1, Math.floor(+days || 7)));
+  return db.prepare(`SELECT day, path, ref, n FROM visits
+                     WHERE day >= date('now', ?) ORDER BY day DESC, n DESC`).all('-' + d + ' days');
+}
+
+/* ─────────────────── 둘러보기용 대회 ─────────────────── */
+/* 첫 화면에 열린 대회가 0개면 들어온 사람이 «죽은 곳이구나» 하고 나간다.
+   그렇다고 가짜 숫자를 지어내지는 않는다 — 눌러서 진짜로 열어 볼 수 있는 대회 하나를
+   «둘러보기» 라고 이름 붙여 두고, 진짜 대회가 하나라도 올라오면 목록에서 스스로 빠진다.
+   운영 열쇠는 아무도 모른다(createEvent 가 만들고 버린다). 보기만 되고 못 고친다. */
+function demoId(db) {
+  const r = db.prepare("SELECT v FROM meta WHERE k='demo'").get();
+  return r ? r.v : '';
+}
+
+function seedDemo(db) {
+  const soon = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  let id = demoId(db);
+  if (id && db.prepare('SELECT 1 FROM events WHERE id=?').get(id)) {
+    /* 날짜가 지나면 «끝남» 으로 굳어 버린다. 계속 2주 뒤로 민다. */
+    db.prepare('UPDATE events SET starts=?, ends=? WHERE id=?').run(soon, soon, id);
+    return id;
+  }
+  const made = createEvent(db, {
+    title: '둘러보기용 예시 대회', host: 'HACK:ON',
+    topic: '동네에서 불편한 것 아무거나', starts: soon, ends: soon });
+  id = made.id;
+  db.prepare("INSERT INTO meta(k,v) VALUES('demo',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(id);
+  db.prepare('UPDATE events SET listed=1 WHERE id=?').run(id);
+  for (const nm of ['빵집 앞 세 사람', '2층 사람들', '늦게 온 팀'])
+    try { joinTeam(db, id, { name: nm, agree: true }); } catch { /* 정원·중복은 그냥 넘긴다 */ }
+  return id;
+}
+
+/* 진짜 대회가 하나라도 있으면 둘러보기용은 뺀다. 둘 다 없으면 둘러보기용만 남긴다. */
+function dropDemo(rows, demo) {
+  const real = rows.filter((r) => r.id !== demo);
+  return real.length ? real : rows;
+}
+
 function sitemap(db) {
   const base = CANON();
   const urls = ['/', '/manual'].concat(
     db.prepare("SELECT id FROM events WHERE listed=1 AND ends >= date('now') ORDER BY ends").all()
+      .filter((r) => r.id !== demoId(db))            // 둘러보기용은 구글에 안 싣는다
       .map((r) => '/e/' + r.id));
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
     + urls.map((x) => '<url><loc>' + base + x + '</loc></url>').join('\n') + '\n</urlset>\n';
@@ -752,6 +822,17 @@ function open(file) {
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
+
+    /* 유입 기록. 어느 화면을 몇 번 봤는지, 어디서 왔는지만 하루 단위로 센다.
+       IP 도 사람도 남기지 않는다 — «어느 홍보가 먹혔나» 는 셈만 있으면 알 수 있고,
+       그 이상을 남기면 지켜 줄 것이 늘어난다. */
+    CREATE TABLE IF NOT EXISTS visits(
+      day  TEXT NOT NULL,                -- YYYY-MM-DD
+      path TEXT NOT NULL,                -- 본 화면. /e/<id> 는 /e/ 로 묶는다
+      ref  TEXT NOT NULL DEFAULT '',     -- 보낸 곳. 도메인만 남긴다
+      n    INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(day, path, ref)
+    );
 
     CREATE TABLE IF NOT EXISTS teams(
       id     INTEGER PRIMARY KEY,
@@ -2660,6 +2741,9 @@ function routes(db) {
     try {
       const bare = wwwTo(req.headers.host);
       if (bare) { res.writeHead(301, { location: bare + req.url }); return res.end(); }
+      /* 화면을 연 것만 센다. api 호출까지 세면 한 사람이 열 번으로 보인다. */
+      if (req.method === 'GET' && !p.startsWith('/api/'))
+        try { countVisit(db, p, req.headers.referer || '', req.headers.host); } catch { /* 셈이 사이트를 죽이면 안 된다 */ }
       if (p === '/robots.txt') {
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
         return res.end(robots());
@@ -2697,8 +2781,11 @@ function routes(db) {
             const want = db.prepare('SELECT COALESCE(SUM(qty),0) t FROM needs WHERE event=?').get(r.id).t;
             r.openNeeds = Math.max(0, want - r.filled);
           }
-          rows.sort((a, b) => rankScore(b) - rankScore(a));
-          const ranked = spreadHosts(rows);
+          const demo = demoId(db);
+          const shown = dropDemo(rows, demo);
+          for (const r of shown) if (r.id === demo) r.demo = 1;   // 화면이 «둘러보기» 라고 표시한다
+          shown.sort((a, b) => rankScore(b) - rankScore(a));
+          const ranked = spreadHosts(shown);
           for (const r of ranked) { delete r.ageDays; delete r.dueDays; }
           return json(res, 200, ranked);
         }
@@ -2900,6 +2987,13 @@ function routes(db) {
             name: me2 ? me2.name : '',
             linked: !!(me2 && me2.kakao),   // 카카오에 묶인 계정인가
           });
+        }
+        if (p === '/api/visits' && req.method === 'GET') {
+          /* ADMIN_KEY 를 아는 사람만. 그게 없으면(내 노트북) 이 컴퓨터에서만 보인다. */
+          const local = /^(::1$|::ffff:127\.|127\.)/.test(req.socket.remoteAddress || '');
+          if (!(process.env.ADMIN_KEY ? headOwner === process.env.ADMIN_KEY : local))
+            throw new HttpError(403, '볼 수 있는 열쇠가 아닙니다');
+          return json(res, 200, visitsOf(db, q.days));
         }
         if (p === '/api/mine' && req.method === 'GET') {
           if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
@@ -4592,6 +4686,34 @@ function selftest() {
     ok(ics.includes('DTSTART;VALUE=DATE:20990101') && ics.includes('DTEND;VALUE=DATE:20990102') && !ics.includes('+09:00'), '종일 일정은 날짜만 — 시간대 없음');
     ok(csvOf(db, fx.id).split('\n')[0].includes('연락처') && !csvOf(db, fx.id, false).includes('연락처'), '«연락 빼고» CSV 에는 연락처 열이 없다');
   }
+  {
+    /* 유입 — 화면만 센다. 그림·스크립트까지 세면 숫자가 의미를 잃는다 */
+    ok(visitPath('/e/ab12') === '/e/' && visitPath('/') === '/' && visitPath('/logo.svg') === '',
+       '유입은 화면만 세고 /e/ 는 한 줄로 뭉친다');
+    ok(visitRef('https://www.naver.com/search?q=해커톤', 'hackon.kr') === 'naver.com'
+       && visitRef('https://hackon.kr/app', 'hackon.kr') === '내부'
+       && visitRef('', 'hackon.kr') === '직접',
+       '보낸 곳은 도메인만 남고, 우리 사이트 안에서 온 것은 내부');
+    countVisit(db, '/', 'https://naver.com/', 'hackon.kr');
+    countVisit(db, '/', 'https://naver.com/', 'hackon.kr');
+    countVisit(db, '/logo.svg', '', 'hackon.kr');     // 안 세야 한다
+    const vs = visitsOf(db, 7);
+    ok(vs.length === 1 && vs[0].n === 2 && vs[0].path === '/' && vs[0].ref === 'naver.com',
+       '같은 날 같은 곳에서 온 것은 한 줄에 쌓인다');
+    ok(!JSON.stringify(vs).includes('q='), '유입 기록에 주소 뒤에 붙은 것이 안 남는다');
+    ok(visitsOf(db, 999).length === 1 && visitsOf(db, -5).length === 1, '며칠치인지는 1~90 로 막는다');
+
+    /* 둘러보기용 대회 — 첫 화면이 텅 비는 것만 막고, 진짜가 생기면 빠진다 */
+    const dm = seedDemo(db);
+    ok(dm && dm === seedDemo(db), '둘러보기용 대회는 두 번 켜도 하나다');
+    ok(db.prepare('SELECT listed FROM events WHERE id=?').get(dm).listed === 1, '둘러보기용은 목록에 실린다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(dm).c === 3, '둘러보기용에 팀이 들어 있다');
+    ok(db.prepare('SELECT ends FROM events WHERE id=?').get(dm).ends > today(), '둘러보기용은 날짜가 지나지 않는다');
+    ok(dropDemo([{ id: dm }], dm).length === 1, '진짜 대회가 없으면 둘러보기용을 보여 준다');
+    ok(dropDemo([{ id: dm }, { id: 'real' }], dm).map((r) => r.id).join() === 'real',
+       '진짜 대회가 하나라도 있으면 둘러보기용은 목록에서 빠진다');
+    ok(!sitemap(db).includes('/e/' + dm), '둘러보기용은 구글에 안 싣는다');
+  }
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
@@ -4611,7 +4733,11 @@ if (require.main === module) {
 
   /* 10분마다 통째로 복사해 둔다. 심사 도중에 노트북이 죽는 일이 실제로 생긴다.
      최근 12벌이면 두 시간 치다. 그 이상은 지운다. */
-  const tick = () => { try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); } };
+  const tick = () => {
+    try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); }
+    /* 둘러보기용 대회 날짜를 계속 앞으로 민다. 켤 때만 밀면 오래 안 껐다 켠 서버에서 «끝남» 이 된다. */
+    try { seedDemo(db); } catch (e) { console.error('둘러보기 대회 실패', e.message); }
+  };
   tick();
   setInterval(tick, 10 * 60 * 1000).unref();
 
@@ -4630,5 +4756,6 @@ if (require.main === module) {
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, showConsent, score, board, outcomes, allocate, tierOf, reallocate, BUDGET_RULE,
                    card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
                    dump, backup, isAdmin,
+                   visitPath, visitRef, countVisit, visitsOf, seedDemo, demoId, dropDemo,
                    addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary,
                    pledgesOf, needsSummary };
