@@ -1058,6 +1058,9 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN notice_at TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN members TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 참석 재확인. 대회 며칠 전 «올 거예요/못 가요». '' 미응답 · ISO시각 = 온다 · 'no' = 못 온다.
+     노쇼는 이걸로 «미리» 잡는다 — 당일 came 는 사후 기록일 뿐이다. */
+  try { db.exec("ALTER TABLE teams ADD COLUMN confirmed TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 쇼케이스 동의 칸. 옛 배포판에는 없다. 없으면 0(=동의 안 함)으로 시작한다 -
      «모름» 을 «있음» 으로 그리지 않는다(오답노트 E22). 동의는 본인이 켜야 생긴다. */
   try { db.exec("ALTER TABLE submissions ADD COLUMN show INTEGER NOT NULL DEFAULT 0"); } catch {}
@@ -1861,7 +1864,7 @@ function closed(e) {
 function board(db, event, admin = false) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
-    SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request,
+    SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
            t.agreed, t.photo, t.came, t.size, t.want, t.no,
            s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
@@ -3211,6 +3214,17 @@ function routes(db) {
           db.prepare('UPDATE teams SET came=? WHERE id=?').run(came, +m[1]);
           return json(res, 200, { came });
         }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/confirm$/)) && req.method === 'POST') {
+          /* 참석 재확인. 그 팀(팀 열쇠)만 누른다. going:false 면 «못 가요» — 주최자가 당일이 아니라 미리 안다. */
+          const b = await body(req);
+          const t = db.prepare('SELECT tkey FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          const tk = String(req.headers['x-tkey'] || b.tkey || '');
+          if (!tk || tk !== t.tkey) throw new HttpError(403, '그 팀의 열쇠가 필요합니다');
+          const confirmed = b.going === false ? 'no' : new Date().toISOString();
+          db.prepare('UPDATE teams SET confirmed=? WHERE id=?').run(confirmed, +m[1]);
+          return json(res, 200, { confirmed });
+        }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/submit$/)) && req.method === 'POST') {
           /* 제출물은 그 팀이나 운영자만 바꾼다. 팀 번호가 1,2,3… 순서라 이걸 안 막으면
              지나가던 사람이 남의 제출 링크를 마감 직전에 바꿔치기할 수 있다(GLM 레드팀).
@@ -4434,6 +4448,10 @@ function selftest() {
   const sup = support(db, ev);
   ok(sup.late === 0 && sup.done === 1, '하면 늦음에서 빠진다');
 
+  db.prepare("UPDATE teams SET confirmed=? WHERE id=?").run('no', t1);
+  ok(board(db, ev, true).rows.find(r => r.id === t1).confirmed === 'no', '«못 가요» 가 주최자 표에 실린다');
+  db.prepare("UPDATE teams SET confirmed=? WHERE id=?").run(new Date().toISOString(), t1);
+  ok(board(db, ev, true).rows.find(r => r.id === t1).confirmed.length > 4, '«올 거예요» 가 주최자 표에 실린다');
   db.prepare("UPDATE teams SET came=datetime('now') WHERE id=?").run(t1);
   ok(outcomes(db, ev).came === 1, '체크인이 세어진다');
   ok(outcomes(db, ev).photo === 1, '촬영 동의가 세어진다');

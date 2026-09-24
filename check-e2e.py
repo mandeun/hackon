@@ -1400,6 +1400,18 @@ with sync_playwright() as p:
     visit(f"/e/{FE}")
     A(pg.query_selector("#next") is not None and "?t=" in pg.inner_text("#next-link"), "신청 뒤 «다음에 할 일» 카드나 내 팀 링크가 없다")
     A(pg.get_attribute("#nx-ics", "href").endswith("/ics"), "캘린더 파일 링크가 없다")
+    # (5) 참석 재확인 — 대회 3일 전부터 «올 거예요» 가 뜨고, 누르면 주최자 표에 남는다 (D-3 이중 확인 실측 근거)
+    import datetime as _dt
+    ev0 = api(f"/api/events/{FE}")
+    soon = (_dt.date.today() + _dt.timedelta(days=2)).isoformat()
+    post(f"/api/events/{FE}", {"starts": soon, "ends": soon}, FK, method="PATCH")
+    visit(f"/e/{FE}")
+    pg.wait_for_selector("#cf-yes", timeout=8000)
+    pg.click("#cf-yes"); pg.wait_for_timeout(1300)
+    row = [r for r in api(f"/api/events/{FE}/board", key=FK)["rows"] if r["id"] == FT["id"]][0]
+    A(row.get("confirmed") not in ("", None, "no"), f"«올 거예요» 를 눌렀는데 재확인이 안 남았다: {row.get('confirmed')!r}")
+    post(f"/api/events/{FE}", {"starts": ev0["starts"], "ends": ev0["ends"]}, FK, method="PATCH")
+    ok("참석 재확인 — 3일 전부터 묻고, 답이 주최자 표에 남는다")
     ics = urllib.request.urlopen(f"{BASE}/api/events/{FE}/ics").read().decode()
     A(f"DTSTART;VALUE=DATE:{d2.replace('-', '')}" in ics and "+09:00" not in ics and "TZID" not in ics, "종일 일정이 날짜만으로 안 나간다")
     # (5) 묻고 답하기 — 열쇠·상한·답은 소식·본인 닫기·끝난 대회 읽기 전용

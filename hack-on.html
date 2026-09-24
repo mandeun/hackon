@@ -2283,7 +2283,7 @@ const SCREEN = {
           <td>${esc(r.name)}</td>
           <td class="meta">${esc(r.contact || '—')}</td>
           <td>${r.photo ? '<span class="pill ok">동의</span>' : '<span class="pill">비동의</span>'}</td>
-          <td><button class="btn ${r.came ? 'sec' : ''} sm" data-came="${r.id}">${
+          <td>${r.confirmed === 'no' ? '<span class="pill warn">못 옴</span> ' : r.confirmed ? '<span class="pill ok">온다</span> ' : '<span class="pill">?</span> '}<button class="btn ${r.came ? 'sec' : ''} sm" data-came="${r.id}">${
             r.came ? '왔음' : '체크인'}</button></td>
         </tr>`).join('')}</table>
         <div class="meta" style="margin-top:8px">촬영에 동의하지 않은 팀은 사진에서 빼 주세요.</div>
@@ -2400,8 +2400,16 @@ const SCREEN = {
         if (!mine || ended) return '';
         const tk = tkeyOf(mine.id); if (!tk) return '';
         const link = `${shareBase()}/e/${e.id}?t=${tk}`;
+        /* 참석 재확인 — 3일 전부터 묻는다. D-3+D-1 이중 확인이 노쇼를 줄인다는 실측(5.4만 명 RCT)을 따른다.
+           앱은 메일을 안 보내니 여기(팀 링크로 돌아온 화면)에서 묻는다. */
+        const dleft = e.starts ? Math.round((new Date(e.starts + 'T00:00:00') - new Date()) / 86400000) : 99;
+        const ask = dleft >= 0 && dleft <= 3;
         return `<div class="card" id="next">
           <h3>다음에 할 일</h3>
+          ${ask ? `<div class="meta" id="cf-box" style="margin-bottom:10px">${mine.confirmed === 'no' ? '못 온다고 알렸습니다.'
+              : mine.confirmed ? '<b>온다고 알렸습니다.</b> 당일에 뵙겠습니다.'
+              : `<b>${dleft === 0 ? '오늘' : dleft + '일 뒤'} 대회입니다.</b> 오시나요?`}
+            ${mine.confirmed ? '' : `<div class="shrow" style="margin-top:6px"><button class="btn sm" id="cf-yes">올 거예요</button><button class="btn sec sm" id="cf-no">못 가요</button></div>`}</div>` : ''}
           <div class="meta">1. <b>내 팀 링크</b>를 <b>나에게만</b> 보내 두세요(팀 방에는 올리지 마세요). 폰을 바꿔도 이 링크로 되찾습니다.<br>
             2. 당일 ${esc(e.starts)} ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : '마감 전에'} 여기서 결과물 주소를 냅니다.<br>
             3. 내기 전에 <b>새 창에서 열리는지</b> 확인합니다.</div>
@@ -3486,6 +3494,19 @@ function wire() {
       if (box) box.value = [...document.querySelectorAll('#s-ai-picks .pick.on')].map((x) => x.dataset.ai).join(' · ');
     };
   });
+
+  /* 참석 재확인 단추 — 그 팀 열쇠로만. 답한 뒤엔 화면을 다시 읽어 상태를 보여 준다. */
+  const cfGo = (going) => async () => {
+    try {
+      /* myId 는 렌더 함수 안의 const 라 여기선 안 보인다. 같은 방식으로 다시 읽는다. */
+      const myId = localStorage.getItem('hackon.team.' + cur);
+      await api(`/teams/${myId}/confirm`, { method: 'POST', tkey: tkeyOf(myId), body: { going } });
+      flash(going ? '온다고 알렸습니다' : '못 간다고 알렸습니다');
+      setTimeout(() => location.reload(), 700);
+    } catch (e) { flash(e.message, true); }
+  };
+  if ($('#cf-yes')) $('#cf-yes').onclick = cfGo(true);
+  if ($('#cf-no')) $('#cf-no').onclick = cfGo(false);
 
   const msave = $('#m-save');
   if (msave) msave.onclick = async () => {
