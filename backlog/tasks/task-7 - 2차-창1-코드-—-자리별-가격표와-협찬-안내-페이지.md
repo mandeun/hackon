@@ -1,9 +1,10 @@
 ---
 id: TASK-7
 title: 2차 창1 코드 — 자리별 가격표와 협찬 안내 페이지
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-24 12:17'
+updated_date: '2026-09-24 12:43'
 labels:
   - 코드
 dependencies: []
