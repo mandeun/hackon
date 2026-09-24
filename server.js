@@ -2203,6 +2203,8 @@ function tv(db, event) {
       ? b.rows.slice(0, 5).map(r => ({ rank: r.rank, name: r.name, score: e.ranked ? r.rscore : r.score })) : [],
     /* 자리 번호 — 마감 뒤 심사 시간에 벽에 띄운다. 심사위원이 «몇 번 테이블»로 찾아간다 */
     seats: closed(e) ? rows.map((r, i) => ({ no: r.no || i + 1, name: r.name })) : [],
+    /* 발표 순서 — 자리 번호 순, 낸 팀만. 운영사가 늘 종이에 적던 것(브레인스톰 §3-6). 마감 뒤에만 */
+    order: closed(e) ? rows.filter(r => r.url).map((r, i) => ({ no: r.no || i + 1, name: r.name })) : [],
     crew: crew(db, event),
     /* 협찬사 로고. 금액은 안 보낸다 - 벽에 걸리는 화면이다. */
     sponsors: db.prepare('SELECT name, kind, logo, link FROM sponsors WHERE event=? ORDER BY amount DESC')
@@ -4410,6 +4412,17 @@ function selftest() {
   editEvent(db, tvEv.id, { due: '2099-01-01T00:00', wifi: 'hackon / 1234' });
   const tvT = joinTeam(db, tvEv.id, { name: '아직안낸팀', agree: true });
   const tv1 = tv(db, tvEv.id);
+  {
+    /* 발표 순서 — 마감 전엔 비고, 마감 뒤엔 낸 팀만 자리 순서로 */
+    const eo = createEvent(db, { title: '발표 순서', starts: '2026-01-10', ends: '2026-01-10' });
+    const o1 = joinTeam(db, eo.id, { name: '낸팀', agree: true, email: 'o1@x.test' });
+    joinTeam(db, eo.id, { name: '안낸팀', agree: true, email: 'o2@x.test' });
+    db.prepare('INSERT INTO submissions(team,url) VALUES(?,?)').run(o1, 'https://example.com/o');
+    const od = tv(db, eo.id).order;
+    ok(od.length === 1 && od[0].name === '낸팀', '큰 화면 발표 순서는 낸 팀만, 자리 순서로');
+    const eo2 = createEvent(db, { title: '발표 전' });
+    ok(tv(db, eo2.id).order.length === 0, '마감 전엔 발표 순서가 비어 있다');
+  }
   ok(tv1.wifi === 'hackon / 1234', '큰 화면에 와이파이가 실린다');
   ok(tv1.waiting.length === 0, '마감이 멀면 미제출 명단을 안 띄운다');
   ok(tv1.urgent === false, '마감이 멀면 급하다고 안 한다');

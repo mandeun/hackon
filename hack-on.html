@@ -2730,14 +2730,29 @@ const SCREEN = {
 
       <div class="tvmid">
         <div class="tvbig">
-          ${(cur1 && nxt && /발표|피칭|데모|시연/.test(cur1.what))
+          ${(() => {
+            /* 발표 시간이고 낸 팀이 있으면 «지금 발표 · 다음» 큐와 팀별 타이머. 팀당 분은 진행표 글에서 읽는다(기본 5분) */
+            const pitch = cur1 && nxt && /발표|피칭|데모|시연/.test(cur1.what);
+            if (pitch && (d.order || []).length) {
+              const per = +((cur1.what.match(/팀당\s*(\d+)\s*분/) || [])[1] || 5);
+              const [h, mi] = cur1.at.split(':').map(Number);
+              const start = new Date(); start.setHours(h, mi, 0, 0);
+              const idx = Math.max(0, Math.min(d.order.length - 1, Math.floor((now - start) / 60000 / per)));
+              const end = new Date(start.getTime() + (idx + 1) * per * 60000);
+              const due = `${ymd()}T${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+              return `<div class="tvlabel">지금 발표 · ${per}분</div>
+               <div class="tvclock" id="tv-pitch" data-due="${due}"></div>
+               <div class="tvsub" style="margin-top:1.2vh"><em>${d.order[idx].no}</em> ${esc(d.order[idx].name)}${d.order[idx + 1] ? ` <span style="color:#AEB6C8">· 다음 ${d.order[idx + 1].no} ${esc(d.order[idx + 1].name)}</span>` : ' <span style="color:#AEB6C8">· 마지막</span>'}</div>
+               <div class="tvsub" style="font-size:2.1vh;color:#AEB6C8;margin-top:.6vh">${d.order.map((o, i) => `${i === idx ? '<b style="color:#fff">' : ''}${o.no} ${esc(o.name)}${i === idx ? '</b>' : ''}`).join(' → ')}</div>`;
+            }
+            return pitch
             ? `<div class="tvlabel">${esc(cur1.what)} · 다음(${esc(nxt.at)} ${esc(nxt.what)})까지</div>
                <div class="tvclock" id="tv-pitch" data-due="${ymd()}T${esc(nxt.at)}"></div>`
             : d.due
             ? `<div class="tvlabel">제출 마감까지</div>
                <div class="tvclock" data-due="${esc(d.due)}"></div>`
             : `<div class="tvlabel">오늘</div>
-               <div class="tvclock" style="font-size:9vh">${esc(d.starts)}</div>`}
+               <div class="tvclock" style="font-size:9vh">${esc(d.starts)}</div>`; })()}
           <div class="tvsub" style="margin-top:2.4vh">
             제출 <em>${d.done}</em> / ${d.teams}팀
             ${d.waiting.length && d.waiting.length <= 6
