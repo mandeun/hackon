@@ -3167,7 +3167,9 @@ function routes(db) {
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/teams$/)) && req.method === 'POST') {
           /* 팀 열쇠는 여기서 딱 한 번 나간다. 신청한 브라우저가 받아서 들고 있는다. */
-          const tid = joinTeam(db, m[1], await body(req));
+          const jb = await body(req);
+          delete jb._promote;   /* 내부 표식 — 밖에서 보내면 정원 검사를 건너뛴다. 경계에서 지운다 */
+          const tid = joinTeam(db, m[1], jb);
           if (typeof tid === 'object') return json(res, 202, tid);   /* 정원이 차서 대기자로 — { waiting: 몇 번째 } */
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
           const jm = joinMail(db, tid); if (jm) void sendMail(db, jm);   /* 기다리지 않는다 — 신청 응답이 메일에 묶이면 안 된다 */

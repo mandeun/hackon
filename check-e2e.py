@@ -1572,10 +1572,12 @@ with sync_playwright() as p:
     A(st1 == 201, "첫 팀이 못 들어갔다")
     st, w = post(f"/api/events/{small['id']}/teams", {"name": "둘째팀", "email": "t@example.com", "agree": True})
     A(st == 202 and w and w.get("waiting") == 1, f"정원 찬 대회에서 대기자가 안 된다: {st} {w}")
-    A(api(f"/api/events/{small['id']}").get("waiting") == 1 and api(f"/api/events/{small['id']}")["teams"] == 1, "대기자가 팀 수에 잡히거나 대기 수가 안 나온다")
+    st2, w2 = post(f"/api/events/{small['id']}/teams", {"name": "새치기", "email": "t@example.com", "agree": True, "_promote": True})
+    A(st2 == 202 and w2 and w2.get("waiting") == 2, f"몸통에 _promote 를 실어 정원을 건너뛴다: {st2} {w2}")
+    A(api(f"/api/events/{small['id']}").get("waiting") == 2 and api(f"/api/events/{small['id']}")["teams"] == 1, "대기자가 팀 수에 잡히거나 대기 수가 안 나온다")
     post(f"/api/teams/{t1['id']}/confirm", {"going": False}, tkey=t1["tkey"])
     rows = api(f"/api/events/{small['id']}/board", key=small["okey"])["rows"]
-    A(any(r["name"] == "둘째팀" for r in rows) and api(f"/api/events/{small['id']}").get("waiting") == 0, f"«못 가요» 뒤 대기자가 안 올라왔다: {[r['name'] for r in rows]}")
+    A(any(r["name"] == "둘째팀" for r in rows) and api(f"/api/events/{small['id']}").get("waiting") == 1, f"«못 가요» 뒤 첫 대기자만 올라와야 한다: {[r['name'] for r in rows]}")
     ok("정원 초과 → 대기, «못 가요»로 자리가 나면 앞 대기자가 팀이 된다")
 
     # ── 6. 협찬사에게 줄 숫자가 쌓이는가 (이 서비스의 차별점) ──
