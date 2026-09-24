@@ -854,6 +854,131 @@ with sync_playwright() as p:
     gctx.close()
     ok("줄 수 있는 것 — /give 세 화면(간식 → 대회 건너뜀 → 이름·연락처), 자리 카드는 이름·연락처만, 연락처는 운영자만")
 
+    # ── 협찬 안내 한 장 (/give/<대회id>) — 인스타 프로필에 거는 주소 ──
+    # 「도와주세요」는 아무도 안 준다. 「이 자리는 얼마고 이름·로고가 어디에 붙는다」를 파는 화면이다.
+    # 숫자는 하나도 안 박는다 — 서버가 준 price 를 그대로 화면에서 찾는다.
+    soon = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    _, sev = post("/api/events", {"title": "협찬안내e2e", "host": "협찬주최",
+                                  "starts": soon, "ends": soon})
+    SID, SK = sev["id"], sev["okey"]
+    _, n_paid = post(f"/api/events/{SID}/needs",
+                     {"kind": "venue", "label": "토요일 6시간 장소", "qty": 2, "price": 150000}, SK)
+    _, n_free = post(f"/api/events/{SID}/needs", {"kind": "judge", "label": "심사위원", "qty": 1}, SK)
+    _, n_good = post(f"/api/events/{SID}/needs", {"kind": "snack", "label": "20명분 간식", "qty": 1}, SK)
+    A(n_paid["price"] == 150000 and n_free["price"] == 0 and n_good["price"] == 0,
+      f"자리를 올릴 때 희망가가 안 붙는다: {n_paid} {n_free} {n_good}")
+
+    def need_now(nid):
+        return next(n for n in api(f"/api/events/{SID}/needs") if n["id"] == nid)
+
+    spctx = b.new_context(viewport={"width": 460, "height": 900})
+    sp = spctx.new_page()
+    sp.on("pageerror", lambda e: errs.append("sponsor:" + str(e)))
+    sp.goto(BASE + f"/give/{SID}", wait_until="networkidle")
+    sp.wait_for_selector(f'[data-price="{n_paid["id"]}"]', timeout=8000)
+    # 서버가 준 금액이 그대로 뜬다. 값을 여기 적지 않고 API 에서 받아 와서 비교한다.
+    want = f"{need_now(n_paid['id'])['price']:,}원"
+    shown = sp.inner_text(f'[data-price="{n_paid["id"]}"]')
+    A(want in shown, f"희망가가 서버 값과 다르게 뜬다: 서버 {want} · 화면 {shown}")
+    A("희망가" in sp.inner_text("#view") and "확정 금액이 아니" in sp.inner_text("#view"),
+      "확정 금액인 척한다 — 「희망가」라는 말이 화면에 없다")
+    ok(f"협찬 안내 — 자리별 금액이 서버 값 그대로 뜬다 ({want}), 확정 금액이 아니라고 적혀 있다")
+
+    # 0원은 「금액 미정」. 단 물건으로도 되는 자리(간식·상품)는 「현물도 됩니다」여야 한다 —
+    # 간식에 「금액 미정」만 띄우면 과자 한 박스 줄 수 있는 사람이 그냥 돌아선다.
+    A("금액 미정" in sp.inner_text(f'[data-price="{n_free["id"]}"]'),
+      "희망가 0 인 자리가 「금액 미정」으로 안 보인다")
+    A("현물도 됩니다" in sp.inner_text(f'[data-price="{n_good["id"]}"]'),
+      "간식 자리에 「현물도 됩니다」가 없다")
+    ok("협찬 안내 — 0원은 「금액 미정」, 물건 협찬 자리는 「현물도 됩니다」")
+
+    # 로고가 어디에 뜨는지 말로 적혀 있어야 판다 — 공개 페이지·현장 큰 화면·결과 보고서 셋
+    body_txt = sp.inner_text("#view")
+    A("공개 페이지" in body_txt and "큰 화면" in body_txt and "결과 보고서" in body_txt,
+      f"이름·로고가 어디 붙는지가 안 적혀 있다: {body_txt[:200]}")
+    A(sp.query_selector(f'a[href="/tv/{SID}"]') is not None, "현장 큰 화면을 미리 볼 길이 없다")
+    ok("협찬 안내 — 이름·로고가 뜨는 세 곳(공개 페이지·현장 큰 화면·결과 보고서)이 적혀 있다")
+
+    # 폰으로 온다. 가로로 밀리면 가격이 화면 밖으로 나간다.
+    for w in (460, 390):
+        sp.set_viewport_size({"width": w, "height": 900})
+        sp.wait_for_timeout(250)
+        A(sp.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"),
+          f"{w}px 에서 가로로 밀린다")
+    sp.set_viewport_size({"width": 460, "height": 900})
+    ok("협찬 안내 — 폰 폭(460·390px)에서 가로로 안 밀린다")
+
+    # 「이 자리 맡기」는 새 길이 아니라 원래 pledge 흐름으로 간다
+    sp.click(f'[data-give-need="{n_paid["id"]}"]')
+    sp.wait_for_selector("#g-name", timeout=8000)
+    A(sp.query_selector("[data-give-event]") is None, "대회가 정해져 있는데 「어느 대회에」를 또 묻는다")
+    sp.fill("#g-name", "협찬사에이")
+    sp.fill("#g-contact", "sponsor-secret@example.com")
+    sp.click("#g-send")
+    sp.wait_for_timeout(900)
+    A("보냈습니다" in sp.inner_text("#give-wrap"), "맡기를 눌렀는데 안 들어갔다")
+    spl = api(f"/api/events/{SID}/pledges", key=SK)
+    mine_p = [p for p in spl if p["need"] == n_paid["id"] and p["name"] == "협찬사에이"]
+    A(mine_p and mine_p[0]["contact"] == "sponsor-secret@example.com",
+      f"협찬 안내에서 보낸 신청이 운영자 목록에 없다: {spl}")
+    A("sponsor-secret" not in json.dumps(api(f"/api/events/{SID}/needs"), ensure_ascii=False)
+      and "sponsor-secret" not in json.dumps(api(f"/api/events/{SID}/ledger"), ensure_ascii=False),
+      "협찬사 연락처가 공개 응답으로 샜다")
+    ok("협찬 안내 — 「이 자리 맡기」가 원래 pledge 흐름으로 들어간다 (연락처는 운영자만)")
+
+    # 운영자가 확인한 것만 「이미 맡아 주신 분」에 오른다. 남은 자리도 서버 값과 맞아야 한다.
+    before_left = need_now(n_paid["id"])["qty"] - need_now(n_paid["id"])["filled"]
+    post(f"/api/pledges/{mine_p[0]['id']}/status", {"status": "ok"}, SK)
+    sp.goto(BASE + f"/give/{SID}", wait_until="networkidle")
+    sp.wait_for_selector(f'[data-price="{n_paid["id"]}"]', timeout=8000)
+    after = need_now(n_paid["id"])
+    txt = sp.inner_text("#view")
+    A("협찬사에이" in txt, "확인했는데 공개 장부에 안 올랐다")
+    A("sponsor-secret" not in txt, "공개 장부에 연락처가 떴다")
+    A(f"{after['qty'] - after['filled']}자리 남음" in sp.inner_text(f'[data-need-card="{n_paid["id"]}"]'),
+      "남은 자리 수가 서버 값과 다르다")
+    A(after["qty"] - after["filled"] == before_left - 1, "확인했는데 남은 자리가 안 줄었다")
+    ok("협찬 안내 — 확인된 협찬사만 이름이 오르고, 남은 자리 수가 서버 값과 같다")
+
+    # 사람이 손으로 넣는 값이다. 화면을 안 거치고 API 를 직접 때려도 안 깨져야 한다.
+    for bad in (-1, "공짜", None, ""):
+        st, r = post(f"/api/needs/{n_free['id']}", {"price": bad}, SK, method="PATCH")
+        A(st == 200 and r["price"] == 0, f"이상한 희망가({bad!r})가 그대로 들어갔다: {st} {r}")
+    st, r = post(f"/api/needs/{n_free['id']}", {"price": 10 ** 30}, SK, method="PATCH")
+    A(st == 200 and r["price"] < 10 ** 30 and r["price"] == need_now(n_free["id"])["price"],
+      f"엄청 큰 희망가가 그대로 들어갔다: {r}")
+    A(post(f"/api/needs/{n_free['id']}", {"price": 90000}, method="PATCH")[0] == 403,
+      "열쇠 없이 희망가가 고쳐졌다")
+    ok("협찬 안내 — 음수·글자·빈값·엄청 큰 수를 막고, 열쇠 없이는 못 고친다")
+
+    # 운영자가 화면에서 희망가를 저장하면 협찬 안내에 바로 반영되고, 「다시 나누기」가 못 덮는다
+    sp.goto(BASE + "/app", wait_until="networkidle")
+    sp.evaluate("localStorage.setItem('hackon.okey.' + %r, %r)" % (SID, SK))
+    sp.goto("about:blank")
+    sp.goto(BASE + f"/app#{SID}", wait_until="networkidle")
+    sp.evaluate("() => document.querySelectorAll('#view details').forEach(d => d.open = true)")
+    sp.wait_for_selector(f'[data-need-price="{n_free["id"]}"]', timeout=8000)
+    sp.fill(f'[data-need-price="{n_free["id"]}"]', "80000")
+    sp.click(f'[data-need-price-save="{n_free["id"]}"]')
+    sp.wait_for_timeout(1000)
+    saved = need_now(n_free["id"])
+    A(saved["price"] == 80000 and saved["held"] is True,
+      f"화면에서 저장한 희망가가 안 들어갔다(혹은 손고침으로 안 잠겼다): {saved}")
+    sp.goto(BASE + f"/give/{SID}", wait_until="networkidle")
+    sp.wait_for_selector(f'[data-price="{n_free["id"]}"]', timeout=8000)
+    A(f"{saved['price']:,}원" in sp.inner_text(f'[data-price="{n_free["id"]}"]'),
+      "운영자가 저장한 희망가가 협찬 안내에 안 뜬다")
+    # 대회 없는 /give 는 예전 그대로다. cur 은 localStorage 에 남아 있으니 주소에 있는 것만 믿어야 한다 —
+    # 안 그러면 「줄 수 있는 것」을 누른 손님에게 지난번에 보던 남의 대회 협찬 안내가 뜬다.
+    sp.evaluate("localStorage.setItem('hackon.event', %r)" % SID)
+    sp.goto("about:blank")
+    sp.goto(BASE + "/give", wait_until="networkidle")
+    sp.wait_for_selector(".gchip[data-give-kind]", timeout=8000)
+    A(sp.query_selector("[data-price]") is None,
+      "대회 없는 /give 인데 지난번에 보던 대회의 협찬 안내가 떴다")
+    spctx.close()
+    ok(f"협찬 안내 — 운영 화면에서 저장한 희망가가 바로 붙는다 ({saved['price']:,}원, 손고침 잠김)")
+
     # 자리를 올릴 때 «무엇을 얼마나» 가 미리 채워진다. 역할이 모호하면 맡겠다는 사람이 줄어든다.
     visit(f"/app#{ev}")
     pg.evaluate("() => document.querySelectorAll('#view details').forEach(d => d.open = true)")

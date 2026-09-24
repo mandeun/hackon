@@ -148,6 +148,9 @@ header{padding:14px 16px 0;border-bottom:1px solid var(--rule);flex:none;backgro
 .gets s{display:block;font-size:11px;color:var(--ink3);font-weight:700;text-decoration:none;margin-bottom:3px}
 .gets b{font-size:13px;line-height:1.35;display:block;word-break:keep-all}
 .gets>div.off{opacity:.45}
+/* 협찬 안내 한 장의 가격. 폰에서 제일 먼저 눈에 들어와야 하는 글자다 */
+.price{font-size:21px;font-weight:800;margin:6px 0 2px;letter-spacing:-.02em;word-break:keep-all}
+.price small{font-size:12px;font-weight:700;color:var(--ink3);margin-left:5px}
 /* 눌러서 고르는 칩. .chip 은 이미 «작은 배지»라 이름을 따로 쓴다 */
 .picks{display:flex;flex-wrap:wrap;gap:7px;margin:6px 0 2px}
 .pick{font-size:13px;font-weight:600;padding:8px 13px;border-radius:99px;
@@ -668,6 +671,19 @@ function getsBox(kind) {
   return `<div class="meta"><b>주시면 받는 것</b> — 공개 장부에 «${esc(r.tag)}: 이름» 으로 남습니다</div>
     <div class="gets">${cell('대회 전', r.pre)}${cell('대회 중', r.mid)}${cell('끝난 뒤', r.post)}</div>`;
 }
+/* 한 줄로 줄인 노출 위치. 가격표 칸에 들어간다 — «얼마»만 있고 «그래서 뭘 받는데»가 없으면 안 팔린다 */
+const getsLine = kind => { const r = RECEIVE[kind] || RECEIVE.other;
+  return [r.pre, r.mid, r.post].filter(Boolean).join(' → '); };
+/* 돈 대신 물건을 받는 게 오히려 흔한 자리. 여기에 «금액 미정» 만 띄우면 줄 수 있는 사람이 돌아선다 */
+const GOODS_KIND = { snack: 1, prize: 1 };
+/* 희망가 한 줄. 0 이면 «금액 미정» — 0원을 «공짜»로 읽히게 두지 않는다.
+   확정 금액인 척하지 않으려고 «희망가» 라는 말을 화면이 늘 같이 붙인다. */
+function priceText(n) {
+  const p = +n.price || 0;
+  const goods = !!GOODS_KIND[n.kind];
+  if (!p) return goods ? '현물도 됩니다' : '금액 미정';
+  return goods ? won(p) + ' · 현물도 됩니다' : won(p);
+}
 let G = { step: 1, kind: '', event: '', fixed: false, need: null, needLabel: '', events: [], done: false };
 function giveReset(keepEvent) {
   G = { step: 1, kind: '', event: keepEvent ? G.event : '', fixed: keepEvent ? G.fixed : false,
@@ -695,7 +711,7 @@ function giveHtml() {
       <div class="gchips">${GIVE_KINDS.map(([k, v]) =>
         `<button type="button" class="gchip${G.kind === k ? ' on' : ''}" data-give-kind="${k}">${v}</button>`).join('')}</div>
       <details class="more" id="give-recv" style="margin-top:10px"><summary>주면 무엇을 받나요</summary>
-        <div class="meta">${GIVE_KINDS.map(([k, v]) => `<b>${v}</b> — ${esc(RECEIVE[k])}`).join('<br>')}</div></details></div>`;
+        <div class="meta">${GIVE_KINDS.map(([k, v]) => `<b>${v}</b> — ${esc(getsLine(k))}`).join('<br>')}</div></details></div>`;
   }
   if (G.step === 2) return `<div class="card" id="give">${steps(2)}<h3>${esc(kindName(G.kind))}, 어느 대회에 주시나요</h3>
       ${G.events.map(e => `<button type="button" class="gev" data-give-event="${esc(e.id)}"><b>${esc(e.title)}</b><span>${esc(e.starts)} · ${esc(e.host)}</span></button>`).join('')}
@@ -806,6 +822,69 @@ function giveNext() {
   if (G.events.length === 1) { G.event = G.events[0].id; return 3; }
   return 2;
 }
+/* ── /give/<대회id> — 협찬 안내 한 장 ────────────────────────────
+   인스타 프로필 링크 하나로 보내는 곳이라 폰 한 화면에서 끝까지 읽힌다.
+   «도와주세요» 대신 «이 자리는 얼마고, 맡으면 이름이 어디에 붙는다» 를 판다.
+   맡기 단추는 새로 만들지 않고 아래 giveBox(기존 pledge 흐름)로 내려보낸다. */
+async function sponsorPage() {
+  const d = await api(`/events/${cur}/board`);
+  const e = d.event;
+  const needs = await api(`/events/${cur}/needs`).catch(() => []);
+  const ledger = await api(`/events/${cur}/ledger`).catch(() => []);
+  const ended = statusOf(e).k === '끝남';
+  const left = n => Math.max(0, (+n.qty || 0) - (+n.filled || 0));
+  const confirmed = n => (n.pledges || []).filter(p => p.status === 'ok' || p.status === 'done');
+  /* 남은 자리를 위로. 다 찬 자리는 «이미 이만큼 모였다» 는 증거라 지우지 않고 아래에 둔다 */
+  const rows = needs.slice().sort((a, b) => (left(b) > 0) - (left(a) > 0));
+  if (G.event !== cur) giveReset(false);
+  G.event = cur; G.fixed = true; G.events = [e];
+  return `<section class="hero">
+      <div class="top">${badge(e)}<span>${esc(e.host)} 주최</span></div>
+      <h2>${esc(e.title)} · 협찬 안내</h2>
+      <p class="sub">${esc(whenText(e))} · 참가 ${+e.teams || 0}팀${e.cap ? ` · 정원 ${esc(String(e.cap))}명` : ''}</p>
+    </section>
+
+    <div class="card">
+      <h3>맡아 주시면 이름과 로고가 세 곳에 뜹니다</h3>
+      <div class="gets">
+        <div><s>대회 전</s><b>이 공개 페이지</b></div>
+        <div><s>대회 당일</s><b>현장 큰 화면</b></div>
+        <div><s>끝난 뒤</s><b>결과 보고서</b></div>
+      </div>
+      <div class="meta">현장 큰 화면은 행사장에 종일 띄워 두는 화면이고, 결과 보고서는 끝나고 참가자·후원자에게 그대로 나가는 한 장입니다.
+        <a href="/e/${esc(cur)}">대회 페이지 보기</a> · <a href="/tv/${esc(cur)}">현장 화면 미리 보기</a></div>
+    </div>
+
+    <h3>자리와 금액</h3>
+    <p class="sub">아래 금액은 <b>주최자가 정한 희망가</b>입니다. 확정 금액이 아니고, 이야기해서 정합니다.
+      이 앱은 돈을 받지 않습니다 — 주고받는 것은 주최자와 직접 하십니다.</p>
+    ${rows.length ? rows.map(n => `<div class="card" data-need-card="${esc(String(n.id))}">
+      <h3>${esc(needKind(n.kind))} · ${esc(n.label)}
+        <span class="pill ${left(n) ? 'warn' : 'ok'}">${left(n) ? left(n) + '자리 남음' : '다 찼습니다'}</span></h3>
+      <div class="price" data-price="${esc(String(n.id))}">${esc(priceText(n))}<small>희망가</small></div>
+      ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
+      <div class="meta"><b>맡으시면</b> — ${esc(getsLine(n.kind))}</div>
+      ${confirmed(n).length ? `<div class="meta" style="margin-top:6px">이미 맡아 주신 분 · ${
+        confirmed(n).map(p => `<b>${esc(p.name)}</b>${p.org ? ' (' + esc(p.org) + ')' : ''}`).join(' · ')}</div>` : ''}
+      ${(!ended && left(n)) ? `<div style="height:12px"></div><button type="button" class="btn sec sm"
+        data-give-need="${esc(String(n.id))}" data-give-kind="${esc(n.kind)}" data-give-label="${esc(n.label)}">🙌 이 자리 맡기</button>` : ''}
+    </div>`).join('') : '<div class="card"><div class="meta">주최자가 아직 자리를 올리지 않았습니다.</div></div>'}
+
+    ${ledger.length ? `<h3>이미 맡아 주신 분들</h3>
+    <p class="sub">주최자가 확인한 것만 오릅니다. 연락처는 어디에도 공개하지 않습니다.</p>
+    <table><tr><th>자리</th><th>이름</th><th>소속</th></tr>
+      ${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td>
+        <td>${esc(x.name)}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
+
+    ${ended ? `<div class="card"><h3>이번 대회는 끝났습니다</h3>
+      <div class="meta">다음 회차를 열면 이 주소에 다시 자리가 뜹니다.</div>
+      <div style="height:10px"></div><a class="btn sec sm" href="/e/${esc(cur)}/report" style="text-decoration:none">결과 보고서 보기</a></div>`
+      : `<h3>목록에 없는 것도 주실 수 있습니다</h3>
+         <p class="sub">위 자리에 없는 것(장비·홍보·교통 같은 것)이면 여기로 보내 주세요. 주최자가 보고 답합니다.</p>
+         ${giveBox()}`}
+    <p class="meta" style="margin:14px 4px"><a href="/e/${esc(cur)}">대회 페이지</a> · <a href="/">HACK:ON 처음으로</a></p>`;
+}
+
 function wireGive() {
   document.querySelectorAll('.gchip[data-give-kind]').forEach(b => b.onclick = () => {
     G.kind = b.dataset.giveKind; G.need = null; G.needLabel = ''; G.step = giveNext(); paintGive(true);
@@ -888,8 +967,11 @@ async function pollNews() {
 const ASK = {};
 function askText(e, n) {
   const left = Math.max(0, (+n.qty || 0) - (+n.filled || 0));
+  /* «도와주세요» 는 안 팔린다. 얼마고 그 대가로 이름이 어디 붙는지를 같은 문장에 넣는다 */
   return `[${e.title}] ${e.starts || ''} · ${needKind(n.kind)} «${n.label}» ${left}자리를 찾습니다.` +
-    (n.note ? ` (${n.note})` : '') + ` 맡아 주실 수 있으면 아래 링크에서 «이 자리 맡기»를 눌러 주세요.\n${shareBase()}/e/${e.id}#give`;
+    (n.note ? ` (${n.note})` : '') +
+    ` 희망가 ${priceText(n)}. 맡아 주시면 ${getsLine(n.kind)}에 이름과 로고가 올라갑니다.` +
+    `\n${shareBase()}/give/${e.id}`;
 }
 const needProgress = n => `${Math.min(+n.filled || 0, +n.qty || 0)}/${+n.qty || 0}`;
 /* 자리 점판. needs 의 qty 만큼 점을 그리고, 확인된 수만큼 켜고, 기다리는 수만큼 노랑 테두리. */
@@ -2095,12 +2177,19 @@ const SCREEN = {
         ${needs.length ? needs.map(n => `<div class="card" style="margin-top:9px">
           <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)}</span>
             ${n.auto || n.amount ? `<span class="pill${n.amount ? '' : ' ok'}">${n.amount ? '계획 ' + won(n.amount) + (n.qty > 1 ? ' × ' + n.qty : '') : '무료로 내주실 분'}</span>` : ''}
-            ${n.held ? '<span class="pill">손고침</span>' : ''}</h3>
+            ${n.held ? '<span class="pill">손고침</span>' : ''}
+            <span class="pill${+n.price ? ' ok' : ''}">협찬 희망가 ${esc(priceText(n))}</span></h3>
           ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
           <div class="shrow" style="margin-top:8px;align-items:center">
             <input type="number" min="0" step="1000" data-need-amount="${esc(n.id)}" value="${+n.amount || 0}" style="max-width:11em" aria-label="배정 금액">
             <button class="btn sec sm" data-need-amount-save="${esc(n.id)}">금액 저장</button>
           </div>
+          ${/* 계획 지출(위)과 협찬 희망가(아래)는 다른 돈이다. 위는 «내가 얼마 쓴다», 아래는 «맡으려면 얼마». */''}
+          <div class="shrow" style="margin-top:6px;align-items:center">
+            <input type="number" min="0" step="10000" data-need-price="${esc(n.id)}" value="${+n.price || 0}" style="max-width:11em" aria-label="협찬 희망가">
+            <button class="btn sec sm" data-need-price-save="${esc(n.id)}">희망가 저장</button>
+          </div>
+          <div class="meta">협찬 안내 페이지에 붙는 값입니다. 0 이면 «${esc(priceText({ kind: n.kind, price: 0 }))}» 으로 보입니다.</div>
           ${(n.pledges || []).length ? `<div style="margin-top:8px">${(n.pledges || []).map(p => `<div class="shrow" style="align-items:center">
             <div class="meta" style="flex:1"><b>${esc(p.name)}</b>${p.org ? ' · ' + esc(p.org) : ''} · ${esc({pending:'확인 대기',ok:'확인함',done:'완료',no:'거절'}[p.status] || p.status)}
               ${pledgeInfo[p.id] && pledgeInfo[p.id].contact ? `<div class="contact">연락처 <b>${esc(pledgeInfo[p.id].contact)}</b>${pledgeInfo[p.id].note ? ' · ' + esc(pledgeInfo[p.id].note) : ''}</div>` : ''}</div>
@@ -2125,6 +2214,9 @@ const SCREEN = {
           </select></div><div><label>몇 자리</label><input id="n-qty" type="number" min="1" value="1"></div></div>
           <label>무엇이 필요한가</label><input id="n-label" maxlength="80" placeholder="예) 20명이 6시간 쓸 장소">
           <label>메모</label><input id="n-note" maxlength="160" placeholder="예) 콘센트 20개 · 와이파이">
+          <label>협찬 희망가 (원) <span class="pill">0 이면 금액 미정</span></label>
+          <input id="n-price" type="number" min="0" step="10000" value="0" placeholder="예) 100000">
+          <div class="meta">«도와주세요» 보다 «이 자리는 10만원» 이 팝니다. 협찬 안내 페이지에 이 값이 붙습니다.</div>
           <div style="height:9px"></div><button class="btn sm" id="n-add">자리 올리기</button>
         </div>
         ${ledger.length ? `<h3 style="margin-top:16px">확인된 공개 장부</h3><table><tr><th>자리</th><th>이름</th><th>소속</th></tr>
@@ -2142,6 +2234,9 @@ const SCREEN = {
             : ''}</div>
         ${linkBox(`${shareBase()}/e/${e.id}`, '', 'b-copy',
           '<b>참가자용.</b> 찍으면 바로 열립니다.')}
+        ${/* 협찬 안내는 «보내는» 주소다 — 인스타 프로필·메일에 이 한 줄만 붙인다. 참가자용 바로 밑에 둔다 */''}
+        ${linkBox(`${shareBase()}/give/${e.id}`, 'givelink', 'b-copyg',
+          '<b>협찬사용.</b> 자리별 희망가와 이름이 어디 붙는지가 한 장에 있습니다.')}
         <div class="meta" style="margin-top:10px">
           <b>운영자 열쇠</b> <span class="pill warn">참가자에게 주지 마세요</span><br>
           <code class="hid" data-reveal>${esc(okeyOf(e.id) || '이 기기에 없음')}</code>
@@ -2396,7 +2491,8 @@ const SCREEN = {
       ${needs.some(n => n.auto || n.amount) ? '<p class="sub">«계획»은 운영자가 쓰려는 돈이라 실제 지출과 다를 수 있습니다. 앱은 돈을 받지 않습니다.</p>' : ''}
       ${needs.map(n => `<div class="card">
         <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)} 채움</span>
-          ${n.auto || n.amount ? `<span class="pill${n.amount ? '' : ' ok'}">${n.amount ? '계획 ' + won(n.amount) + (n.qty > 1 ? ' × ' + n.qty : '') : '무료로 내주실 분 찾습니다'}</span>` : ''}</h3>
+          ${n.auto || n.amount ? `<span class="pill${n.amount ? '' : ' ok'}">${n.amount ? '계획 ' + won(n.amount) + (n.qty > 1 ? ' × ' + n.qty : '') : '무료로 내주실 분 찾습니다'}</span>` : ''}
+          ${+n.price ? `<span class="pill ok">협찬 희망가 ${esc(priceText(n))}</span>` : ''}</h3>
         ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
         ${confirmed(n).length ? `<div class="meta" style="margin-top:6px">확인됨 · ${confirmed(n).map(p => `<b>${esc(p.name)}</b>${p.org ? ' (' + esc(p.org) + ')' : ''}`).join(' · ')}</div>` : ''}
         ${(+n.filled||0) < (+n.qty||0) ? `<div style="height:12px"></div><button type="button" class="btn sec sm" data-give-need="${esc(n.id)}" data-give-kind="${esc(n.kind)}" data-give-label="${esc(n.label)}">🙌 이 자리 맡기</button>` : '<div class="meta" style="margin-top:8px"><b>필요한 만큼 채워졌습니다.</b></div>'}
@@ -2532,8 +2628,10 @@ const SCREEN = {
   },
 
   /* /give — 첫 화면 «내가 줄 수 있는 것» 이 오는 곳. 대회를 아직 안 고른 채 시작한다.
-     열린 대회(끝나지 않은 것)만 고를 수 있고, 하나뿐이면 그 화면은 건너뛴다. */
+     열린 대회(끝나지 않은 것)만 고를 수 있고, 하나뿐이면 그 화면은 건너뛴다.
+     /give/<대회id> 면 그 대회의 «협찬 안내» 한 장으로 간다 — 인스타 프로필에 거는 주소다. */
   async give() {
+    if (cur) return sponsorPage();
     const list = LIVE ? await api('/events') : DEMO.events;
     G.fixed = false;
     G.events = list.filter(e => statusOf(e).k !== '끝남');
@@ -3288,6 +3386,15 @@ function wire() {
       flash('금액을 저장했습니다. 이 줄은 다시 나눠도 안 바뀝니다'); render();
     } catch (e) { flash(e.message, true); }
   });
+  document.querySelectorAll('[data-need-price-save]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.needPriceSave;
+    const inp = document.querySelector(`[data-need-price="${id}"]`);
+    if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
+    try {
+      await api(`/needs/${id}`, { method: 'PATCH', body: { price: +inp.value } });
+      flash('협찬 희망가를 저장했습니다. 협찬 안내 페이지에 바로 뜹니다'); render();
+    } catch (e) { flash(e.message, true); }
+  });
 
   wireGive();
 
@@ -3332,8 +3439,9 @@ function wire() {
     const label = $('#n-label').value.trim(), qty = Math.max(1, +$('#n-qty').value || 1);
     if (!label) return flash('어떤 자리가 필요한지 적어 주세요', true);
     try {
-      if (LIVE) await api(`/events/${cur}/needs`, { method:'POST', body:{ kind:$('#n-kind').value, label, qty, note:$('#n-note').value.trim() } });
-      else DEMO.needs.push({ id:'dn' + Date.now(), kind:$('#n-kind').value, label, qty, filled:0, note:$('#n-note').value.trim(), pledges:[] });
+      const price = Math.max(0, Math.floor(+($('#n-price') || {}).value || 0));
+      if (LIVE) await api(`/events/${cur}/needs`, { method:'POST', body:{ kind:$('#n-kind').value, label, qty, price, note:$('#n-note').value.trim() } });
+      else DEMO.needs.push({ id:'dn' + Date.now(), kind:$('#n-kind').value, label, qty, price, filled:0, note:$('#n-note').value.trim(), pledges:[] });
       flash('필요한 자리를 올렸습니다');
     } catch (e) { flash(e.message, true); }
   };
@@ -3988,6 +4096,8 @@ function wire() {
   if (copyj) copyj.onclick = () => copyAny('#jlink', '심사 주소를 복사했습니다');
   const copyt = $('#b-copyt');
   if (copyt) copyt.onclick = () => copyAny('#tvlink', '현장 화면 주소를 복사했습니다');
+  const copyg = $('#b-copyg');
+  if (copyg) copyg.onclick = () => copyAny('#givelink', '협찬 안내 주소를 복사했습니다');
 
   /* 주소를 복사해서 어딘가에 붙이는 것이 아니라 그냥 여는 것이다. 새 창으로 띄운다. */
   const tvb = $('#b-tv');
@@ -4372,7 +4482,9 @@ const PUB = location.pathname.match(/^\/e\/([a-z0-9]+)(\/report)?$/);
 const JUD = location.pathname.match(/^\/j\/([a-z0-9]+)$/);
 const VOT = location.pathname.match(/^\/v\/([a-z0-9]+)$/);
 const TVM = location.pathname.match(/^\/tv\/([a-z0-9]+)$/);
-const GIV = location.pathname === '/give';   // «줄 수 있는 것» 세 화면. 첫 화면 입구가 온다
+/* /give 는 «줄 수 있는 것» 세 화면(첫 화면 입구가 온다).
+   /give/<대회id> 는 그 대회의 협찬 안내 한 장 — 인스타 프로필에 거는 주소다. */
+const GIV = location.pathname.match(/^\/give(?:\/([a-z0-9]+))?$/);
 const ASKP = location.pathname === '/ask';   // «받는 사람» — 후원자·의뢰자가 주제·문제를 올리는 세 화면
 const RCV = location.pathname.match(/^\/r\/([a-z0-9]+)$/);   // 받는 화면 /r/<id>?k=<열쇠>
 const GFT = location.pathname.match(/^\/s\/([po]\d+)$/);   // 준 사람의 화면 /s/<ref>?k=<열쇠>
@@ -4406,6 +4518,9 @@ if (TVM) {
 }
 else if (GIV || ASKP) {
   tab = GIV ? 'give' : 'ask';
+  /* cur 은 localStorage 에서 미리 채워져 있다. 대회 없는 /give 로 들어왔는데 그걸 그대로 두면
+     지난번에 보던 남의 대회 협찬 안내가 뜬다. 주소에 있는 것만 믿는다. */
+  if (GIV) cur = GIV[1] || '';
   document.querySelector('nav').style.display = 'none';
   document.body.classList.add('guest');
 }

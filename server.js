@@ -1191,6 +1191,9 @@ function open(file) {
   try { db.exec('ALTER TABLE needs ADD COLUMN amount INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE needs ADD COLUMN held INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE needs ADD COLUMN auto INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* price = 협찬 희망가. amount(쓰려는 돈)와 다르다 — amount 는 «우리가 얼마 쓴다»,
+     price 는 «이 자리를 맡으려면 얼마»다. 0 = 금액 미정. 확정 금액이 아니라 부르는 값이다. */
+  try { db.exec('ALTER TABLE needs ADD COLUMN price INTEGER NOT NULL DEFAULT 0'); } catch {}
   try {
     const 빈투표 = db.prepare("SELECT id FROM events WHERE vkey=''").all();
     const 채움v = db.prepare('UPDATE events SET vkey=? WHERE id=?');
@@ -2367,6 +2370,10 @@ const NEED_KINDS = ['venue', 'cash', 'judge', 'prize', 'mentor', 'snack', 'other
 const PLEDGE_STATUS = ['pending', 'ok', 'done', 'no'];
 /* 꺾쇠는 저장 전에 뺀다. JSON 응답을 화면이 그대로 그려도 돌지 않게 - esc 를 잊어도 안전하다 */
 const plain = (s, n) => String(s == null ? '' : s).replace(/[<>]/g, '').trim().slice(0, n);
+/* 사람이 손으로 넣는 돈. 음수·글자·1e999·null 이 들어와도 0 ~ 10억 사이의 정수로 떨어진다.
+   화면이 막아 주길 기대하지 않는다 — API 를 직접 때리면 화면은 없다. */
+const MAX_WON = 1000000000;
+const money = v => Math.min(Math.max(0, Math.floor(Number(v)) || 0), MAX_WON);
 
 function addNeed(db, event, b) {
   const label = plain(b.label, 100);
@@ -2374,9 +2381,10 @@ function addNeed(db, event, b) {
   const qty = Math.min(Math.max(+b.qty || 1, 1), 99);
   const kind = NEED_KINDS.includes(b.kind) ? b.kind : 'other';
   const note = plain(b.note, 300);
-  const r = db.prepare('INSERT INTO needs(event,kind,label,qty,note) VALUES(?,?,?,?,?)')
-    .run(event, kind, label, qty, note);
-  return { id: Number(r.lastInsertRowid), kind, label, qty, note, filled: 0, pledges: [] };
+  const price = money(b.price);
+  const r = db.prepare('INSERT INTO needs(event,kind,label,qty,note,price) VALUES(?,?,?,?,?,?)')
+    .run(event, kind, label, qty, note, price);
+  return { id: Number(r.lastInsertRowid), kind, label, qty, note, price, filled: 0, pledges: [] };
 }
 
 function addPledge(db, need, event, b) {
@@ -2575,7 +2583,7 @@ function needsOf(db, event) {
   return db.prepare('SELECT * FROM needs WHERE event=? ORDER BY id').all(event)
     .map(n => ({
       id: n.id, kind: n.kind, label: n.label, qty: n.qty, note: n.note,
-      amount: +n.amount || 0, held: !!n.held, auto: !!n.auto,
+      amount: +n.amount || 0, price: +n.price || 0, held: !!n.held, auto: !!n.auto,
       filled: pl.filter(p => p.need === n.id && (p.status === 'ok' || p.status === 'done')).length,
       pledges: pl.filter(p => p.need === n.id)
                  .map(p => ({ id: p.id, name: p.name, org: p.org, status: p.status })),
@@ -2780,8 +2788,8 @@ function routes(db) {
           const made = createEvent(db, b);
           if (src) {
             editEvent(db, made.id, { mode: src.mode, chat: src.chat, safety: src.safety, wifi: src.wifi });
-            for (const n of db.prepare('SELECT kind, label, qty, note FROM needs WHERE event=? ORDER BY id').all(src.id))
-              db.prepare('INSERT INTO needs(event,kind,label,qty,note) VALUES(?,?,?,?,?)').run(made.id, n.kind, n.label, n.qty, n.note);
+            for (const n of db.prepare('SELECT kind, label, qty, note, price FROM needs WHERE event=? ORDER BY id').all(src.id))
+              db.prepare('INSERT INTO needs(event,kind,label,qty,note,price) VALUES(?,?,?,?,?,?)').run(made.id, n.kind, n.label, n.qty, n.note, n.price);
             made.copied = src.id;
           }
           return json(res, 201, made);
@@ -3326,7 +3334,9 @@ function routes(db) {
           needAdmin(db, n.event, key, owner);
           const bd = await body(req);
           const set = [], val = [];
-          if (bd.amount !== undefined) { set.push('amount=?', 'held=1'); val.push(Math.max(0, Math.floor(+bd.amount || 0))); }
+          if (bd.amount !== undefined) { set.push('amount=?', 'held=1'); val.push(money(bd.amount)); }
+          /* 희망가도 손고침으로 친다 — 안 그러면 «다시 나누기» 한 번에 값매김이 통째로 날아간다 */
+          if (bd.price !== undefined) { set.push('price=?', 'held=1'); val.push(money(bd.price)); }
           if (bd.qty !== undefined) { set.push('qty=?', 'held=1'); val.push(Math.min(Math.max(+bd.qty || 1, 1), 99)); }
           if (bd.held !== undefined) { set.push('held=?'); val.push(bd.held ? 1 : 0); }
           if (!set.length) throw new HttpError(400, '고칠 것이 없습니다');
@@ -3600,11 +3610,13 @@ function routes(db) {
          /            첫 화면. 플랫폼 소개와 열린 대회 목록 (home.html)
          /app         대회를 열고 굴리는 곳 (hack-on.html)
          /e /j /tv    공개·심사·현장 화면. 전부 같은 hack-on.html 이 주소를 보고 갈라진다
-         /give        «줄 수 있는 것» 세 화면. 첫 화면 입구가 여기로 온다 (hack-on.html) */
+         /give        «줄 수 있는 것» 세 화면. 첫 화면 입구가 여기로 온다 (hack-on.html)
+         /give/<id>   그 대회의 협찬 안내 한 장. 인스타 프로필에 거는 주소 (hack-on.html) */
       const pub = p.match(/^\/e\/[a-z0-9]+(\/report)?$/) || p.match(/^\/j\/[a-z0-9]+$/)
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
-               || p === '/app' || p === '/give' || p === '/ask' || p.match(/^\/r\/[a-z0-9]+$/)
+               || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
+               || p === '/ask' || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
 
       /* 화면 파일은 /e/<id> 같은 깊은 주소에서도 그대로 나간다. 그 안의 <script src="qr.js">
@@ -4468,6 +4480,33 @@ function selftest() {
   addNeed(db, nbEv.id, { kind: 'snack', label: '<script>alert(1)</script>간식',
                          note: '<img src=x onerror=alert(1)>' });
   ok(!JSON.stringify(needsOf(db, nbEv.id)).includes('<'), '라벨·메모의 꺾쇠는 저장 전에 뺀다');
+
+  /* ── 협찬 희망가(price) — 자리에 값을 매겨 파는 판 ──
+     amount(쓰려는 돈)와 헷갈리면 안 된다. amount 는 «우리가 얼마 쓴다», price 는 «맡으려면 얼마».
+     사람이 손으로 넣는 숫자라, 화면을 거치지 않고 API 를 직접 때려도 안 깨져야 한다. */
+  {
+    const 값 = 자리 => needsOf(db, nbEv.id).find(x => x.id === 자리.id).price;
+    ok(값(n1) === 0, '새 자리의 협찬 희망가는 0 — 금액 미정으로 시작한다');
+    const 값매김 = addNeed(db, nbEv.id, { kind: 'venue', label: '값 붙은 장소', price: 100000 });
+    ok(값매김.price === 100000 && 값(값매김) === 100000, '희망가를 매기면 공개 응답에 그대로 실린다');
+    ok(값(addNeed(db, nbEv.id, { label: '음수', price: -5000 })) === 0, '음수 희망가는 0 으로 잡는다');
+    ok(값(addNeed(db, nbEv.id, { label: '글자', price: '십만원' })) === 0
+       && 값(addNeed(db, nbEv.id, { label: '빈값', price: '' })) === 0
+       && 값(addNeed(db, nbEv.id, { label: '없음' })) === 0, '글자·빈값·없음은 0 으로 잡는다');
+    ok(값(addNeed(db, nbEv.id, { label: '엄청큰수', price: 1e30 })) === MAX_WON
+       && money(Infinity) === MAX_WON && money('1e999') === MAX_WON,
+       '엄청 큰 수와 무한대는 상한에서 멈춘다');
+    ok(값(addNeed(db, nbEv.id, { label: '소수점', price: 1234.9 })) === 1234,
+       '소수점은 내림해서 정수로 저장한다');
+    /* 두 칸이 서로를 안 건드린다는 것을 실제로 확인한다 — 하나를 고치면 다른 하나가 따라 움직이면
+       예산 합(amount*qty ≤ budget)이 희망가 때문에 깨진다. */
+    ok(needsOf(db, nbEv.id).find(x => x.id === 값매김.id).amount === 0, '희망가를 매겨도 계획 지출은 0 그대로다');
+    db.prepare('UPDATE needs SET amount=50000 WHERE id=?').run(값매김.id);
+    ok(값(값매김) === 100000, '계획 지출을 고쳐도 희망가는 안 변한다');
+    const 합 = db.prepare('SELECT COALESCE(SUM(price*qty),0) s FROM needs WHERE event=?').get(nbEv.id).s;
+    ok(합 > 0 && !JSON.stringify(needsOf(db, nbEv.id)).includes('contact'),
+       '희망가가 붙어도 공개 응답에는 연락처가 없다');
+  }
 
   /* 누구나 신청한다. 연락처는 운영자가 볼 것 - 공개 응답 어디에도 안 실린다 */
   const pg1 = addPledge(db, n1.id, nbEv.id,
