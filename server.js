@@ -1744,7 +1744,7 @@ function joinTeam(db, event, b) {
   db.prepare('UPDATE teams SET no = (SELECT COALESCE(MAX(no),0)+1 FROM teams t2 WHERE t2.event=? AND t2.id<>teams.id) WHERE id=?').run(event, Number(r.lastInsertRowid));
     return Number(r.lastInsertRowid);
   } catch {
-    throw new HttpError(409, '같은 이름의 팀이 있습니다');
+    throw new HttpError(409, '같은 이름의 팀이 있습니다. 이미 신청한 팀이면 팀 링크로 들어오고, 기기를 바꿨다면 운영자에게 링크 재발급을 부탁하세요. 새 팀이면 이름 뒤에 소속을 붙여 보세요');
   }
 }
 

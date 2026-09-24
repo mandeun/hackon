@@ -1138,7 +1138,7 @@ function applyForm() {
   return `<label>팀 이름 <span class="pill">필수</span></label>
     <input id="t-name" placeholder="혼자 오시면 본인 이름을 적으세요">
     <label>이메일 <span class="pill">필수</span></label>
-    <input id="t-email" type="email" placeholder="확정 안내와 크레딧이 여기로 갑니다">
+    <input id="t-email" type="email" placeholder="팀 링크를 잃었을 때 되찾는 열쇠입니다">
     <div class="agree">
       <div class="meta"><b>개인정보 수집·이용 안내</b><br>
         수집 항목 · 이름(팀 이름) · 이메일 · 참가 정보<br>
@@ -1170,7 +1170,7 @@ function moreForm(t) {
   if (!need.length) return `<div class="card" id="apply" style="text-align:center;padding:28px 20px">
     <div style="font-size:40px;line-height:1">🎉</div>
     <h3 style="margin-top:12px">신청 완료</h3>
-    <div class="meta">다 주셨습니다. 확정 메일을 기다려 주세요. 이제 이 대회의 <b>켜는 사람</b>입니다.</div></div>`;
+    <div class="meta">다 주셨습니다. 이제 이 대회의 <b>켜는 사람</b>입니다. 대회 3일 전에 여기서 «오시나요»를 다시 묻습니다.</div></div>`;
   return `<div class="card" id="apply">
     <div class="pill ok" style="margin-bottom:10px">✓ 접수됨</div>
     <h3>신청됐습니다. 조금만 더</h3>
@@ -1681,7 +1681,7 @@ const SCREEN = {
     if (!list.length && my && my.events.length) return mineBox + `
       <div class="card">
         <h3>다음에 할 일</h3>
-        <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 0원도 됩니다. 넣으면 자리가 저절로 깔립니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
+        <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
       </div>`;
     if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>
@@ -1931,7 +1931,7 @@ const SCREEN = {
           <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
           ${e.mode === 'online' ? `<li><span class="ic">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
           <li><span class="ic">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
-            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명</span>` : ''}</span></span></li>
+            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · 남은 자리 ${Math.max(0, e.cap - e.teams)}팀</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
         </ul>
         ${dueBox(e)}
@@ -2001,6 +2001,10 @@ const SCREEN = {
         <summary>${todo ? '아직 안 정한 것' : '대회 정보 고치기'}
           <span class="when">${todo ? '여는 중' : '날짜 · 상금 · 진행 순서'}</span></summary><div class="in">
         <div class="meta">비워 둬도 대회는 돌아갑니다.</div>
+        <div class="row">
+          <div><label>대회 이름</label><input id="e-title" value="${esc(e.title)}"></div>
+          <div><label>여는 사람</label><input id="e-host" value="${esc(e.host)}" placeholder="동아리·모임·본인 이름"></div>
+        </div>
         <div class="row">
           <div><label>시작</label><input id="e-starts" type="date" value="${esc(e.starts)}"></div>
           <div><label>끝</label><input id="e-ends" type="date" value="${esc(e.ends)}"></div>
@@ -2352,7 +2356,7 @@ const SCREEN = {
           <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
           ${e.topic ? `<li><span class="ic">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
           <li><span class="ic">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
-            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명</span>` : ''}</span></span></li>
+            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · 남은 자리 ${Math.max(0, e.cap - e.teams)}팀</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
           ${e.chat ? `<li><span class="ic">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
           ${e.safety ? `<li><span class="ic">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
@@ -2431,7 +2435,9 @@ const SCREEN = {
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
       </div>` : ''}
 
-      ${d.closed ? `<h3>순위${e.vmode ? ' <span class="pill">관객 평가</span>' : ''}</h3>
+      ${d.closed && !(e.vmode ? d.rows.some(r => r.votes) : d.rows.some(r => +r.score > 0))
+        ? `<h3>순위</h3><p class="sub">심사 점수가 없어 순위를 매기지 않았습니다.</p>`
+      : d.closed ? `<h3>순위${e.vmode ? ' <span class="pill">관객 평가</span>' : ''}</h3>
         ${e.vmode ? '<p class="sub">심사위원 대신 관객·참가자가 준 별점 평균으로 매겼습니다.</p>' : ''}
         <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객 평가' : '점수'}</th></tr>
         ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${r.featured ? '⭐ ' : ''}${esc(r.name)}</td>
@@ -2816,7 +2822,7 @@ const SCREEN = {
       </div>
 
       <div class="card">
-        ${d.event.rubric.map(r => { const v = t.mine[r.key] ?? 70; return `
+        ${d.event.rubric.map(r => { const v = t.mine[r.key] ?? ''; return `
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
           <div class="sl">
             <input type="range" min="0" max="100" step="5" value="${v}"
@@ -3166,7 +3172,7 @@ const SCREEN = {
         <input id="j-name" value="${esc(localStorage.getItem('hackon.judge') || '')}" placeholder="이름">
         ${d.event.rubric.map(r => `
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
-          <input class="j-v" data-key="${esc(r.key)}" type="number" min="0" max="100" value="70">`).join('')}
+          <input class="j-v" data-key="${esc(r.key)}" type="number" min="0" max="100" value="" placeholder="점수">`).join('')}
         <div style="height:10px"></div>
         <button class="btn sm" id="j-save">점수 저장</button>
       </div>`;
@@ -3539,6 +3545,8 @@ function wire() {
     try {
       const plan = planRead();
       await api(`/events/${cur}`, { method: 'PATCH', body: {
+        title: $('#e-title') && $('#e-title').value.trim() || undefined,
+        host: $('#e-host') && $('#e-host').value.trim() || undefined,
         starts: $('#e-starts').value, ends: $('#e-ends').value,
         prize: $('#e-prize').value, cap: $('#e-cap').value,
         wifi: $('#e-wifi') ? $('#e-wifi').value.trim() : undefined,
@@ -3699,7 +3707,7 @@ function wire() {
     if (!judge) return flash('심사위원 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
     const values = {};
-    document.querySelectorAll('.j-v').forEach(i => { values[i.dataset.key] = +i.value; });
+    document.querySelectorAll('.j-v').forEach(i => { if (i.value !== '') values[i.dataset.key] = +i.value; });
     try {
       await api(`/teams/${curTeam}/score`, { method: 'POST', body: { judge, values } });
       localStorage.setItem('hackon.judge', judge);
@@ -4001,7 +4009,7 @@ function wire() {
 
   document.querySelectorAll('[data-jsave]').forEach(b => b.onclick = async () => {
     const id = b.dataset.jsave, values = {};
-    document.querySelectorAll('.jv-' + id).forEach(i => { values[i.dataset.key] = +i.value; });
+    document.querySelectorAll('.jv-' + id).forEach(i => { if (i.value !== '') values[i.dataset.key] = +i.value; });
     const g = document.querySelector('.jg-' + id), nx = document.querySelector('.jn2-' + id);
     try {
       await api(`/teams/${id}/score`, { method: 'POST',
