@@ -1563,11 +1563,15 @@ with sync_playwright() as p:
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")
-    A(post(f"/api/events/{small['id']}/teams", {"name": "첫팀", "email": "t@example.com", "agree": True})[0] == 201,
-      "첫 팀이 못 들어갔다")
-    A(post(f"/api/events/{small['id']}/teams", {"name": "둘째팀", "email": "t@example.com", "agree": True})[0] == 409,
-      "정원 찬 대회에 들어가졌다")
-    ok("정원 초과 차단 (409)")
+    st1, t1 = post(f"/api/events/{small['id']}/teams", {"name": "첫팀", "email": "t@example.com", "agree": True})
+    A(st1 == 201, "첫 팀이 못 들어갔다")
+    st, w = post(f"/api/events/{small['id']}/teams", {"name": "둘째팀", "email": "t@example.com", "agree": True})
+    A(st == 202 and w and w.get("waiting") == 1, f"정원 찬 대회에서 대기자가 안 된다: {st} {w}")
+    A(api(f"/api/events/{small['id']}").get("waiting") == 1 and api(f"/api/events/{small['id']}")["teams"] == 1, "대기자가 팀 수에 잡히거나 대기 수가 안 나온다")
+    post(f"/api/teams/{t1['id']}/confirm", {"going": False}, tkey=t1["tkey"])
+    rows = api(f"/api/events/{small['id']}/board", key=small["okey"])["rows"]
+    A(any(r["name"] == "둘째팀" for r in rows) and api(f"/api/events/{small['id']}").get("waiting") == 0, f"«못 가요» 뒤 대기자가 안 올라왔다: {[r['name'] for r in rows]}")
+    ok("정원 초과 → 대기, «못 가요»로 자리가 나면 앞 대기자가 팀이 된다")
 
     # ── 6. 협찬사에게 줄 숫자가 쌓이는가 (이 서비스의 차별점) ──
     visit(f"/app#{ev}")

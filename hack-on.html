@@ -1939,7 +1939,7 @@ const SCREEN = {
           <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
           ${e.mode === 'online' ? `<li><span class="ic">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
           <li><span class="ic">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
-            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · 남은 자리 ${Math.max(0, e.cap - e.teams)}팀</span>` : ''}</span></span></li>
+            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
         </ul>
         ${dueBox(e)}
@@ -2289,6 +2289,7 @@ const SCREEN = {
           <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button>
           <button class="btn sec sm" data-rename="${r.id}" title="팀 이름 고치기" style="padding:4px 8px">✏️</button>
           <button class="btn sec sm" data-trash="${r.id}" title="지우기 — 휴지통으로 가고 되살릴 수 있다" style="padding:4px 8px">🗑</button></td></tr>`).join('')}</table>
+      ${e.waiting ? `<div class="meta" style="margin-top:8px">대기 ${e.waiting}명 — «못 가요»·지움·정원 늘림으로 자리가 나면 앞에서부터 올라오고 메일이 갑니다(메일이 꺼져 있으면 🔗로 링크를 전해 주세요).</div>` : ''}
       ${(d.mails || []).length ? `<div class="meta" style="margin-top:8px">메일: ${d.mails.map(x => `${{ sent: '보냄', failed: '실패', skipped: '건너뜀(발송 열쇠 없음)' }[x.status] || x.status} ${x.c}`).join(' · ')}</div>` : ''}
       ${(d.trash || []).length ? `<details style="margin-top:8px"><summary>지운 팀 ${d.trash.length} <span class="when">되살릴 수 있습니다</span></summary><div class="in">
         ${d.trash.map(t => `<div class="shrow" style="margin-top:6px;align-items:center"><span>${esc(t.name)} <span class="meta">${esc(String(t.at).slice(0, 16))}${t.by === 'team' ? ' · 본인이 취소' : ''}</span></span><button class="btn sec sm" data-untrash="${t.id}">되살리기</button></div>`).join('')}</div></details>` : ''}
@@ -2369,7 +2370,7 @@ const SCREEN = {
           <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
           ${e.topic ? `<li><span class="ic">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
           <li><span class="ic">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
-            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · 남은 자리 ${Math.max(0, e.cap - e.teams)}팀</span>` : ''}</span></span></li>
+            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
           ${e.chat ? `<li><span class="ic">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
           ${e.safety ? `<li><span class="ic">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
@@ -3699,6 +3700,7 @@ function wire() {
         name, email,
         share: !!($('#t-share') && $('#t-share').checked),
         agree: true } });
+      if (r.waiting) { flash(`정원이 찼습니다. 대기 ${r.waiting}번째 — 자리가 나면 이메일로 팀 링크를 보냅니다`); return; }
       localStorage.setItem('hackon.team.' + cur, r.id);   // 두 번째 칸을 보여 주려고 기억한다
       /* 팀 열쇠. 이 브라우저가 그 팀 사람이라는 증거다 - 서버가 여기서 한 번만 준다.
          대회 열쇠(hackon.okey.*)와 같은 방식이다. */

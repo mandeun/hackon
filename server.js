@@ -757,6 +757,28 @@ function remindDue(db, now = new Date()) {
   return out;
 }
 
+/* 자리가 난 만큼 대기자를 앞에서부터 팀으로 올린다. 올라간 팀에는 새 번호가 붙고(GUIDE §12) 팀 링크가 메일로 간다.
+   이름이 그새 겹치면 그 줄은 버린다. 부르는 곳: 못 가요 · 팀 지움 · 정원 늘림. */
+function promoteWaiting(db, event) {
+  const out = [];
+  for (;;) {
+    const e = getEvent(db, event);
+    if (!e.cap || e.seatsLeft === 0) break;
+    const w = db.prepare('SELECT * FROM waitlist WHERE event=? ORDER BY id LIMIT 1').get(event);
+    if (!w) break;
+    db.prepare('DELETE FROM waitlist WHERE id=?').run(w.id);
+    let tid;
+    try { tid = joinTeam(db, event, { name: w.name, email: w.contact, share: !!w.share, agree: true, _promote: true }); }
+    catch { continue; }
+    if (typeof tid !== 'number') continue;
+    const t = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
+    out.push({ id: tid, name: w.name });
+    void sendMail(db, { event, kind: 'promote', ref: tid, to: w.contact, subject: `[HACK:ON] ${e.title} — 자리가 났습니다. 팀이 됐습니다`,
+      text: `${w.name} 팀, 대기하시던 ${e.title} 에 자리가 나서 팀으로 올라갔습니다.\n\n팀 링크: ${mailSite()}/e/${event}?t=${t.tkey}\n\n이 링크가 팀 열쇠입니다. 나에게만 보관하세요. 못 오게 되면 이 링크에서 «못 가요»를 눌러 주세요 — 다음 분께 자리가 갑니다.` });
+  }
+  return out;
+}
+
 /* 팀에 딸린 표를 이름으로 찾는다 — 스키마가 늘어도 휴지통이 반쪽이 안 되게. */
 function teamChildTables(db) {
   return db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('teams','team_trash')").all()
@@ -1159,6 +1181,12 @@ function open(file) {
   db.exec(`CREATE TABLE IF NOT EXISTS mail_log(
     id INTEGER PRIMARY KEY, event TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '', ref TEXT NOT NULL DEFAULT '',
     rcpt TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', err TEXT NOT NULL DEFAULT '',
+    at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  /* 대기자. 정원이 차면 teams 대신 여기 들어간다 — teams 를 읽는 SQL 80군데가 대기자를 팀으로 세지 않게.
+     자리가 나면(못 가요·지움·정원 늘림) 앞에서부터 팀으로 올리고 팀 링크를 메일로 보낸다. 페널티는 없다(레드팀 09-25). */
+  db.exec(`CREATE TABLE IF NOT EXISTS waitlist(
+    id INTEGER PRIMARY KEY, event TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, contact TEXT NOT NULL DEFAULT '', share INTEGER NOT NULL DEFAULT 0,
     at TEXT NOT NULL DEFAULT (datetime('now')))`);
   db.exec(`CREATE TABLE IF NOT EXISTS team_trash(
     id INTEGER PRIMARY KEY, team INTEGER NOT NULL, event TEXT NOT NULL,
@@ -1804,6 +1832,9 @@ function getEvent(db, id) {
   for (const r of e.rubric) if (!r.hint && RUBRIC_HINT[r.key]) r.hint = RUBRIC_HINT[r.key];
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
   e.teams = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(id).c;
+  e.waiting = db.prepare('SELECT COUNT(*) c FROM waitlist WHERE event=?').get(id).c;
+  /* «못 가요»라고 한 팀은 자리를 돌려준다 — 표에는 남지만(운영자가 본다) 정원에서는 뺀다 */
+  e.seatsLeft = e.cap ? Math.max(0, e.cap - db.prepare("SELECT COUNT(*) c FROM teams WHERE event=? AND confirmed<>'no'").get(id).c) : null;
   e.sponsors = db.prepare('SELECT * FROM sponsors WHERE event=? ORDER BY amount DESC').all(id);
   e.missing = ready(e);
   return e;
@@ -1814,13 +1845,21 @@ function joinTeam(db, event, b) {
   if (!b.name) throw new HttpError(400, '팀 이름이 필요합니다');
   /* 동의 없이 연락처를 받지 않는다. 화면에서 체크박스를 지워도 여기서 막힌다. */
   if (!b.agree) throw new HttpError(400, '개인정보 수집·이용에 동의해 주세요');
-  if (e.cap && e.teams >= e.cap) throw new HttpError(409, '정원이 찼습니다');
   /* 신청 화면은 이메일을 처음부터 받는다 — 확정 안내와 후원사 크레딧이 전부 이메일로 간다.
      꼴이 틀리면 막고, 맞으면 소문자로 다듬어 연락처로 쓴다. 협찬사 제공 동의(share)는 수집 동의와 별개 체크. */
   if (b.email !== undefined) {
     const em = String(b.email || '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) throw new HttpError(400, '이메일을 적어 주세요');
     b.contact = em;
+  }
+  if (e.cap && e.seatsLeft === 0 && !b._promote) {
+    /* 정원이 찼다 — 대기자로. 같은 이름이 팀이나 대기자에 이미 있으면 막는다(재신청 도배 방지) */
+    if (db.prepare('SELECT 1 FROM teams WHERE event=? AND name=?').get(event, b.name) ||
+        db.prepare('SELECT 1 FROM waitlist WHERE event=? AND name=?').get(event, b.name))
+      throw new HttpError(409, '같은 이름이 이미 있습니다');
+    if (!b.contact) throw new HttpError(400, '대기자는 이메일이 필요합니다 — 자리가 나면 거기로 팀 링크를 보냅니다');
+    db.prepare('INSERT INTO waitlist(event,name,contact,share) VALUES(?,?,?,?)').run(event, b.name, b.contact, b.share ? 1 : 0);
+    return { waiting: db.prepare('SELECT COUNT(*) c FROM waitlist WHERE event=?').get(event).c };
   }
   try {
     /* 연락처가 있으면 사람으로 이어 붙인다. 다음 대회에서도 같은 사람으로 이어진다.
@@ -3092,7 +3131,9 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)$/))) {
           if (req.method === 'PATCH') {
             needAdmin(db, m[1], key, owner);
-            editEvent(db, m[1], await body(req));
+            const eb = await body(req);
+            editEvent(db, m[1], eb);
+            if (eb.cap !== undefined) promoteWaiting(db, m[1]);   /* 정원을 늘리면 대기자가 올라온다 */
             return json(res, 200, getEvent(db, m[1]));
           }
           if (req.method === 'GET') {
@@ -3111,6 +3152,7 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/teams$/)) && req.method === 'POST') {
           /* 팀 열쇠는 여기서 딱 한 번 나간다. 신청한 브라우저가 받아서 들고 있는다. */
           const tid = joinTeam(db, m[1], await body(req));
+          if (typeof tid === 'object') return json(res, 202, tid);   /* 정원이 차서 대기자로 — { waiting: 몇 번째 } */
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
           const jm = joinMail(db, tid); if (jm) void sendMail(db, jm);   /* 기다리지 않는다 — 신청 응답이 메일에 묶이면 안 된다 */
           return json(res, 201, { id: tid, tkey: nt.tkey });
@@ -3335,6 +3377,8 @@ function routes(db) {
           if (!tk || tk !== t.tkey) throw new HttpError(403, '그 팀의 열쇠가 필요합니다');
           const confirmed = b.going === false ? 'no' : new Date().toISOString();
           db.prepare('UPDATE teams SET confirmed=? WHERE id=?').run(confirmed, +m[1]);
+          const t2 = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
+          if (confirmed === 'no') promoteWaiting(db, t2.event);   /* 돌려준 자리는 바로 다음 대기자에게 */
           return json(res, 200, { confirmed });
         }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/submit$/)) && req.method === 'POST') {
@@ -3522,7 +3566,9 @@ function routes(db) {
           const tk = String(req.headers['x-tkey'] || '');
           let by = 'team';
           if (!tk || tk !== t.tkey) { needAdmin(db, t.event, key, owner); by = 'admin'; }
-          return json(res, 200, { trash: trashTeam(db, t.id, by) });
+          const trashed = trashTeam(db, t.id, by);
+          promoteWaiting(db, t.event);
+          return json(res, 200, { trash: trashed });
         }
         /* 팀 이름 고치기 — 운영자 또는 그 팀 */
         if ((m = p.match(/^\/api\/teams\/(\d+)$/)) && req.method === 'PATCH') {
@@ -3864,6 +3910,23 @@ function selftest() {
     const d1 = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     db.prepare('UPDATE events SET starts=?, ends=? WHERE id=?').run(d1, d1, tv.id);
     ok(remindDue(db).filter(x => x.event === tv.id).map(x => x.kind).join() === 'd1', 'D-1 은 D-3 을 보냈어도 따로 한 번 더 간다');
+    /* 대기자 — 정원이 차면 대기, «못 가요»·지움·정원 늘림에 앞에서부터 올라오고 메일이 간다 */
+    const ew = createEvent(db, { title: '대기 검사', cap: 1 });
+    const wa = joinTeam(db, ew.id, { name: '첫팀', agree: true, email: 'a@x.test' });
+    const wb = joinTeam(db, ew.id, { name: '둘째', agree: true, email: 'b@x.test' });
+    const wc = joinTeam(db, ew.id, { name: '셋째', agree: true, email: 'c@x.test' });
+    ok(typeof wa === 'number' && wb.waiting === 1 && wc.waiting === 2, '정원이 차면 팀이 아니라 대기 n번째');
+    ok(getEvent(db, ew.id).teams === 1 && getEvent(db, ew.id).waiting === 2, '대기자는 팀 수에 안 잡힌다');
+    let dupW = 0; try { joinTeam(db, ew.id, { name: '둘째', agree: true, email: 'b@x.test' }); } catch (e) { dupW = e.code; }
+    ok(dupW === 409, '같은 이름으로 대기 도배는 막는다');
+    db.prepare("UPDATE teams SET confirmed='no' WHERE id=?").run(wa);
+    let up = promoteWaiting(db, ew.id);
+    ok(up.length === 1 && up[0].name === '둘째' && getEvent(db, ew.id).waiting === 1, '«못 가요»로 난 자리에 첫 대기자가 올라온다');
+    ok(db.prepare("SELECT status FROM mail_log WHERE kind='promote' AND ref=?").get(String(up[0].id)).status === 'skipped', '승급 메일이 장부에 남는다(열쇠 없으면 건너뜀)');
+    ok(promoteWaiting(db, ew.id).length === 0, '자리가 없으면 안 올린다');
+    trashTeam(db, up[0].id, 'admin');
+    up = promoteWaiting(db, ew.id);
+    ok(up.length === 1 && up[0].name === '셋째' && getEvent(db, ew.id).waiting === 0, '팀을 지우면 다음 대기자가 올라온다');
     ok(board(db, tv.id, true).rows.length === before, '되살리면 표 수가 돌아온다');
     ok(db.prepare('SELECT tkey FROM teams WHERE id=?').get(ta).tkey === tkeyA, '팀 열쇠도 그대로다');
     let dup = false; try { db.prepare('UPDATE teams SET name=? WHERE id=?').run('남을팀', ta); } catch { dup = true; }
