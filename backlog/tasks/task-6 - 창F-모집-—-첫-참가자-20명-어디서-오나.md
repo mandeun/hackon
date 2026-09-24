@@ -1,10 +1,10 @@
 ---
 id: TASK-6
 title: 창F 모집 — 첫 참가자 20명 어디서 오나
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-24 11:50'
-updated_date: '2026-09-24 11:56'
+updated_date: '2026-09-24 12:06'
 labels:
   - 조사
   - 창F

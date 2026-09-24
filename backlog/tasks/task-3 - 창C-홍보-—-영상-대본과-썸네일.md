@@ -1,10 +1,10 @@
 ---
 id: TASK-3
 title: 창C 홍보 — 영상 대본과 썸네일
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-24 11:50'
-updated_date: '2026-09-24 11:56'
+updated_date: '2026-09-24 12:06'
 labels:
   - 홍보
   - 창C

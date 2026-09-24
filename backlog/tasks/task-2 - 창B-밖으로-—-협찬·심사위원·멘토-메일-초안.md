@@ -1,10 +1,10 @@
 ---
 id: TASK-2
 title: 창B 밖으로 — 협찬·심사위원·멘토 메일 초안
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-24 11:50'
-updated_date: '2026-09-24 11:56'
+updated_date: '2026-09-24 12:06'
 labels:
   - 메일
   - 창B

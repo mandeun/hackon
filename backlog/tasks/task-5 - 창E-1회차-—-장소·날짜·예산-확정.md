@@ -1,10 +1,10 @@
 ---
 id: TASK-5
 title: 창E 1회차 — 장소·날짜·예산 확정
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-24 11:50'
-updated_date: '2026-09-24 11:56'
+updated_date: '2026-09-24 12:06'
 labels:
   - 운영
   - 창E

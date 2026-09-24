@@ -1,10 +1,10 @@
 ---
 id: TASK-1
 title: 창A 코드 — 빈 화면 방지와 유입 기록
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-24 11:50'
-updated_date: '2026-09-24 11:56'
+updated_date: '2026-09-24 12:05'
 labels:
   - 코드
   - 창A
