@@ -1428,6 +1428,18 @@ with sync_playwright() as p:
     A(st == 200 and rs and rs.get("id") == FT["id"], f"되살린 팀 id 가 다르다: {rs}")
     A(len(api(f"/api/events/{FE}/board", key=FK)["rows"]) == n0, "되살렸는데 표 수가 안 돌아왔다")
     ok("팀 휴지통 — 지우기·되살리기가 같은 id 로 왕복한다")
+    # (6b) «이 문제로 내 대회 열기» — 의뢰 올린 사람이 기다리지 않고 직접 연다
+    _, rq = post("/api/requests", {"kind": "requester", "name": "총무 최", "pain": "회비 낸 사람 세기", "done": "이름 누르면 냈다로", "contact": "choi@example.com"})
+    A(any(q["id"] == rq["id"] for q in api("/api/requests")), "올린 의뢰가 후보 목록에 없다")
+    visit(f"/app?req={rq['id']}")
+    A(pg.query_selector("#f-req") is not None and "회비" in pg.input_value("#f-title"), "의뢰가 열기 탭 제목에 안 채워진다")
+    pg.click("#f-save"); pg.wait_for_timeout(1500)
+    newev = pg.evaluate("localStorage.getItem('hackon.event')")
+    A(newev and newev != FE, "의뢰로 대회가 안 만들어졌다")
+    A(any(q["id"] == rq["id"] for q in api(f"/api/events/{newev}/requests")), "만든 대회에 그 의뢰가 주제로 안 붙었다")
+    A(not any(q["id"] == rq["id"] for q in api("/api/requests")), "붙은 의뢰가 후보 목록에 그대로 있다")
+    pg.evaluate(f"localStorage.setItem('hackon.event', '{FE}')")
+    ok("의뢰 → «이 문제로 내 대회 열기» — 이름 하나로 열리고 첫 주제로 붙는다")
     # (7) 같은 것을 참가자가 화면에서 — «신청 취소» 뒤 «되돌리기». 열쇠는 위 (4)에서 넣어 둔 그 브라우저.
     pg.once("dialog", lambda d: d.accept())
     visit(f"/e/{FE}")

@@ -636,6 +636,7 @@ const DEMO = {
 };
 
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '', curReq = '', curGift = '', GKEY = '';
+let MAKE_REQ = '';   // «이 문제로 내 대회 열기»로 들어온 의뢰 id. 만들 때 첫 주제로 붙는다
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
 let AUTH = null;   // 카카오 로그인을 쓸 수 있는지, 지금 로그인했는지
@@ -735,7 +736,8 @@ function askHtml() {
     <div class="meta">이 주소를 적어 두세요 — 끝나면 여기서 결과물을 봅니다. 열쇠라서 남에게 주지 마세요.</div>
     <div class="share" id="ask-link" style="margin-top:10px">${esc(location.origin)}/r/${esc(Q.result.id)}?k=${esc(Q.result.rkey)}</div>
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn sm" id="ask-copy">주소 복사</button><a class="btn sec sm" href="/r/${esc(Q.result.id)}?k=${esc(Q.result.rkey)}" style="text-decoration:none">받는 화면 열기</a></div>
-    <div class="meta" style="margin-top:10px">${Q.event ? '이 대회 운영자가 주제로 고르면 대회 페이지에 실립니다.' : '운영자가 자기 대회 주제로 고르면 그때 대회에 붙습니다.'}</div></div>`;
+    <div class="meta" style="margin-top:10px">${Q.event ? '이 대회 운영자가 주제로 고르면 대회 페이지에 실립니다.' : '운영자가 자기 대회 주제로 고르면 그때 대회에 붙습니다.<br>기다리지 않아도 됩니다 — 이름 하나 적으면 직접 열 수 있습니다.'}</div>
+    ${Q.event ? '' : `<div style="margin-top:10px"><a class="btn sm" href="/app?req=${esc(Q.result.id)}" style="text-decoration:none">이 문제로 내 대회 열기</a></div>`}</div>`;
   if (Q.step === 1) return `<div class="card" id="ask">${steps(1)}<h3>어느 쪽이세요</h3>
     <div class="gchips" style="grid-template-columns:1fr 1fr">
       <button type="button" class="gchip${Q.kind === 'sponsor' ? ' on' : ''}" data-ask-kind="sponsor">후원하고 싶어요<br><span style="font-size:12px;font-weight:500">관심 주제를 냅니다</span></button>
@@ -1709,14 +1711,20 @@ const SCREEN = {
   },
 
   async make() {
+    /* 의뢰에서 들어왔으면 그 문제를 제목 초안으로. 목록은 공개(연락처 없음)라 열쇠가 필요 없다 */
+    let rq = null;
+    if (MAKE_REQ && LIVE) rq = (await api('/requests').catch(() => [])).find(r => r.id === MAKE_REQ) || null;
+    if (MAKE_REQ && !rq) { MAKE_REQ = ''; flash('그 의뢰는 이미 다른 대회에 붙었거나 닫혔습니다', true); }
     return `<h2>혼자 여는 20명짜리<br>동네 해커톤부터</h2>
+      ${rq ? `<div class="card" id="f-req" style="border-color:#AECFB8;background:var(--ok-l)"><h3>이 문제로 엽니다</h3>
+        <div class="meta"><b>${esc(rq.topic || rq.pain)}</b>${rq.done ? '<br>«됐다»의 기준: ' + esc(rq.done) : ''}<br>${esc(rq.name)} 님의 의뢰가 새 대회의 첫 주제로 붙습니다. 끝나면 그분이 결과물을 받습니다.</div></div>` : ''}
       <p class="sub">기본값은 <b>20명 · 6시간 · 개인전</b>입니다. 처음에는 세 단계만 합니다.</p>
       <div class="card" style="border-color:#AECFB8;background:var(--ok-l)">
         <div class="meta"><b>1. 이름</b> — 지금 여기서 만듭니다<br>
           <b>2. 필요한 자리</b> — 장소·심사·상품·멘토·간식을 올립니다<br>
           <b>3. 링크 공유</b> — 참가자와 도와줄 사람에게 보냅니다</div>
       </div>
-      <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 문제 해결 해커톤">
+      <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 문제 해결 해커톤"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
       ${(() => { const ids = Object.keys(localStorage).filter(k => k.startsWith('hackon.okey.')).map(k => k.slice(12)); if (!ids.length || !LIVE) return '';
         return `<details class="more" id="f-fromwrap" style="margin-top:8px"><summary>지난 대회에서 가져오기 <span class="when">기준표·주제·진행 순서·자리</span></summary>
           <div class="in"><select id="f-from"><option value="">가져오지 않음</option>${ids.map(id => `<option value="${esc(id)}">${esc(id)}</option>`).join('')}</select>
@@ -3640,12 +3648,13 @@ function wire() {
     const b = { title: $('#f-title').value.trim() };   // 처음엔 이름만 받는다
     const fromSel = $('#f-from');
     if (fromSel && fromSel.value) { b.from = fromSel.value; b.fromKey = okeyOf(fromSel.value); }   // 지난 대회에서 가져오기
+    if (MAKE_REQ) b.req = MAKE_REQ;   // 의뢰에서 들어왔으면 첫 주제로 붙인다
     /* 유형과 심사 기준은 고르는 것이라 손이 안 간다. 그래서 첫 화면에 같이 둔다. */
     if (!b.title) return flash('대회 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
     try {
       const r = await api('/events', { method: 'POST', body: b });
-      cur = r.id;
+      cur = r.id; MAKE_REQ = '';
       localStorage.setItem('hackon.event', cur);
       localStorage.setItem('hackon.okey.' + r.id, r.okey);   // 대회 열쇠
       if (r.owner) localStorage.setItem('hackon.owner', r.owner);   // 주최자 열쇠
@@ -4636,6 +4645,7 @@ else if (GFT) {
   if (k) { try { localStorage.setItem('hackon.pkey.' + curGift, k); } catch (_) {} history.replaceState(null, '', location.pathname); }   // 열쇠는 주소창·기록에 안 남긴다
   GKEY = localStorage.getItem('hackon.pkey.' + curGift) || '';
 }
+else if (new URLSearchParams(location.search).get('req')) { MAKE_REQ = new URLSearchParams(location.search).get('req'); tab = 'make'; history.replaceState(null, '', location.pathname); }
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
 
 const wideBtn = document.getElementById('b-wide');

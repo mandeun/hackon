@@ -2898,6 +2898,12 @@ function routes(db) {
             b.rubric = src.rubric; b.topic = b.topic || src.topic; b.cap = src.cap; b.plan = src.plan;   // 상금·날짜는 안 가져온다 — 새로 정할 것
           }
           const made = createEvent(db, b);
+          /* «이 문제로 내 대회 열기» — 열린 의뢰(어느 대회에도 안 붙은 것)를 새 대회의 첫 주제로 붙인다.
+             의뢰자가 자기 문제로 여는 길이자, 남의 문제를 보고 여는 길. 이미 붙은 의뢰는 조용히 건너뛴다. */
+          if (b.req) {
+            const rq = db.prepare("SELECT id FROM requests WHERE id=? AND event='' AND status='open'").get(String(b.req));
+            if (rq) { db.prepare('UPDATE requests SET event=? WHERE id=?').run(made.id, rq.id); made.req = rq.id; }
+          }
           if (src) {
             editEvent(db, made.id, { mode: src.mode, chat: src.chat, safety: src.safety, wifi: src.wifi });
             for (const n of db.prepare('SELECT kind, label, qty, note, price FROM needs WHERE event=? ORDER BY id').all(src.id))
@@ -4206,6 +4212,14 @@ function selftest() {
   ok(rq.id.length === 8 && rq.rkey.length === 10, '요청을 올리면 공개 id 와 열쇠가 나온다');
   ok(openRequests(db).some(r => r.id === rq.id) && !JSON.stringify(openRequests(db)).includes('kim@x.test') && !JSON.stringify(openRequests(db)).includes(rq.rkey),
      '후보 목록엔 연락처·열쇠가 없다');
+  {
+    /* «이 문제로 내 대회 열기» — 열린 의뢰만 붙고, 붙은 뒤엔 후보 목록에서 빠진다 */
+    const rq2 = addRequest(db, { kind: 'requester', name: '회장 박', pain: '동아리 출석 세기', contact: 'park@x.test' });
+    ok(openRequests(db).some(r => r.id === rq2.id), '올린 의뢰는 후보 목록에 있다');
+    const evQ = createEvent(db, { title: '의뢰로 연 대회' });
+    db.prepare('UPDATE requests SET event=? WHERE id=? AND event=\'\'').run(evQ.id, rq2.id);
+    ok(!openRequests(db).some(r => r.id === rq2.id) && requestsOf(db, evQ.id).some(r => r.id === rq2.id), '대회에 붙으면 후보에서 빠지고 그 대회 주제가 된다');
+  }
   let rqThrew = 0; try { addRequest(db, { kind: 'sponsor', name: '', topic: 'x' }); } catch (e) { rqThrew = e.code; }
   ok(rqThrew === 400, '이름 없는 요청은 400');
   db.prepare('UPDATE requests SET event=? WHERE id=?').run(rqEv.id, rq.id);

@@ -222,6 +222,12 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
     <a class="btn s" href="/app">대회 열기</a>
   </div>
+  <!-- 같은 절 안에 둔다 — 첫 화면은 절 셋을 넘기지 않는다(검사가 잠근다). 의뢰가 없으면 통째로 숨는다 -->
+  <div id="asks" hidden style="margin-top:22px">
+    <h2 style="font-size:17px">풀어 달라는 문제 <span class="mono grey" id="asks-count" style="font-size:14px;font-weight:400"></span></h2>
+    <p class="grey" style="margin:4px 0 8px">누군가 올린 «번거로운 일»입니다. 아직 어느 대회에도 안 붙었습니다. 이름 하나 적으면 이 문제로 대회가 열립니다.</p>
+    <div id="asks-grid" class="evs"></div>
+  </div>
 </section>
 
 <!-- 02 지난 대회 우수작. 운영자 별표 + 만든 사람 동의 + 마감 뒤, 셋 다 있어야 서버가 준다. -->
@@ -344,6 +350,20 @@ document.querySelectorAll('[data-filter]').forEach(function(b){
 });
 
 /* ── 지난 대회 우수작. 운영자 별표 + 본인 동의 + 마감 뒤인 팀만 서버가 준다. 없으면 통째로 감춘다. ── */
+fetch('/api/requests').then(function(r){ return r.json(); }).then(function(list){
+  list = (list || []).filter(function(q){ return q.kind !== 'sponsor'; });
+  if (!list.length) return;
+  document.getElementById('asks').hidden = false;
+  document.getElementById('asks-count').textContent = list.length + '건';
+  document.getElementById('asks-grid').innerHTML = list.slice(0, 6).map(function(q){
+    return '<a class="ev" href="/app?req=' + esc(q.id) + '">' +
+      '<span class="st open">의뢰</span>' +
+      '<span><div class="t">' + esc(q.topic || q.pain) + '</div><div class="m">' + esc(q.name) + (q.done ? ' · «됐다»의 기준: ' + esc(q.done) : '') + '</div></span>' +
+      '<span class="n">이 문제로 열기 →</span>' +
+    '</a>';
+  }).join('');
+}).catch(function(){});
+
 fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list){
   if (!list || !list.length) return;
   document.getElementById('showcase').hidden = false;
