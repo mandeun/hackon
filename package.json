@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node server.js --test",
-    "check:e2e": "uv run --with playwright --with axe-playwright-python python check-e2e.py"
+    "check:e2e": "uv run --with playwright --with axe-playwright-python python -X utf8 check-e2e.py"
   },
   "license": "MIT",
   "private": true

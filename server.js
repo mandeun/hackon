@@ -657,6 +657,32 @@ const siteOf = (req) => {
       || SITE || `http://${h || 'localhost'}`;
 };
 
+/* ── 검색 엔진 ─────────────────────────────────────────
+   주소가 셋(hackon.kr · www · mandeun)이라 구글이 같은 글을 세 번 보고 점수를 나눈다.
+   대표 주소는 SITES 의 첫 번째(hackon.kr). www. 로 오면 301 로 떼고,
+   robots · sitemap 은 대표 주소로 쓴다. 화면 쪽 canonical 은 home.html 에 박혀 있다. */
+const CANON = () => (SITES[0] || SITE || '').replace(/\/$/, '');
+/* www.hackon.kr → https://hackon.kr. 목록(SITES)에 있는 주소로만 보낸다 — 열린 리다이렉트 방지 */
+const wwwTo = (host) => {
+  const h = String(host || '').toLowerCase();
+  if (!h.startsWith('www.')) return '';
+  const bare = h.slice(4);
+  return SITES.some((s) => s.toLowerCase().replace(/^https?:\/\//, '') === bare) ? 'https://' + bare : '';
+};
+function robots() {
+  return 'User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /j/\nDisallow: /p/\nDisallow: /r/\nDisallow: /s/\n'
+    + (CANON() ? 'Sitemap: ' + CANON() + '/sitemap.xml\n' : '');
+}
+/* 첫 화면 · 매뉴얼 · 아직 안 끝난 공개 대회. 끝난 대회는 빼서 검색에 죽은 링크가 안 남게 한다 */
+function sitemap(db) {
+  const base = CANON();
+  const urls = ['/', '/manual'].concat(
+    db.prepare("SELECT id FROM events WHERE listed=1 AND ends >= date('now') ORDER BY ends").all()
+      .map((r) => '/e/' + r.id));
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    + urls.map((x) => '<url><loc>' + base + x + '</loc></url>').join('\n') + '\n</urlset>\n';
+}
+
 /* ───────────────────────── DB ───────────────────────── */
 /* #region reuse:db-open — sqlite 열기(WAL+FK). 파일 경로만 바꾸면 어느 프로젝트든 그대로 쓴다 */
 function open(file) {
@@ -1189,8 +1215,12 @@ function manualPage(md) {
   const rest = cut < 0 ? body : body.slice(cut + 5);
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>운영 매뉴얼 — HACK:ON</title>
+<title>해커톤 운영 매뉴얼 — 처음 여는 사람을 위한 준비표 | HACK:ON</title>
 <meta name="description" content="해커톤을 처음 여는 사람을 위한 운영 매뉴얼. 준비표부터 끝나고 2주까지.">
+<link rel="canonical" href="https://hackon.kr/manual">
+<meta property="og:title" content="해커톤 운영 매뉴얼 — HACK:ON">
+<meta property="og:description" content="해커톤을 처음 여는 사람을 위한 운영 매뉴얼. 준비표부터 끝나고 2주까지.">
+<meta property="og:image" content="https://hackon.kr/og.png">
 <link rel="icon" href="/icon.svg">
 <style>
 :root{--ink:#141B34;--paper:#F9F7EE;--mute:#5E6D56;--line:#DEDACB;--on:#C96442}
@@ -2597,6 +2627,16 @@ function routes(db) {
     const u = new URL(req.url, 'http://x');
     const p = u.pathname;
     try {
+      const bare = wwwTo(req.headers.host);
+      if (bare) { res.writeHead(301, { location: bare + req.url }); return res.end(); }
+      if (p === '/robots.txt') {
+        res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+        return res.end(robots());
+      }
+      if (p === '/sitemap.xml') {
+        res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'no-cache' });
+        return res.end(sitemap(db));
+      }
       if (p.startsWith('/api/')) {
         const q = Object.fromEntries(u.searchParams);
         let m;
@@ -3518,6 +3558,22 @@ function selftest() {
     ok(at('hackon.mandeun.com') === 'https://hackon.mandeun.com', '다른 주소도 제 주소로 되돌린다');
     ok(at('HACKON.KR') === 'https://hackon.kr', '대소문자가 달라도 같은 주소다');
     ok(at('evil.example') !== 'https://evil.example', '목록에 없는 host 는 따라가지 않는다');
+    ok(wwwTo('www.hackon.kr') === 'https://hackon.kr', 'www 는 대표 주소로 301');
+    ok(wwwTo('WWW.HACKON.KR') === 'https://hackon.kr', 'www 대문자도 뗀다');
+    ok(wwwTo('hackon.kr') === '' && wwwTo('') === '', 'www 아니면 안 건드린다');
+    ok(wwwTo('www.evil.example') === '', '목록에 없는 www 는 안 보낸다 — 열린 리다이렉트 방지');
+    ok(robots().includes('Sitemap: https://hackon.kr/sitemap.xml'), 'robots 가 대표 주소의 sitemap 을 가리킨다');
+    ok(robots().includes('Disallow: /api/') && robots().includes('Disallow: /j/'), 'API 와 심사 링크는 색인 제외');
+    {
+      const sm = sitemap(db);
+      ok(sm.includes('<loc>https://hackon.kr/</loc>') && sm.includes('<loc>https://hackon.kr/manual</loc>'), 'sitemap 에 첫 화면과 매뉴얼');
+      ok(!sm.includes(evR.id), '목록에 안 올린 대회는 sitemap 에 없다');
+      db.prepare('UPDATE events SET listed=1 WHERE id=?').run(evR.id);
+      ok(sitemap(db).includes('/e/' + evR.id), '목록에 올린 대회는 sitemap 에 실린다');
+      db.prepare("UPDATE events SET ends='2020-01-01' WHERE id=?").run(evR.id);
+      ok(!sitemap(db).includes(evR.id), '끝난 대회는 sitemap 에서 빠진다');
+      db.prepare('UPDATE events SET listed=0, ends=? WHERE id=?').run(db.prepare('SELECT starts FROM events WHERE id=?').get(evR.id).starts, evR.id);
+    }
     SITES.length = 0; SITES.push(...saved);
   }
   ok(unsign(db, evR.owner + '.deadbeef') === '', '서명이 틀리면 안 읽힌다');

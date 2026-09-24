@@ -4,7 +4,7 @@ FROM node:24-alpine
 
 WORKDIR /app
 # GUIDE.md 는 /manual 이 읽어서 화면으로 만든다. 빠지면 배포판에서만 매뉴얼이 404 가 난다.
-COPY server.js home.html hack-on.html qr.js sw.js manifest.webmanifest icon.svg logo.svg package.json GUIDE.md ./
+COPY server.js home.html hack-on.html qr.js sw.js manifest.webmanifest icon.svg logo.svg og.png package.json GUIDE.md ./
 
 # DB 와 백업은 볼륨에 둔다. 기계가 꺼졌다 켜져도 대회가 남아야 한다.
 ENV DB=/data/hackon.db
