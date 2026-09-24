@@ -644,7 +644,7 @@ const $ = s => document.querySelector(s);
 const view = $('#view');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 const won = n => (+n || 0).toLocaleString('ko-KR') + '원';
-const NEED_KIND = { venue:'장소', cash:'돈', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
+const NEED_KIND = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
 /* ── «줄 수 있는 것을 주는» 흐름. 세 화면, 화면마다 판단 하나. ──
    ① 무엇을 (칩 하나) → ② 어느 대회에 (열린 대회가 하나뿐이면 건너뜀) → ③ 이름·연락처 → 끝.
    대회 페이지의 자리 카드 «이 자리 맡기» 는 ①②를 건너뛰고 ③으로 온다 (자리가 정해져 있다).
@@ -653,7 +653,7 @@ const NEED_KIND = { venue:'장소', cash:'돈', judge:'심사', prize:'상품', 
    연락처는 전처럼 운영자만 본다.
    상태는 G 하나에 둔다 — flash() 가 성공하면 화면을 통째로 다시 그리는데,
    단계를 DOM 에만 두면 «보냈습니다» 대신 첫 화면이 돌아온다. */
-const GIVE_KINDS = [['venue','장소'], ['cash','돈'], ['judge','심사'], ['mentor','멘토'], ['snack','간식'], ['other','기타']];
+const GIVE_KINDS = [['venue','장소'], ['cash','돈'], ['judge','심사'], ['mentor','멘토'], ['snack','간식'], ['other','기타']];   // 칩은 여섯 — 화면마다 판단 하나(검사가 잠근다). 크레딧은 운영자가 올린 자리로만 받는다
 /* 주면 받는 것 — 종류마다 다르다. 이 문장이 없으면 «장부에 이름» 한 줄뿐이라 왜 주는지 화면이 말하지 않는다(데시: 예고된 대가는 안에서 나온 마음을 밀어내지만, 받는 것을 감추는 건 다른 문제다) */
 /* 지쳐서 나가는 참가자에게 서술을 시키면 안 채운다. 누르는 것으로 바꾼다. */
 const AI_WHERE = ['안 썼어요', '화면', '코드', '데이터', '글·기획'];
@@ -661,6 +661,7 @@ const AI_WHERE = ['안 썼어요', '화면', '코드', '데이터', '글·기획
 const RECEIVE = {
   venue:  { tag: '장소', pre: '대회 페이지에 이름', mid: '행사장 큰 화면에 이름', post: '결과 보고서' },
   cash:   { tag: '함께', pre: '대회 페이지에 이름', mid: '행사장 큰 화면에 이름', post: '결과 보고서' },
+  credit: { tag: '크레딧', pre: '대회 페이지에 이름', mid: '참가자가 그 크레딧으로 만듭니다', post: '결과물 전체 열람·보고서' },
   judge:  { tag: '심사', pre: '대회 페이지에 이름', mid: '결과물을 마감 직후 먼저', post: '심사평이 팀에게' },
   mentor: { tag: '멘토', pre: '대회 페이지에 이름', mid: '당일 팀들을 만납니다', post: '결과물과 보고서' },
   snack:  { tag: '간식', pre: '대회 페이지에 이름', mid: '행사장 큰 화면에 이름', post: '결과 보고서' },
@@ -2221,7 +2222,7 @@ const SCREEN = {
         <div class="card" style="margin-top:10px">
           <h3>자리 추가</h3>
           <div class="row"><div><label>종류</label><select id="n-kind">
-            <option value="venue">장소</option><option value="cash">돈</option><option value="judge">심사</option><option value="prize">상품</option>
+            <option value="venue">장소</option><option value="cash">돈</option><option value="credit">크레딧</option><option value="judge">심사</option><option value="prize">상품</option>
             <option value="mentor">멘토</option><option value="snack">간식</option><option value="other">기타</option>
           </select></div><div><label>몇 자리</label><input id="n-qty" type="number" min="1" value="1"></div></div>
           <label>무엇이 필요한가</label><input id="n-label" maxlength="80" placeholder="예) 20명이 6시간 쓸 장소">
@@ -2542,8 +2543,10 @@ const SCREEN = {
         ${(+n.filled||0) < (+n.qty||0) ? `<div style="height:12px"></div><button type="button" class="btn sec sm" data-give-need="${esc(n.id)}" data-give-kind="${esc(n.kind)}" data-give-label="${esc(n.label)}">🙌 이 자리 맡기</button>` : '<div class="meta" style="margin-top:8px"><b>필요한 만큼 채워졌습니다.</b></div>'}
       </div>`).join('')}` : ''}
 
-      ${ledger.length ? `<h3>공개 장부</h3>
-      <p class="sub">운영자가 확인한 것만 남고, 연락처는 공개하지 않습니다.</p>
+      ${(() => { const pend = needs.reduce((s, n) => s + (n.pledges || []).filter(p => p.status === 'pending').length, 0);
+        return (ledger.length || pend) ? `<h3>공개 장부</h3>
+      <p class="sub">운영자가 확인한 것만 남고, 연락처는 공개하지 않습니다.${pend ? ` <b>확인 대기 ${pend}건</b> — 운영자가 확인하면 여기 오릅니다. 신청하셨다면 다시 하지 않아도 됩니다.` : ''}</p>` : ''; })()}
+      ${ledger.length ? `
       <table><tr><th>자리</th><th>이름</th><th>소속</th></tr>${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}${x.direct ? ' <span class="pill" title="운영자가 앱 밖에서 구해 직접 올린 줄">운영자 등록</span>' : ''}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
 
       ${!ended ? giveBox() : ''}
@@ -3468,6 +3471,7 @@ function wire() {
     prize:  '1등 상품 하나면 됩니다',
     snack:  '20명분 · 오후에 한 번',
     cash:   '얼마든 괜찮습니다 · 쓴 곳은 장부에 남깁니다',
+    credit: 'AI·클라우드 크레딧 · 팀당 얼마인지 적어 주세요 · 코드는 당일 나눠 드립니다',
     other:  '',
   };
   const nkind = $('#n-kind'), nnote = $('#n-note');

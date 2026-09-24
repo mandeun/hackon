@@ -757,6 +757,20 @@ function remindDue(db, now = new Date()) {
   return out;
 }
 
+/* 의뢰자에게 «끝났다» — 붙은 대회가 마감됐고 제출물이 하나라도 있으면 받는 화면 링크를 한 번 보낸다.
+   받는 화면(/r/)은 마감 뒤에만 결과물을 여니(server: publicRequest 규칙) 그 뒤에 부르는 게 맞다. */
+function doneDue(db) {
+  const rows = db.prepare(`SELECT r.id, r.rkey, r.contact, r.name, r.topic, r.pain, e.id AS event, e.title, e.ends, e.due
+    FROM requests r JOIN events e ON e.id = r.event
+    WHERE r.event <> '' AND r.contact LIKE '%@%'
+      AND EXISTS (SELECT 1 FROM submissions s JOIN teams t ON t.id = s.team WHERE t.event = e.id AND s.url <> '')
+      AND NOT EXISTS (SELECT 1 FROM mail_log l WHERE l.kind = 'done' AND l.ref = r.id AND l.status = 'sent')`).all();
+  return rows.filter(r => closed(r) && isEmail(r.contact)).map(r => ({
+    event: r.event, kind: 'done', ref: r.id, to: r.contact,
+    subject: `[HACK:ON] «${r.topic || r.pain}» — 결과물이 준비됐습니다`,
+    text: `${r.name} 님, 올리신 문제 «${r.topic || r.pain}» 로 ${r.title} 이 끝났습니다.\n\n받는 화면: ${mailSite()}/r/${r.id}?k=${r.rkey}\n\n결과물 주소와, 동의한 만든 분의 연락처가 있습니다. 「이거면 됩니다 / 아직 아니에요」를 남겨 주시면 만든 분에게 갑니다. 만든 분은 무료 외주가 아닙니다 — 이어 가려면 그분과 직접 정하세요.\n\n이 링크는 열쇠입니다. 나에게만 보관하세요.` }));
+}
+
 /* 자리가 난 만큼 대기자를 앞에서부터 팀으로 올린다. 올라간 팀에는 새 번호가 붙고(GUIDE §12) 팀 링크가 메일로 간다.
    이름이 그새 겹치면 그 줄은 버린다. 부르는 곳: 못 가요 · 팀 지움 · 정원 늘림. */
 function promoteWaiting(db, event) {
@@ -2516,7 +2530,7 @@ function assign(db, event, b) {
 /* ── 빈자리 판 · 공개 장부 · 2주 확인 (PLAN.md §API) ──
    운영자가 필요한 자리를 올리고, 누구나 맡겠다고 신청하고, 운영자가 확인하면
    이름이 공개 장부에 남는다. contact 는 어느 공개 응답에도 실리지 않는다. */
-const NEED_KINDS = ['venue', 'cash', 'judge', 'prize', 'mentor', 'snack', 'other'];
+const NEED_KINDS = ['venue', 'cash', 'credit', 'judge', 'prize', 'mentor', 'snack', 'other'];   // credit: AI·클라우드 크레딧 — 현금 대신, 결제 없이
 const PLEDGE_STATUS = ['pending', 'ok', 'done', 'no'];
 /* 꺾쇠는 저장 전에 뺀다. JSON 응답을 화면이 그대로 그려도 돌지 않게 - esc 를 잊어도 안전하다 */
 const plain = (s, n) => String(s == null ? '' : s).replace(/[<>]/g, '').trim().slice(0, n);
@@ -2556,7 +2570,7 @@ function setPledge(db, id, b) {
 
 /* ── 자리 밖 제안(offer) — 메일 대신 앱에서 바로 ── */
 const OFFER_STATUS = ['pending', 'ok', 'no'];
-const OFFER_KIND_LABEL = { venue:'장소', cash:'돈', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
+const OFFER_KIND_LABEL = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
 function addOffer(db, event, b) {
   if (!db.prepare('SELECT 1 FROM events WHERE id=?').get(event)) throw new HttpError(404, '없는 대회입니다');
   const name = plain(b.name, 40);
@@ -3927,6 +3941,19 @@ function selftest() {
     trashTeam(db, up[0].id, 'admin');
     up = promoteWaiting(db, ew.id);
     ok(up.length === 1 && up[0].name === '셋째' && getEvent(db, ew.id).waiting === 0, '팀을 지우면 다음 대기자가 올라온다');
+    /* «끝났다» 메일 — 마감 전엔 안 가고, 마감 뒤 제출물이 있으면 한 번 간다 */
+    const ed = createEvent(db, { title: '끝났다 검사', starts: '2026-01-10', ends: '2026-01-10' });
+    const rqd = addRequest(db, { kind: 'requester', name: '총무 정', pain: '출석 세기', contact: 'jung@x.test', event: ed.id });
+    db.prepare('UPDATE requests SET event=? WHERE id=?').run(ed.id, rqd.id);
+    ok(!doneDue(db).some(x => x.ref === rqd.id), '제출물이 없으면 «끝났다»가 안 간다');
+    const tdn = joinTeam(db, ed.id, { name: '만든팀', agree: true, email: 'm@x.test' });
+    db.prepare("INSERT INTO submissions(team,url) VALUES(?,?)").run(tdn, 'https://example.com/x');
+    const dd = doneDue(db).find(x => x.ref === rqd.id);
+    ok(dd && dd.text.includes(`/r/${rqd.id}?k=${rqd.rkey}`), '마감 뒤 제출물이 있으면 받는 화면 링크가 간다');
+    logMail(db, dd, 'sent');
+    ok(!doneDue(db).some(x => x.ref === rqd.id), '한 번 보낸 의뢰엔 다시 안 간다');
+    /* 크레딧 종류 */
+    ok(NEED_KINDS.includes('credit') && OFFER_KIND_LABEL.credit === '크레딧', '자리 종류에 크레딧이 있다');
     ok(board(db, tv.id, true).rows.length === before, '되살리면 표 수가 돌아온다');
     ok(db.prepare('SELECT tkey FROM teams WHERE id=?').get(ta).tkey === tkeyA, '팀 열쇠도 그대로다');
     let dup = false; try { db.prepare('UPDATE teams SET name=? WHERE id=?').run('남을팀', ta); } catch { dup = true; }
@@ -5014,7 +5041,7 @@ if (require.main === module) {
   setInterval(tick, 10 * 60 * 1000).unref();
   /* 한 시간마다 D-3·D-1 리마인더. 발송 열쇠가 없으면 아예 안 돈다 — 장부에 «건너뜀»이 매시간 쌓이지 않게. */
   if (RESEND_KEY) {
-    const mailTick = () => { try { for (const mm of remindDue(db)) void sendMail(db, mm); } catch (e) { console.error('리마인더 실패', e.message); } };
+    const mailTick = () => { try { for (const mm of [...remindDue(db), ...doneDue(db)]) void sendMail(db, mm); } catch (e) { console.error('리마인더 실패', e.message); } };
     mailTick();
     setInterval(mailTick, 60 * 60 * 1000).unref();
   }
