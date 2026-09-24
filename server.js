@@ -709,6 +709,54 @@ function spreadHosts(rows) {
   return out;
 }
 
+/* ── 메일 — 이메일 한 채널만 (레드팀 09-25: 웹푸시·알림톡은 안 한다).
+   Resend 한 곳에 fetch 로 보낸다. 의존성 0. RESEND_KEY 가 없으면 보내지 않고 장부에 «건너뜀»으로만 남긴다 —
+   로컬·파일 모드가 그대로 돌아간다. 보내는 주소(MAIL_FROM)는 Resend 에서 도메인 확인을 마친 것이어야 한다. */
+const RESEND_KEY = process.env.RESEND_KEY || '';
+const MAIL_FROM = process.env.MAIL_FROM || 'HACK:ON <hi@mandeun.com>';
+const isEmail = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s || ''));
+function logMail(db, m, status, err) {
+  db.prepare('INSERT INTO mail_log(event,kind,ref,rcpt,subject,status,err) VALUES(?,?,?,?,?,?,?)')
+    .run(m.event || '', m.kind || '', String(m.ref || ''), m.to || '', m.subject || '', status, String(err || '').slice(0, 200));
+}
+async function sendMail(db, m) {
+  if (!isEmail(m.to)) return false;
+  if (!RESEND_KEY) { logMail(db, m, 'skipped', 'RESEND_KEY 없음'); return false; }
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST', signal: AbortSignal.timeout(8000),
+      headers: { authorization: 'Bearer ' + RESEND_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify({ from: MAIL_FROM, to: [m.to], subject: m.subject, text: m.text }),
+    });
+    if (!r.ok) throw new Error('resend ' + r.status);
+    logMail(db, m, 'sent'); return true;
+  } catch (e) { logMail(db, m, 'failed', e.message); return false; }
+}
+const mailSite = () => SITES[0] || `http://localhost:${PORT}`;
+/* 신청 직후 — 팀 링크를 메일로도 남긴다(GUIDE §9 «확인 메일은 즉시 보냅니다»). 링크를 잃으면 재확인도 못 한다(이탈 감사 P6). */
+function joinMail(db, tid) {
+  const t = db.prepare('SELECT t.id, t.name, t.contact, t.tkey, e.id AS event, e.title, e.starts FROM teams t JOIN events e ON e.id=t.event WHERE t.id=?').get(tid);
+  if (!t || !isEmail(t.contact)) return null;
+  return { event: t.event, kind: 'join', ref: t.id, to: t.contact, subject: `[HACK:ON] ${t.title} — 신청됐습니다. 팀 링크를 보관하세요`,
+    text: `${t.name} 팀, 신청됐습니다.\n\n대회: ${t.title} (${t.starts || '날짜 미정'})\n팀 링크: ${mailSite()}/e/${t.event}?t=${t.tkey}\n\n이 링크가 팀 열쇠입니다. 나에게만 보관하세요. 폰을 바꿔도 이 링크로 되찾습니다.\n대회 3일 전과 하루 전에 «오시나요»를 한 번 더 묻습니다. 못 오게 되면 그 화면에서 «못 가요»를 눌러 주세요 — 그 자리가 다른 분께 갑니다.\n\n답장은 hi@mandeun.com 으로.` };
+}
+/* D-3·D-1 리마인더 — 이중 발송 자체에 건다(타이밍 확신은 낮다: 근거 RCT 가 병원 데이터, 레드팀 09-25).
+   한 팀에 한 종류씩 한 번만. 못 온다고 한 팀·이메일 없는 팀·이미 답한 팀은 건너뛴다. 실패는 다음 시간에 다시. */
+function remindDue(db, now = new Date()) {
+  const out = [];
+  for (const [kind, days] of [['d3', 3], ['d1', 1]]) {
+    const day = new Date(now.getTime() + days * 86400000).toISOString().slice(0, 10);
+    const rows = db.prepare(`SELECT t.id, t.name, t.contact, t.tkey, e.id AS event, e.title, e.starts
+      FROM teams t JOIN events e ON e.id = t.event
+      WHERE e.starts = ? AND t.confirmed = '' AND t.contact LIKE '%@%'
+        AND NOT EXISTS (SELECT 1 FROM mail_log l WHERE l.kind = ? AND l.ref = CAST(t.id AS TEXT) AND l.status = 'sent')`).all(day, kind);
+    for (const t of rows) if (isEmail(t.contact)) out.push({ event: t.event, kind, ref: t.id, to: t.contact,
+      subject: `[HACK:ON] ${t.title} — ${days}일 뒤입니다. 오시나요?`,
+      text: `${t.name} 팀, ${t.title} 이 ${t.starts} 에 열립니다. ${days}일 뒤입니다.\n\n아래 팀 링크를 열고 «올 거예요» 또는 «못 가요»를 눌러 주세요. 못 오시면 그 자리가 다른 분께 갑니다.\n${mailSite()}/e/${t.event}?t=${t.tkey}\n\n이 링크는 팀 열쇠입니다. 나에게만 보관하세요.` });
+  }
+  return out;
+}
+
 /* 팀에 딸린 표를 이름으로 찾는다 — 스키마가 늘어도 휴지통이 반쪽이 안 되게. */
 function teamChildTables(db) {
   return db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('teams','team_trash')").all()
@@ -1106,6 +1154,12 @@ function open(file) {
   /* 팀 휴지통. 지우면 팀 행과 딸린 것(제출·점수·심사평·투표…)을 JSON 으로 옮겨 둔다.
      되살리면 같은 id 로 돌아오니 참가자가 저장해 둔 팀 링크(tkey)가 그대로 산다.
      teams 를 읽는 SQL 이 80군데라 «지운 표시» 열을 넣으면 80곳을 다 고쳐야 한다 — 그래서 옮긴다. */
+  /* 메일 장부. 보낸 것·못 보낸 것·발송 열쇠가 없어 건너뛴 것이 전부 남는다.
+     리마인더는 «이 팀에 이 종류가 sent 로 있나»로 한 번만 보낸다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS mail_log(
+    id INTEGER PRIMARY KEY, event TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '', ref TEXT NOT NULL DEFAULT '',
+    rcpt TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', err TEXT NOT NULL DEFAULT '',
+    at TEXT NOT NULL DEFAULT (datetime('now')))`);
   db.exec(`CREATE TABLE IF NOT EXISTS team_trash(
     id INTEGER PRIMARY KEY, team INTEGER NOT NULL, event TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '', tkey TEXT NOT NULL DEFAULT '', json TEXT NOT NULL,
@@ -3052,6 +3106,7 @@ function routes(db) {
           /* 팀 열쇠는 여기서 딱 한 번 나간다. 신청한 브라우저가 받아서 들고 있는다. */
           const tid = joinTeam(db, m[1], await body(req));
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
+          const jm = joinMail(db, tid); if (jm) void sendMail(db, jm);   /* 기다리지 않는다 — 신청 응답이 메일에 묶이면 안 된다 */
           return json(res, 201, { id: tid, tkey: nt.tkey });
         }
 
@@ -3061,7 +3116,8 @@ function routes(db) {
           /* 심사 링크를 만들려면 운영자에게 심사 열쇠가 필요하다. 손님에겐 절대 안 준다. */
           if (adm) { const kk = db.prepare('SELECT jkey, vkey, judged FROM events WHERE id=?').get(m[1]);
                      bd.event.jkey = kk.jkey; bd.event.vkey = kk.vkey; bd.event.judged = kk.judged;
-                     bd.trash = db.prepare('SELECT id, team, name, at, by FROM team_trash WHERE event=? ORDER BY id DESC').all(m[1]); }
+                     bd.trash = db.prepare('SELECT id, team, name, at, by FROM team_trash WHERE event=? ORDER BY id DESC').all(m[1]);
+                     bd.mails = db.prepare('SELECT status, COUNT(*) c FROM mail_log WHERE event=? GROUP BY status').all(m[1]); }
           return json(res, 200, bd);
         }
 
@@ -3786,6 +3842,22 @@ function selftest() {
     ok(db.prepare('SELECT COUNT(*) c FROM team_trash WHERE event=?').get(tv.id).c === 1, '휴지통에 한 줄 남는다');
     const back = untrashTeam(db, trId);
     ok(back.same && back.id === ta, '되살리면 같은 id 로 돌아온다 — 팀 링크가 산다');
+    /* 메일 — 열쇠가 없으면 보내지 않고 장부에만 남는다. 리마인더는 D-3·D-1 한 번씩, 답한 팀·못 온다는 팀은 건너뛴다 */
+    const jm = joinMail(db, ta);
+    ok(jm && jm.to === 'trash@x.test' && jm.text.includes(`/e/${tv.id}?t=${tkeyA}`), '신청 메일에 팀 링크가 들어간다');
+    sendMail(db, jm);
+    ok(db.prepare("SELECT status FROM mail_log WHERE kind='join' AND ref=?").get(String(ta)).status === 'skipped', 'RESEND_KEY 없으면 «건너뜀»으로만 남는다');
+    const d3 = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+    db.prepare('UPDATE events SET starts=?, ends=? WHERE id=?').run(d3, d3, tv.id);
+    let due = remindDue(db);
+    ok(due.filter(x => x.event === tv.id).length === 2 && due.every(x => x.kind === 'd3'), 'D-3 에 이메일 있는 두 팀 모두 리마인더 대상');
+    db.prepare("UPDATE teams SET confirmed='no' WHERE name='남을팀' AND event=?").run(tv.id);
+    logMail(db, due.find(x => x.ref === ta), 'sent');
+    ok(remindDue(db).filter(x => x.event === tv.id).length === 0, '보낸 팀·못 온다는 팀은 다시 안 보낸다');
+    logMail(db, { ...due[0], kind: 'd3' }, 'failed');
+    const d1 = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    db.prepare('UPDATE events SET starts=?, ends=? WHERE id=?').run(d1, d1, tv.id);
+    ok(remindDue(db).filter(x => x.event === tv.id).map(x => x.kind).join() === 'd1', 'D-1 은 D-3 을 보냈어도 따로 한 번 더 간다');
     ok(board(db, tv.id, true).rows.length === before, '되살리면 표 수가 돌아온다');
     ok(db.prepare('SELECT tkey FROM teams WHERE id=?').get(ta).tkey === tkeyA, '팀 열쇠도 그대로다');
     let dup = false; try { db.prepare('UPDATE teams SET name=? WHERE id=?').run('남을팀', ta); } catch { dup = true; }
@@ -4863,6 +4935,12 @@ if (require.main === module) {
   const tick = () => { try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); } };
   tick();
   setInterval(tick, 10 * 60 * 1000).unref();
+  /* 한 시간마다 D-3·D-1 리마인더. 발송 열쇠가 없으면 아예 안 돈다 — 장부에 «건너뜀»이 매시간 쌓이지 않게. */
+  if (RESEND_KEY) {
+    const mailTick = () => { try { for (const mm of remindDue(db)) void sendMail(db, mm); } catch (e) { console.error('리마인더 실패', e.message); } };
+    mailTick();
+    setInterval(mailTick, 60 * 60 * 1000).unref();
+  }
 
   /* 0.0.0.0 으로 듣는다. 이걸 안 하면 같은 와이파이의 폰이 못 붙는다. */
   http.createServer(routes(db)).listen(PORT, '0.0.0.0', () => {

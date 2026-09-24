@@ -186,6 +186,16 @@ node desktop.js --check   # 띄우지 않고 브라우저·포트·화면 파일
 fly secrets set KAKAO_KEY=<REST API 키> KAKAO_SECRET=<보안 키> SITE=https://hackon.mandeun.com
 ```
 
+## 메일 켜기 (신청 확인 · D-3 · D-1 리마인더)
+
+열쇠가 없으면 보내지 않고 운영자 표에 «건너뜀»으로만 남는다. 켜려면 [Resend](https://resend.com)에서 도메인(mandeun.com)을 확인하고 API 키를 넣는다.
+
+```bash
+fly secrets set RESEND_KEY=<Resend API 키> MAIL_FROM="HACK:ON <hi@mandeun.com>"
+```
+
+이메일 한 채널만 쓴다. 웹푸시·카카오 알림톡은 안 한다(사업자·건당 비용·옵트인 0).
+
 카카오 개발자 사이트에서 할 일은 네 가지다.
 
 1. 애플리케이션 추가 → **REST API 키**를 복사

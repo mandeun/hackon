@@ -1422,6 +1422,8 @@ with sync_playwright() as p:
     A(st == 200 and tr and tr.get("trash"), f"팀을 못 지웠다: {st} {tr}")
     A(len(api(f"/api/events/{FE}/board", key=FK)["rows"]) == n0 - 1, "지웠는데 표에 남아 있다")
     A(len(api(f"/api/events/{FE}/board", key=FK).get("trash") or []) >= 1, "운영자 표에 «지운 팀» 목록이 안 실린다")
+    mails = api(f"/api/events/{FE}/board", key=FK).get("mails") or []
+    A(any(x["status"] in ("skipped", "sent") and x["c"] >= 1 for x in mails), f"신청 메일이 장부에 안 남았다: {mails}")
     st, rs = post(f"/api/trash/{tr['trash']}/restore", {}, FK)
     A(st == 200 and rs and rs.get("id") == FT["id"], f"되살린 팀 id 가 다르다: {rs}")
     A(len(api(f"/api/events/{FE}/board", key=FK)["rows"]) == n0, "되살렸는데 표 수가 안 돌아왔다")

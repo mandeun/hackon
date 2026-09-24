@@ -2281,6 +2281,7 @@ const SCREEN = {
           <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button>
           <button class="btn sec sm" data-rename="${r.id}" title="팀 이름 고치기" style="padding:4px 8px">✏️</button>
           <button class="btn sec sm" data-trash="${r.id}" title="지우기 — 휴지통으로 가고 되살릴 수 있다" style="padding:4px 8px">🗑</button></td></tr>`).join('')}</table>
+      ${(d.mails || []).length ? `<div class="meta" style="margin-top:8px">메일: ${d.mails.map(x => `${{ sent: '보냄', failed: '실패', skipped: '건너뜀(발송 열쇠 없음)' }[x.status] || x.status} ${x.c}`).join(' · ')}</div>` : ''}
       ${(d.trash || []).length ? `<details style="margin-top:8px"><summary>지운 팀 ${d.trash.length} <span class="when">되살릴 수 있습니다</span></summary><div class="in">
         ${d.trash.map(t => `<div class="shrow" style="margin-top:6px;align-items:center"><span>${esc(t.name)} <span class="meta">${esc(String(t.at).slice(0, 16))}${t.by === 'team' ? ' · 본인이 취소' : ''}</span></span><button class="btn sec sm" data-untrash="${t.id}">되살리기</button></div>`).join('')}</div></details>` : ''}
       <p class="sub" style="margin-top:12px">팀을 누르면 제출·심사 화면이 열립니다. <b>☆</b> 추천작 · <b>🔗</b> 팀을 잃은 참가자에게 주는 링크(본인 확인 뒤) · <b>✏️</b> 이름 고치기 · <b>🗑</b> 지우기(휴지통에서 되살릴 수 있습니다).</p>
@@ -2414,7 +2415,7 @@ const SCREEN = {
         const tk = tkeyOf(mine.id); if (!tk) return '';
         const link = `${shareBase()}/e/${e.id}?t=${tk}`;
         /* 참석 재확인 — 3일 전부터 묻는다. D-3+D-1 이중 확인이 노쇼를 줄인다는 실측(5.4만 명 RCT)을 따른다.
-           앱은 메일을 안 보내니 여기(팀 링크로 돌아온 화면)에서 묻는다. */
+           메일(D-3·D-1)이 이 화면으로 부르고, 답은 여기서 남긴다. 발송 열쇠가 없어도 이 화면은 그대로 묻는다. */
         const dleft = e.starts ? Math.round((new Date(e.starts + 'T00:00:00') - new Date()) / 86400000) : 99;
         const ask = dleft >= 0 && dleft <= 3;
         return `<div class="card" id="next">
