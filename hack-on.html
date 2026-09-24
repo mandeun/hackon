@@ -661,7 +661,7 @@ function giveHtml() {
   if (G.done) return `<div class="card" id="give" style="text-align:center;padding:28px 20px">
     <div style="font-size:40px;line-height:1">🙌</div>
     <h3 style="margin-top:12px">보냈습니다</h3>
-    <div class="meta">확인되면 공개 장부에 이름이 오릅니다.</div>
+    <div class="meta">확인되면 공개 장부에 이름이 오릅니다. 연락처는 운영자만 봅니다.</div>
     ${G.ref && G.pkey ? `<div class="meta" style="margin-top:10px"><b>내 후원 화면</b> — 확인 여부·진행·결과물을 여기서 봅니다. 열쇠가 들어 있으니 적어 두세요.</div>
     <div class="share" id="give-link" style="margin-top:8px">${esc(location.origin)}/s/${esc(G.ref)}?k=${esc(G.pkey)}</div>
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn sm" id="g-copy">주소 복사</button><a class="btn sec sm" href="/s/${esc(G.ref)}?k=${esc(G.pkey)}" style="text-decoration:none">내 후원 화면 열기</a></div>` : ''}
@@ -704,7 +704,7 @@ function askHtml() {
     <div class="gchips" style="grid-template-columns:1fr 1fr">
       <button type="button" class="gchip${Q.kind === 'sponsor' ? ' on' : ''}" data-ask-kind="sponsor">후원하고 싶어요<br><span style="font-size:12px;font-weight:500">관심 주제를 냅니다</span></button>
       <button type="button" class="gchip${Q.kind === 'requester' ? ' on' : ''}" data-ask-kind="requester">내 문제를 내고 싶어요<br><span style="font-size:12px;font-weight:500">번거로운 일을 적습니다</span></button></div>
-    <div class="meta" style="margin-top:10px">둘 다 마감 뒤 결과물을 받습니다.</div></div>`;
+    <div class="meta" style="margin-top:10px">둘 다 마감 뒤 결과물을 받습니다. 앱은 돈을 만지지 않습니다.</div></div>`;
   if (Q.step === 2) {
     if (Q.kind === 'sponsor') return `<div class="card" id="ask">${steps(2)}<h3>어떤 주제로 만든 것을 받고 싶으세요</h3>
       <div class="meta">예) 동네 가게 예약 · 음성 메모</div>
@@ -1957,7 +1957,7 @@ const SCREEN = {
           <div class="meta">첫 화면 목록에서 사라지고 링크로는 열립니다.</div>
           <div style="height:8px"></div>${e.listed ? '<button class="btn sm" id="gd-unlist">목록에서 내리기</button>' : '<span class="pill">지금 목록에 없습니다</span>'}</div>
         <div class="card"><h3>완전히 지우기</h3>
-          <div class="meta">팀·제출·점수·투표가 함께 지워집니다. 지우기 직전 사본이 내려받아집니다.</div>
+          <div class="meta">팀·제출·점수·투표가 함께 지워지고 되돌릴 수 없습니다. 사본(연락처 포함)이 내려받아지니 운영자만 보관하세요.</div>
           ${busyDel ? `<label>확인하려면 대회 이름을 그대로 적으세요</label><input id="gd-name" placeholder="${esc(e.title)}">`
                     : '<div class="meta" style="margin-top:6px">신청·자리·제안이 없는 빈 대회라 바로 지울 수 있습니다.</div>'}
           <div style="height:8px"></div><button class="btn sm" id="gd-go" data-title="${esc(e.title)}" style="background:var(--bad)"${busyDel ? ' disabled' : ''}>완전히 지우기</button></div>
@@ -2041,7 +2041,7 @@ const SCREEN = {
           <button type="button" class="bgchip on" data-bg-chip="300000">작은 대회 30만원 <span>권장</span></button>
           <button type="button" class="bgchip" data-bg-chip="1000000">100만원</button>
         </div>
-        <div class="meta" style="margin-bottom:6px">20명 안팎이면 30만원쯤을 권합니다(추정).</div>
+        <div class="meta" style="margin-bottom:6px">20명 안팎이면 30만원쯤을 권합니다(추정). «판에 올리기»를 눌러야 반영됩니다.</div>
         <div class="shrow" style="margin-top:10px;align-items:center">
           <input id="bg-in" type="number" min="0" step="10000" value="${+e.budget || ''}" placeholder="예) 300000" style="flex:1">
           <button class="btn sm" id="bg-go">미리 보기</button>
@@ -2246,7 +2246,7 @@ const SCREEN = {
       </section>
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
       ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
-        <div class="meta">운영자가 띄운 공지가 시각과 함께 남습니다.</div>
+        <div class="meta">운영자 공지가 시각과 함께 남습니다. 메일·문자는 안 보내니 이 페이지를 열어 두세요.</div>
         <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn sec sm" id="nt-bell">새 소식 알림 받기</button><span class="meta" id="nt-bell-s"></span></div>
         <ul class="news" id="news-list">${notes.map(newsRow).join('')}</ul></div>` : ''}
       ${(() => {
@@ -2371,9 +2371,9 @@ const SCREEN = {
       ${/* 필요한 자리는 참가자가 아니라 '도와줄 사람' 몫이다. 참가자가 먼저 볼 것(언제·누가·순서)
             뒤로 보낸다. 올린 자리가 없으면 통째로 안 그린다 — 빈 점판은 '아무도 안 돕는다' 로 읽힌다. */''}
       ${needs.length ? `<h3>함께 여는 자리</h3>
-      <p class="sub">한 자리씩 맡아서 같이 엽니다.</p>
+      <p class="sub">한 자리씩 맡아서 같이 엽니다. 연락처는 운영자만 봅니다.</p>
       ${dotBoard(needs, '이 대회를 함께 여는 자리')}
-      ${needs.some(n => n.auto || n.amount) ? '<p class="sub">«계획»은 운영자가 그 자리에 쓰려는 돈입니다. 정산은 운영자와 직접 하고, 앱은 돈을 받지 않습니다.</p>' : ''}
+      ${needs.some(n => n.auto || n.amount) ? '<p class="sub">«계획»은 운영자가 쓰려는 돈이라 실제 지출과 다를 수 있습니다. 앱은 돈을 받지 않습니다.</p>' : ''}
       ${needs.map(n => `<div class="card">
         <h3>${esc(needKind(n.kind))} · ${esc(n.label)} <span class="pill ${(+n.filled||0) >= (+n.qty||0) ? 'ok' : 'warn'}">${needProgress(n)} 채움</span>
           ${n.auto || n.amount ? `<span class="pill${n.amount ? '' : ' ok'}">${n.amount ? '계획 ' + won(n.amount) + (n.qty > 1 ? ' × ' + n.qty : '') : '무료로 내주실 분 찾습니다'}</span>` : ''}</h3>
@@ -2487,7 +2487,7 @@ const SCREEN = {
         ${r.pain && r.topic !== r.pain ? `<p class="sub" style="margin-bottom:6px">${esc(r.pain)}</p>` : ''}
         ${r.done ? `<p class="sub" style="margin-bottom:0"><b>«됐다»의 기준:</b> ${esc(r.done)}</p>` : ''}
       </section>
-      ${!ev ? `<div class="card"><h3>아직 대회에 붙지 않았습니다</h3><div class="meta">운영자가 대회 주제로 고르면 여기에 대회와 만드는 팀이 보입니다.</div></div>`
+      ${!ev ? `<div class="card"><h3>아직 대회에 붙지 않았습니다</h3><div class="meta">운영자가 대회 주제로 고르면 여기에 대회와 만드는 팀이 보입니다. 이 주소를 적어 두세요.</div></div>`
       : `<div class="card"><h3>${esc(ev.title)}</h3><div class="meta">${esc(ev.starts)}${ev.due ? ' · 제출 마감 ' + esc(ev.due.replace('T', ' ')) : ''} · <a href="/e/${esc(ev.id)}">대회 페이지</a></div></div>
       ${!ev.closed ? `<div class="card"><h3>지금 ${v.teams.length}팀이 만들고 있습니다</h3>
           <div class="meta">결과물 주소는 <b>제출 마감 뒤</b>에 여기서 열립니다.</div>
@@ -2508,7 +2508,7 @@ const SCREEN = {
         <div class="card"><h3>2주 뒤 — 아직 쓰고 계세요?</h3>
           <div class="meta">이 답이 다음 대회를 정합니다. 답이 없으면 «모름»으로 남습니다.${v.followup ? ' 지금 답: <b>' + esc((FU.find(x => x[0] === v.followup) || [])[1] || v.followup) + '</b>' : ''}</div>
           <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${FU.map(([k, l]) => `<button class="btn ${v.followup === k ? '' : 'sec'} sm" data-followup="${k}">${l}</button>`).join('')}</div></div>`}`}
-      <p class="meta" style="margin:14px 4px">끝난 뒤 고쳐 달라는 부탁은 약속이 아닙니다.</p>`;
+      <p class="meta" style="margin:14px 4px">끝난 뒤 고쳐 달라는 부탁은 약속이 아닙니다. 만든 분은 무료 외주가 아닙니다.</p>`;
   },
 
   /* /give — 첫 화면 «내가 줄 수 있는 것» 이 오는 곳. 대회를 아직 안 고른 채 시작한다.
@@ -2623,7 +2623,7 @@ const SCREEN = {
        운영자가 보낸 /j/<id>?k=… 를 열면 열쇠가 자동으로 담긴다. 직접 받은 열쇠를 넣어도 된다. */
     const keyPrompt = (err) => `<h2>심사위원 화면</h2>
       <p class="sub">${err ? '<b class="late">' + esc(err) + '</b><br>' : ''}
-        운영자에게 받은 <b>심사 링크</b>를 여세요. 열쇠만 받으셨다면 여기에 넣으세요.</p>
+        운영자에게 받은 <b>심사 링크</b>를 여세요(열쇠가 들어 있습니다). 열쇠만 받으셨다면 여기에 넣으세요.</p>
       <label>심사 열쇠</label><input id="jk-in" placeholder="영문과 숫자 10자">
       <div style="height:12px"></div>
       <button class="btn" id="jk-go">열기</button>`;
@@ -2782,7 +2782,7 @@ const SCREEN = {
     const myT = localStorage.getItem('hackon.team.' + cur);
     const tk = myT ? tkeyOf(myT) : '';
     if (peer && !tk) return `<h2>참가팀 상호평가</h2>
-      <p class="sub">참가 신청한 브라우저에서만 표를 줄 수 있습니다.</p>`;
+      <p class="sub">참가 신청한 브라우저에서만 표를 줄 수 있습니다 — 신청할 때 쓴 폰으로 여세요.</p>`;
     if (!peer && !vkeyOf(cur)) return keyPrompt('');
     let d;
     try { d = await api(`/events/${cur}/vote`, peer ? { tkey: tk } : {}); }
@@ -2841,7 +2841,7 @@ const SCREEN = {
             <b>AI 가 준 것 중 버린 판단</b> ${esc(t.aidrop)}</div>` : ''}
         </div>`).join('')}
         ${pk.top.some(t => t.reachable) ? `<p class="sub">
-          <b>연락 받겠다고 한 팀이 있습니다.</b> 주최자에게 말씀하시면 연결해 드립니다.</p>` : ''}` : ''}
+          <b>연락 받겠다고 한 팀이 있습니다.</b> 주최자에게 말씀하시면 동의한 팀만 연결해 드립니다.</p>` : ''}` : ''}
 
       <h3>${S()}. 무엇을 했나</h3>
       <div class="stat">
