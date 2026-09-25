@@ -637,6 +637,15 @@ const DEMO = {
 
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '', curReq = '', curGift = '', GKEY = '';
 let MAKE_REQ = '';   // «이 문제로 내 대회 열기»로 들어온 의뢰 id. 만들 때 첫 주제로 붙는다
+/* 대회 유형 — 이름 짓기가 막히는 사람을 위한 시작점. 누르면 이름·정원·유형·주제 힌트가 채워지고, 다 고칠 수 있다.
+   «실질 유효한 대회»의 검증은 따로 안 만든다 — 날짜·여는 사람·주제가 비면 첫 화면 목록에 안 오르는 기존 규칙이 그 검증이다. */
+const TEMPLATES = [
+  { chip: '동아리 안에서',  title: '우리 동아리 만들기 대회',       cap: 12, kind: '당일',    topic: '동아리 운영에서 번거로운 일 하나', note: '12명 · 하루. 회비·출석·공지 같은 우리 일을 고른다' },
+  { chip: '학교끼리',       title: '우리 학교 대 옆 학교 해커톤',    cap: 40, kind: '당일',    topic: '학교 생활에서 매번 손이 가는 일',  note: '40명 · 하루. 학교별 팀으로 붙는다. 장소는 한쪽 학교' },
+  { chip: '회사·일터',      title: '우리 팀 업무 자동화 해커톤',     cap: 15, kind: '당일',    topic: '내 일에서 매주 반복하는 작업 하나', note: '15명 · 하루. 코딩 경험 없어도 된다 — 만드는 건 AI, 고르는 건 사람' },
+  { chip: '우리 가게',      title: '우리 가게 문제 풀기 대회',       cap: 10, kind: '당일',    topic: '가게에서 사장님이 매일 손으로 하는 일', note: '10명 · 하루. 사장님이 문제를 올리고 결과물을 받는다' },
+  { chip: '온라인 1주',     title: '일주일 만들기 온라인 대회',      cap: 30, kind: '온라인 1주', topic: '', note: '모이지 않는다. 각자 만들고 마지막 날 발표' },
+];
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
 let AUTH = null;   // 카카오 로그인을 쓸 수 있는지, 지금 로그인했는지
@@ -1165,6 +1174,7 @@ function applyForm() {
 }
 
 /* 신청을 마친 사람에게만 보이는 두 번째 칸. 여기서 진짜 정보를 받는다. */
+let PUB_SPONSORS = [];   // 공개 페이지가 그릴 때 채운다 — 신청 완료 카드에 «함께하는 곳»으로 보인다
 function moreForm(t) {
   const need = [];
   if (!t.contact) need.push('연락처');
@@ -1173,7 +1183,8 @@ function moreForm(t) {
   if (!need.length) return `<div class="card" id="apply" style="text-align:center;padding:28px 20px">
     <div style="font-size:40px;line-height:1">🎉</div>
     <h3 style="margin-top:12px">신청 완료</h3>
-    <div class="meta">다 주셨습니다. 이제 이 대회의 <b>켜는 사람</b>입니다. 대회 3일 전에 여기서 «오시나요»를 다시 묻습니다.</div></div>`;
+    <div class="meta">다 주셨습니다. 이제 이 대회의 <b>켜는 사람</b>입니다. 대회 3일 전에 여기서 «오시나요»를 다시 묻습니다.</div>
+    ${PUB_SPONSORS.length ? `<div class="meta" style="margin-top:12px">함께하는 곳</div>${logoBand(PUB_SPONSORS)}` : ''}</div>`;
   return `<div class="card" id="apply">
     <div class="pill ok" style="margin-bottom:10px">✓ 접수됨</div>
     <h3>신청됐습니다. 조금만 더</h3>
@@ -1202,6 +1213,8 @@ function moreForm(t) {
         ${FOUND.map(f => `<option>${f}</option>`).join('')}</select>` : ''}
     ${!t.note ? `<label>하고 싶은 것 (선택)</label>
       <textarea id="m-note" rows="2" placeholder="어떤 불편을 풀고 싶은지 한 줄"></textarea>` : ''}
+    ${!t.link ? `<label>만든 것 링크 (선택)</label>
+      <input id="m-link" placeholder="깃허브·포트폴리오·전에 만든 것. 없으면 비워 두세요 — 처음인 분도 팀이 생깁니다">` : ''}
     <label class="ck"><input type="checkbox" id="m-photo"${t.photo ? ' checked' : ''}>
       <span>행사 사진·영상 촬영과 공개에 동의합니다 <span class="pill ok">선택</span></span></label>
     <label class="ck"><input type="checkbox" id="m-spon"${t.sponsor_ok ? ' checked' : ''}>
@@ -1213,6 +1226,7 @@ function moreForm(t) {
   </div>`;
 }
 let msg = null;
+let TPL = null;   // 열기 탭에서 누른 유형
 
 /* 안내를 띄우고 화면을 한 번만 다시 그린다.
    예전에는 안내가 사라질 때도 다시 그렸는데, 그 사이에 사용자가 쓰던 칸이 통째로 날아갔다. */
@@ -1725,7 +1739,14 @@ const SCREEN = {
           <b>2. 필요한 자리</b> — 장소·심사·상품·멘토·간식을 올립니다<br>
           <b>3. 링크 공유</b> — 참가자와 도와줄 사람에게 보냅니다</div>
       </div>
+      ${/* 이름을 직접 짓기 어려우면 누른다 — 유형이 이름·정원·시간·주제 힌트를 채운다. 안 눌러도 된다(입력 최소) */''}
+      <label>어떤 대회인가요 <span class="pill">누르면 채워집니다</span></label>
+      <div class="gchips" id="f-types">${TEMPLATES.map((t, i) => `<button type="button" class="pick" data-tpl="${i}">${esc(t.chip)}</button>`).join('')}</div>
+      <div class="meta" id="f-tplnote" style="margin:-2px 0 8px"></div>
       <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 문제 해결 해커톤"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
+      ${rq ? `<label>어떻게 받을까요</label>
+      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button></div>
+      <div class="meta" style="margin:-2px 0 8px">«온라인으로 결과물만»은 모이지 않습니다. 일주일 동안 각자 만들어 내고, 올린 분이 받아서 «됐다»를 답합니다.</div>` : ''}
       ${(() => { const ids = Object.keys(localStorage).filter(k => k.startsWith('hackon.okey.')).map(k => k.slice(12)); if (!ids.length || !LIVE) return '';
         return `<details class="more" id="f-fromwrap" style="margin-top:8px"><summary>지난 대회에서 가져오기 <span class="when">기준표·주제·진행 순서·자리</span></summary>
           <div class="in"><select id="f-from"><option value="">가져오지 않음</option>${ids.map(id => `<option value="${esc(id)}">${esc(id)}</option>`).join('')}</select>
@@ -2232,7 +2253,8 @@ const SCREEN = {
           <label>메모</label><input id="n-note" maxlength="160" placeholder="예) 콘센트 20개 · 와이파이">
           <label>협찬 희망가 (원) <span class="pill">0 이면 금액 미정</span></label>
           <input id="n-price" type="number" min="0" step="10000" value="0" placeholder="예) 100000">
-          <div class="meta">«도와주세요» 보다 «이 자리는 10만원» 이 팝니다. 협찬 안내 페이지에 이 값이 붙습니다.</div>
+          <div class="meta">«도와주세요» 보다 «이 자리는 10만원» 이 팝니다. 협찬 안내 페이지에 이 값이 붙습니다.<br>
+            권장(예산 자동 배분과 같은 기준): 간식 1인 6,000원 · 심사 무보수(100만원 넘는 대회만 1인 20만원) · 장소 0원(현물로 받는다) · 크레딧은 팀당 금액을 적는다.</div>
           <div style="height:9px"></div><button class="btn sm" id="n-add">자리 올리기</button>
         </div>
         ${ledger.length ? `<h3 style="margin-top:16px">확인된 공개 장부</h3><table><tr><th>자리</th><th>이름</th><th>소속</th></tr>
@@ -2347,6 +2369,7 @@ const SCREEN = {
     const myId = localStorage.getItem('hackon.team.' + cur);
     const mine = myId ? d.rows.find(r => String(r.id) === String(myId)) : null;
     const cw = LIVE ? await api(`/events/${cur}/crew`) : { solo:[], looking:[] };
+    PUB_SPONSORS = e.sponsors || [];
     const rec = LIVE ? await api(`/events/${cur}/record`).catch(() => null) : null;
     const hrep = LIVE ? await api(`/events/${cur}/rep`).catch(() => null) : null;
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
@@ -2445,6 +2468,7 @@ const SCREEN = {
               <div class="row">
                 <div><label>지금 몇 명</label><input id="cf-size" type="number" min="1" max="9" value="${mine.size || 1}"></div>
                 <div><label>더 찾는 분 (선택)</label><input id="cf-want" placeholder="예) 화면 만드는 분" value="${esc(mine.want || '')}"></div>
+                <div><label>만든 것 링크 (선택)</label><input id="cf-link" placeholder="없으면 비워 두세요" value="${esc(mine.link || '')}"></div>
               </div></div>` : ''}
             <div class="shrow" style="margin-top:6px"><button class="btn sm" id="cf-yes">올 거예요</button><button class="btn sec sm" id="cf-no">못 가요</button></div>`}</div>` : ''}
           <div class="meta">1. <b>내 팀 링크</b>를 <b>나에게만</b> 보내 두세요(팀 방에는 올리지 마세요). 폰을 바꿔도 이 링크로 되찾습니다.<br>
@@ -2513,7 +2537,7 @@ const SCREEN = {
           <b style="font-size:14px">혼자 오시는 분 ${cw.solo.length}명</b>
           <table>${cw.solo.map(r => `<tr>
             <td style="width:7em">${esc(r.name)}</td>
-            <td>${r.role ? `<span class="pill">${esc(r.role)}</span> ` : ''}${esc(r.note || '')}</td>
+            <td>${r.role ? `<span class="pill">${esc(r.role)}</span> ` : ''}${r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener" class="pill">만든 것</a> ` : '<span class="pill ok">처음이에요</span> '}${esc(r.note || '')}</td>
           </tr>`).join('')}</table></div>` : ''}
         ${cw.looking.length ? `<div style="margin-top:14px">
           <b style="font-size:14px">자리가 남은 팀 ${cw.looking.length}팀</b>
@@ -2665,6 +2689,7 @@ const SCREEN = {
           ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ''}
           ${t.url ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec sm" data-rtry="${i}">열어보기</button><a class="btn sec sm" href="${esc(t.url)}" target="_blank" rel="noopener" style="text-decoration:none">새 창</a></div>
             <div class="trybox" id="rtry-${i}" hidden></div>` : '<div class="meta" style="margin-top:6px">제출한 주소가 없습니다.</div>'}
+          ${t.sale ? `<div class="meta" style="margin-top:8px">만든 분 제안 · <b>${esc(t.sale)}</b></div>` : ''}
           ${t.contact ? `<div class="meta" style="margin-top:8px">만든 분 연락처(동의한 분) · <b>${esc(t.contact)}</b> — 직접 연락하세요. 앱은 돈을 만지지 않습니다.</div>`
                       : '<div class="meta" style="margin-top:8px">만든 분이 연락처 제공에 동의하지 않았습니다.</div>'}
           <label>판정 <span class="pill">점수표 없음</span></label>
@@ -3134,6 +3159,7 @@ const SCREEN = {
     const reqs = LIVE ? await api(`/events/${cur}/requests`).catch(() => []) : [];
     return `<button class="btn sec sm" data-go="board">← 순위로</button>
       <h2 style="margin-top:12px">${esc(t.name)}</h2>
+      ${(d.event.sponsors || []).length ? `<div class="meta">함께하는 곳</div>${logoBand(d.event.sponsors)}<div style="height:6px"></div>` : ''}
       <p class="sub">${t.rank}위 · ${t.score}점 · 심사 ${t.judges}명</p>
       ${(d.judges || []).length ? `<div class="meta" style="margin:-8px 0 12px">
         본 사람 ${(t.by || []).map(esc).join(', ') || '없음'}${
@@ -3180,6 +3206,10 @@ const SCREEN = {
           <select id="s-request"><option value="">자유 주제</option>${reqs.map(r => `<option value="${esc(r.id)}"${t.request === r.id ? ' selected' : ''}>${esc(r.kind === 'sponsor' ? '후원자' : '의뢰자')} · ${esc(r.topic || r.pain)}</option>`).join('')}</select>
           <div class="meta">고르면 마감 뒤 결과물을 받고 «됐다/아니다»를 답합니다.</div>` : ''}
         <div style="height:14px"></div>
+        <label>이 결과물, 필요한 분께 넘길 수 있나요 <span class="pill">선택</span></label>
+        <input id="s-sale" maxlength="60" value="${esc(t.sale || '')}" placeholder="예) 무료로 드려요 · 5만원에 · 협의">
+        <div class="meta">마감 뒤 <b>이 주제를 올린 분</b>에게만 보입니다. 조건은 그분과 직접 정합니다 — 앱은 돈을 만지지 않습니다.</div>
+        <div style="height:10px"></div>
         <label class="ck"><input type="checkbox" id="s-show"${t.show ? ' checked' : ''}>
           <span>대회가 끝난 뒤 <b>첫 화면에 내 결과물을 걸어도 좋습니다</b></span></label>
         <div class="meta">체크를 풀면 바로 내려갑니다. 링크·팀 이름·설명만 올라가고 <b>연락처는 올라가지 않습니다.</b></div>
@@ -3562,7 +3592,7 @@ function wire() {
          빈 칸은 안 보낸다 — 서버는 빈 값을 덮어쓰지 않는다. */
       if (going && $('#cf-more')) {
         const g = sel => { const el = $(sel); return el && el.value ? el.value : undefined; };
-        const more = { role: g('#cf-role'), size: g('#cf-size'), want: g('#cf-want'),
+        const more = { role: g('#cf-role'), size: g('#cf-size'), want: g('#cf-want'), link: g('#cf-link'),
                        solo: $('#cf-solo') ? !!$('#cf-solo').value : undefined };
         if (Object.values(more).some(v => v !== undefined))
           await api(`/teams/${myId}/more`, { method: 'POST', tkey: tkeyOf(myId), body: more }).catch(() => {});
@@ -3609,6 +3639,7 @@ function wire() {
         solo: $('#m-solo') ? !!$('#m-solo').value : undefined,
         size: g('#m-size'),
         want: ($('#m-want-on') && $('#m-want-on').value) ? g('#m-want') : undefined,
+        link: g('#m-link'),
         photo: $('#m-photo') ? $('#m-photo').checked : undefined,
         sponsor_ok: $('#m-spon') ? $('#m-spon').checked : undefined } });
       /* 여기서 받은 연락처를 이 브라우저에 남긴다.
@@ -3669,6 +3700,7 @@ function wire() {
   const save = $('#f-save');
   if (save) save.onclick = async () => {
     const b = { title: $('#f-title').value.trim() };   // 처음엔 이름만 받는다
+    if (TPL) { b.cap = TPL.cap; if (TPL.topic) b.topic = TPL.topic; }   // 유형 칩을 눌렀으면 정원·주제 힌트도
     const fromSel = $('#f-from');
     if (fromSel && fromSel.value) { b.from = fromSel.value; b.fromKey = okeyOf(fromSel.value); }   // 지난 대회에서 가져오기
     if (MAKE_REQ) b.req = MAKE_REQ;   // 의뢰에서 들어왔으면 첫 주제로 붙인다
@@ -3695,6 +3727,19 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
 
+  /* 유형 칩 — 이름·정원·유형을 채운다. 다시 누르면 다른 유형으로 바뀐다 */
+  document.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => {
+    TPL = TEMPLATES[+b.dataset.tpl];
+    document.querySelectorAll('[data-tpl]').forEach(x => x.classList.toggle('on', x === b));
+    const ft = $('#f-title'); if (ft && (!ft.value.trim() || ft.dataset.auto === '1')) { ft.value = TPL.title; ft.dataset.auto = '1'; }
+    if ($('#f-kind')) $('#f-kind').value = TPL.kind;
+    if ($('#f-tplnote')) $('#f-tplnote').textContent = TPL.note + ' — 이름은 고쳐도 됩니다.';
+  });
+  if ($('#f-title')) $('#f-title').addEventListener('input', () => { $('#f-title').dataset.auto = '0'; });
+  document.querySelectorAll('[data-how]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('[data-how]').forEach(x => x.classList.toggle('on', x === b));
+    if ($('#f-kind')) $('#f-kind').value = b.dataset.how;
+  });
   const fkind = $('#f-kind');
   const fkindnote = $('#f-kindnote');
   if (fkind && fkindnote) {
@@ -3744,6 +3789,7 @@ function wire() {
         body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim(),
                 aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(),
                 show: $('#s-show') ? $('#s-show').checked : undefined,
+                sale: $('#s-sale') ? $('#s-sale').value.trim() : undefined,
                 request: $('#s-request') ? $('#s-request').value : undefined } });
       flash('제출했습니다');
     } catch (e) { flash(e.message, true); }

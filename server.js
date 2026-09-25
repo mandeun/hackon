@@ -1187,6 +1187,10 @@ function open(file) {
   /* 참석 재확인. 대회 며칠 전 «올 거예요/못 가요». '' 미응답 · ISO시각 = 온다 · 'no' = 못 온다.
      노쇼는 이걸로 «미리» 잡는다 — 당일 came 는 사후 기록일 뿐이다. */
   try { db.exec("ALTER TABLE teams ADD COLUMN confirmed TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 만든 것 링크(깃허브·포트폴리오·이 사이트 결과물). 선택. 팀 짜기 화면에서 «처음이에요»와 나란히 — 경력이 없어도 밀리지 않게 */
+  try { db.exec("ALTER TABLE teams ADD COLUMN link TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 결과물을 필요한 분께 넘길 의향(«무료로 드려요» «5만원에» «협의»). 앱은 돈을 만지지 않는다 — 조건은 당사자가 직접 */
+  try { db.exec("ALTER TABLE submissions ADD COLUMN sale TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 팀 휴지통. 지우면 팀 행과 딸린 것(제출·점수·심사평·투표…)을 JSON 으로 옮겨 둔다.
      되살리면 같은 id 로 돌아오니 참가자가 저장해 둔 팀 링크(tkey)가 그대로 산다.
      teams 를 읽는 SQL 이 80군데라 «지운 표시» 열을 넣으면 80곳을 다 고쳐야 한다 — 그래서 옮긴다. */
@@ -1661,16 +1665,17 @@ function moreTeam(db, id, b, can) {
   /* 채울 것이 하나라도 있으면 주인이어야 한다.
      '빈 칸만 채운다' 는 규칙은 덮어쓰기를 막을 뿐, 빈 칸을 남이 채우는 것은 못 막는다.
      연락처는 한 번 쓰면 끝이라 남이 먼저 채우면 진짜 참가자가 밀려난다. */
-  const 채울것 = ['contact', 'role', 'found', 'note', 'want']
+  const 채울것 = ['contact', 'role', 'found', 'note', 'want', 'link']
     .some(k => b[k] !== undefined && String(b[k]).trim() && !t[k])
     || (b.solo !== undefined && !t.solo && !!b.solo)
     || (b.photo !== undefined && !t.photo && !!b.photo);
   if (채울것 && !owns)
     throw new HttpError(403, '이 팀은 신청한 분이나 운영자만 고칠 수 있습니다');
-  for (const k of ['contact', 'role', 'found', 'note', 'want']) {
+  for (const k of ['contact', 'role', 'found', 'note', 'want', 'link']) {
     if (b[k] === undefined || !String(b[k]).trim()) continue;
     if (t[k]) continue;                       // 이미 적힌 것은 안 건드린다
-    set.push(`${k}=?`); val.push(String(b[k]).slice(0, 300));
+    if (k === 'link' && !webUrl(b[k])) continue;   // 주소 꼴이 아니면 버린다 — href 에 들어가는 값이다
+    set.push(`${k}=?`); val.push(k === 'link' ? webUrl(b[k]) : String(b[k]).slice(0, 300));
   }
   if (b.solo !== undefined && !t.solo) { set.push('solo=?'); val.push(b.solo ? 1 : 0); }
   if (b.photo !== undefined && !t.photo) { set.push('photo=?'); val.push(b.photo ? 1 : 0); }
@@ -1729,7 +1734,7 @@ function createEvent(db, b) {
   if (sum !== 100) throw new HttpError(400, `심사 배점 합이 ${sum} 입니다. 100 이어야 합니다`);
   db.prepare(`INSERT INTO events(id,title,host,topic,starts,ends,prize,cap,rubric,due)
               VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, b.title, b.host || '주최자', b.topic || '',
+    .run(id, b.title, b.host || '주최자', plain(b.topic, 120),
          b.starts || today(), b.ends || b.starts || today(),
          +b.prize || 0, +b.cap || 0, JSON.stringify(rubric), b.due || '');
   /* 연 사람을 붙인다. 열쇠를 안 갖고 왔으면 새로 하나 만들어 준다. */
@@ -1921,13 +1926,14 @@ function submit(db, team, b) {
      칸이 없는 옛 화면이 저장할 때 남의 동의를 꺼 버리면 안 된다. */
   const on = b.show === undefined ? (prev ? prev.show : 0) : (b.show ? 1 : 0);
   const at = on ? ((prev && prev.show && prev.show_at) || new Date().toISOString()) : '';
-  db.prepare(`INSERT INTO submissions(team,url,note,aiuse,aidrop,show,show_at)
-                VALUES(?,?,?,?,?,?,?)
+  const sale = b.sale === undefined ? (db.prepare('SELECT sale FROM submissions WHERE team=?').get(team) || {}).sale || '' : plain(b.sale, 60);
+  db.prepare(`INSERT INTO submissions(team,url,note,aiuse,aidrop,show,show_at,sale)
+                VALUES(?,?,?,?,?,?,?,?)
               ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note,
                 aiuse=excluded.aiuse, aidrop=excluded.aidrop,
-                show=excluded.show, show_at=excluded.show_at, at=datetime('now')`)
+                show=excluded.show, show_at=excluded.show_at, sale=excluded.sale, at=datetime('now')`)
     .run(team, webUrl(b.url), b.note || '',
-         (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at);
+         (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at, sale);
   /* 어느 주제·요청으로 만들었나. 이 대회에 붙은 요청만 고를 수 있다. 안 보내면 그대로 */
   if (b.request !== undefined) {
     const rq = String(b.request || '');
@@ -2161,11 +2167,11 @@ function setSeats(db, id, b, can) {
     연락처는 안 담는다 — 오프라인이라 얼굴 보고 짜면 되고, 그게 더 잘 된다.
     온라인 매칭은 실패한 사례가 많다(팀은 많은데 전부 '비공개·초대 필요'). */
 function crew(db, event) {
-  const rows = db.prepare(`SELECT id, name, role, solo, size, want, note, members, person
+  const rows = db.prepare(`SELECT id, name, role, solo, size, want, note, members, person, link
                            FROM teams WHERE event = ? ORDER BY id`).all(event);
   return {
     solo: rows.filter(r => r.solo).map(r => ({
-      id: r.id, name: r.name, role: r.role, note: r.note })),
+      id: r.id, name: r.name, role: r.role, note: r.note, link: webUrl(r.link) })),
     /* 자리가 남은 팀. 예전에는 '사람을 찾는다고 적은 팀' 만 나왔는데,
        적기 귀찮아서 안 적은 팀이 더 많았다. 빈자리가 있으면 그 자체가 찾는 것이다. */
     looking: rows.map(r => ({ ...r, s: seats(r) }))
@@ -2373,7 +2379,7 @@ function requestView(db, id) {
   if (!r) throw new HttpError(404, '없는 요청입니다');
   const e = r.event ? getEvent(db, r.event) : null;
   const isClosed = e ? closed(e) : false;
-  const teams = r.event ? db.prepare(`SELECT t.id, t.name, t.contact, t.sponsor_ok, s.url, s.note, s.show
+  const teams = r.event ? db.prepare(`SELECT t.id, t.name, t.contact, t.sponsor_ok, s.url, s.note, s.show, s.sale
                                        FROM teams t LEFT JOIN submissions s ON s.team = t.id
                                        WHERE t.event=? AND t.request=? ORDER BY t.id`).all(r.event, r.id) : [];
   const vd = {}; for (const v of db.prepare('SELECT team, ok, note, at FROM verdicts WHERE request=?').all(id)) vd[v.team] = v;
@@ -2383,6 +2389,7 @@ function requestView(db, id) {
     teams: teams.map(t => ({
       id: t.id, name: t.name, note: t.note || '',
       url: isClosed ? webUrl(t.url) : '',                       // 마감 전엔 링크 없음 — board 의 규칙과 같다
+      sale: isClosed ? (t.sale || '') : '',                     // «넘길 수 있어요» 제안. 거래는 당사자 간 — 앱은 돈을 안 만진다
       contact: isClosed && t.sponsor_ok ? t.contact : '',        // 동의한 사람만, 마감 뒤에만
       verdict: vd[t.id] ? { ok: !!vd[t.id].ok, note: vd[t.id].note, at: vd[t.id].at } : null,
     })),
@@ -3958,6 +3965,27 @@ function selftest() {
     ok(!doneDue(db).some(x => x.ref === rqd.id), '한 번 보낸 의뢰엔 다시 안 간다');
     /* 크레딧 종류 */
     ok(NEED_KINDS.includes('credit') && OFFER_KIND_LABEL.credit === '크레딧', '자리 종류에 크레딧이 있다');
+    /* 결과물 «넘길 수 있어요» — 마감 뒤 받는 화면에만 보인다. 만든 것 링크 — 주소 꼴만 남는다 */
+    {
+      const es = createEvent(db, { title: '판매 검사', starts: '2026-01-10', ends: '2026-01-10', topic: '동아리 회비' });
+      const rqs = addRequest(db, { kind: 'requester', name: '총무 한', pain: '회비', contact: 'h@x.test', event: es.id });
+      db.prepare('UPDATE requests SET event=? WHERE id=?').run(es.id, rqs.id);
+      const ts = joinTeam(db, es.id, { name: '파는팀', agree: true, email: 's@x.test' });
+      db.prepare('UPDATE teams SET request=? WHERE id=?').run(rqs.id, ts);
+      db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T00:00', es.id);
+      submit(db, ts, { url: 'https://example.com/s', sale: '무료로 드려요 <b>' });
+      ok(requestView(db, rqs.id).teams[0].sale === '', '마감 전엔 «넘길 수 있어요»가 안 보인다');
+      db.prepare('UPDATE events SET due=? WHERE id=?').run('2026-01-10T00:00', es.id);
+      ok(requestView(db, rqs.id).teams[0].sale === '무료로 드려요 b', '마감 뒤 받는 화면에 제안이 보이고 꺾쇠는 빠진다');
+      db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T00:00', es.id);   /* 마감을 다시 열고 고쳐 낸다 */
+      submit(db, ts, { url: 'https://example.com/s2' });
+      ok(db.prepare('SELECT sale FROM submissions WHERE team=?').get(ts).sale === '무료로 드려요 b', 'sale 을 안 보내면 그대로 둔다');
+      moreTeam(db, ts, { link: 'javascript:alert(1)' }, { admin: true });
+      ok(db.prepare('SELECT link FROM teams WHERE id=?').get(ts).link === '', '주소 꼴이 아닌 링크는 버린다');
+      moreTeam(db, ts, { link: 'https://github.com/x/y', solo: true }, { admin: true });
+      ok(crew(db, es.id).solo[0].link === 'https://github.com/x/y', '팀 짜기 목록에 만든 것 링크가 실린다');
+      ok(getEvent(db, es.id).topic === '동아리 회비', '열 때 준 주제가 저장된다');
+    }
     ok(board(db, tv.id, true).rows.length === before, '되살리면 표 수가 돌아온다');
     ok(db.prepare('SELECT tkey FROM teams WHERE id=?').get(ta).tkey === tkeyA, '팀 열쇠도 그대로다');
     let dup = false; try { db.prepare('UPDATE teams SET name=? WHERE id=?').run('남을팀', ta); } catch { dup = true; }

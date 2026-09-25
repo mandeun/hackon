@@ -1445,6 +1445,16 @@ with sync_playwright() as p:
     A(not any(q["id"] == rq["id"] for q in api("/api/requests")), "붙은 의뢰가 후보 목록에 그대로 있다")
     pg.evaluate(f"localStorage.setItem('hackon.event', '{FE}')")
     ok("의뢰 → «이 문제로 내 대회 열기» — 이름 하나로 열리고 첫 주제로 붙는다")
+    # (6c) 열기 탭 유형 칩 — 누르면 이름·정원이 채워지고, 만든 대회에 그 값이 들어간다
+    visit("/app"); pg.click('nav button[data-t="make"]'); pg.wait_for_selector("[data-tpl]")
+    pg.click("[data-tpl='3']"); pg.wait_for_timeout(200)
+    A("가게" in pg.input_value("#f-title"), "유형 칩이 이름을 안 채운다")
+    pg.click("#f-save"); pg.wait_for_timeout(1500)
+    tev = pg.evaluate("localStorage.getItem('hackon.event')")
+    te = api(f"/api/events/{tev}")
+    A(te["cap"] == 10 and "가게" in (te.get("topic") or ""), f"유형 칩의 정원·주제가 대회에 안 들어갔다: {te['cap']} {te.get('topic')!r}")
+    pg.evaluate(f"localStorage.setItem('hackon.event', '{FE}')")
+    ok("열기 탭 유형 칩 — 누르면 이름·정원·주제가 채워진다 (입력 최소)")
     # (7) 같은 것을 참가자가 화면에서 — «신청 취소» 뒤 «되돌리기». 열쇠는 위 (4)에서 넣어 둔 그 브라우저.
     pg.once("dialog", lambda d: d.accept())
     visit(f"/e/{FE}")
