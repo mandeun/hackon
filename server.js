@@ -793,6 +793,31 @@ function promoteWaiting(db, event) {
   return out;
 }
 
+/* 깃허브 링크에서 아이디만. github.com/아이디 또는 github.com/아이디/저장소 — 그 밖은 '' */
+function ghLogin(url) {
+  const m = /^https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9-]{1,39})(?:\/|$)/i.exec(String(url || '').trim());
+  return m ? m[1] : '';
+}
+async function ghProfile(db, login) {
+  const k = 'gh:' + login.toLowerCase();
+  const c = db.prepare('SELECT v FROM meta WHERE k=?').get(k);
+  if (c) { const v = JSON.parse(c.v); if (Date.now() - v.at < 86400000) return v.data; }
+  let data = { ok: false };
+  try {
+    const h = { 'user-agent': 'hackon.kr', accept: 'application/vnd.github+json' };
+    const u = await (await fetch(`https://api.github.com/users/${login}`, { headers: h, signal: AbortSignal.timeout(6000) })).json();
+    if (u && u.login) {
+      const rs = await (await fetch(`https://api.github.com/users/${login}/repos?per_page=100&sort=updated`, { headers: h, signal: AbortSignal.timeout(6000) })).json();
+      const list = Array.isArray(rs) ? rs.filter(r => !r.fork) : [];
+      const top = list.slice().sort((a, b) => b.stargazers_count - a.stargazers_count).slice(0, 3)
+        .map(r => ({ name: r.name, url: r.html_url, stars: r.stargazers_count, lang: r.language || '' }));
+      data = { ok: true, login: u.login, repos: u.public_repos, stars: list.reduce((s, r) => s + r.stargazers_count, 0), top };
+    }
+  } catch {}
+  if (data.ok) db.prepare('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)').run(k, JSON.stringify({ at: Date.now(), data }));
+  return data;
+}
+
 /* 팀에 딸린 표를 이름으로 찾는다 — 스키마가 늘어도 휴지통이 반쪽이 안 되게. */
 function teamChildTables(db) {
   return db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('teams','team_trash')").all()
@@ -1267,6 +1292,10 @@ function open(file) {
   db.exec('UPDATE teams SET no = (SELECT COUNT(*) FROM teams t2 WHERE t2.event = teams.event AND t2.id <= teams.id) WHERE no = 0');
   try { db.exec('ALTER TABLE events ADD COLUMN ranked INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE pledges ADD COLUMN pkey TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 심사·멘토로 오는 분의 이해관계 확인(참가자·후원사와 같은 회사·가족·금전 관계 없음). 본인 선언이다 — 앱이 검증하지 않는다 */
+  try { db.exec("ALTER TABLE pledges ADD COLUMN coi INTEGER NOT NULL DEFAULT 0"); } catch {}
+  /* 협찬사 로고 파일. 찾은 로고가 틀릴 때 운영자가 직접 올린다. 작게(400KB) 잘라서 받는다 */
+  db.exec(`CREATE TABLE IF NOT EXISTS sponsor_logos(sponsor INTEGER PRIMARY KEY REFERENCES sponsors(id) ON DELETE CASCADE, mime TEXT NOT NULL, data BLOB NOT NULL)`);
   try { db.exec("ALTER TABLE offers ADD COLUMN pkey TEXT NOT NULL DEFAULT ''"); } catch {}
   db.exec(`CREATE TABLE IF NOT EXISTS surveys(
       event     TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -2564,8 +2593,8 @@ function addPledge(db, need, event, b) {
   const name = plain(b.name, 40);
   if (!name) throw new HttpError(400, '이름을 적어 주세요');
   const pkey = crypto.randomBytes(5).toString('hex');   // 준 사람의 열쇠. 응답에서 한 번만 나간다
-  const r = db.prepare('INSERT INTO pledges(need,event,name,org,contact,note,pkey) VALUES(?,?,?,?,?,?,?)')
-    .run(need, event, name, plain(b.org, 60), plain(b.contact, 100), plain(b.note, 300), pkey);
+  const r = db.prepare('INSERT INTO pledges(need,event,name,org,contact,note,pkey,coi) VALUES(?,?,?,?,?,?,?,?)')
+    .run(need, event, name, plain(b.org, 60), plain(b.contact, 100), plain(b.note, 300), pkey, b.coi ? 1 : 0);
   return { id: Number(r.lastInsertRowid), status: 'pending', ref: 'p' + Number(r.lastInsertRowid), pkey };
 }
 
@@ -2752,7 +2781,7 @@ function csvOf(db, event, withContact = true) {
 
 /* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
 function needsOf(db, event) {
-  const pl = db.prepare('SELECT id, need, name, org, status FROM pledges WHERE event=? ORDER BY id')
+  const pl = db.prepare('SELECT id, need, name, org, status, coi FROM pledges WHERE event=? ORDER BY id')
     .all(event);
   return db.prepare('SELECT * FROM needs WHERE event=? ORDER BY id').all(event)
     .map(n => ({
@@ -2760,7 +2789,7 @@ function needsOf(db, event) {
       amount: +n.amount || 0, price: +n.price || 0, held: !!n.held, auto: !!n.auto,
       filled: pl.filter(p => p.need === n.id && (p.status === 'ok' || p.status === 'done')).length,
       pledges: pl.filter(p => p.need === n.id)
-                 .map(p => ({ id: p.id, name: p.name, org: p.org, status: p.status })),
+                 .map(p => ({ id: p.id, name: p.name, org: p.org, status: p.status, coi: !!p.coi })),
     }));
 }
 
@@ -3064,6 +3093,15 @@ function routes(db) {
           return json(res, 200, { kinds: KINDS, rubrics: RUBRICS });
         if (p === '/api/logo' && req.method === 'GET')
           return json(res, 200, logoFor(q.domain));
+        if ((m = p.match(/^\/api\/sponsors\/(\d+)\/logo$/)) && req.method === 'GET') {
+          const lg = db.prepare('SELECT mime, data FROM sponsor_logos WHERE sponsor=?').get(+m[1]);
+          if (!lg) throw new HttpError(404, '로고가 없습니다');
+          res.writeHead(200, { 'content-type': lg.mime, 'cache-control': 'public, max-age=86400' });
+          return res.end(lg.data);
+        }
+        /* 깃허브 공개 이력 — 링크가 github.com/아이디 면 공개 저장소·별 수·대표 저장소만. 인증 없이(시간당 60회) + 하루 캐시 */
+        if ((m = p.match(/^\/api\/gh\/([A-Za-z0-9-]{1,39})$/)) && req.method === 'GET')
+          return json(res, 200, await ghProfile(db, m[1]));
         if (p === '/api/levels' && req.method === 'GET')
           return json(res, 200, { levels: LEVELS });
 
@@ -3197,9 +3235,20 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/sponsors$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);
           const b = await body(req);
-          db.prepare('INSERT INTO sponsors(event,name,kind,amount,note,logo,link) VALUES(?,?,?,?,?,?,?)')
-            .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '', webUrl(b.logo), webUrl(b.link));
-          return json(res, 201, { ok: true });
+          /* 링크만 넣어도 된다 — 로고 주소가 없으면 도메인에서 찾는다(운영자가 «찾기»를 안 눌렀어도) */
+          let logo = webUrl(b.logo), link = webUrl(b.link);
+          if (!link && b.domain) { const lf = logoFor(b.domain); if (lf.ok) link = 'https://' + lf.domain; }
+          if (!logo && link) { const lf = logoFor(link.replace(/^https?:\/\//, '').split('/')[0]); if (lf.ok) logo = lf.url; }
+          const r = db.prepare('INSERT INTO sponsors(event,name,kind,amount,note,logo,link) VALUES(?,?,?,?,?,?,?)')
+            .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '', logo, link);
+          const sid = Number(r.lastInsertRowid);
+          /* 직접 올린 파일 — data: 주소로 온다. 종류·크기를 보고 그대로 저장, 로고 주소는 우리 경로로 */
+          const dm = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.logoData || ''));
+          if (dm && dm[2].length < 560000) {
+            db.prepare('INSERT OR REPLACE INTO sponsor_logos(sponsor,mime,data) VALUES(?,?,?)').run(sid, dm[1], Buffer.from(dm[2], 'base64'));
+            db.prepare('UPDATE sponsors SET logo=? WHERE id=?').run(`/api/sponsors/${sid}/logo`, sid);
+          }
+          return json(res, 201, { ok: true, id: sid, logo: db.prepare('SELECT logo FROM sponsors WHERE id=?').get(sid).logo });
         }
         /* 보고서는 협찬사에게 나눠 주는 물건이라 열쇠 없이 열려야 한다.
            개인 식별 정보가 애초에 안 담기는 응답이라 열어도 된다 - 운영자만 보는 칸만 뺀다. */
@@ -3985,6 +4034,14 @@ function selftest() {
       moreTeam(db, ts, { link: 'https://github.com/x/y', solo: true }, { admin: true });
       ok(crew(db, es.id).solo[0].link === 'https://github.com/x/y', '팀 짜기 목록에 만든 것 링크가 실린다');
       ok(getEvent(db, es.id).topic === '동아리 회비', '열 때 준 주제가 저장된다');
+      ok(ghLogin('https://github.com/karpathy/nanoGPT') === 'karpathy' && ghLogin('https://github.com/torvalds') === 'torvalds' && ghLogin('https://gitlab.com/x') === '' && ghLogin('javascript:1') === '', '깃허브 링크에서 아이디만 뽑는다');
+      const nd = addNeed(db, es.id, { kind: 'judge', label: '심사', qty: 1 });
+      const pc = addPledge(db, nd.id, es.id, { name: '심사 김', contact: 'j@x.test', coi: true });
+      ok(needsOf(db, es.id).find(n => n.id === nd.id).pledges[0].coi === true, '심사 맡는 분의 이해관계 확인이 남는다');
+      db.prepare("INSERT INTO sponsors(event,name,kind,amount,note,logo,link) VALUES(?,?,?,?,?,?,?)").run(es.id, '파일로고', '현물', 0, '', '', 'https://example.com');
+      const sid = db.prepare('SELECT id FROM sponsors WHERE name=?').get('파일로고').id;
+      db.prepare('INSERT INTO sponsor_logos(sponsor,mime,data) VALUES(?,?,?)').run(sid, 'image/png', Buffer.from([137, 80, 78, 71]));
+      ok(db.prepare('SELECT length(data) n FROM sponsor_logos WHERE sponsor=?').get(sid).n === 4, '올린 로고 파일이 그대로 남는다');
     }
     ok(board(db, tv.id, true).rows.length === before, '되살리면 표 수가 돌아온다');
     ok(db.prepare('SELECT tkey FROM teams WHERE id=?').get(ta).tkey === tkeyA, '팀 열쇠도 그대로다');

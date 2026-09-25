@@ -1609,6 +1609,7 @@ with sync_playwright() as p:
     # 협찬 로고 — 개인이 후원을 받았을 때 돌려줄 수 있는 실물
     LOGO = "https://example.test/logo.png"
     pg.fill("#p-name", "로고회사")
+    pg.evaluate("document.getElementById('p-adv').open = true")   # 로고·갈 곳 주소는 «직접 넣기»로 접혀 있다
     pg.fill("#p-logo", LOGO)
     pg.fill("#p-link", "https://example.test")
     # 로고를 넣으면 상표권 합의 확인을 받아야 저장된다
@@ -1644,6 +1645,8 @@ with sync_playwright() as p:
     # javascript: 주소는 저장도 안 되고 화면에도 안 나간다.
     # 열쇠가 한 번 새면 이 자리 한 줄로 공개 페이지를 보는 사람 전부가 당한다.
     pg.fill("#p-name", "나쁜회사")
+    pg.fill("#p-dom", "")   # 홈페이지 주소가 남아 있으면 서버가 거기서 로고·갈 곳을 정당하게 채운다 — 이 검사는 javascript: 만 본다
+    pg.evaluate("document.getElementById('p-adv').open = true")
     pg.fill("#p-logo", "javascript:alert(1)")
     pg.fill("#p-link", "javascript:alert(2)")
     if not pg.is_checked("#p-perm"):
@@ -1776,7 +1779,7 @@ with sync_playwright() as p:
     ok(f"성과 기록 — 완주율 {o['finishRate']}% · 면접 {o['interview']}건")
 
     # ── 사후 지원 — 이게 '보장' 이다. 기록만 하는 표로는 약속이 안 된다 ──
-    pg.click("summary:has-text('사후 지원')")
+    pg.click("summary:has-text('끝난 뒤 멘토')")
     pg.wait_for_timeout(300)
     pg.fill("#h-name", "박실무")
     pg.fill("#h-org", "어느회사")
@@ -1784,7 +1787,7 @@ with sync_playwright() as p:
     pg.click("#h-add")
     pg.wait_for_timeout(800)
     if not pg.is_visible("#a-add"):
-        pg.click("summary:has-text('사후 지원')")
+        pg.click("summary:has-text('끝난 뒤 멘토')")
         pg.wait_for_timeout(300)
     pg.wait_for_selector("#a-add")
     pg.click("#a-add")
@@ -1799,7 +1802,7 @@ with sync_playwright() as p:
 
     # 했음을 누르면 지킨 것으로 넘어간다
     if not pg.is_visible("[data-done]"):
-        pg.click("summary:has-text('사후 지원')")
+        pg.click("summary:has-text('끝난 뒤 멘토')")
         pg.wait_for_timeout(300)
     pg.click("[data-done]")
     pg.wait_for_timeout(800)

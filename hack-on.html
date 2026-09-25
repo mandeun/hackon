@@ -571,7 +571,7 @@ body.tv #cta{display:none}
     <button data-t="make"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="6"/><path d="M12 8v8M8 12h8"/></svg></span>열기</button>
     <button data-t="find"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>구하기</button>
     <button data-t="board"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 20V11M12 20V5M18 20v-6"/></svg></span>순위</button>
-    <button data-t="spon"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7.5-4.6-9.3-9.4C1.6 8.6 3.6 5 7 5c2.1 0 3.5 1.2 5 3 1.5-1.8 2.9-3 5-3 3.4 0 5.4 3.6 4.3 6.6C19.5 16.4 12 21 12 21z"/></svg></span>협찬 성과</button>
+    <button data-t="spon"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7.5-4.6-9.3-9.4C1.6 8.6 3.6 5 7 5c2.1 0 3.5 1.2 5 3 1.5-1.8 2.9-3 5-3 3.4 0 5.4 3.6 4.3 6.6C19.5 16.4 12 21 12 21z"/></svg></span>후원 보고</button>
   </nav>
 </div>
 
@@ -587,6 +587,16 @@ const okeyOf = id => localStorage.getItem('hackon.okey.' + id) || '';
 const myKey = () => localStorage.getItem('hackon.owner') || '';
 /* 팀 열쇠. 신청할 때 한 번 받아 두고, 그 팀 칸을 고칠 때마다 같이 보낸다. */
 const tkeyOf = tid => localStorage.getItem('hackon.tkey.' + tid) || '';
+/* 깃허브 링크에서 아이디만 — 서버의 ghLogin 과 같은 규칙 */
+const ghOf = url => { const m = /^https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9-]{1,39})(?:\/|$)/i.exec(String(url || '').trim()); return m ? m[1] : ''; };
+/* 화면에 [data-gh] 가 있으면 공개 이력을 채운다. 실패하면 조용히 빈다 — 입력은 링크 하나뿐이었다 */
+async function fillGh() {
+  for (const el of document.querySelectorAll('[data-gh]')) {
+    try { const g = await api(`/gh/${encodeURIComponent(el.dataset.gh)}`);
+      el.innerHTML = g.ok ? `공개 저장소 <b>${+g.repos || 0}</b> · ⭐ <b>${+g.stars || 0}</b>${g.top.length ? ' · ' + g.top.map(t => `<a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.name)}</a>${t.lang ? '(' + esc(t.lang) + ')' : ''}`).join(', ') : ''}` : ''; }
+    catch { el.innerHTML = ''; }
+  }
+}
 /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 한 번 받아 두고, 점수를 넣을 때 같이 보낸다. */
 const jkeyOf = id => localStorage.getItem('hackon.jkey.' + id) || '';
 /* 관객 투표 열쇠. 투표 링크(/v/<id>?k=…)로 받아 두고, 표를 던질 때 같이 보낸다. */
@@ -662,6 +672,12 @@ const NEED_KIND = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심�
    연락처는 전처럼 운영자만 본다.
    상태는 G 하나에 둔다 — flash() 가 성공하면 화면을 통째로 다시 그리는데,
    단계를 DOM 에만 두면 «보냈습니다» 대신 첫 화면이 돌아온다. */
+document.head.insertAdjacentHTML('beforeend', `<style>
+.htabs{position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0 10px;margin:0 0 6px;background:var(--bg,#F4F5F7);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.htabs::-webkit-scrollbar{display:none}
+.htabs button{flex:0 0 auto;border:1px solid var(--rule,#DDE1E6);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink,#1A1E1D);cursor:pointer}
+.htabs button:active{background:#E9EEFF}
+</style>`);
 const GIVE_KINDS = [['venue','장소'], ['cash','돈'], ['judge','심사'], ['mentor','멘토'], ['snack','간식'], ['other','기타']];   // 칩은 여섯 — 화면마다 판단 하나(검사가 잠근다). 크레딧은 운영자가 올린 자리로만 받는다
 /* 주면 받는 것 — 종류마다 다르다. 이 문장이 없으면 «장부에 이름» 한 줄뿐이라 왜 주는지 화면이 말하지 않는다(데시: 예고된 대가는 안에서 나온 마음을 밀어내지만, 받는 것을 감추는 건 다른 문제다) */
 /* 지쳐서 나가는 참가자에게 서술을 시키면 안 채운다. 누르는 것으로 바꾼다. */
@@ -732,6 +748,8 @@ function giveHtml() {
     <div id="g-recv">${getsBox(G.kind)}</div>
     ${G.kind === 'other' && !G.need ? `<label>무엇인가요 <span class="pill">필수</span></label>
       <input id="g-what" maxlength="80" placeholder="예) 20명 들어갈 카페를 토요일에 빌려드릴 수 있어요">` : ''}
+    ${(G.kind === 'judge' || G.kind === 'mentor') ? `<label class="ck"><input type="checkbox" id="g-coi"><span>이 대회 참가자·후원사와 <b>이해관계가 없습니다</b>(같은 회사·가족·금전 관계) <span class="pill">본인 확인</span></span></label>
+    <div class="meta">직장인·업계 분이 많이 오십니다. 심사·멘토는 이 한 줄이 공정성의 전부라 여쭙니다. 운영자 화면에만 표시됩니다.</div>` : ''}
     <label>이름 <span class="pill">필수</span></label><input id="g-name" placeholder="이름 또는 가게·회사 이름">
     <label>연락처 <span class="pill warn">운영자에게만 보입니다</span></label><input id="g-contact" placeholder="이메일 또는 전화">
     <div style="height:14px"></div><button class="btn" id="g-send">보내기</button>
@@ -923,7 +941,8 @@ function wireGive() {
     if (!contact) return flash('운영자가 연락할 연락처를 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
     try {
-      const r = G.need ? await api(`/needs/${G.need}/pledge`, { method: 'POST', body: { name, contact, note: what } })
+      const coi = $('#g-coi') ? $('#g-coi').checked : undefined;
+      const r = G.need ? await api(`/needs/${G.need}/pledge`, { method: 'POST', body: { name, contact, note: what, coi } })
                        : await api(`/events/${G.event}/offer`, { method: 'POST', body: { kind: G.kind, name, contact, note: what } });
       G.ref = r.ref || ''; G.pkey = r.pkey || '';   // 준 사람의 열쇠 — 응답에서 한 번만 온다
       if (G.ref && G.pkey) try { localStorage.setItem('hackon.pkey.' + G.ref, G.pkey); } catch (_) {}
@@ -1227,6 +1246,7 @@ function moreForm(t) {
 }
 let msg = null;
 let TPL = null;   // 열기 탭에서 누른 유형
+let P_LOGO_DATA = '';   // 협찬사 로고 파일(줄인 data: 주소). 넣고 나면 비운다
 
 /* 안내를 띄우고 화면을 한 번만 다시 그린다.
    예전에는 안내가 사라질 때도 다시 그렸는데, 그 사이에 사용자가 쓰던 칸이 통째로 날아갔다. */
@@ -1544,7 +1564,7 @@ function logoBand(list, tv) {
   if (!list || !list.length) return '';
   /* 서버가 넣을 때 걸러도 여기서 다시 본다.
      걸러지기 전에 저장된 줄이 있을 수 있고, 그 한 줄이면 보는 사람 전부가 당한다. */
-  const web = v => (/^https?:\/\//i.test(String(v || '').trim()) ? String(v).trim() : '');
+  const web = v => (/^(https?:\/\/|\/api\/sponsors\/\d+\/logo$)/i.test(String(v || '').trim()) ? String(v).trim() : '');
   return `<div class="${tv ? 'tvlogos' : 'logos'}">` + list.map(sp => {
     const logo = web(sp.logo), link = web(sp.link);
     /* 로고는 바깥에서 온다. 행사장 와이파이가 죽으면 안 온다.
@@ -1634,6 +1654,8 @@ function paintCta() {
 async function render() {
   if (LIVE && !NET) { try { NET = await api('/health'); } catch { NET = { net: [] }; } }
   if (LIVE && !AUTH) { try { AUTH = await api('/auth'); } catch { AUTH = { kakao: false }; } }
+  /* 로그인돼 있으면 주최자 열쇠가 응답에 실려 온다 — 이 기기에 심는다. 새 폰에서 카카오 로그인만 하면 내 대회가 다 따라온다 */
+  if (LIVE && AUTH && AUTH.loggedIn && AUTH.owner && myKey() !== AUTH.owner) { try { localStorage.setItem('hackon.owner', AUTH.owner); } catch (_) {} }
   document.body.classList.toggle('doc', tab === 'report');
   /* 「서버 연결됨」은 만든 사람 말이지 쓰는 사람 말이 아니다. 연결이 되는 것이 기본값이라
      그걸 자랑처럼 띄울 이유가 없다. file:// 로 열었을 때의 «데모» 만 남긴다 —
@@ -1913,11 +1935,13 @@ const SCREEN = {
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 참가 ${e.teams}팀</p>
       ${dueBox(e)}
       <div class="card">
-        <h3>운영자 열쇠</h3>
-        <div class="meta">대회를 만든 기기의 ‘순위’ 화면 아래에 있습니다.</div>
+        <h3>운영자로 열기</h3>
+        ${AUTH && AUTH.kakao && !AUTH.loggedIn ? `<div class="meta">대회를 만들 때 쓴 카카오로 <b>로그인</b>하면 열쇠 없이 열립니다.</div>
+        <a class="kko" href="/auth/kakao" style="display:inline-block;margin:8px 0">카카오로 로그인</a>
+        <details class="more"><summary>열쇠를 직접 넣기 <span class="when">로그인 없이 만든 대회</span></summary><div class="in">` : `<div class="meta">대회를 만든 기기의 운영 화면 «보낼 주소» 아래에 있습니다.</div>`}
         <label>열쇠</label><input id="ok-in" placeholder="영문과 숫자 10자">
         <div style="height:10px"></div>
-        <button class="btn sm" id="ok-go">열기</button>
+        <button class="btn sm" id="ok-go">열기</button>${AUTH && AUTH.kakao && !AUTH.loggedIn ? '</div></details>' : ''}
       </div>
       
       <div class="share">${shareBase()}/e/${esc(e.id)}</div>`;
@@ -1998,7 +2022,8 @@ const SCREEN = {
             끝나는 날까지 이 칸이 자리를 차지했다.
             무슨 일이 생겼을 때 찾아서 누르는 것이지, 늘 보고 있을 것이 아니다.
             띄워 둔 공지가 있으면 위에 따로 뜨므로 접혀 있어도 안 놓친다. */''}
-      <details><summary>전체 공지
+      <div class="htabs" id="host-tabs">${[['sec-info','기본'],['sec-notice','공지'],['sec-topic','주제'],['bg-card','예산'],['sec-needs','자리'],['sec-links','주소'],['sec-apply','신청'],['sec-desk','등록'],['sec-after','끝난 뒤'],['spon','후원']].map(([id, t]) => `<button type="button" data-sec="${id}">${t}</button>`).join('')}</div>
+      <details id="sec-notice"><summary>전체 공지
         <span class="when">${e.notice ? '띄워져 있습니다' : '큰 화면과 공개 페이지에 동시에'}</span>
         </summary><div class="in">
         <div class="meta">한 줄이 <b>큰 화면</b>과 참가자 폰에 같이 뜨고, 한 시간 뒤 내려갑니다.</div>
@@ -2073,7 +2098,7 @@ const SCREEN = {
 
       ${/* 올라온 주제·요청. 붙은 것(연락처는 운영자만)과 후보(아직 어느 대회에도 안 붙은 것). 한 대회 다섯 개까지, 올라온 순. */''}
       ${(() => { const mine = reqsAll.filter(r => r.event === e.id), cands = reqsCand;
-        return `<details${mine.length ? ' open' : ''}><summary>주제 · 요청 <span class="when">${mine.length ? mine.length + '개 붙음' : cands.length ? '후보 ' + cands.length + '개' : '아직 없음'}</span></summary><div class="in">
+        return `<details id="sec-topic"${mine.length ? ' open' : ''}><summary>주제 · 요청 <span class="when">${mine.length ? mine.length + '개 붙음' : cands.length ? '후보 ' + cands.length + '개' : '아직 없음'}</span></summary><div class="in">
         <div class="meta">한 대회 다섯 개까지, 마감 뒤 그 사람이 결과물을 받습니다.</div>
         ${mine.map(r => `<div class="card" style="margin-top:9px"><h3><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span> ${esc(r.topic || r.pain)}</h3>
           <div class="meta">${esc(r.name)}${r.contact ? ' · <span class="contact">' + esc(r.contact) + '</span>' : ''}${r.done ? '<br>«됐다»의 기준: ' + esc(r.done) : ''}${r.teams ? '<br>' + r.teams + '팀이 골랐습니다' : ''}</div>
@@ -2197,7 +2222,7 @@ const SCREEN = {
               <h3>💰 예산으로 자리 나누기${e.mode === 'online' ? ' <span class="pill">온라인판</span>' : ''}</h3>${inner}</div>`;
       })()}
 
-      <details open><summary>필요한 자리 <span class="when">${needs.reduce((a,n) => a + Math.max(0,(+n.qty||0)-(+n.filled||0)),0)}자리 남음</span></summary><div class="in">
+      <details id="sec-needs" open><summary>필요한 자리 <span class="when">${needs.reduce((a,n) => a + Math.max(0,(+n.qty||0)-(+n.filled||0)),0)}자리 남음</span></summary><div class="in">
         ${dotBoard(needs, '내 대회의 자리')}
         <div class="meta">장소·심사·상품·멘토·간식을 공개 페이지에 올립니다.</div>
         ${offers.filter(o => o.status === 'pending').length ? `<div class="card" style="margin-top:10px;border-left:3px solid var(--acc)">
@@ -2228,7 +2253,7 @@ const SCREEN = {
           </div>
           <div class="meta">협찬 안내 페이지에 붙는 값입니다. 0 이면 «${esc(priceText({ kind: n.kind, price: 0 }))}» 으로 보입니다.</div>
           ${(n.pledges || []).length ? `<div style="margin-top:8px">${(n.pledges || []).map(p => `<div class="shrow" style="align-items:center">
-            <div class="meta" style="flex:1"><b>${esc(p.name)}</b>${p.org ? ' · ' + esc(p.org) : ''} · ${esc({pending:'확인 대기',ok:'확인함',done:'완료',no:'거절'}[p.status] || p.status)}
+            <div class="meta" style="flex:1"><b>${esc(p.name)}</b>${p.org ? ' · ' + esc(p.org) : ''} · ${esc({pending:'확인 대기',ok:'확인함',done:'완료',no:'거절'}[p.status] || p.status)}${(n.kind === 'judge' || n.kind === 'mentor') ? (p.coi ? ' <span class="pill ok">이해관계 없음 확인</span>' : ' <span class="pill warn">이해관계 미확인</span>') : ''}
               ${pledgeInfo[p.id] && pledgeInfo[p.id].contact ? `<div class="contact">연락처 <b>${esc(pledgeInfo[p.id].contact)}</b>${pledgeInfo[p.id].note ? ' · ' + esc(pledgeInfo[p.id].note) : ''}</div>` : ''}</div>
             ${p.status === 'pending' ? `<button class="btn sm" data-pledge-status="${esc(p.id)}" data-status="ok">확인</button>
               <button class="btn sec sm" data-pledge-status="${esc(p.id)}" data-status="no">거절</button>` : ''}
@@ -2261,7 +2286,7 @@ const SCREEN = {
           ${ledger.map(x => `<tr><td>${esc(needKind(x.kind))} · ${esc(x.label)}</td><td>${esc(x.name)}</td><td>${esc(x.org || '—')}</td></tr>`).join('')}</table>` : ''}
       </div></details>
 
-      <details${폄('주소')}><summary>보낼 주소 <span class="when">모집·심사</span></summary><div class="in">
+      <details id="sec-links"${폄('주소')}><summary>보낼 주소 <span class="when">모집·심사</span></summary><div class="in">
         <div class="meta">
           ${NET && NET.net && NET.net.length > 1
             ? `<br>랜 주소가 여러 개입니다. 안 열리면 다른 것을 쓰세요 —
@@ -2276,8 +2301,10 @@ const SCREEN = {
         ${linkBox(`${shareBase()}/give/${e.id}`, 'givelink', 'b-copyg',
           '<b>협찬사용.</b> 자리별 희망가와 이름이 어디 붙는지가 한 장에 있습니다.')}
         <div class="meta" style="margin-top:10px">
-          <b>운영자 열쇠</b> <span class="pill warn">참가자에게 주지 마세요</span><br>
-          <code class="hid" data-reveal>${esc(okeyOf(e.id) || '이 기기에 없음')}</code>
+          <b>다른 기기·폰에서 열려면</b> — 거기서 <b>카카오 로그인</b>하면 내가 연 대회가 그대로 따라옵니다. 열쇠를 적지 않아도 됩니다.
+          <details class="more" style="margin-top:6px"><summary>열쇠를 직접 보기 <span class="when">로그인 없이 넘길 때만</span></summary><div class="in">
+            <b>운영자 열쇠</b> <span class="pill warn">참가자에게 주지 마세요</span><br>
+            <code class="hid" data-reveal>${esc(okeyOf(e.id) || '이 기기에 없음')}</code></div></details>
         </div>
 
         ${/* 나머지 둘은 '보내는' 주소가 아니다. 큰 화면은 이 노트북에서 열기만 하고,
@@ -2302,7 +2329,7 @@ const SCREEN = {
       </div></details>
       ${/* 이 브라우저로 신청한 사람에게만 펴 준다. 이어서 채울 칸이 있기 때문이다.
             주최자에게는 접어 둔다 - 주최자가 자기 대회에 신청할 일은 드물다. */''}
-      <details${mine ? ' open' : ''}><summary>참가 신청
+      <details id="sec-apply"${mine ? ' open' : ''}><summary>참가 신청
         <span class="when">${mine ? '조금만 더' : d.rows.length ? '대신 넣어 줄 때' : '아직 아무도 없습니다'}</span>
         </summary><div class="in">${mine ? moreForm(mine) : applyForm()}</div></details>
       <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객' : '점수'}</th><th class="n">${e.vmode ? '표' : '심사'}</th><th></th></tr>
@@ -2320,7 +2347,7 @@ const SCREEN = {
       ${(d.trash || []).length ? `<details style="margin-top:8px"><summary>지운 팀 ${d.trash.length} <span class="when">되살릴 수 있습니다</span></summary><div class="in">
         ${d.trash.map(t => `<div class="shrow" style="margin-top:6px;align-items:center"><span>${esc(t.name)} <span class="meta">${esc(String(t.at).slice(0, 16))}${t.by === 'team' ? ' · 본인이 취소' : ''}</span></span><button class="btn sec sm" data-untrash="${t.id}">되살리기</button></div>`).join('')}</div></details>` : ''}
       <p class="sub" style="margin-top:12px">팀을 누르면 제출·심사 화면이 열립니다. <b>☆</b> 추천작 · <b>🔗</b> 팀을 잃은 참가자에게 주는 링크(본인 확인 뒤) · <b>✏️</b> 이름 고치기 · <b>🗑</b> 지우기(휴지통에서 되살릴 수 있습니다).</p>
-      <details${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
+      <details id="sec-desk"${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
         <div class="meta">절반쯤 오는 게 정상입니다.</div>
         <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
         ${d.rows.map(r => `<tr>
@@ -2337,7 +2364,7 @@ const SCREEN = {
             무엇부터 눌러야 하는지 알 수가 없고, 정작 참가자들이 기다리는 '결과 공개'가
             맨 아래에 있었다. 실제로 할 일 순서대로 1·2·3 을 매기고,
             안 눌러도 되는 것은 안 눌러도 된다고 적는다. */''}
-      <details${폄('정산')}><summary>끝난 뒤에 <span class="when">시상 · 정산</span></summary><div class="in">
+      <details id="sec-after"${폄('정산')}><summary>끝난 뒤에 <span class="when">시상 · 정산</span></summary><div class="in">
         <h3 style="font-size:15px;margin-bottom:3px">1. 결과 공개</h3>
         <div class="meta">시상 뒤에 켜세요. 각 팀이 자기 점수와 심사평만 봅니다.${
           d.rows.length ? ` <b>${d.rows.length}팀</b>이 기다립니다.` : ''}</div>
@@ -2537,7 +2564,7 @@ const SCREEN = {
           <b style="font-size:14px">혼자 오시는 분 ${cw.solo.length}명</b>
           <table>${cw.solo.map(r => `<tr>
             <td style="width:7em">${esc(r.name)}</td>
-            <td>${r.role ? `<span class="pill">${esc(r.role)}</span> ` : ''}${r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener" class="pill">만든 것</a> ` : '<span class="pill ok">처음이에요</span> '}${esc(r.note || '')}</td>
+            <td>${r.role ? `<span class="pill">${esc(r.role)}</span> ` : ''}${r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener" class="pill">만든 것</a> ` : '<span class="pill ok">처음이에요</span> '}${esc(r.note || '')}${ghOf(r.link) ? `<div class="meta" data-gh="${esc(ghOf(r.link))}">깃허브 보는 중…</div>` : ''}</td>
           </tr>`).join('')}</table></div>` : ''}
         ${cw.looking.length ? `<div style="margin-top:14px">
           <b style="font-size:14px">자리가 남은 팀 ${cw.looking.length}팀</b>
@@ -3131,7 +3158,7 @@ const SCREEN = {
              <td>${r.done ? '<span class="pill ok">완료</span>'
                           : `<span class="pill ${r.late ? 'warn' : ''}">${r.late ? '늦음' : '진행'}</span>`}</td>
            </tr>`).join('')}</table>`
-        : '<p class="sub">이번 회차는 사후 지원을 배정하지 않았습니다.</p>'}
+        : '<p class="sub">이번 회차는 끝난 뒤 멘토를 정하지 않았습니다.</p>'}
 
       <h3>${S()}. 결과물</h3>
       ${done.length
@@ -3340,25 +3367,26 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
             <select id="p-kind"><option>크레딧</option><option>상품</option><option>멘토</option><option>현금</option><option>현물</option></select></div>
           <div><label>금액(원)</label><input id="p-amt" type="number" value="0"></div>
         </div>
-        <label>회사 홈페이지 주소 <span class="pill">여기만 넣으면 됩니다</span></label>
+        <label>회사 홈페이지 주소 <span class="pill">이것만 넣으면 됩니다</span></label>
         <div class="shrow">
           <input id="p-dom" placeholder="openai.com">
           <button class="btn sec sm" id="p-find">로고 찾기</button>
         </div>
         <div id="p-logopv"></div>
-        <label>로고 이미지 주소 <span class="pill">안 넣어도 됩니다</span></label>
-        <input id="p-logo" placeholder="찾기를 누르면 채워집니다">
-
+        <div class="meta">로고는 주소에서 찾아 채웁니다(안 눌러도 넣을 때 찾습니다). 틀리면 아래에서 파일로 올리세요.</div>
+        <label>찾은 로고가 틀리면 파일로 <span class="pill">선택</span></label>
+        <input type="file" id="p-file" accept="image/png,image/jpeg,image/webp">
         <label class="ck"><input type="checkbox" id="p-perm">
           <span>이 로고를 쓰기로 <b>협찬사와 합의했습니다</b></span></label>
         <div class="meta">회사 로고는 상표권 대상입니다. 합의 뒤에 올리세요.</div>
-        <label>눌렀을 때 갈 곳</label>
-        <input id="p-link" placeholder="https://회사홈페이지">
+        <details class="more" id="p-adv"><summary>주소를 직접 넣기 <span class="when">선택</span></summary><div class="in">
+          <label>로고 이미지 주소</label><input id="p-logo" placeholder="찾기를 누르면 채워집니다">
+          <label>눌렀을 때 갈 곳</label><input id="p-link" placeholder="https://회사홈페이지"></div></details>
         <div style="height:10px"></div>
         <button class="btn sm" id="p-add">협찬사 추가</button>
       </div></details>
 
-      ${fw ? `<details${fw.next.length ? ' open' : ''}><summary>이어가기
+      ${fw ? `<details${fw.next.length ? ' open' : ''}><summary>2주 뒤 안부
         <span class="when">${fw.next.length ? fw.next.length + '건 물어볼 때가 됐습니다'
           : fw.asked12 ? fw.aliveRate + '% 살아 있음' : '2 · 6 · 12주'}</span>
         </summary><div class="in">
@@ -3378,7 +3406,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
         <div class="meta">칸을 누르면 <b>안 물어봄 → 이어감 → 중단</b> 순으로 바뀝니다.</div>
       </div></details>` : ''}
 
-      ${LIVE ? `<details><summary>사후 지원 <span class="when">행사 전에 정해 둔다</span></summary>
+      ${LIVE ? `<details><summary>끝난 뒤 멘토 <span class="when">행사 전에 정해 둔다</span></summary>
         <div class="in">
         <div class="meta">끝나고 팀을 봐 줄 사람을 <b>행사 전에</b> 정해 둡니다.
           끝나고 정하면 아무도 안 합니다.</div>
@@ -4024,6 +4052,13 @@ function wire() {
     try { const r = await api(`/trash/${b.dataset.untrash}/restore`, { method: 'POST' }); flash(r.same ? '되살렸습니다. 팀 링크도 그대로입니다' : '되살렸습니다'); render(); }
     catch (e) { flash(e.message, true); }
   });
+  document.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => {
+    if (b.dataset.sec === 'spon') { tab = 'spon'; render(); return; }
+    const d = document.getElementById(b.dataset.sec) || document.querySelector('#view h2');
+    if (!d) return; if (d.tagName === 'DETAILS') d.open = true;
+    d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  if (document.querySelector('[data-gh]')) fillGh();
   document.querySelectorAll('[data-relink]').forEach(b => b.onclick = async (ev) => {
     ev.stopPropagation();
     if (!LIVE) return flash('데모에서는 안 됩니다', true);
@@ -4607,6 +4642,20 @@ function wire() {
     flash(`동의한 ${r.rows.length}팀만 내려받았습니다`);
   };
 
+  /* 로고 파일 — 브라우저에서 320px 로 줄여 data: 주소로 보낸다. 큰 원본은 안 올린다 */
+  const pfile = $('#p-file');
+  if (pfile) pfile.onchange = () => {
+    const f = pfile.files[0]; if (!f) return;
+    const img = new Image(); const url = URL.createObjectURL(f);
+    img.onload = () => {
+      const s = Math.min(1, 320 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      P_LOGO_DATA = c.toDataURL('image/png'); URL.revokeObjectURL(url);
+      $('#p-logopv').innerHTML = `<div class="qrline"><div class="qr" style="width:70px"><img src="${P_LOGO_DATA}" alt="" style="width:100%;height:auto;display:block"></div><div class="meta">이 파일로 들어갑니다.</div></div>`;
+    };
+    img.src = url;
+  };
   const pfind = $('#p-find');
   if (pfind) pfind.onclick = async () => {
     const d = $('#p-dom').value.trim();
@@ -4633,10 +4682,11 @@ function wire() {
       return flash('로고를 쓰기로 합의했는지 확인해 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다', true);
     try {
-      await api(`/events/${cur}/sponsors`, { method: 'POST',
-        body: { name, kind: $('#p-kind').value, amount: $('#p-amt').value,
-                logo: $('#p-logo').value.trim(), link: $('#p-link').value.trim() } });
-      flash('협찬사를 넣었습니다');
+      const r = await api(`/events/${cur}/sponsors`, { method: 'POST',
+        body: { name, kind: $('#p-kind').value, amount: $('#p-amt').value, domain: $('#p-dom').value.trim(),
+                logo: $('#p-logo').value.trim(), link: $('#p-link').value.trim(), logoData: P_LOGO_DATA || undefined } });
+      P_LOGO_DATA = '';
+      flash(r.logo ? '협찬사를 넣었습니다. 로고도 붙었습니다' : '협찬사를 넣었습니다. 로고는 못 찾았습니다 — 파일로 올려 주세요');
     } catch (e) { flash(e.message, true); }
   };
 
