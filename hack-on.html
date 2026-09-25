@@ -648,6 +648,9 @@ const DEMO = {
 
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '', curReq = '', curGift = '', GKEY = '';
 let MAKE_REQ = '';   // «이 문제로 내 대회 열기»로 들어온 의뢰 id. 만들 때 첫 주제로 붙는다
+/* 열쇠 없는 모드(2026-09-25): 카카오 로그인이 켜져 있으면 운영자 열쇠를 화면에서 통째로 뺀다 — 로그인이 곧 열쇠.
+   열쇠는 서버·비상용 주소(/app?k=…#대회)에만 남는다. 카카오가 없는 서버(로컬·파일 모드)는 예전 열쇠 화면 그대로. */
+const keyless = () => !!(LIVE && AUTH && AUTH.kakao);
 /* 대회 유형 — 이름 짓기가 막히는 사람을 위한 시작점. 누르면 이름·정원·유형·주제 힌트가 채워지고, 다 고칠 수 있다.
    «실질 유효한 대회»의 검증은 따로 안 만든다 — 날짜·여는 사람·주제가 비면 첫 화면 목록에 안 오르는 기존 규칙이 그 검증이다. */
 const TEMPLATES = [
@@ -1708,7 +1711,9 @@ const SCREEN = {
       </div>`).join('')}
       ${AUTH && AUTH.linked ? `<div class="card" style="padding:11px 13px"><div class="meta">
         <b>카카오로 로그인돼 있습니다.</b> 다른 기기에서도 그대로 보입니다.
-      </div></div>` : `<div class="card" style="padding:11px 13px"><div class="meta">
+      </div></div>` : keyless() ? `<div class="card" style="padding:11px 13px"><div class="meta">
+        <b>카카오로 로그인해 두세요.</b> 그래야 다른 폰·컴퓨터에서도 이 대회가 보입니다.<br>
+        <a class="kko" href="/auth/kakao" style="margin-top:8px">카카오로 로그인</a></div></div>` : `<div class="card" style="padding:11px 13px"><div class="meta">
         <b>주최자 열쇠</b> — 다른 기기에서 내 대회를 찾을 때 씁니다. 눌러서 보고 적어 두세요.<br>
         <code class="hid" data-reveal>${esc(myKey())}</code>
         ${AUTH && AUTH.kakao ? `<br><br><b>잃어버릴 걱정을 없애려면</b> 카카오로 로그인해 두세요.
@@ -1726,12 +1731,13 @@ const SCREEN = {
       </div>`;
     if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>
-      ${my ? '' : `<div class="card">
+      ${my ? '' : keyless() ? `<div class="card">
+        <h3>전에 연 대회를 찾으시나요</h3>
+        <div class="meta">대회를 만들 때 쓴 카카오로 로그인하면 다 나옵니다.</div>
+        <div style="height:8px"></div><a class="kko" href="/auth/kakao">카카오로 로그인</a>
+      </div>` : `<div class="card">
         <h3>전에 연 대회를 찾으시나요</h3>
         <div class="meta">주최자 열쇠를 넣으면 내가 연 대회가 다 나옵니다.</div>
-        ${AUTH && AUTH.kakao ? `<div style="height:8px"></div>
-          <a class="kko" href="/auth/kakao">카카오로 로그인</a>
-          <div class="meta" style="margin-top:8px">또는 열쇠로 찾기</div>` : ''}
         <label>주최자 열쇠</label><input id="ow-in" placeholder="영문과 숫자 12자">
         <div style="height:10px"></div>
         <button class="btn sm" id="ow-go">찾기</button>
@@ -1750,6 +1756,11 @@ const SCREEN = {
   },
 
   async make() {
+    /* 열쇠 없는 모드: 로그인 없이 만들면 그 대회를 다른 기기에서 못 찾는다 — 만들기 전에 로그인 */
+    if (keyless() && !(AUTH && AUTH.loggedIn)) return `<h2>대회를 열려면<br>먼저 로그인</h2>
+      <p class="sub">카카오 한 번이면 됩니다. 그래야 어느 폰·컴퓨터에서든 내 대회가 열립니다. 열쇠나 비밀번호는 없습니다.</p>
+      <div class="card"><a class="kko" href="/auth/kakao" style="display:inline-block">카카오로 로그인하고 열기</a>
+      <div class="meta" style="margin-top:10px">닉네임만 받습니다. 이메일·전화는 안 받습니다.</div></div>`;
     /* 의뢰에서 들어왔으면 그 문제를 제목 초안으로. 목록은 공개(연락처 없음)라 열쇠가 필요 없다 */
     let rq = null;
     if (MAKE_REQ && LIVE) rq = (await api('/requests').catch(() => [])).find(r => r.id === MAKE_REQ) || null;
@@ -1938,13 +1949,15 @@ const SCREEN = {
       ${dueBox(e)}
       <div class="card">
         <h3>운영자로 열기</h3>
-        ${AUTH && AUTH.kakao && !AUTH.loggedIn ? `<div class="meta">대회를 만들 때 쓴 카카오로 <b>로그인</b>하면 열쇠 없이 열립니다.</div>
-        <a class="kko" href="/auth/kakao" style="display:inline-block;margin:8px 0">카카오로 로그인</a>
-        <details class="more"><summary>열쇠를 직접 넣기 <span class="when">로그인 없이 만든 대회</span></summary><div class="in">` : `<div class="meta">대회를 만든 기기의 운영 화면 «보낼 주소» 아래에 있습니다.</div>`}
+        ${keyless() ? (AUTH.loggedIn
+          ? `<div class="meta">지금 로그인한 계정(${esc(AUTH.name || '카카오')})으로 만든 대회가 아닙니다. 만든 계정으로 로그인하세요. 그 계정을 모르면 hi@mandeun.com 으로.</div>
+             <a class="chip" href="/auth/logout" style="margin-top:8px">다른 계정으로 — 나가기</a>`
+          : `<div class="meta">대회를 만들 때 쓴 카카오로 <b>로그인</b>하면 열립니다. 열쇠는 없습니다.</div>
+             <a class="kko" href="/auth/kakao" style="display:inline-block;margin:8px 0">카카오로 로그인</a>`)
+        : `<div class="meta">대회를 만든 기기의 운영 화면 «보낼 주소» 아래에 있습니다.</div>
         <label>열쇠</label><input id="ok-in" placeholder="영문과 숫자 10자">
         <div style="height:10px"></div>
-        <button class="btn sm" id="ok-go">열기</button>${AUTH && AUTH.kakao && !AUTH.loggedIn ? '</div></details>' : ''}
-        ${AUTH && AUTH.loggedIn ? `<div class="meta" style="margin-top:10px">지금 로그인한 계정(${esc(AUTH.name || '카카오')})으로 만든 대회가 아닙니다. 만든 기기의 열쇠를 넣어 여세요. 열쇠를 잃었으면 hi@mandeun.com 으로 — 서버에서 찾아 드립니다.</div>` : ''}
+        <button class="btn sm" id="ok-go">열기</button>`}
       </div>
       
       <div class="share">${shareBase()}/e/${esc(e.id)}</div>`;
@@ -2304,10 +2317,10 @@ const SCREEN = {
         ${linkBox(`${shareBase()}/give/${e.id}`, 'givelink', 'b-copyg',
           '<b>협찬사용.</b> 자리별 희망가와 이름이 어디 붙는지가 한 장에 있습니다.')}
         <div class="meta" style="margin-top:10px">
-          <b>다른 기기·폰에서 열려면</b> — 거기서 <b>카카오 로그인</b>하면 내가 연 대회가 그대로 따라옵니다. 열쇠를 적지 않아도 됩니다.
-          <details class="more" style="margin-top:6px"><summary>열쇠를 직접 보기 <span class="when">로그인 없이 넘길 때만</span></summary><div class="in">
+          <b>다른 기기·폰에서 열려면</b> — 거기서 <b>카카오 로그인</b>하면 내가 연 대회가 그대로 따라옵니다.${keyless() ? '' : `
+          <details class="more" style="margin-top:6px"><summary>열쇠를 직접 보기</summary><div class="in">
             <b>운영자 열쇠</b> <span class="pill warn">참가자에게 주지 마세요</span><br>
-            <code class="hid" data-reveal>${esc(okeyOf(e.id) || '이 기기에 없음')}</code></div></details>
+            <code class="hid" data-reveal>${esc(okeyOf(e.id) || '이 기기에 없음')}</code></div></details>`}
         </div>
 
         ${/* 나머지 둘은 '보내는' 주소가 아니다. 큰 화면은 이 노트북에서 열기만 하고,
@@ -4780,6 +4793,11 @@ else if (GFT) {
   const k = new URLSearchParams(location.search).get('k');
   if (k) { try { localStorage.setItem('hackon.pkey.' + curGift, k); } catch (_) {} history.replaceState(null, '', location.pathname); }   // 열쇠는 주소창·기록에 안 남긴다
   GKEY = localStorage.getItem('hackon.pkey.' + curGift) || '';
+}
+else if (location.hash.length > 1 && new URLSearchParams(location.search).get('k')) {
+  /* 비상용 뒷문 — 서비스 운영자가 서버에서 꺼낸 대회 열쇠를 주소로 넣는다. 화면 어디에도 안내하지 않는다 */
+  cur = location.hash.slice(1); try { localStorage.setItem('hackon.okey.' + cur, new URLSearchParams(location.search).get('k')); } catch (_) {}
+  history.replaceState(null, '', location.pathname + location.hash); tab = 'board';
 }
 else if (new URLSearchParams(location.search).get('req')) { MAKE_REQ = new URLSearchParams(location.search).get('req'); tab = 'make'; history.replaceState(null, '', location.pathname); }
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
