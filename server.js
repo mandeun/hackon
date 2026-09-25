@@ -954,7 +954,7 @@ async function newsTick(db) {
   return { got: got.length, added };
 }
 function newsList(db, days = 9, job = '') {
-  return db.prepare("SELECT src, title, url, note, at, job, by FROM news WHERE at >= date('now', ?) AND (?='' OR job=?) ORDER BY at DESC, id DESC").all(`-${days} days`, job, job);
+  return db.prepare("SELECT id, src, title, url, note, at, job, by FROM news WHERE at >= date('now', ?) AND (?='' OR job=?) ORDER BY at DESC, id DESC").all(`-${days} days`, job, job);
 }
 /* 직무별 세팅 레시피 — 복붙하면 그대로 돌아가는 명령·설정. 편집자가 고른다(숫자·순위 없음). 제보·대회 결과로 갱신 */
 const SETUP = {

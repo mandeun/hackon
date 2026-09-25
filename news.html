@@ -39,7 +39,7 @@ main{max-width:720px;margin:0 auto;padding:10px 20px 60px}
 .it .s{flex:none;font-size:11.5px;font-weight:800;padding:4px 8px;border-radius:999px;background:var(--paper);color:var(--grey);white-space:nowrap;margin-top:2px}
 .it .s.hackon{background:var(--on);color:var(--ink)} .it .s.tip{background:#FFF3C4;color:#7A5A00} .it .s.paper{background:#EAF3EF;color:var(--moss)}
 .it .t{font-size:15.5px;font-weight:700;line-height:1.45;text-decoration:none;overflow-wrap:anywhere}
-.it .n{font-size:12.5px;color:var(--grey);margin-top:3px} .it .j{display:inline-block;font-size:11px;font-weight:800;color:var(--moss);margin-right:6px}
+.it .n{font-size:12.5px;color:var(--grey);margin-top:3px} .new{display:inline-block;background:var(--on);color:var(--ink);font-size:10.5px;font-weight:900;border-radius:6px;padding:2px 6px;margin-right:6px;vertical-align:middle} .pk{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--hair)} .pk:first-child{border-top:0} .pk b{font-size:22px;color:var(--moss);min-width:26px} .pk a{font-weight:800;text-decoration:none;font-size:15px} .pk small{display:block;color:var(--grey);font-size:12.5px;margin-top:2px} .it .j{display:inline-block;font-size:11px;font-weight:800;color:var(--moss);margin-right:6px}
 .empty{background:#fff;border:1px solid var(--hair);border-radius:14px;padding:22px;text-align:center;color:var(--grey);margin-top:12px}
 label{display:block;font-size:13px;font-weight:700;color:var(--grey);margin:10px 0 4px}
 input,select{width:100%;min-height:44px;border:1.5px solid var(--hair);border-radius:10px;padding:8px 12px;font:inherit;font-size:15px;background:#fff}
@@ -62,6 +62,8 @@ input,select{width:100%;min-height:44px;border:1.5px solid var(--hair);border-ra
 <main>
   <div class="jobs" id="jobs"></div>
   <div class="card" id="how" hidden><h2 id="how-t"></h2><div class="m">지금 이렇게 씁니다 — 편집자가 고른 것. 더 나은 방법을 알면 아래 «제보»로. 대회에서 나온 것이 여기에 붙습니다.</div><ul class="how" id="how-l"></ul></div>
+  <div class="card" id="fresh" hidden><h2 id="fresh-t"></h2><div class="m" id="fresh-m"></div></div>
+  <div class="card" id="picks" hidden><h2>오늘의 셋 <span class="m" style="font-weight:600">— 사람들이 가장 많이 반응한 것과 제보</span></h2><div id="picks-l"></div></div>
   <div id="list"><div class="empty">모으는 중…</div></div>
   <div class="card" id="tip">
     <h2>제보 — 이 직무에서 이거 써 보니 좋더라</h2>
@@ -96,19 +98,32 @@ const HOW = {
   const SRC = d.src || {}, JOBS = d.jobs || Object.keys(HOW), rows = d.rows || [];
   jobsEl.innerHTML = ['all', ...JOBS].map(k => `<button class="chip" data-k="${esc(k)}" aria-pressed="${k === cur}">${k === 'all' ? '전체' : esc(k)}</button>`).join('');
   jobsEl.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; cur = b.dataset.k; [...jobsEl.children].forEach(c => c.setAttribute('aria-pressed', c.dataset.k === cur)); history.replaceState(null, '', cur === 'all' ? '/news' : '/news?job=' + encodeURIComponent(cur)); draw(); };
+  /* 지난번 본 것 뒤로 새로 들어온 것 — 이 브라우저 기준(localStorage). 처음이면 오늘 것 */
+  let seen = 0; try { seen = +localStorage.getItem('hackon.news.seen') || 0; } catch (_) {}
+  const today = rows.length ? rows[0].at : '';
+  const isNew = r => seen ? r.id > seen : r.at === today;
+  const score = r => { const m = /(\d[\d,]*)/.exec(r.note || ''); return (r.src === 'tip' ? 100000 : r.src === 'hackon' ? 90000 : 0) + (m ? +m[1].replace(/,/g, '') : 0); };
   function draw() {
     const md = cur === 'all' ? '/news.md' : '/news.md?job=' + encodeURIComponent(cur);
+    const scope = rows.filter(r => cur === 'all' || r.job === cur || (cur !== 'all' && r.src === 'hackon'));
+    const fresh = scope.filter(isNew);
+    const fr = document.getElementById('fresh'); fr.hidden = !fresh.length;
+    if (fresh.length) { document.getElementById('fresh-t').textContent = (seen ? '지난번 뒤로 새로 들어온 것 ' : '오늘 들어온 것 ') + fresh.length + '개'; document.getElementById('fresh-m').textContent = '출처: ' + [...new Set(fresh.map(r => SRC[r.src] || r.src))].join(' · '); }
+    const picks = scope.slice().sort((a, b) => score(b) - score(a)).slice(0, 3);
+    const pk = document.getElementById('picks'); pk.hidden = picks.length < 3;
+    if (picks.length >= 3) document.getElementById('picks-l').innerHTML = picks.map((r, i) => `<div class="pk"><b>${i + 1}</b><div><a href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a><small>${esc(SRC[r.src] || r.src)}${r.job ? ' · ' + esc(r.job) : ''}${r.by ? ' · 제보 ' + esc(r.by) : ''}${r.note ? ' · ' + esc(r.note) : ''}</small></div></div>`).join('');
     document.getElementById('mdlink').href = md; document.getElementById('mdaddr').textContent = 'hackon.kr' + md;
     if (HOW[cur]) { how.hidden = false; document.getElementById('how-t').textContent = cur + ' — 지금 이렇게 쓴다'; document.getElementById('how-l').innerHTML = HOW[cur].map(([t, h, u]) => `<li><b>${esc(t)}</b> — ${esc(h)}${u && ok(u) ? ` · <a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${u.startsWith('/') ? '열기' : '깃허브'}</a>` : ''}</li>`).join(''); }
     else how.hidden = true;
-    const rs = rows.filter(r => cur === 'all' || r.job === cur || (cur !== 'all' && r.src === 'hackon'));
+    const rs = scope;
     if (!rs.length) { list.innerHTML = `<div class="empty">${cur === 'all' ? '아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.' : '이 직무로 분류된 소식이 아직 없습니다. 아래 «제보» 가 첫 줄이 됩니다.'}</div>`; return; }
     const by = {}; for (const r of rs) (by[r.at] = by[r.at] || []).push(r);
     list.innerHTML = Object.keys(by).map(day => `<div class="day"><h3>${esc(day)}</h3>${by[day].map(r => `<div class="it">
       <span class="s ${esc(r.src)}">${esc(SRC[r.src] || r.src)}</span>
-      <div>${r.job && cur === 'all' ? `<span class="j">${esc(r.job)}</span>` : ''}<a class="t" href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>${r.note || r.by ? `<div class="n">${r.by ? '제보 ' + esc(r.by) + (r.note ? ' · ' : '') : ''}${esc(r.note || '')}</div>` : ''}</div></div>`).join('')}</div>`).join('');
+      <div>${isNew(r) ? '<span class="new">NEW</span>' : ''}${r.job && cur === 'all' ? `<span class="j">${esc(r.job)}</span>` : ''}<a class="t" href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>${r.note || r.by ? `<div class="n">${r.by ? '제보 ' + esc(r.by) + (r.note ? ' · ' : '') : ''}${esc(r.note || '')}</div>` : ''}</div></div>`).join('')}</div>`).join('');
   }
   draw();
+  try { if (rows.length) localStorage.setItem('hackon.news.seen', String(Math.max(...rows.map(r => r.id || 0)))); } catch (_) {}
   /* 제보 — 로그인한 사람만 칸이 열린다 */
   const sel = document.getElementById('t-job'); sel.innerHTML = JOBS.map(j => `<option>${esc(j)}</option>`).join('');
   if (d.loggedIn) document.getElementById('tip-in').hidden = false; else document.getElementById('tip-login').hidden = false;
