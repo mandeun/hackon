@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>해커온뉴스 — 오늘 새로 뜬 AI 모델·논문·앱, 그리고 우승작</title>
+<meta name="description" content="hackon.kr 이 6시간마다 모으는 AI 새 소식. 제목과 주소만, 본문은 원문에서. 링크를 클로드에 붙이면 내 직무에 맞게 골라 줍니다.">
+<link rel="icon" href="/icon.svg">
+<style>
+:root{--ink:#0B1020;--on:#C8F53B;--mist:#AEB6C8;--paper:#F4F6F8;--moss:#1F6F5C;--grey:#5B6470;--hair:#E3E6EA;
+  --sans:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif;--mono:ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}[hidden]{display:none!important}
+html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--ink)}
+.top{background:var(--ink);color:#fff;padding:22px 20px 26px}
+.wrap{max-width:720px;margin:0 auto}
+.brand{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand a{color:#fff;text-decoration:none;font-weight:900;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+.brand i{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--on);box-shadow:0 0 0 4px rgba(200,245,59,.25)}
+.brand nav a{font-weight:600;font-size:14px;color:var(--mist);margin-left:14px}
+h1{font-size:clamp(26px,6vw,36px);font-weight:900;letter-spacing:-.04em;line-height:1.15;margin:22px 0 8px}
+h1 b{color:var(--on)}
+.lead{color:var(--mist);font-size:15px;line-height:1.6;margin:0}
+.paste{margin-top:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:12px 18px;border:0;border-radius:12px;background:var(--on);color:var(--ink);font-weight:900;font-size:15px;cursor:pointer;font-family:inherit;text-decoration:none}
+.btn.o{background:transparent;color:#fff;border:1.5px solid #3A4358}
+.hint{font-size:13px;color:var(--mist);flex-basis:100%}
+main{max-width:720px;margin:0 auto;padding:10px 20px 60px}
+.day{margin-top:22px}
+.day h2{font-size:14px;color:var(--grey);font-weight:700;letter-spacing:.04em;margin:0 0 8px;font-family:var(--mono)}
+.it{background:#fff;border:1px solid var(--hair);border-radius:14px;padding:12px 14px;margin:8px 0;display:flex;gap:12px;align-items:flex-start}
+.it .s{flex:none;font-size:11.5px;font-weight:800;padding:4px 8px;border-radius:999px;background:var(--paper);color:var(--grey);white-space:nowrap;margin-top:2px}
+.it .s.hackon{background:var(--on);color:var(--ink)}
+.it .s.paper{background:#EAF3EF;color:var(--moss)}
+.it .t{font-size:15.5px;font-weight:700;line-height:1.45;text-decoration:none;overflow-wrap:anywhere}
+.it .n{font-size:12.5px;color:var(--grey);margin-top:3px}
+.empty{background:#fff;border:1px solid var(--hair);border-radius:14px;padding:22px;text-align:center;color:var(--grey);margin-top:22px}
+.foot{margin-top:30px;font-size:13px;color:var(--grey);line-height:1.6}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin-top:18px}
+.chip{border:1.5px solid var(--hair);background:#fff;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;color:var(--grey)}
+.chip[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="top"><div class="wrap">
+  <div class="brand"><a href="/"><i></i>HACK:ON</a><nav><a href="/problems">문제 은행</a><a href="/app">대회 열기</a></nav></div>
+  <h1>해커온<b>뉴스</b></h1>
+  <p class="lead">6시간마다 새로 뜬 AI 모델·논문·앱·기사와 HACK:ON 우승작. 제목과 주소만 모읍니다 — 본문은 원문에서.</p>
+  <div class="paste">
+    <button class="btn" id="copy">클로드에 붙여넣기용 복사</button>
+    <a class="btn o" href="/news.md">텍스트로 보기</a>
+    <span class="hint">복사한 글을 클로드(또는 아무 AI)에 붙이고 «나는 ○○ 일을 한다»고 말하면, 내 직무에 쓸 것만 골라 «오늘 해 볼 것 3가지»로 정리해 줍니다. 주소 하나만 줘도 됩니다: <span style="font-family:var(--mono)">hackon.kr/news.md</span></span>
+  </div>
+</div></div>
+<main>
+  <div class="filters" id="filters"></div>
+  <div id="list"><div class="empty">모으는 중…</div></div>
+  <p class="foot">우승작은 끝난 대회의 1위 중 «쇼케이스 공개»에 동의한 팀만 실립니다. 기사·모델·논문은 제목과 주소만 가져오며 원문 저작권은 각 출처에 있습니다. 문의 hi@mandeun.com</p>
+</main>
+<script>
+(async () => {
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  const ok = u => /^https?:\/\//i.test(String(u || ''));
+  let d; try { d = await (await fetch('/api/news')).json(); } catch { d = { src: {}, rows: [] }; }
+  const SRC = d.src || {}; let rows = d.rows || []; let cur = 'all';
+  const fl = document.getElementById('filters'), list = document.getElementById('list');
+  const kinds = ['all', ...Object.keys(SRC).filter(k => rows.some(r => r.src === k))];
+  fl.innerHTML = kinds.map(k => `<button class="chip" data-k="${k}" aria-pressed="${k === cur}">${k === 'all' ? '전체' : esc(SRC[k] || k)}</button>`).join('');
+  fl.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; cur = b.dataset.k; [...fl.children].forEach(c => c.setAttribute('aria-pressed', c.dataset.k === cur)); draw(); };
+  function draw() {
+    const rs = rows.filter(r => cur === 'all' || r.src === cur);
+    if (!rs.length) { list.innerHTML = '<div class="empty">아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.</div>'; return; }
+    const by = {}; for (const r of rs) (by[r.at] = by[r.at] || []).push(r);
+    list.innerHTML = Object.keys(by).map(day => `<div class="day"><h2>${esc(day)}</h2>${by[day].map(r => `<div class="it">
+      <span class="s ${esc(r.src)}">${esc(SRC[r.src] || r.src)}</span>
+      <div><a class="t" href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}</div></div>`).join('')}</div>`).join('');
+  }
+  draw();
+  document.getElementById('copy').onclick = async () => {
+    try { const t = await (await fetch('/news.md')).text(); await navigator.clipboard.writeText(t); alert('복사했습니다. 클로드에 붙여넣고 «나는 ○○ 일을 한다»고 말하세요.'); }
+    catch { location.href = '/news.md'; }
+  };
+})();
+</script>
+</body>
+</html>

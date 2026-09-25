@@ -82,10 +82,13 @@ input::placeholder{color:#8a8a8a}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
 /* 표제. 한 문장과 단추 둘. 폰(390px)에서 접힘 위에 단추가 들어와야 한다. */
-.hero{padding:28px 0 10px}
-.hero .eyebrow{font-size:14px;font-weight:700;color:var(--ink);margin-bottom:10px}
+.hero{padding:34px 0 30px;background:var(--acc) url(/hero.jpg) center/cover no-repeat;color:#fff;position:relative}
+.hero::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,16,32,.92) 0%,rgba(11,16,32,.72) 55%,rgba(11,16,32,.35) 100%)}
+.hero .wrap{position:relative}
+.hero .btn{background:var(--on);color:var(--acc)} .hero .btn.o{background:transparent;color:#fff;border-color:rgba(255,255,255,.45)}
+.hero .eyebrow{font-size:14px;font-weight:700;color:var(--on);margin-bottom:10px}
 .hero h1{font-size:clamp(30px,7.2vw,46px);font-weight:850;letter-spacing:-.045em;line-height:1.12}
-.hero .lead{margin-top:14px;font-size:17px;color:var(--grey);line-height:1.6;text-wrap:pretty}
+.hero .lead{margin-top:14px;font-size:17px;color:#D5DAE6;line-height:1.6;text-wrap:pretty}
 .hero .cta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
 @media (max-width:640px){ .hero .cta{flex-direction:column;align-items:stretch} .hero .cta .btn{width:100%} }
 
@@ -174,6 +177,8 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <nav class="sec" aria-label="절">
       <a href="#list">대회 찾기</a>
       <a href="#give">협찬·돕기</a>
+      <a href="/problems">문제 은행</a>
+      <a href="/news">해커온뉴스</a>
       <a id="nav-manual" href="#">운영 매뉴얼</a>
     </nav>
     <nav class="tools" aria-label="도구">

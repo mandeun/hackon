@@ -545,10 +545,17 @@ function profile(db, pid) {
   const came = past.filter(r => r.came).length;
   const made = past.filter(r => r.made).length;
   const rt = db.prepare('SELECT skill, manner FROM ratings WHERE target=?').all(pid);
+  /* 수상 — 끝난 대회에서 순위 3 안. 순위는 board 가 매긴 것을 그대로 쓴다(여기서 다시 안 센다). */
+  let wins = 0;
+  for (const r of past) if (r.made) {
+    try { const b = board(db, r.event, true).rows.find(x => x.id === r.id); if (b && b.rank && b.rank <= 3) wins++; } catch {}
+  }
+  const skillAvg = rt.length ? rt.reduce((a, r) => a + r.skill, 0) / rt.length : 0;
+  const tier = rankOf(made, wins, skillAvg, rt.length);
 
   return {
     id: me.id, handle: me.handle, level: me.level,
-    events: past.length,
+    events: past.length, wins, tier,
     /* 완주 - 왔고 결과물을 냈나. 이게 이 사람의 실력에 대한 가장 단단한 증거다. */
     finished: made,
     finishRate: came ? Math.round(made / came * 1000) / 10 : 0,
@@ -561,6 +568,22 @@ function profile(db, pid) {
     history: rows.map(r => ({ title: r.title, ends: r.ends, team: r.name,
                               role: r.role, came: !!r.came, made: !!r.made })),
   };
+}
+
+/* 티어 5단계 — 캐글 progression(참가→기여→전문가→마스터→그랜드마스터)을 완주·수상·동료 실력으로 옮긴 것.
+   티어가 곧 이력이 되려면 «완주» 가 바탕이어야 한다. 앉아만 있다 간 사람은 새싹에 머문다. */
+const RANKS = [
+  { name: '새싹',   need: () => true },
+  { name: '브론즈', need: (m, w, s, n) => m >= 1 },
+  { name: '실버',   need: (m, w, s, n) => m >= 3 || (m >= 1 && w >= 1) },
+  { name: '골드',   need: (m, w, s, n) => m >= 5 && w >= 1 && (n < 3 || s >= 3.5) },
+  { name: '플래티넘', need: (m, w, s, n) => m >= 10 && w >= 3 && n >= 3 && s >= 4 },
+];
+const TIER_NEXT = ['완주 1번이면 브론즈', '완주 3번 또는 완주 1 + 수상 1이면 실버', '완주 5 + 수상 1이면 골드', '완주 10 + 수상 3 + 동료 실력 4 이상이면 플래티넘', '가장 높은 단계입니다'];
+function rankOf(made, wins, skill, n) {
+  let i = 0;
+  for (let k = 0; k < RANKS.length; k++) if (RANKS[k].need(made, wins, skill, n)) i = k;
+  return { name: RANKS[i].name, level: i, next: TIER_NEXT[i] };
 }
 
 /** 이 대회(주최자)의 평판. 참가자가 남긴 평가에서 나온다. */
@@ -820,6 +843,50 @@ async function ghProfile(db, login) {
   } catch {}
   if (data.ok) db.prepare('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)').run(k, JSON.stringify({ at: Date.now(), data }));
   return data;
+}
+
+/* ── 해커온뉴스 — 제목·주소만 모은다(저작권: 본문 없음). 실패한 출처는 건너뛰고 나머지는 산다. ── */
+const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ai: 'AI타임스', hackon: 'HACK:ON 우승작' };
+async function newsTick(db) {
+  const got = [];
+  const j = async u => { const r = await fetch(u, { headers: { 'user-agent': 'hackon.kr', accept: 'application/json' }, signal: AbortSignal.timeout(8000) }); return r.ok ? r.json() : null; };
+  try { for (const m of (await j('https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=8')) || [])
+    got.push({ src: 'hf', title: m.id, url: 'https://huggingface.co/' + m.id, note: `♥ ${m.likes || 0}` }); } catch {}
+  try { for (const p of (await j('https://huggingface.co/api/daily_papers?limit=8')) || []) if (p.paper && p.paper.title)
+    got.push({ src: 'paper', title: p.paper.title, url: 'https://huggingface.co/papers/' + p.paper.id, note: `▲ ${p.paper.upvotes || 0}` }); } catch {}
+  try { for (const sp of (await j('https://huggingface.co/api/spaces?sort=trendingScore&direction=-1&limit=5')) || [])
+    got.push({ src: 'space', title: sp.id, url: 'https://huggingface.co/spaces/' + sp.id, note: `♥ ${sp.likes || 0}` }); } catch {}
+  try {
+    const x = await (await fetch('https://www.aitimes.com/rss/allArticle.xml', { signal: AbortSignal.timeout(8000) })).text();
+    const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim();
+    let m, n = 0; const re = /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<link>([\s\S]*?)<\/link>/g;
+    while ((m = re.exec(x)) && n++ < 12) { const u = de(m[2]); if (/^https?:\/\//.test(u)) got.push({ src: 'ai', title: de(m[1]).slice(0, 140), url: u, note: '' }); }
+  } catch {}
+  /* 우리 우승작 — 끝난 대회의 1위, 쇼케이스에 동의(show)한 팀만. */
+  try {
+    for (const e of db.prepare("SELECT id, title FROM events WHERE listed=1 AND ends < date('now') ORDER BY ends DESC LIMIT 20").all()) {
+      const top = board(db, e.id, true).rows.find(r => r.rank === 1 && r.url && r.show);
+      if (top) got.push({ src: 'hackon', title: `${e.title} — 1위 ${top.name}`, url: top.url, note: top.note || '' });
+    }
+  } catch {}
+  const ins = db.prepare('INSERT OR IGNORE INTO news(src,key,title,url,note) VALUES(?,?,?,?,?)');
+  let added = 0;
+  for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 160), g.url.slice(0, 500), String(g.note).slice(0, 200)).changes);
+  db.prepare("DELETE FROM news WHERE at < date('now','-30 days')").run();
+  return { got: got.length, added };
+}
+function newsList(db, days = 9) {
+  return db.prepare("SELECT src, title, url, note, at FROM news WHERE at >= date('now', ?) ORDER BY at DESC, id DESC").all(`-${days} days`);
+}
+/* 클로드에 붙여넣는 마크다운. 첫 줄이 «직무에 맞게 골라 달라» 는 지시라 링크만 복붙해도 된다. */
+function newsMd(db) {
+  const rows = newsList(db);
+  const by = {}; for (const r of rows) (by[r.at] = by[r.at] || []).push(r);
+  let out = `# 해커온뉴스 — hackon.kr/news (${today()})\n\n` +
+    `> 아래는 최근 9일 동안 새로 뜬 AI 모델·논문·앱·기사와 HACK:ON 우승작의 제목과 주소입니다.\n` +
+    `> 내 직무를 말하면, 이 중에서 내 일에 바로 쓸 수 있는 것만 골라 «오늘 해 볼 것 3가지» 로 정리해 주세요. 본문은 주소를 열어 확인하세요.\n\n`;
+  for (const d of Object.keys(by)) { out += `## ${d}\n`; for (const r of by[d]) out += `- [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}${r.note ? ' · ' + r.note : ''}\n`; out += '\n'; }
+  return out;
 }
 
 /* 팀에 딸린 표를 이름으로 찾는다 — 스키마가 늘어도 휴지통이 반쪽이 안 되게. */
@@ -1369,7 +1436,15 @@ function open(file) {
       at     TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(token, event)
     )`);
-  try { db.exec("ALTER TABLE votes ADD COLUMN note TEXT NOT NULL DEFAULT ''"); } catch {}      // 별점 옆 한 줄
+  try { db.exec("ALTER TABLE votes ADD COLUMN note TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 문제 은행 — 대회 없이 «풀었습니다» 하고 보낸 결과. 연락처는 낸 사람(의뢰자)만 본다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS solutions(
+    id INTEGER PRIMARY KEY, request TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '', contact TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  /* 해커온뉴스 — 6시간마다 밖에서 제목·주소만 모은다(본문은 안 가져온다). key 가 주소라 같은 글은 한 번만. */
+  db.exec(`CREATE TABLE IF NOT EXISTS news(
+    id INTEGER PRIMARY KEY, src TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);      // 별점 옆 한 줄
   /* 이 표가 생기기 전에 띄운 공지(events.notice)를 한 번 옮겨 둔다 — 안 그러면 큰 화면엔 공지가 있는데
      공개 페이지 «소식»은 비어 «있는 것을 없음으로» 그린다. 시각은 notice_at 그대로 */
   for (const r of db.prepare("SELECT id, notice, notice_at FROM events WHERE notice<>'' AND id NOT IN (SELECT event FROM notices)").all())
@@ -2399,7 +2474,20 @@ function requestsOf(db, event, admin = false) {
 }
 /* 후보 — 아직 어느 대회에도 안 붙은 요청. 운영자가 «이 대회 주제로» 가져간다. 올라온 순 */
 function openRequests(db) {
-  return db.prepare("SELECT * FROM requests WHERE event='' AND status='open' ORDER BY created, id LIMIT 50").all().map(publicRequest);
+  return db.prepare("SELECT * FROM requests WHERE event='' AND status='open' ORDER BY created, id LIMIT 50").all()
+    .map(r => ({ ...publicRequest(r), solutions: db.prepare('SELECT COUNT(*) c FROM solutions WHERE request=?').get(r.id).c }));
+}
+/* 대회 없이 푼 결과. 백준처럼 «문제 → 풀이» 만 있고 점수는 없다 — 판정은 낸 사람이 «이거면 됩니다» 로. */
+function addSolution(db, request, b) {
+  const r = db.prepare('SELECT id, status FROM requests WHERE id=?').get(request);
+  if (!r) throw new HttpError(404, '없는 문제입니다');
+  if (r.status !== 'open') throw new HttpError(409, '닫힌 문제입니다');
+  const name = plain(b.name, 40), url = String(b.url || '').trim(), note = plain(b.note, 200), contact = plain(b.contact, 80);
+  if (!name) throw new HttpError(400, '이름을 넣어 주세요');
+  if (!/^https?:\/\//i.test(url) || url.length > 500) throw new HttpError(400, 'https:// 로 시작하는 주소를 넣어 주세요');
+  if (db.prepare('SELECT COUNT(*) c FROM solutions WHERE request=?').get(request).c >= 50) throw new HttpError(409, '풀이가 가득 찼습니다');
+  const id = Number(db.prepare('INSERT INTO solutions(request,name,url,note,contact) VALUES(?,?,?,?,?)').run(request, name, url, note, contact).lastInsertRowid);
+  return { id, request, name, url, note };
 }
 function canReceive(db, id, rkey) {
   const r = db.prepare('SELECT rkey FROM requests WHERE id=?').get(id);
@@ -2418,6 +2506,7 @@ function requestView(db, id) {
   const vd = {}; for (const v of db.prepare('SELECT team, ok, note, at FROM verdicts WHERE request=?').all(id)) vd[v.team] = v;
   return {
     request: publicRequest(r), followup: r.followup, followupAt: r.followup_at,
+    solutions: db.prepare('SELECT id,name,url,note,contact,at FROM solutions WHERE request=? ORDER BY id').all(id),
     event: e ? { id: e.id, title: e.title, starts: e.starts, ends: e.ends, due: e.due, closed: isClosed } : null,
     teams: teams.map(t => ({
       id: t.id, name: t.name, note: t.note || '',
@@ -3696,6 +3785,10 @@ function routes(db) {
           return json(res, 200, { rkey: nk });
         }
         /* ── 받는 사람(후원자·의뢰자) ── */
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/solutions$/)) && req.method === 'POST')
+          return json(res, 201, addSolution(db, m[1], await body(req)));   // 문제 은행 — 대회 없이 «풀었습니다»
+        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, rows: newsList(db) });
+        if (p === '/news.md' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' }); return res.end(newsMd(db)); }
         if (p === '/api/requests' && req.method === 'POST')
           return json(res, 201, addRequest(db, await body(req)));          // 누구나 — 열쇠는 여기서 딱 한 번
         if (p === '/api/requests' && req.method === 'GET')
@@ -3914,7 +4007,7 @@ function routes(db) {
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
-               || p === '/ask' || p.match(/^\/r\/[a-z0-9]+$/)
+               || p === '/ask' || p === '/problems' || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
 
       /* 화면 파일은 /e/<id> 같은 깊은 주소에서도 그대로 나간다. 그 안의 <script src="qr.js">
@@ -3924,7 +4017,7 @@ function routes(db) {
 
       /* #region reuse:static — 경로 탈출 방지 + MIME + 스트림. 그대로 복사해 쓴다 */
       const f = path.join(ROOT,
-        p === '/' ? 'home.html' : pub ? 'hack-on.html' : decodeURIComponent(rel));
+        p === '/' ? 'home.html' : p === '/news' ? 'news.html' : pub ? 'hack-on.html' : decodeURIComponent(rel));
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
       if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) throw new HttpError(404, '없습니다');
       res.writeHead(200, { 'content-type': MIME[path.extname(f)] || 'application/octet-stream' });
@@ -5121,6 +5214,22 @@ function selftest() {
     ok(visitsOf(db, 999).length === 1 && visitsOf(db, -5).length === 1, '며칠치인지는 1~90 로 막는다');
 
   }
+  /* 티어 — 완주가 바탕. 앉아만 있으면 새싹, 완주 하나면 브론즈, 수상이 있어야 실버가 빨라진다 */
+  ok(rankOf(0, 0, 0, 0).name === '새싹' && rankOf(1, 0, 0, 0).name === '브론즈', '티어 새싹·브론즈');
+  ok(rankOf(1, 1, 0, 0).name === '실버' && rankOf(3, 0, 0, 0).name === '실버', '티어 실버 두 길');
+  ok(rankOf(5, 1, 3, 5).name === '실버' && rankOf(5, 1, 3.6, 5).name === '골드' && rankOf(5, 1, 0, 0).name === '골드', '티어 골드는 동료 실력 3.5 (평가 3건 미만이면 안 봄)');
+  ok(rankOf(10, 3, 4.2, 3).name === '플래티넘' && rankOf(10, 3, 4.2, 2).name === '골드', '티어 플래티넘은 평가 3건 이상');
+  /* 문제 은행 — 대회 없이 풀이를 남기고, 낸 사람만 연락처를 본다 */
+  {
+    const rq = addRequest(db, { kind: 'requester', name: '문구점 박', pain: '재고 세기', contact: 'p@x.test' });
+    const sol = addSolution(db, rq.id, { name: '풀이 김', url: 'https://k.example/inv', note: '엑셀 대신', contact: 'k@x.test' });
+    ok(sol.id > 0 && openRequests(db).find(r => r.id === rq.id).solutions === 1, '풀이가 열린 문제에 세어진다');
+    ok(requestView(db, rq.id).solutions[0].contact === 'k@x.test', '받는 화면엔 풀이 연락처가 있다');
+    let bad = false; try { addSolution(db, rq.id, { name: '', url: 'https://x' }); } catch { bad = true; } ok(bad, '이름 없는 풀이는 거절');
+    bad = false; try { addSolution(db, rq.id, { name: 'x', url: 'javascript:alert(1)' }); } catch { bad = true; } ok(bad, 'https 아닌 풀이 주소는 거절');
+    ok(!JSON.stringify(openRequests(db)).includes('k@x.test'), '공개 목록엔 풀이 연락처가 없다');
+  }
+  ok(newsMd(db).startsWith('# 해커온뉴스'), '뉴스 마크다운 머리');
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
@@ -5143,6 +5252,9 @@ if (require.main === module) {
   const tick = () => { try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); } };
   tick();
   setInterval(tick, 10 * 60 * 1000).unref();
+  /* 해커온뉴스 — 켜지고 15초 뒤 한 번, 그 뒤 6시간마다. 밖이 죽어도 앱은 산다. */
+  setTimeout(() => newsTick(db).catch(() => {}), 15000).unref();
+  setInterval(() => newsTick(db).catch(() => {}), 6 * 60 * 60 * 1000).unref();
   /* 한 시간마다 D-3·D-1 리마인더. 발송 열쇠가 없으면 아예 안 돈다 — 장부에 «건너뜀»이 매시간 쌓이지 않게. */
   if (RESEND_KEY) {
     const mailTick = () => { try { for (const mm of [...remindDue(db), ...doneDue(db)]) void sendMail(db, mm); } catch (e) { console.error('리마인더 실패', e.message); } };
