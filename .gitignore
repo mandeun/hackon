@@ -5,3 +5,5 @@ node_modules/
 *.db-shm
 작업로그.md
 __pycache__/
+.env
+.env.*
