@@ -2349,7 +2349,7 @@ function assign(db, event, b) {
 const NEED_KINDS = ['venue', 'cash', 'judge', 'prize', 'mentor', 'snack', 'other'];
 const PLEDGE_STATUS = ['pending', 'ok', 'done', 'no'];
 /* 꺾쇠는 저장 전에 뺀다. JSON 응답을 화면이 그대로 그려도 돌지 않게 - esc 를 잊어도 안전하다 */
-const plain = (s, n) => String(s == null ? '' : s).replace(/[<>]/g, '').trim().slice(0, n);
+const plain = (s, n) => String(s == null || (typeof s === 'object') ? '' : s)   /* 객체·배열은 빈 값 — «[object Object]» 가 제목이 되지 않게(감사 2) */.replace(/[<>]/g, '').trim().slice(0, n);
 
 function addNeed(db, event, b) {
   const label = plain(b.label, 100);
