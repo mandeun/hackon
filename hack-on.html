@@ -2472,7 +2472,7 @@ const SCREEN = {
          ${ended ? `<p class="meta" id="ended-line" style="margin:12px 0 0"><b>끝난 대회입니다.</b> <a href="/e/${esc(e.id)}/report">결과 보고서 보기</a></p>`
                  : `<div class="gsteps" id="how3" style="margin:12px 0 0"><span class="on">① 신청</span><span class="sep">→</span><span>② 그날 와서 만들기</span><span class="sep">→</span><span>③ 제출</span></div>`}
       </section>
-      ${(e.sponsors || []).length ? `<div class="card" id="spon-top" style="padding:14px 16px"><div class="meta" style="margin-bottom:6px">함께하는 곳</div>${logoBand(e.sponsors)}</div>` : ''}
+      ${(e.sponsors || []).length ? `<div class="card" id="spon-top" style="padding:14px 16px"><div class="meta" style="margin-bottom:6px">함께한 곳</div>${logoBand(e.sponsors)}</div>` : ''}
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
       ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
         <div class="meta">운영자 공지가 시각과 함께 남습니다. 메일·문자는 안 보내니 이 페이지를 열어 두세요.</div>
