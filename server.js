@@ -968,11 +968,13 @@ function newsMd(db, job = '') {
 
 /* ── MCP — 카카오 PlayMCP·클로드에서 «hackon 대회 열어 줘» 가 되게. JSON-RPC 2.0 over HTTP, 읽기 셋 + 문제 올리기 하나.
    쓰기 도구는 문제 올리기뿐(누구나 /ask 에서 하는 것과 같다). 대회 열기는 로그인이 필요해 웹으로 보낸다. */
+/* PlayMCP 심사 요건(개발가이드 §2): annotations 5개 전부, 영문 설명에 서비스명 «HACK:ON(해커온)», 도구 3~10개, 이름에 kakao 금지 */
+const ann = (title, ro) => ({ title, readOnlyHint: ro, destructiveHint: false, openWorldHint: false, idempotentHint: ro });
 const MCP_TOOLS = [
-  { name: 'list_hackathons', description: '지금 열려 있는 HACK:ON 대회 목록(제목·날짜·주최·남은 자리·주소)', inputSchema: { type: 'object', properties: {} } },
-  { name: 'list_problems', description: '문제 은행 — 가게·모임이 올린 «풀어 달라는 문제» 목록', inputSchema: { type: 'object', properties: {} } },
-  { name: 'post_problem', description: '문제 올리기. name(가게·별명), pain(뭐가 번거로운지), done(«됐다»의 기준), contact(연락처, 만드는 팀만 봄)', inputSchema: { type: 'object', properties: { name: { type: 'string' }, pain: { type: 'string' }, done: { type: 'string' }, contact: { type: 'string' } }, required: ['name', 'pain', 'contact'] } },
-  { name: 'news', description: '해커온뉴스 — 최근 새로 뜬 AI 모델·논문·도구·기사. job 으로 직무 필터(마케팅·기획·디자인·개발·영업·CS·데이터·소상공인)', inputSchema: { type: 'object', properties: { job: { type: 'string' } } } },
+  { name: 'list_hackathons', description: 'Lists open one-day hackathons on HACK:ON(해커온): title, date, host, seats left, page URL. 지금 열려 있는 대회 목록', inputSchema: { type: 'object', properties: {} }, annotations: ann('열린 대회 목록', true) },
+  { name: 'list_problems', description: 'Lists problems posted by local shops and groups on HACK:ON(해커온) problem bank — things they want built. 문제 은행 목록', inputSchema: { type: 'object', properties: {} }, annotations: ann('문제 은행', true) },
+  { name: 'post_problem', description: 'Posts a new problem to the HACK:ON(해커온) problem bank. name = shop or nickname, pain = what is tedious, done = what counts as solved, contact = email or phone (shown only to builders). 문제 올리기', inputSchema: { type: 'object', properties: { name: { type: 'string' }, pain: { type: 'string' }, done: { type: 'string' }, contact: { type: 'string' } }, required: ['name', 'pain', 'contact'] }, annotations: ann('문제 올리기', false) },
+  { name: 'news', description: 'Returns HACK:ON(해커온) news — recent AI models, papers, tools, articles and hackathon winners as Markdown; optional job filter: 마케팅, 기획, 디자인, 개발, 영업·CS, 데이터, 소상공인. 해커온뉴스', inputSchema: { type: 'object', properties: { job: { type: 'string' } } }, annotations: ann('해커온뉴스', true) },
 ];
 function mcpCall(db, msg) {
   const id = msg.id ?? null, m = msg.method || '';
@@ -5370,7 +5372,7 @@ function selftest() {
     const tip = addTip(db, 'own1', '제보 김', { job: '마케팅', title: '카피 초안 도구', url: 'https://t.example/1' });
     ok(tip.job === '마케팅' && newsList(db, 9, '마케팅').some(r => r.src === 'tip' && r.by === '제보 김'), '제보가 직무 태그로 실린다');
     let dup = false; try { addTip(db, 'own1', '제보 김', { title: 'x', url: 'https://t.example/1' }); } catch { dup = true; } ok(dup, '같은 주소 제보는 거절');
-    const m1 = mcpCall(db, { jsonrpc: '2.0', id: 1, method: 'tools/list' }); ok(m1.result.tools.length === 4, 'MCP 도구 넷');
+    const m1 = mcpCall(db, { jsonrpc: '2.0', id: 1, method: 'tools/list' }); ok(m1.result.tools.length === 4 && m1.result.tools.every(t => t.annotations && 'readOnlyHint' in t.annotations && /HACK:ON/.test(t.description) && !/kakao/i.test(t.name)), 'MCP 도구 넷 — PlayMCP 요건(annotations·서비스명·이름)');
     const m2 = mcpCall(db, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_problems' } }); ok(/문구점 박/.test(m2.result.content[0].text), 'MCP 문제 은행');
     const m3 = mcpCall(db, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'post_problem', arguments: { name: 'MCP 가게', pain: '장부', contact: 'm@x.test' } } }); ok(/\/r\/[a-z0-9]+\?k=/.test(m3.result.content[0].text), 'MCP 로 문제 올리기 → 받는 링크');
     ok(mcpCall(db, { jsonrpc: '2.0', id: 4, method: 'nope' }).error.code === -32601 && mcpCall(db, { method: 'notifications/initialized' }) === null, 'MCP 오류·알림');
