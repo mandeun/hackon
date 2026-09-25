@@ -1933,8 +1933,8 @@ const SCREEN = {
     /* 운영자 board 에는 심사·투표 열쇠가 딸려 온다. 적어 두면 링크·창 열기가 늘 된다. */
     if (e.jkey) try { localStorage.setItem('hackon.jkey.' + cur, e.jkey); } catch (_) {}
     if (e.vkey) try { localStorage.setItem('hackon.vkey.' + cur, e.vkey); } catch (_) {}
-    const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
-    const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : DEMO.ledger;
+    const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : (DEMO.needs || []);
+    const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : (DEMO.ledger || []);
     /* 운영자 열쇠가 있을 때만 연락처가 붙은 명단을 받는다. 없으면 빈 배열. */
     const pledgeInfo = {};
     (LIVE ? await api(`/events/${cur}/pledges`).catch(() => []) : (DEMO.pledges || [])).forEach(p => { pledgeInfo[p.id] = p; });
@@ -2415,8 +2415,8 @@ const SCREEN = {
     PUB_SPONSORS = e.sponsors || [];
     const rec = LIVE ? await api(`/events/${cur}/record`).catch(() => null) : null;
     const hrep = LIVE ? await api(`/events/${cur}/rep`).catch(() => null) : null;
-    const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : DEMO.needs;
-    const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : DEMO.ledger;
+    const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : (DEMO.needs || []);
+    const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : (DEMO.ledger || []);
     const notes = LIVE ? await api(`/events/${cur}/notices`).catch(() => []) : [];
     const reqs = LIVE ? await api(`/events/${cur}/requests`).catch(() => []) : [];
     const qas = LIVE ? await api(`/events/${cur}/questions`).catch(() => []) : [];
