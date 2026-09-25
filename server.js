@@ -997,6 +997,19 @@ function open(file) {
   try { db.exec('ALTER TABLE teams ADD COLUMN no INTEGER NOT NULL DEFAULT 0'); } catch {}
   db.exec('UPDATE teams SET no = (SELECT COUNT(*) FROM teams t2 WHERE t2.event = teams.event AND t2.id <= teams.id) WHERE no = 0');
   try { db.exec('ALTER TABLE events ADD COLUMN ranked INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* 2026-09-26 짝 비교 심사(Gavel·HackMIT 의 pairwise 를 하루짜리 규모로 줄인 것).
+     pmode — 점수 슬라이더 대신 «두 팀 중 나은 쪽»만 고르게 한다. 처음 심사하는 사람은 60점과 70점을
+     가를 근거가 없지만 «둘 중 어느 쪽»은 고를 수 있다. 순위는 승률로 매긴다. */
+  try { db.exec('ALTER TABLE events ADD COLUMN pmode INTEGER NOT NULL DEFAULT 0'); } catch {}
+  db.exec(`CREATE TABLE IF NOT EXISTS pairs(
+      id     INTEGER PRIMARY KEY,
+      event  TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      judge  TEXT NOT NULL,
+      a      INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      b      INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      winner INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      at     TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(event, judge, a, b))`);
   try { db.exec("ALTER TABLE pledges ADD COLUMN pkey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE offers ADD COLUMN pkey TEXT NOT NULL DEFAULT ''"); } catch {}
   db.exec(`CREATE TABLE IF NOT EXISTS surveys(
@@ -1719,6 +1732,65 @@ function score(db, team, b) {
       .run(team, b.judge, (b.good || '').slice(0, 500), (b.next || '').slice(0, 500));
 }
 
+/* ── 짝 비교 심사 ──
+   «두 팀 중 어느 쪽이 나은가» 만 묻는다. 점수를 매기는 것보다 사람이 잘하는 일이고,
+   심사위원마다 후하고 짠 차이가 애초에 생기지 않는다(Gavel·HackMIT).
+   쌍은 작은 id 를 a 로 맞춰 저장한다 — (3,7)과 (7,3)은 같은 쌍이다. */
+function pairTeams(db, event) {
+  /* 제출한 팀만 비교한다. 안 낸 팀을 비교표에 올리면 나머지 팀이 공짜 승리를 얻는다. */
+  return db.prepare(`SELECT t.id, t.name, t.no, s.url, s.note, s.aiuse, s.aidrop
+                     FROM teams t JOIN submissions s ON s.team = t.id
+                     WHERE t.event = ? AND s.url <> '' ORDER BY t.id`).all(event);
+}
+/** 이 심사위원이 다음에 볼 두 팀. 없으면 done. 비교가 적은 팀부터 올린다. */
+function nextPair(db, event, judge) {
+  const teams = pairTeams(db, event);
+  if (teams.length < 2) return null;
+  const seen = {};   // 팀별 비교 횟수 — 심사위원 전체 것으로 센다(한 팀만 계속 나오는 것을 막는다)
+  for (const t of teams) seen[t.id] = db.prepare('SELECT COUNT(*) c FROM pairs WHERE event=? AND (a=? OR b=?)')
+    .get(event, t.id, t.id).c;
+  const mine = new Set(db.prepare('SELECT a, b FROM pairs WHERE event=? AND judge=?').all(event, judge)
+    .map(r => r.a + ':' + r.b));
+  const order = [...teams].sort((x, y) => seen[x.id] - seen[y.id] || x.id - y.id);
+  for (let i = 0; i < order.length; i++)
+    for (let j = i + 1; j < order.length; j++) {
+      const a = Math.min(order[i].id, order[j].id), b = Math.max(order[i].id, order[j].id);
+      if (!mine.has(a + ':' + b)) return [order[i], order[j]];
+    }
+  return null;   // 이 심사위원은 가능한 쌍을 다 봤다
+}
+/** 심사위원이 보는 짝 비교 화면. 마감 전 링크 감추기는 judgeView 와 같은 규칙이다. */
+function pairView(db, event, judge, admin = false) {
+  const e = getEvent(db, event);
+  if (!judge) throw new HttpError(400, '심사위원 이름이 필요합니다');
+  const hideUrl = !admin && !closed(e);
+  const n = db.prepare('SELECT COUNT(*) c FROM pairs WHERE event=? AND judge=?').get(event, judge).c;
+  const head = { event: { id: e.id, title: e.title, rubric: e.rubric, due: e.due,
+                          starts: e.starts, ends: e.ends, pmode: !!e.pmode },
+                 n, teams: pairTeams(db, event).length };
+  const pr = nextPair(db, event, judge);
+  if (!pr) return { ...head, done: true };
+  const clean = t => ({ ...t, url: hideUrl ? '' : t.url });
+  return { ...head, done: false, a: clean(pr[0]), b: clean(pr[1]) };
+}
+/** 고른 것을 저장한다. 같은 심사위원이 같은 쌍을 다시 고르면 덮어쓴다. */
+function savePair(db, event, b) {
+  const judge = plain(b.judge, 40);
+  if (!judge) throw new HttpError(400, '심사위원 이름이 필요합니다');
+  const x = +b.a, y = +b.b, w = +b.winner;
+  if (!x || !y || x === y) throw new HttpError(400, '서로 다른 두 팀이 필요합니다');
+  if (w !== x && w !== y) throw new HttpError(400, '두 팀 중 하나를 골라 주세요');
+  for (const id of [x, y]) {
+    const t = db.prepare('SELECT event FROM teams WHERE id=?').get(id);
+    if (!t || t.event !== event) throw new HttpError(404, '이 대회의 팀이 아닙니다');
+  }
+  const lo = Math.min(x, y), hi = Math.max(x, y);
+  db.prepare(`INSERT INTO pairs(event,judge,a,b,winner) VALUES(?,?,?,?,?)
+              ON CONFLICT(event,judge,a,b) DO UPDATE SET winner=excluded.winner, at=datetime('now')`)
+    .run(event, judge, lo, hi, w);
+  return { ok: true, n: db.prepare('SELECT COUNT(*) c FROM pairs WHERE event=? AND judge=?').get(event, judge).c };
+}
+
 /** 순위 — 항목별 가중 평균. 심사위원 수가 달라도 평균이라 흔들리지 않는다. */
 /** 제출 마감이 지났나. 마감을 안 정했으면 대회 마지막 날을 기준으로 본다.
     이 하나가 '무엇을 보여 줄지' 를 거의 다 정한다. */
@@ -1786,7 +1858,11 @@ function board(db, event, admin = false) {
     const v = db.prepare('SELECT AVG(score) a, COUNT(*) c FROM votes WHERE team=?').get(t.id);
     /* no — 자리 번호(신청 순). 과학전람회식 심사에서 심사위원이 찾아가는 번호이자 큰 화면·팀 화면이 같이 쓴다.
        팀이 지워지면 뒤 번호가 당겨진다 — 그래서 대회 당일 아침 이후로는 팀을 지우지 말라고 매뉴얼에 적는다. */
+    /* 짝 비교. 이긴 횟수 / 비교 횟수. 한 번도 안 비교된 팀은 «모름»이라 null 이다 — 0% 로 그리면 꼴찌가 된다. */
+    const pn = db.prepare('SELECT COUNT(*) c FROM pairs WHERE event=? AND (a=? OR b=?)').get(event, t.id, t.id).c;
+    const pw = db.prepare('SELECT COUNT(*) c FROM pairs WHERE event=? AND winner=?').get(event, t.id).c;
     const row = { ...t, no: t.no || ti + 1, score: Math.round(total * 10) / 10, rscore, judges: judged.size,
+                  pairs: pn, wins: pn ? pw : null, pscore: pn ? Math.round(pw / pn * 1000) / 10 : null,
                   vote: v.c ? Math.round((v.a || 0) * 10) / 10 : 0, votes: v.c,
                   words, by: [...judged].sort(), done: !!t.url };
     /* 마감 전에는 제출 링크를 안 내려보낸다.
@@ -1800,8 +1876,10 @@ function board(db, event, admin = false) {
                   delete row.show_at; }
     return row;
   });
-  /* 관객 평가 모드면 표 평균으로 줄 세운다. 아니면 심사 점수로. */
+  /* 관객 평가 모드면 표 평균으로, 짝 비교 모드면 승률로 줄 세운다. 아니면 심사 점수로.
+     승률이 «모름»(비교 0)인 팀은 뒤로 보낸다 — 0% 로 쳐서 꼴찌를 만들지 않고, 줄 세울 근거가 없어 뒤에 둔다. */
   rows.sort((a, b) => e.vmode ? (b.vote - a.vote) || (b.votes - a.votes)
+                    : e.pmode ? ((b.pscore ?? -1) - (a.pscore ?? -1)) || (b.pairs - a.pairs) || (b.score - a.score)
                     : e.ranked ? (b.rscore - a.rscore) || (b.score - a.score) : b.score - a.score);
   rows.forEach((r, i) => { r.rank = i + 1; });
   e.admin = admin;   // 화면이 운영 칸을 그릴지 말지 이걸로 정한다
@@ -1811,7 +1889,8 @@ function board(db, event, admin = false) {
                              WHERE t.event = ? ORDER BY s.judge`).all(event).map(r => r.judge);
   /* 마감 전에는 점수도 안 준다. 심사 중에 순위가 보이면 심사위원이 그걸 보고 맞춘다.
      Kaggle 이 public/private 리더보드를 나눈 것과 같은 이유다. */
-  if (!admin && !closed(e)) for (const r of rows) { r.score = null; r.rscore = null; r.rank = null; r.vote = null; r.votes = null; }
+  if (!admin && !closed(e)) for (const r of rows) { r.score = null; r.rscore = null; r.rank = null; r.vote = null; r.votes = null;
+                                                    r.pscore = null; r.wins = null; }
   /* 관객·참가팀이 별점 옆에 남긴 한 줄. 마감 뒤에만, 누가 썼는지는 없다 */
   if (closed(e)) for (const r of rows)
     r.words_public = db.prepare("SELECT note FROM votes WHERE team=? AND note<>'' ORDER BY at").all(r.id).map(x => x.note);
@@ -1901,7 +1980,8 @@ function tv(db, event) {
                            LEFT JOIN submissions s ON s.team = t.id
                            WHERE t.event = ? ORDER BY t.id`).all(event);
   const b = board(db, event, false);
-  const judged = b.rows.some(r => r.judges > 0);
+  /* 짝 비교 대회에는 점수가 아예 없다 — 비교 한 건이라도 있으면 «심사가 시작됐다»로 본다 */
+  const judged = b.rows.some(r => r.judges > 0 || r.pairs > 0);
   return {
     title: e.title, host: e.host, due: e.due, plan: e.plan,
     starts: e.starts, ends: e.ends,
@@ -1917,7 +1997,8 @@ function tv(db, event) {
     /* 순위는 마감이 지나고 심사가 시작된 뒤에만 벽에 띄운다.
        그 전에 띄우면 심사위원이 보고 점수를 맞추고, 참가자는 압박만 받는다. */
     ranks: (judged && closed(e))
-      ? b.rows.slice(0, 5).map(r => ({ rank: r.rank, name: r.name, score: e.ranked ? r.rscore : r.score })) : [],
+      ? b.rows.slice(0, 5).map(r => ({ rank: r.rank, name: r.name,
+          score: e.pmode ? r.pscore : e.ranked ? r.rscore : r.score })) : [],
     /* 자리 번호 — 마감 뒤 심사 시간에 벽에 띄운다. 심사위원이 «몇 번 테이블»로 찾아간다 */
     seats: closed(e) ? rows.map((r, i) => ({ no: r.no || i + 1, name: r.name })) : [],
     crew: crew(db, event),
@@ -1955,7 +2036,7 @@ function judgeView(db, event, judge, admin = false) {
   teams.sort((a, b) => (a.doneByMe ? 1 : 0) - (b.doneByMe ? 1 : 0));
   return {
     event: { id: e.id, title: e.title, rubric: e.rubric, due: e.due,
-             starts: e.starts, ends: e.ends },
+             starts: e.starts, ends: e.ends, pmode: !!e.pmode },
     teams,
     /* 첫 팀은 옆 심사위원과 같이 채점하라는 안내를 화면이 띄우는 근거 — 아직 아무 점수도 없을 때만 */
     first: !db.prepare('SELECT 1 FROM scores s JOIN teams t ON t.id = s.team WHERE t.event = ? LIMIT 1').get(event),
@@ -2135,6 +2216,8 @@ function dump(db, event) {
     teams,
     submissions: db.prepare(`SELECT * FROM submissions WHERE team IN ${inIds}`).all(),
     scores: db.prepare(`SELECT * FROM scores WHERE team IN ${inIds}`).all(),
+    /* 2026-09-26 — 짝 비교 기록. 이게 빠지면 pmode 대회는 되살려도 순위가 통째로 없다 */
+    pairs: db.prepare('SELECT * FROM pairs WHERE event=? ORDER BY id').all(event),
     reviews: db.prepare(`SELECT * FROM reviews WHERE team IN ${inIds}`).all(),
     sponsors: db.prepare('SELECT * FROM sponsors WHERE event=?').all(event),
     outcomes: db.prepare('SELECT * FROM outcomes WHERE event=?').all(event),
@@ -2180,6 +2263,8 @@ function restoreEvent(db, d, owner) {
   for (const x of d.reviews || []) if (tmap[x.team]) ins('reviews', { ...x, team: tmap[x.team] });
   for (const x of d.assignments || []) if (tmap[x.team]) ins('assignments', { ...x, team: tmap[x.team] });
   for (const x of d.votes || []) if (tmap[x.team]) ins('votes', { ...x, team: tmap[x.team] });
+  for (const x of d.pairs || []) if (tmap[x.a] && tmap[x.b] && tmap[x.winner])
+    ins('pairs', { ...x, a: tmap[x.a], b: tmap[x.b], winner: tmap[x.winner] });
   for (const x of d.pledges || []) if (nmap[x.need]) ins('pledges', { ...x, need: nmap[x.need] });
   for (const x of d.offers || []) ins('offers', x);
   for (const x of d.notices || []) ins('notices', x);
@@ -2714,6 +2799,26 @@ function routes(db) {
           if (was !== on) db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1],
             on ? '순위 산정을 심사위원별 등수 보정으로 바꿨습니다' : '순위 산정을 점수 평균으로 되돌렸습니다');
           return json(res, 200, { ranked: !!on });
+        }
+        /* 짝 비교 켜고 끄기 — 마감 뒤엔 vmode·ranked 와 같은 이유로 못 바꾼다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/pmode$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);
+          if (closed(getEvent(db, m[1]))) throw new HttpError(409, '제출 마감이 지나 순위가 공개됐습니다. 심사 방식은 더 못 바꿉니다');
+          const on = (await body(req)).on ? 1 : 0;
+          const was = db.prepare('SELECT pmode FROM events WHERE id=?').get(m[1]).pmode;
+          db.prepare('UPDATE events SET pmode=? WHERE id=?').run(on, m[1]);
+          if (was !== on) db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1],
+            on ? '심사를 짝 비교로 바꿨습니다 — 두 팀 중 나은 쪽을 고릅니다' : '심사를 점수 매기기로 되돌렸습니다');
+          return json(res, 200, { pmode: !!on });
+        }
+        /* 짝 비교 — 다음 두 팀을 받고, 고른 것을 보낸다. 점수 넣기와 같은 자격(심사 열쇠)이다. */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/pair$/))) {
+          if (!canJudge(db, m[1], key, owner, jkey))
+            throw new HttpError(403, '심사 열쇠가 필요합니다');
+          if (req.method === 'GET')
+            return json(res, 200, pairView(db, m[1], q.judge || '', isAdmin(db, m[1], key, owner)));
+          if (req.method === 'POST')
+            return json(res, 200, savePair(db, m[1], await body(req)));
         }
         if (p === '/api/find' && req.method === 'GET')
           return json(res, 200, findHelp(q.size));
@@ -4449,6 +4554,71 @@ function selftest() {
     const ics = icsOf(getEvent(db, qe.id), 'https://x.test');
     ok(ics.includes('DTSTART;VALUE=DATE:20990101') && ics.includes('DTEND;VALUE=DATE:20990102') && !ics.includes('+09:00'), '종일 일정은 날짜만 — 시간대 없음');
     ok(csvOf(db, fx.id).split('\n')[0].includes('연락처') && !csvOf(db, fx.id, false).includes('연락처'), '«연락 빼고» CSV 에는 연락처 열이 없다');
+  }
+  /* ── 2026-09-26 짝 비교 심사 — 승률로 줄 세우기 · 같은 쌍 덮어쓰기 · 비교 0 은 모름 ── */
+  {
+    const pe = createEvent(db, { title: '짝비교', starts: today(), ends: today() });
+    const p1 = joinTeam(db, pe.id, { name: '하나', agree: true });
+    const p2 = joinTeam(db, pe.id, { name: '둘', agree: true });
+    const p3 = joinTeam(db, pe.id, { name: '셋', agree: true });
+    ok(nextPair(db, pe.id, '심사갑') === null, '제출한 팀이 없으면 비교할 쌍도 없다');
+    for (const t of [p1, p2, p3]) submit(db, t, { url: 'https://example.com/' + t });
+    db.prepare('UPDATE events SET pmode=1 WHERE id=?').run(pe.id);
+    ok(getEvent(db, pe.id).pmode === 1, 'pmode 칸이 있다');
+    /* 처음 주는 쌍은 아직 아무도 안 본 두 팀이다 */
+    const first = nextPair(db, pe.id, '심사갑');
+    ok(first && first.length === 2 && first[0].id !== first[1].id, '아직 안 본 두 팀을 골라 준다');
+    /* 심사위원 둘이 세 쌍을 다 본다. 신청 순서를 뒤집어 «셋 > 둘 > 하나» 가 되게 고른다 —
+       팀 id 순으로 그냥 늘어놓아도 맞는 순서면 정렬을 지웠을 때 검사가 안 터진다 */
+    const pick = (j, x, y, w) => savePair(db, pe.id, { judge: j, a: x, b: y, winner: w });
+    for (const j of ['심사갑', '심사을']) {
+      pick(j, p1, p2, p2); pick(j, p1, p3, p3); pick(j, p2, p3, p3);
+    }
+    ok(nextPair(db, pe.id, '심사갑') === null, '가능한 쌍을 다 보면 더 줄 쌍이 없다');
+    ok(pairView(db, pe.id, '심사갑', true).done === true, '다 본 심사위원에게는 done 을 준다');
+    ok(pairView(db, pe.id, '심사갑', true).n === 3, '이 심사위원이 한 비교 수를 센다');
+    let pb = board(db, pe.id, true).rows;
+    ok(pb.map(r => r.name).join() === '셋,둘,하나', '승률 순으로 줄 세운다 (신청 순과 반대다)');
+    ok(pb[0].pscore === 100 && pb[0].wins === 4 && pb[0].pairs === 4, '전승 팀은 승률 100');
+    ok(pb[2].pscore === 0, '전패 팀은 승률 0 — 비교를 했으니 0 은 모름이 아니다');
+    /* 같은 심사위원이 같은 쌍을 다시 고르면 덮어쓴다. 비교 수는 안 늘고 이긴 쪽만 바뀐다 */
+    pick('심사갑', p2, p1, p1);            // 순서를 뒤집어 다시 골라도 같은 쌍이다
+    pb = board(db, pe.id, true).rows;
+    ok(pb.find(r => r.id === p1).pairs === 4, '같은 쌍을 다시 골라도 비교 수는 안 늘어난다');
+    ok(pb.find(r => r.id === p1).wins === 1 && pb.find(r => r.id === p2).wins === 1,
+       '같은 심사위원·같은 쌍은 덮어쓴다 — 이긴 쪽만 옮겨간다');
+    /* 한 번도 비교 안 된 팀은 승률이 «모름»(null)이다. 0 으로 그리면 꼴찌가 된다 */
+    const p4 = joinTeam(db, pe.id, { name: '넷', agree: true });
+    submit(db, p4, { url: 'https://example.com/4' });
+    const r4 = board(db, pe.id, true).rows.find(r => r.id === p4);
+    ok(r4.pscore === null && r4.wins === null && r4.pairs === 0, '비교가 없는 팀의 승률은 0 이 아니라 모름');
+    ok(board(db, pe.id, true).rows[3].id === p4, '모름인 팀은 맨 뒤에 둔다 — 0% 로 쳐서 꼴찌로 만들지 않는다');
+    /* 새 팀이 들어오면 비교가 적은 쪽부터 다시 올린다 */
+    const nx = nextPair(db, pe.id, '심사병');
+    ok(nx && (nx[0].id === p4 || nx[1].id === p4), '비교 횟수가 적은 팀을 먼저 올린다');
+    /* 손님에게는 마감 전 승률·승수를 안 준다 — score 와 같은 규칙 */
+    const guest = board(db, pe.id, false).rows[0];
+    ok(guest.pscore === null && guest.wins === null && guest.score === null, '마감 전 손님에게 승률이 안 샌다');
+    /* 큰 화면 순위는 pmode 면 승률을 쓴다 */
+    editEvent(db, pe.id, { due: '2020-01-01T00:00' });
+    const tvr = tv(db, pe.id).ranks;
+    ok(tvr.length === 4 && tvr[0].score === board(db, pe.id, true).rows[0].pscore,
+       '큰 화면 순위가 pmode 면 점수가 아니라 승률을 쓴다');
+    /* 고르는 값 검사 — 같은 팀 둘, 쌍 밖의 우승자, 이름 없음 */
+    let pc = 0; try { savePair(db, pe.id, { judge: '심사갑', a: p1, b: p1, winner: p1 }); } catch (e) { pc = e.code; }
+    ok(pc === 400, '같은 팀 둘은 비교가 아니다');
+    pc = 0; try { savePair(db, pe.id, { judge: '심사갑', a: p1, b: p2, winner: p3 }); } catch (e) { pc = e.code; }
+    ok(pc === 400, '두 팀 중 하나가 아니면 못 고른다');
+    pc = 0; try { savePair(db, pe.id, { judge: '', a: p1, b: p2, winner: p1 }); } catch (e) { pc = e.code; }
+    ok(pc === 400, '이름 없이는 못 고른다');
+    /* 사본에 짝 비교가 담기고, 되살리면 그대로 살아난다 */
+    const pd = dump(db, pe.id);
+    ok(pd.pairs.length === 6, '사본에 짝 비교 기록이 담긴다');
+    const was = board(db, pe.id, true).rows.map(r => `${r.name}:${r.pscore}`).join();
+    db.prepare('DELETE FROM events WHERE id=?').run(pe.id);
+    const back = restoreEvent(db, pd, pe.owner);
+    ok(board(db, back.id, true).rows.map(r => `${r.name}:${r.pscore}`).join() === was,
+       '되살린 대회의 승률 순위가 그대로다 (' + was + ')');
   }
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });

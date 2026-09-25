@@ -1975,31 +1975,36 @@ const SCREEN = {
         /* 심사 대안 카드. 기본은 심사(아무것도 안 누르면 그대로). 관객 평가·참가팀 상호평가로 막판에 바꿀 수 있고,
            마감 뒤에는 순위가 공개된 뒤라 못 바꾼다(서버 409). 점수가 있으면 바꾸기 전에 묻는다. */
         const J = judgeState(e, d, needs);
-        const on = !!e.vmode, peer = !!e.vpeer;
+        const on = !!e.vmode, peer = !!e.vpeer, pon = !on && !!e.pmode;
         const title = on ? (peer ? '🤝 참가팀 상호평가 켜짐' : '⭐ 관객 평가 켜짐')
+                    : pon ? '🔀 짝 비교 켜짐'
                     : J.urgent ? '대회 날짜가 됐는데 심사 점수가 아직 없어요' : '심사위원을 못 구하셨나요';
         const stateLine = J.state.startsWith('yes') ? `심사위원 <b>${J.state.slice(4)}명</b> 구함`
                         : J.state === 'no' ? '심사위원 <b>아직 없음</b>'
                         : `심사위원 구하셨나요? <button class="btn sec sm" data-judged="yes">네</button> <button class="btn sec sm" data-judged="no">아직</button>`;
-        return `<div class="card" id="jcard" style="${on || J.urgent ? 'border-color:#AECFB8;background:var(--ok-l)' : ''}">
+        return `<div class="card" id="jcard" style="${on || pon || J.urgent ? 'border-color:#AECFB8;background:var(--ok-l)' : ''}">
         <h3>${title}</h3>
         <div class="meta">${on
           ? (peer ? '참가팀이 서로 별점을 줍니다. 자기 팀은 못 찍고 팀당 한 표입니다. 순위는 별점 평균입니다.'
                   : '심사위원 대신 관객·참가자가 폰으로 별점을 줍니다. 순위는 별점 평균으로 매겨집니다.')
+          : pon ? '심사위원이 두 팀 중 나은 쪽만 고릅니다. 처음 심사하는 분에게 맞습니다.'
           : '기본은 심사위원 점수입니다. 심사위원 자리가 비면 관객 평가나 참가팀 상호평가로 돌릴 수 있습니다. 제출 마감 전까지 되돌릴 수 있습니다.'}</div>
-        ${on ? '' : `<div class="meta" style="margin-top:6px">${stateLine}${J.jseats ? ` · 확인된 심사 자리 ${J.jseats}` : (needs.some(n => n.kind === 'judge') ? '' : ' · 심사 자리를 올리지 않으셨어요')}${J.need ? ` · 참가 ${J.teams}팀이면 <b>${J.need}명</b>이면 됩니다` : ''}</div>`}
+        ${on || pon ? '' : `<div class="meta" style="margin-top:6px">${stateLine}${J.jseats ? ` · 확인된 심사 자리 ${J.jseats}` : (needs.some(n => n.kind === 'judge') ? '' : ' · 심사 자리를 올리지 않으셨어요')}${J.need ? ` · 참가 ${J.teams}팀이면 <b>${J.need}명</b>이면 됩니다` : ''}</div>`}
         ${(!on && J.state.startsWith('yes') && J.dleft !== null && J.dleft >= 0 && J.dleft <= 7) ? `<div class="meta" style="margin-top:6px">행사 주입니다. 심사위원에게 <button class="btn sec sm" id="jb-confirm" data-title="${esc(e.title)}" data-starts="${esc(e.starts)}">확인 부탁 글 복사</button> — 예비 심사위원 한두 분도 이때 잡아 두세요.</div>` : ''}
         ${js.length ? `<div class="meta" style="margin-top:6px">심사위원 ${js.length}명의 점수가 있습니다${on ? ' (점수는 남아 있습니다)' : ''}. <button class="btn sec sm" id="b-progress">심사 진행 알리기</button> <span class="meta">— «n/m 팀 봤습니다»가 소식에 뜹니다.</span></div>` : ''}
-        ${(!on) ? `<div class="meta" style="margin-top:6px" id="rank-row">${e.ranked ? '<b>순위 보정 켜짐</b> — 심사위원마다 등수로 셉니다.' : '순위는 점수 평균입니다.' + (sp.warn ? ' <span class="late">심사 눈높이 차이가 큽니다 — 순위 보정을 켜 보세요.</span>' : '')}
+        ${(!on && !pon) ? `<div class="meta" style="margin-top:6px" id="rank-row">${e.ranked ? '<b>순위 보정 켜짐</b> — 심사위원마다 등수로 셉니다.' : '순위는 점수 평균입니다.' + (sp.warn ? ' <span class="late">심사 눈높이 차이가 큽니다 — 순위 보정을 켜 보세요.</span>' : '')}
           ${d.closed ? '' : ` <button class="btn sec sm" id="b-ranked" data-on="${e.ranked ? 0 : 1}">${e.ranked ? '점수 평균으로 되돌리기' : '순위로 보정 켜기'}</button>`}</div>` : ''}
         ${(() => { const tv = (d.rows || []).reduce((a, r) => a + (+r.votes || 0), 0), n = (d.rows || []).length;
             return on && n && tv > n * (n + 3) ? `<div class="meta late" style="margin-top:6px">표가 ${tv}장 — 참가 ${n}팀 규모치고 많습니다. 발표 전에 현장 인원과 견주어 보세요.</div>` : ''; })()}
         <div style="height:10px"></div>
         ${d.closed ? '<span class="pill">마감이 지나 평가 방식은 더 못 바꿉니다</span>'
           : on ? `<button class="btn sec sm" id="b-vmode" data-on="0" data-judges="${js.length}">심사 점수로 되돌리기</button>`
+          : pon ? `<button class="btn sec sm" id="b-pmode" data-on="0">점수 매기기로 되돌리기</button>`
           : `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="b-vmode" data-on="1" data-judges="${js.length}">관객 평가 켜기</button>
-             <button class="btn sec sm" id="b-vpeer" data-judges="${js.length}">참가팀 상호평가로</button></div>
-             <div class="meta" style="margin-top:6px">관객 평가는 현장에, 상호평가는 온라인·소규모에 맞습니다.</div>`}
+             <button class="btn sec sm" id="b-vpeer" data-judges="${js.length}">참가팀 상호평가로</button>
+             <button class="btn sec sm" id="b-pmode" data-on="1">짝 비교로</button></div>
+             <div class="meta" style="margin-top:6px">관객 평가는 현장에, 상호평가는 온라인·소규모에 맞습니다.</div>
+             <div class="meta" style="margin-top:4px">짝 비교는 심사가 처음인 분에게 맞습니다.</div>`}
         ${on ? `<div style="margin-top:12px">
           <div class="meta"><b>투표 링크</b> — ${peer ? '참가팀에게 보내세요. 신청한 브라우저에서만 열립니다.' : '큰 화면에 띄우거나 QR 을 보여 주세요. 열쇠가 들어 있습니다.'}</div>
           ${linkBox(`${shareBase()}/v/${e.id}${!peer && e.vkey ? '?k=' + e.vkey : ''}`, 'vlink', 'b-copyv',
@@ -2152,11 +2157,11 @@ const SCREEN = {
       <details${mine ? ' open' : ''}><summary>참가 신청
         <span class="when">${mine ? '조금만 더' : d.rows.length ? '대신 넣어 줄 때' : '아직 아무도 없습니다'}</span>
         </summary><div class="in">${mine ? moreForm(mine) : applyForm()}</div></details>
-      <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객' : '점수'}</th><th class="n">${e.vmode ? '표' : '심사'}</th><th></th></tr>
+      <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객' : e.pmode ? '승률' : '점수'}</th><th class="n">${e.vmode ? '표' : e.pmode ? '비교' : '심사'}</th><th></th></tr>
       ${d.rows.map(r => `<tr data-team="${r.id ?? ''}" style="cursor:pointer"><td>${r.rank}</td>
         <td>${r.featured ? '⭐ ' : ''}${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
-        <td class="n">${e.vmode ? (r.votes ? r.vote + '★' : '—') : r.score}</td>
-        <td class="n">${e.vmode ? (r.votes || 0) + '표' : r.judges + '명'}</td>
+        <td class="n">${e.vmode ? (r.votes ? r.vote + '★' : '—') : e.pmode ? (r.pscore === null ? '—' : r.pscore + '%') : r.score}</td>
+        <td class="n">${e.vmode ? (r.votes || 0) + '표' : e.pmode ? (r.pairs || 0) + '번' : r.judges + '명'}</td>
         <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
           title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
           <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button></td></tr>`).join('')}</table>
@@ -2308,11 +2313,13 @@ const SCREEN = {
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
       </div>` : ''}
 
-      ${d.closed ? `<h3>순위${e.vmode ? ' <span class="pill">관객 평가</span>' : ''}</h3>
-        ${e.vmode ? '<p class="sub">심사위원 대신 관객·참가자가 준 별점 평균으로 매겼습니다.</p>' : ''}
-        <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객 평가' : '점수'}</th></tr>
+      ${d.closed ? `<h3>순위${e.vmode ? ' <span class="pill">관객 평가</span>' : e.pmode ? ' <span class="pill">짝 비교</span>' : ''}</h3>
+        ${e.vmode ? '<p class="sub">심사위원 대신 관객·참가자가 준 별점 평균으로 매겼습니다.</p>'
+          : e.pmode ? '<p class="sub">심사위원이 두 팀씩 견주어 고른 승률입니다.</p>' : ''}
+        <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객 평가' : e.pmode ? '승률' : '점수'}</th></tr>
         ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${r.featured ? '⭐ ' : ''}${esc(r.name)}</td>
-          <td class="n">${e.vmode ? (r.votes ? r.vote + '★ (' + r.votes + ')' : '—') : r.score}</td></tr>`).join('')}</table>`
+          <td class="n">${e.vmode ? (r.votes ? r.vote + '★ (' + r.votes + ')' : '—')
+            : e.pmode ? (r.pscore === null ? '—' : r.pscore + '% (' + r.pairs + '번)') : r.score}</td></tr>`).join('')}</table>`
       : d.rows.length ? `<h3>참가한 팀 <span style="color:var(--ink3);font-weight:600">${d.rows.length}</span></h3>
         <p class="sub">순위와 점수는 <b>제출 마감 뒤</b>에 함께 공개됩니다.</p>
         <table><tr><th>팀</th><th class="n">제출</th></tr>
@@ -2646,6 +2653,41 @@ const SCREEN = {
       <div class="jbar"><div class="grow"><i style="width:${
         d.teams.length ? Math.round(done / d.teams.length * 100) : 0}%"></i></div>
         <button class="btn sec sm" id="j-all">${jAll ? '심사로 돌아가기' : '전체 비교'}</button></div>`;
+
+    /* 짝 비교 모드 — 점수 슬라이더 대신 두 팀 중 나은 쪽만 고른다.
+       처음 심사하는 분은 60점과 70점을 가를 근거가 없다. «둘 중 어느 쪽»은 고를 수 있다. */
+    if (d.event.pmode) {
+      const pv = await api(`/events/${cur}/pair?judge=${encodeURIComponent(who)}`);
+      const rub = `<details style="margin-top:14px"><summary>심사 기준 보기</summary><div class="in">
+        ${d.event.rubric.map(r => `<label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>${hintLine(r)}`).join('')}
+        <div class="meta">고를 때 참고만 하세요. 점수는 안 매깁니다.</div></div></details>`;
+      const phead = `<p class="sub"><span id="pair-n">${esc(who)} 님 · ${pv.n}번 비교했습니다</span>
+        <button class="btn sec sm" id="jn-out" style="margin-left:6px">이름 바꾸기</button></p>`;
+      if (pv.done) return `<h2>${esc(pv.event.title)}</h2>${phead}
+        <div class="card"><h3>다 봤습니다. 고맙습니다.</h3>
+        <div class="meta">${pv.teams < 2 ? '아직 비교할 팀이 모자랍니다.' : '더 볼 쌍이 없습니다. 창을 닫으셔도 됩니다.'}</div></div>${rub}`;
+      const pcard = (t, id) => `<div class="card" id="${id}" style="margin:0;flex:1;min-width:0">
+        <h3 style="margin:0 0 4px">${esc(t.name)}</h3>
+        <div class="meta">자리 ${t.no}</div>
+        ${t.note ? `<div class="meta" style="margin-top:6px;font-size:14px">${esc(t.note)}</div>` : ''}
+        ${t.url ? `<div style="margin-top:8px"><a class="btn sec sm"
+             href="${esc(/^https?:\/\//i.test(t.url) ? t.url : '#')}"
+             target="_blank" rel="noopener noreferrer">결과물 열기</a></div>`
+          : '<div class="meta" style="margin-top:6px">링크는 마감 뒤에 열립니다.</div>'}
+        ${t.aiuse ? `<div class="meta" style="margin-top:8px"><b>AI 를 쓴 곳</b> ${esc(t.aiuse)}</div>` : ''}
+      </div>`;
+      return `<h2>${esc(pv.event.title)}</h2>${phead}
+        <p class="sub">두 팀 중 나은 쪽을 고르세요. 점수는 안 매깁니다.</p>
+        <div style="display:flex;gap:8px;align-items:stretch">
+          ${pcard(pv.a, 'pair-a')}${pcard(pv.b, 'pair-b')}</div>
+        <div class="shrow" style="margin-top:10px">
+          <button class="btn" id="pair-pick-a" style="flex:1"
+            data-pa="${pv.a.id}" data-pb="${pv.b.id}" data-pw="${pv.a.id}">왼쪽이 낫다</button>
+          <button class="btn" id="pair-pick-b" style="flex:1"
+            data-pa="${pv.a.id}" data-pb="${pv.b.id}" data-pw="${pv.b.id}">오른쪽이 낫다</button>
+        </div>
+        <p class="sub" style="margin-top:8px">고르면 다음 쌍이 뜹니다. 되돌아갈 필요는 없습니다.</p>${rub}`;
+    }
 
     /* 전체 비교 - 앞 팀에 90점을 줬는데 뒤에 더 잘한 팀이 나오면 앞을 고쳐야 한다.
        그 길이 없으면 심사위원은 처음부터 점수를 짜게 준다. */
@@ -3583,6 +3625,16 @@ function wire() {
   };
   const bvmode = $('#b-vmode');
   if (bvmode) bvmode.onclick = () => switchVote(+bvmode.dataset.on, 0, +bvmode.dataset.judges || 0);
+  /* 짝 비교 켜고 끄기. 마감 뒤에는 서버가 409 로 막는다 */
+  const bpmode = $('#b-pmode');
+  if (bpmode) bpmode.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    try {
+      await api(`/events/${cur}/pmode`, { method: 'POST', body: { on: +bpmode.dataset.on } });
+      flash(+bpmode.dataset.on ? '짝 비교를 켰습니다. 심사 링크는 그대로 쓰시면 됩니다' : '점수 매기기로 되돌렸습니다');
+      render();
+    } catch (e) { flash(e.message, true); }
+  };
   const bvpeer = $('#b-vpeer');
   if (bvpeer) bvpeer.onclick = () => switchVote(1, 1, +bvpeer.dataset.judges || 0);
   const jbaud = $('#jb-aud');
@@ -3857,6 +3909,16 @@ function wire() {
     jTeam = d.teams[(i + 1) % d.teams.length].id;
     render();
   };
+  /* 짝 비교 — 고르면 바로 저장하고 다음 쌍을 그린다 */
+  document.querySelectorAll('#pair-pick-a, #pair-pick-b').forEach(btn => btn.onclick = async () => {
+    try {
+      const r = await api(`/events/${cur}/pair`, { method: 'POST', body: {
+        judge: localStorage.getItem('hackon.judge'),
+        a: +btn.dataset.pa, b: +btn.dataset.pb, winner: +btn.dataset.pw } });
+      flash(`${r.n}번째 비교를 저장했습니다`);
+      render();
+    } catch (e) { flash(e.message, true); }
+  });
   const jall = $('#j-all');
   if (jall) jall.onclick = () => { jAll = !jAll; render(); };
   document.querySelectorAll('[data-jgo]').forEach(r => r.onclick = () => {
