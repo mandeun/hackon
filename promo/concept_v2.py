@@ -53,7 +53,7 @@ html,body{{margin:0;background:#0B1020;color:#fff;{FONT};width:540px;height:960p
 img{{width:280px;filter:brightness(0) invert(1);opacity:0;transform:scale(.85);animation:pop .4s .1s forwards}}
 .u{{font-size:60px;font-weight:900;letter-spacing:2px;margin-top:22px;opacity:0;animation:up .35s .35s forwards}}
 .h{{font-size:27px;font-weight:700;color:#AEB6C8;margin-top:14px;line-height:1.4;opacity:0;animation:up .35s .55s forwards}}
-.btn{{margin-top:26px;background:#2350F5;border-radius:12px;padding:16px 30px;font-size:28px;font-weight:900;opacity:0;animation:up .35s .8s forwards}}
+.btn{{margin-top:26px;background:#C8F53B;color:#0B1020;border-radius:12px;padding:16px 30px;font-size:28px;font-weight:900;opacity:0;animation:up .35s .8s forwards}}
 .ex{{position:absolute;left:0;right:0;bottom:290px;font-size:17px;color:#AEB6C8}}
 @keyframes up{{to{{opacity:1;transform:translateY(0)}}from{{transform:translateY(14px)}}}}
 @keyframes pop{{to{{opacity:1;transform:scale(1)}}}}
@@ -147,8 +147,8 @@ CAPS = [("cap03", "<b class='on'>이름 하나</b>면 열립니다", 60), ("cap0
 CAP = """<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:transparent}
  .w{width:1080px;height:340px;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse 72%% 62%% at 50%% 50%%,rgba(12,15,23,.88) 0%%,rgba(12,15,23,.6) 55%%,rgba(12,15,23,0) 100%%)}
  .t{%s;font-weight:800;font-size:%dpx;letter-spacing:3px;color:rgb(250,248,244);text-shadow:0 6px 18px rgba(0,0,0,.6);text-align:center;line-height:1.34;padding:0 58px}
- .t b{font-weight:900} .t b.on{color:#7FA0FF}
- .bar{position:absolute;left:50%%;transform:translateX(-50%%);top:74px;width:54px;height:5px;border-radius:3px;background:#2350F5}
+ .t b{font-weight:900} .t b.on{color:#C8F53B}
+ .bar{position:absolute;left:50%%;transform:translateX(-50%%);top:74px;width:54px;height:5px;border-radius:3px;background:#C8F53B}
 </style><div class="w"><div class="bar"></div><div class="t">%s</div></div>"""
 BUG = f"""<!doctype html><meta charset="utf-8"><style>html,body{{margin:0;background:transparent}}
  .b{{display:inline-flex;align-items:center;gap:10px;padding:10px 18px;border-radius:999px;background:rgba(12,15,23,.78)}}
