@@ -2730,7 +2730,7 @@ const SCREEN = {
       <div class="card"><h3>${esc(ev.title)}</h3>
         <div class="meta">${esc(ev.host)} 주최 · ${esc(ev.starts)}${ev.due ? ' · 제출 마감 ' + esc(ev.due.replace('T', ' ')) : ''} · <a href="/e/${esc(ev.id)}">대회 페이지</a></div>
         <div class="meta" style="margin-top:6px">참가 <b>${ev.teams}</b>팀${ev.closed ? ` · 완주 <b>${ev.finished}</b>팀${ev.finishRate !== null ? ' · 완주율 <b>' + ev.finishRate + '%</b>' : ''}` : ''}</div></div>
-      <div class="card"><h3>받으시는 것</h3><div class="meta">${esc(RECEIVE[g.kind] || RECEIVE.other)}</div></div>
+      <div class="card"><h3>받으시는 것</h3>${getsBox(g.kind)}</div>
       ${(g.status === 'ok' || g.status === 'done') && ev.pay ? `<div class="card" id="pay-line"><h3>입금 안내</h3><div class="meta">${esc(ev.pay)}</div><div class="meta" style="margin-top:6px">앱은 돈을 만지지 않습니다. 주최자에게 직접 — 모인 돈이 상금·간식이 됩니다.</div></div>` : ''}
       ${!ev.closed ? `<div class="card"><h3>결과물은 마감 뒤에</h3><div class="meta">마감이 지나면 상위 셋과 결과 보고서 주소가 열립니다.</div></div>`
       : `<div class="card"><h3>완주 상위 셋</h3>
