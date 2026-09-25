@@ -121,6 +121,7 @@ const PLAN_RULE = {
   judge: 30,     // 심사 합의
   award: 20,     // 시상·마무리
   lunch: 60,
+  check: 15,     // 팀 짜기 뒤 «계획 1분 발표» — 초반 체크포인트가 완주를 올린다(Nolte, CSCW 2020)
 };
 
 const hhmm = m => String(Math.floor(m / 60) % 24).padStart(2, '0') + ':'
@@ -155,11 +156,14 @@ function draftPlan(start, end, teams, kind) {
   rows.push({ at: hhmm(t), what: '등록 · 아이스브레이킹' });   t += R.open;
   rows.push({ at: hhmm(t), what: '주제 안내 · 아이디어 발표' }); t += R.idea;
   rows.push({ at: hhmm(t), what: '팀 짜기' });                 t += R.team;
+  /* 초반 필수 체크포인트 — 팀마다 «무엇을 만들지» 1분씩. 아이디어를 초반에 잡아 주면 완주율이 오른다(Nolte, 뉴커머 멘토링 CSCW 2020) */
+  rows.push({ at: hhmm(t), what: '계획 1분 발표 · 멘토 점검' }); t += R.check;
 
   /* 12시를 지나면 점심을 넣는다. 안 넣으면 그 시간에 절반이 사라진다. */
-  if (t <= 12 * 60 && z - tail > 13 * 60) {
-    rows.push({ at: hhmm(12 * 60), what: '점심' });
-    t = 13 * 60;
+  if (t <= 12 * 60 + 30 && z - tail > 13 * 60) {   /* 12시 반까지 만들기가 못 시작하면 점심부터 — 아침 순서가 12시를 살짝 넘겨도 */
+    const lunchAt = Math.max(12 * 60, t);
+    rows.push({ at: hhmm(lunchAt), what: '점심' });
+    t = lunchAt + R.lunch;
   }
   const buildStart = t, buildEnd = z - tail;
   rows.push({ at: hhmm(buildStart), what: '만들기' });

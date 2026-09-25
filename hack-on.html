@@ -2560,6 +2560,10 @@ const SCREEN = {
       ${(cw.solo.length || cw.looking.length) ? `<div class="card">
         <h3>같이 할 사람 찾기</h3>
         <div class="meta"><b>당일 팀 짜는 시간에 얼굴 보며 정합니다.</b> 혼자 오셔도 팀이 생깁니다.</div>
+        ${(() => { /* 역할 균형 한 줄 — 배정은 안 한다(알고리즘 배정만 하면 불만·재배정 혼란, 시빅 해커톤 실측). 부족한 역할만 짚는다 */
+          const c = { 만들기: 0, 기획: 0, 디자인: 0 }; cw.solo.forEach(r => { if (c[r.role] !== undefined) c[r.role]++; });
+          const lack = Object.keys(c).filter(k => !c[k]);
+          return cw.solo.length >= 2 ? `<div class="meta" style="margin-top:6px">혼자 오신 분 — 만들기 ${c.만들기} · 기획 ${c.기획} · 디자인 ${c.디자인}${lack.length ? `. <b>${lack.join('·')}</b>을 맡을 분이 오면 팀이 고르게 됩니다.` : '. 세 역할이 다 있습니다.'}</div>` : ''; })()}
         ${cw.solo.length ? `<div style="margin-top:14px">
           <b style="font-size:14px">혼자 오시는 분 ${cw.solo.length}명</b>
           <table>${cw.solo.map(r => `<tr>
