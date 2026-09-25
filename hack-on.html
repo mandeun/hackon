@@ -224,6 +224,17 @@ body.tv main{padding:3.2vh 3vw;overflow:hidden;flex:1;min-height:0;
 .tvspon .tvlogos > *{font-size:4.2vh;color:#0B1020;font-weight:900}
 .tvspon .tvlogos img{height:9vh;max-width:22vw}
 .tvspon small{font-size:1.5vh;color:#5B6470;writing-mode:vertical-rl;letter-spacing:.2em}
+/* 로고 벽 — 화면을 6등분, 칸마다 로고 하나가 꽉 찬다. 10분마다 30초, L 키로 고정. 빈 칸은 «이 자리 비었습니다» 로 판다 */
+.tvwall{position:fixed;inset:0;background:#fff;z-index:9;display:grid;gap:1.2vh;padding:1.2vh;grid-template-rows:repeat(2,1fr)}
+.tvwall > div{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;border-radius:1.6vh;background:#F4F6F8;color:#0B1020;text-align:center;padding:2vh;overflow:hidden}
+.tvwall img{width:72%;max-height:64%;object-fit:contain}
+.tvwall b{font-size:5.6vh;font-weight:900;letter-spacing:-.02em;line-height:1.1}
+.tvwall .who{font-size:2.2vh;color:#5B6470;font-weight:700}
+.tvwall .open{background:#0B1020;color:#fff} .tvwall .open b{color:#C8F53B;font-size:3.4vh;word-break:break-all;max-width:100%} .tvwall .open .who{color:#AEB6C8}
+.tvwall .names b{font-size:3.6vh}
+.logos.big{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.logos.big > *{justify-content:center;padding:18px 12px;min-height:92px;font-size:19px;font-weight:900}
+.logos.big img{height:60px;max-width:100%}
 /* 오프라인 행사에서 제일 많이 나오는 질문이다. 늘 떠 있어야 한다. */
 .tvseats{display:flex;flex-wrap:wrap;gap:1vh 1.6vw;font-size:2.2vh;color:#C9D0DE;margin:1vh 0}
 .tvseats span{display:inline-flex;align-items:center;gap:.6vw;white-space:nowrap}.tvseats em{font-style:normal;font-weight:800;color:#fff;background:#2F3A55;border-radius:.8vh;padding:.2vh .9vw;min-width:2.6ch;text-align:center}
@@ -1279,6 +1290,8 @@ let P_LOGO_DATA = '';   // 협찬사 로고 파일(줄인 data: 주소). 넣고 
    저장할 때마다 '안 본 팀 먼저' 로 순서가 다시 매겨지기 때문이다. */
 let jTeam = null, jAll = false;
 let curPerson = null;
+let TVWALL = false;   // 큰 화면 로고 벽 고정(L 키)
+document.addEventListener('keydown', e => { if (TVM && (e.key === 'l' || e.key === 'L')) { TVWALL = !TVWALL; render(); } });
 /* 지금 화면에 그릴 진행표. 카드로 그리기 때문에 문자열이 아니라 그대로 들고 있는다. */
 let PLAN_NOW = [];
 let vArea = '';   // 구하기 화면에서 고른 자치구
@@ -2464,6 +2477,7 @@ const SCREEN = {
           <li><span class="ic">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
+          <li><span class="ic">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span style="color:var(--ink3);font-weight:500">· 카톡 방에 한 번</span></span></span></li>
           <li><span class="ic">🗓️</span><span><span class="k">내 달력에</span><span class="v"><a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 캘린더에 넣기</a></span></span></li>
           ${e.chat ? `<li><span class="ic">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
           ${e.safety ? `<li><span class="ic">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
@@ -2472,7 +2486,7 @@ const SCREEN = {
          ${ended ? `<p class="meta" id="ended-line" style="margin:12px 0 0"><b>끝난 대회입니다.</b> <a href="/e/${esc(e.id)}/report">결과 보고서 보기</a></p>`
                  : `<div class="gsteps" id="how3" style="margin:12px 0 0"><span class="on">① 신청</span><span class="sep">→</span><span>② 그날 와서 만들기</span><span class="sep">→</span><span>③ 제출</span></div>`}
       </section>
-      ${(e.sponsors || []).length ? `<div class="card" id="spon-top" style="padding:14px 16px"><div class="meta" style="margin-bottom:6px">함께한 곳</div>${logoBand(e.sponsors)}</div>` : ''}
+      ${(e.sponsors || []).length ? `<div class="card" id="spon-top" style="padding:14px 16px"><div class="meta" style="margin-bottom:6px">함께한 곳</div>${logoBand(e.sponsors).replace('class="logos"', 'class="logos big"')}</div>` : ''}
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
       ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
         <div class="meta">운영자 공지가 시각과 함께 남습니다. 메일·문자는 안 보내니 이 페이지를 열어 두세요.</div>
@@ -2723,6 +2737,17 @@ const SCREEN = {
         </div>`}`;
   },
 
+  /* 기여 순위 — 이름을 정한 사람만. 숫자는 대회·문제 은행 기록에서만 나온다(창작 없음). */
+  async rank() {
+    const d = LIVE ? await api('/rank').catch(() => ({ rows: [] })) : { rows: [] };
+    const TC = ['#AEB6C8', '#B87333', '#8E9BB0', '#D4A017', '#1F6F5C'];
+    return `<section class="hero"><div class="top"><span class="pill">순위</span></div><h2>기여 순위</h2>
+        <p class="sub" style="margin-bottom:0">완주·평가·문제·풀이·판정·자리 맡기 — 남을 위해 한 일의 합입니다. 티어는 완주가 바탕입니다.</p></section>
+      ${d.rows.length ? `<div class="card"><table><tr><th>#</th><th>이름</th><th>티어</th><th>완주</th><th>기여</th></tr>
+        ${d.rows.map((r, i) => `<tr><td>${i + 1}</td><td><a href="/p/${esc(r.id)}">${esc(r.handle)}</a></td><td><b style="color:${TC[r.level] || TC[0]}">${esc(r.tier)}</b></td><td>${r.finished}${r.wins ? ` · 수상 ${r.wins}` : ''}</td><td><b>${r.xp}</b></td></tr>`).join('')}</table></div>`
+        : '<div class="card"><h3>아직 기록이 없습니다</h3><div class="meta">첫 대회가 끝나면 여기에 이름이 오릅니다. 프로필에서 «보여 줄 이름»을 정한 사람만 보입니다.</div></div>'}
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/problems">문제 은행</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
   /* 문제 은행 — 사장님·후원자가 올린 «풀어 달라는 문제» 전부. 대회로 열든, 지금 혼자 풀든. */
   async problems() {
     const rows = LIVE ? await api('/requests').catch(() => []) : [];
@@ -2826,6 +2851,16 @@ const SCREEN = {
   async tv() {
     const d = await api(`/events/${cur}/tv`);
     const now = new Date();
+    /* 로고 벽 — 후원 로고·심사 이름·빈 자리를 6칸에. 후원이 하나라도 있으면 10분마다 30초 자동, L 키로 켜고 끈다 */
+    const cells = [];
+    for (const sp of (d.sponsors || []).slice(0, 5)) {
+      const logo = /^(https?:\/\/|\/api\/sponsors\/\d+\/logo$)/i.test(String(sp.logo || '')) ? sp.logo : '';
+      cells.push(`<div>${logo ? `<img src="${esc(logo)}" alt="${esc(sp.name)}" onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:this.alt}))">` : `<b>${esc(sp.name)}</b>`}<span class="who">함께한 곳</span></div>`);
+    }
+    if ((d.judges || []).length) cells.push(`<div class="names"><span class="who">심사·멘토</span><b>${d.judges.map(esc).join('<br>')}</b></div>`);
+    while (cells.length < 6) cells.push(`<div class="open"><span class="who">이 자리 비었습니다</span><b>${esc(shareBase().replace(/^https?:\/\//, ''))}/give/${esc(cur)}</b><span class="who">장소 · 심사 · 간식 · 크레딧 — 맡아 주시면 여기 이름이 큽니다</span></div>`);
+    const wallOn = TVWALL || ((d.sponsors || []).length > 0 && now.getMinutes() % 10 === 0 && now.getSeconds() < 30);
+    const wall = wallOn ? `<div class="tvwall" style="grid-template-columns:repeat(3,1fr)">${cells.slice(0, 6).join('')}</div>` : '';
     const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
     /* 지금 지난 것 중 마지막이 '지금', 그다음이 '다음'. 시각만 비교하면 된다. */
     const plan = d.plan || [];
@@ -2833,7 +2868,7 @@ const SCREEN = {
     plan.forEach((r, i) => { if (r.at <= hhmm) at = i; });
     const cur1 = plan[at], nxt = plan[at + 1];
 
-    return `<div class="tvwrap">
+    return `${wall}<div class="tvwrap">
       <div class="tvtop">
         <div class="tvtitle">${esc(d.title)}</div>
         <div class="tvhost">${esc(d.host)}</div>
@@ -3048,6 +3083,11 @@ const SCREEN = {
         ${T.next ? `<div class="meta" style="margin-top:6px">${esc(T.next)}</div>` : ''}
         <div class="meta" style="margin-top:10px;font-family:var(--mono,monospace)">${esc(location.host)}/p/${esc(d.id)}</div>
         <div class="meta">이 주소를 이력서·프로필에 붙이세요. 숫자는 대회 기록에서만 나옵니다.</div>
+      </div>
+      <div class="card" id="xp"><h3>기여 ${(d.xp && d.xp.total) || 0} <span class="pill">채굴량</span></h3>
+        <div class="meta">남을 위해 한 일이 그대로 내 기록입니다 — 완주뿐 아니라 평가를 주고, 문제를 올리고, 풀이를 보내고, 판정하고, 자리를 맡은 것까지.</div>
+        ${(d.xp && d.xp.items.length) ? `<table style="margin-top:8px"><tr><th>한 일</th><th>횟수</th><th>기여</th></tr>${d.xp.items.map(x => `<tr><td>${esc(x.label)}</td><td>${x.count}</td><td><b>${x.xp}</b></td></tr>`).join('')}</table>` : '<div class="meta" style="margin-top:6px">아직 없습니다. 대회에 나오거나 <a href="/problems">문제를 풀면</a> 쌓입니다.</div>'}
+        <div class="meta" style="margin-top:8px"><a href="/rank">순위 보기</a></div>
       </div>
 
       <div class="stat">
@@ -4807,7 +4847,8 @@ const TVM = location.pathname.match(/^\/tv\/([a-z0-9]+)$/);
    /give/<대회id> 는 그 대회의 협찬 안내 한 장 — 인스타 프로필에 거는 주소다. */
 const GIV = location.pathname.match(/^\/give(?:\/([a-z0-9]+))?$/);
 const ASKP = location.pathname === '/ask';
-const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다   // «받는 사람» — 후원자·의뢰자가 주제·문제를 올리는 세 화면
+const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
+const RNK = location.pathname === '/rank';       // 기여 순위 — 백준 랭킹처럼   // «받는 사람» — 후원자·의뢰자가 주제·문제를 올리는 세 화면
 const RCV = location.pathname.match(/^\/r\/([a-z0-9]+)$/);   // 받는 화면 /r/<id>?k=<열쇠>
 const GFT = location.pathname.match(/^\/s\/([po]\d+)$/);   // 준 사람의 화면 /s/<ref>?k=<열쇠>
 if (PRO) {
@@ -4839,6 +4880,7 @@ if (TVM) {
   setInterval(() => render(), 10000);
 }
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (RNK) { tab = 'rank'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIV || ASKP) {
   tab = GIV ? 'give' : 'ask';
   /* cur 은 localStorage 에서 미리 채워져 있다. 대회 없는 /give 로 들어왔는데 그걸 그대로 두면
@@ -4871,6 +4913,13 @@ else if (location.hash.length > 1 && new URLSearchParams(location.search).get('k
 else if (new URLSearchParams(location.search).get('req')) { MAKE_REQ = new URLSearchParams(location.search).get('req'); tab = 'make'; history.replaceState(null, '', location.pathname); }
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
 
+/* 친구에게 보내기 — 폰이면 공유 시트, 아니면 주소 복사. 톡방 한 번이 광고비보다 싸다 */
+document.addEventListener('click', async ev => {
+  const b = ev.target.closest('#share-ev'); if (!b) return; ev.preventDefault();
+  const url = location.origin + '/e/' + cur, text = `${b.dataset.title} — 같이 갈래? 혼자 와도 팀이 생겨. 코딩 몰라도 됨. ${url}`;
+  try { if (navigator.share) { await navigator.share({ title: b.dataset.title, text, url }); return; } } catch (_) { return; }
+  try { await navigator.clipboard.writeText(text); flash('복사했습니다. 톡방에 붙여 넣으세요'); } catch (_) { flash(url); }
+});
 /* 문제 은행 «풀었습니다» — 화면 어디서 눌러도 이 하나가 받는다 */
 document.addEventListener('click', async ev => {
   const b = ev.target.closest('[data-solve]'); if (b) { const box = document.getElementById('sol-' + b.dataset.solve); if (box) { box.hidden = !box.hidden; } return; }

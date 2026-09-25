@@ -555,7 +555,7 @@ function profile(db, pid) {
 
   return {
     id: me.id, handle: me.handle, level: me.level,
-    events: past.length, wins, tier,
+    events: past.length, wins, tier, xp: xpOf(db, pid),
     /* 완주 - 왔고 결과물을 냈나. 이게 이 사람의 실력에 대한 가장 단단한 증거다. */
     finished: made,
     finishRate: came ? Math.round(made / came * 1000) / 10 : 0,
@@ -568,6 +568,35 @@ function profile(db, pid) {
     history: rows.map(r => ({ title: r.title, ends: r.ends, team: r.name,
                               role: r.role, came: !!r.came, made: !!r.made })),
   };
+}
+
+/* 기여(XP) — 비트코인의 채굴처럼, 남을 위해 한 일이 곧 내 기록이 된다.
+   완주·참가·동료 평가 주기·문제 올리기·풀이 보내기·판정하기·자리 맡기. 전부 «연락처 해시 = 사람» 하나에 모인다.
+   ponytail: 사람 수만큼 전체 표를 훑는다(pidOf 는 HMAC 이라 SQL 로 못 잇는다). 수천 명 넘으면 solutions·requests·pledges 에 pid 열을 둔다 */
+const XP = { made: 10, came: 3, rated: 2, ratedEvent: 2, solved: 5, asked: 3, judged: 3, pledged: 5 };
+const XP_LABEL = { made: '완주', came: '참가', rated: '동료 평가 주기', ratedEvent: '대회 평가 주기', solved: '문제 풀이', asked: '문제 올리기', judged: '풀이 판정', pledged: '자리 맡기(확정)' };
+function xpOf(db, pid) {
+  const past = db.prepare(`SELECT t.came, s.url IS NOT NULL AS made FROM teams t JOIN events e ON e.id = t.event
+                           LEFT JOIN submissions s ON s.team = t.id WHERE t.person=? AND e.ends < date('now')`).all(pid);
+  const mine = rows => rows.filter(r => pidOf(db, r.contact) === pid).length;
+  const n = {
+    made: past.filter(r => r.made).length,
+    came: past.filter(r => r.came).length,
+    rated: db.prepare('SELECT COUNT(*) c FROM ratings WHERE giver=?').get(pid).c,
+    ratedEvent: db.prepare('SELECT COUNT(*) c FROM event_ratings WHERE giver=?').get(pid).c,
+    solved: mine(db.prepare("SELECT contact FROM solutions WHERE contact<>''").all()),
+    asked: mine(db.prepare("SELECT contact FROM requests WHERE contact<>''").all()),
+    judged: mine(db.prepare("SELECT r.contact FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.contact<>''").all()),
+    pledged: mine(db.prepare("SELECT contact FROM pledges WHERE status IN ('ok','done') AND contact<>''").all()),
+  };
+  const items = Object.keys(XP).filter(k => n[k] > 0).map(k => ({ key: k, label: XP_LABEL[k], count: n[k], xp: n[k] * XP[k] }));
+  return { total: items.reduce((a, x) => a + x.xp, 0), items };
+}
+/* 순위 — 백준 랭킹처럼 기여 순. 이름을 정한 사람만 오른다(이름 없는 해시는 아무 뜻이 없다) */
+function rank(db, limit = 50) {
+  return db.prepare("SELECT id, handle FROM people WHERE handle<>''").all()
+    .map(p => { const pr = profile(db, p.id); return { id: p.id, handle: p.handle, tier: pr.tier.name, level: pr.tier.level, finished: pr.finished, wins: pr.wins, xp: pr.xp.total }; })
+    .filter(r => r.xp > 0).sort((a, b) => b.xp - a.xp || b.level - a.level).slice(0, limit);
 }
 
 /* 티어 5단계 — 캐글 progression(참가→기여→전문가→마스터→그랜드마스터)을 완주·수상·동료 실력으로 옮긴 것.
@@ -846,7 +875,44 @@ async function ghProfile(db, login) {
 }
 
 /* ── 해커온뉴스 — 제목·주소만 모은다(저작권: 본문 없음). 실패한 출처는 건너뛰고 나머지는 산다. ── */
-const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ai: 'AI타임스', hackon: 'HACK:ON 우승작' };
+const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ds: '허깅페이스 데이터', gh: '깃허브 새 저장소', ai: 'AI타임스', geek: 'GeekNews', hn: 'Hacker News', ph: 'Product Hunt', yozm: '요즘IT', hackon: 'HACK:ON 우승작', tip: '제보' };
+/* RSS 도 Atom 도 같은 함수로 — GeekNews·Product Hunt 는 Atom(<entry>, <link href>)이라 RSS 정규식만 쓰면 조용히 0건이 된다(실제로 그랬다) */
+function parseFeed(x, max) {
+  const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/<[^>]+>/g, '').trim();
+  const out = [];
+  for (const chunk of String(x).split(/<(?:item|entry)[\s>]/).slice(1)) {
+    if (out.length >= max) break;
+    const t = /<title[^>]*>([\s\S]*?)<\/title>/.exec(chunk);
+    const l = /<link[^>]*href="([^"]+)"/.exec(chunk) || /<link[^>]*>([\s\S]*?)<\/link>/.exec(chunk);
+    const url = de(l && l[1]), title = de(t && t[1]).slice(0, 140);
+    if (title && /^https?:\/\//.test(url)) out.push({ title, url });
+  }
+  return out;
+}
+/* 직무 태그 — 제목 낱말로 거칠게. 틀리면 «전체» 로 남는다. 제보는 제보자가 고른다 */
+const JOBS = ['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'];
+const JOB_RE = {
+  '마케팅': /마케팅|광고|브랜드|카피|sns|인스타|유튜브|콘텐츠|캠페인|marketing|ads?\b|brand|creator|influenc|seo/i,
+  '디자인': /디자인|figma|ui|ux|이미지 생성|image|video|영상|일러스트|폰트|design|diffusion|flux|midjourney|canva/i,
+  '데이터': /데이터|분석|sql|dashboard|대시보드|통계|analytics|dataset|엑셀|spreadsheet|bi\b/i,
+  '영업·CS': /영업|세일즈|sales|crm|고객|cs\b|상담|챗봇|support|콜센터|리드/i,
+  '기획': /기획|pm\b|product|프로덕트|노션|notion|로드맵|스펙|요구사항|workflow|자동화|automation|n8n|agent|에이전트/i,
+  '소상공인': /가게|매장|자영업|소상공인|사장|카페|식당|배달|네이버 플레이스|예약|재고|pos\b/i,
+  '개발': /개발|코드|code|github|api|모델|llm|오픈소스|open.?source|파이썬|python|javascript|typescript|rust|sdk|cli|프레임워크|framework|repo/i,
+};
+/* 좁은 것부터 본다 — «가게 예약 자동화» 는 기획(자동화)이 아니라 소상공인이다 */
+const JOB_ORDER = ['소상공인', '마케팅', '디자인', '데이터', '영업·CS', '기획', '개발'];
+function jobOf(title) { for (const j of JOB_ORDER) if (JOB_RE[j].test(String(title || ''))) return j; return ''; }
+function addTip(db, ownerId, ownerName, b) {
+  const job = JOBS.includes(b.job) ? b.job : '';
+  const title = plain(b.title, 140), url = String(b.url || '').trim(), note = plain(b.note, 200);
+  if (!title) throw new HttpError(400, '제목을 넣어 주세요');
+  if (!/^https?:\/\//i.test(url) || url.length > 500) throw new HttpError(400, 'https:// 로 시작하는 주소를 넣어 주세요');
+  if (db.prepare("SELECT COUNT(*) c FROM news WHERE owner=? AND at=date('now')").get(ownerId).c >= 5) throw new HttpError(429, '제보는 하루 다섯 건까지입니다');
+  const r = db.prepare('INSERT OR IGNORE INTO news(src,key,title,url,note,job,by,owner) VALUES(?,?,?,?,?,?,?,?)').run('tip', url, title, url, note, job, plain(ownerName, 40), ownerId);
+  if (!r.changes) throw new HttpError(409, '이미 올라온 주소입니다');
+  return { id: Number(r.lastInsertRowid), job, title, url };
+}
 async function newsTick(db) {
   const got = [];
   const j = async u => { const r = await fetch(u, { headers: { 'user-agent': 'hackon.kr', accept: 'application/json' }, signal: AbortSignal.timeout(8000) }); return r.ok ? r.json() : null; };
@@ -856,12 +922,23 @@ async function newsTick(db) {
     got.push({ src: 'paper', title: p.paper.title, url: 'https://huggingface.co/papers/' + p.paper.id, note: `▲ ${p.paper.upvotes || 0}` }); } catch {}
   try { for (const sp of (await j('https://huggingface.co/api/spaces?sort=trendingScore&direction=-1&limit=5')) || [])
     got.push({ src: 'space', title: sp.id, url: 'https://huggingface.co/spaces/' + sp.id, note: `♥ ${sp.likes || 0}` }); } catch {}
+  /* RSS 셋 — 제목·주소만. 어느 하나가 죽어도 나머지는 산다 */
+  const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+  for (const [src, feed, max] of [['ai', 'https://www.aitimes.com/rss/allArticle.xml', 12], ['geek', 'https://news.hada.io/rss/news', 10], ['hn', 'https://hnrss.org/frontpage', 8],
+                                  ['ph', 'https://www.producthunt.com/feed', 8], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8]]) {
+    try {
+      const x = await (await fetch(feed, { headers: { 'user-agent': 'hackon.kr' }, signal: AbortSignal.timeout(8000) })).text();
+      for (const it of parseFeed(x, max)) got.push({ src, ...it, note: '' });
+    } catch {}
+  }
+  /* 깃허브 — 이번 주 생긴 저장소 중 별 많은 것(트렌딩 API 는 없다). 데이터셋은 허깅페이스 */
   try {
-    const x = await (await fetch('https://www.aitimes.com/rss/allArticle.xml', { signal: AbortSignal.timeout(8000) })).text();
-    const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim();
-    let m, n = 0; const re = /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<link>([\s\S]*?)<\/link>/g;
-    while ((m = re.exec(x)) && n++ < 12) { const u = de(m[2]); if (/^https?:\/\//.test(u)) got.push({ src: 'ai', title: de(m[1]).slice(0, 140), url: u, note: '' }); }
+    const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    for (const r of ((await j(`https://api.github.com/search/repositories?q=created:%3E${since}&sort=stars&order=desc&per_page=6`)) || {}).items || [])
+      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 80) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발' });
   } catch {}
+  try { for (const d of (await j('https://huggingface.co/api/datasets?sort=trendingScore&direction=-1&limit=4')) || [])
+    got.push({ src: 'ds', title: d.id, url: 'https://huggingface.co/datasets/' + d.id, note: `♥ ${d.likes || 0}`, job: '데이터' }); } catch {}
   /* 우리 우승작 — 끝난 대회의 1위, 쇼케이스에 동의(show)한 팀만. */
   try {
     for (const e of db.prepare("SELECT id, title FROM events WHERE listed=1 AND ends < date('now') ORDER BY ends DESC LIMIT 20").all()) {
@@ -869,24 +946,60 @@ async function newsTick(db) {
       if (top) got.push({ src: 'hackon', title: `${e.title} — 1위 ${top.name}`, url: top.url, note: top.note || '' });
     }
   } catch {}
-  const ins = db.prepare('INSERT OR IGNORE INTO news(src,key,title,url,note) VALUES(?,?,?,?,?)');
+  const ins = db.prepare('INSERT OR IGNORE INTO news(src,key,title,url,note,job) VALUES(?,?,?,?,?,?)');
   let added = 0;
-  for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 160), g.url.slice(0, 500), String(g.note).slice(0, 200)).changes);
+  for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 160), g.url.slice(0, 500), String(g.note).slice(0, 200), g.src === 'hackon' ? '' : (g.job || jobOf(g.title))).changes);
   db.prepare("DELETE FROM news WHERE at < date('now','-30 days')").run();
   return { got: got.length, added };
 }
-function newsList(db, days = 9) {
-  return db.prepare("SELECT src, title, url, note, at FROM news WHERE at >= date('now', ?) ORDER BY at DESC, id DESC").all(`-${days} days`);
+function newsList(db, days = 9, job = '') {
+  return db.prepare("SELECT src, title, url, note, at, job, by FROM news WHERE at >= date('now', ?) AND (?='' OR job=?) ORDER BY at DESC, id DESC").all(`-${days} days`, job, job);
 }
 /* 클로드에 붙여넣는 마크다운. 첫 줄이 «직무에 맞게 골라 달라» 는 지시라 링크만 복붙해도 된다. */
-function newsMd(db) {
-  const rows = newsList(db);
+function newsMd(db, job = '') {
+  const rows = newsList(db, 9, job);
   const by = {}; for (const r of rows) (by[r.at] = by[r.at] || []).push(r);
-  let out = `# 해커온뉴스 — hackon.kr/news (${today()})\n\n` +
+  let out = `# 해커온뉴스${job ? ' · ' + job : ''} — hackon.kr/news (${today()})\n\n` +
     `> 아래는 최근 9일 동안 새로 뜬 AI 모델·논문·앱·기사와 HACK:ON 우승작의 제목과 주소입니다.\n` +
     `> 내 직무를 말하면, 이 중에서 내 일에 바로 쓸 수 있는 것만 골라 «오늘 해 볼 것 3가지» 로 정리해 주세요. 본문은 주소를 열어 확인하세요.\n\n`;
-  for (const d of Object.keys(by)) { out += `## ${d}\n`; for (const r of by[d]) out += `- [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}${r.note ? ' · ' + r.note : ''}\n`; out += '\n'; }
+  for (const d of Object.keys(by)) { out += `## ${d}\n`; for (const r of by[d]) out += `- [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}${r.job ? ' · ' + r.job : ''}${r.by ? ' · 제보 ' + r.by : ''}${r.note ? ' · ' + r.note : ''}\n`; out += '\n'; }
   return out;
+}
+
+/* ── MCP — 카카오 PlayMCP·클로드에서 «hackon 대회 열어 줘» 가 되게. JSON-RPC 2.0 over HTTP, 읽기 셋 + 문제 올리기 하나.
+   쓰기 도구는 문제 올리기뿐(누구나 /ask 에서 하는 것과 같다). 대회 열기는 로그인이 필요해 웹으로 보낸다. */
+const MCP_TOOLS = [
+  { name: 'list_hackathons', description: '지금 열려 있는 HACK:ON 대회 목록(제목·날짜·주최·남은 자리·주소)', inputSchema: { type: 'object', properties: {} } },
+  { name: 'list_problems', description: '문제 은행 — 가게·모임이 올린 «풀어 달라는 문제» 목록', inputSchema: { type: 'object', properties: {} } },
+  { name: 'post_problem', description: '문제 올리기. name(가게·별명), pain(뭐가 번거로운지), done(«됐다»의 기준), contact(연락처, 만드는 팀만 봄)', inputSchema: { type: 'object', properties: { name: { type: 'string' }, pain: { type: 'string' }, done: { type: 'string' }, contact: { type: 'string' } }, required: ['name', 'pain', 'contact'] } },
+  { name: 'news', description: '해커온뉴스 — 최근 새로 뜬 AI 모델·논문·도구·기사. job 으로 직무 필터(마케팅·기획·디자인·개발·영업·CS·데이터·소상공인)', inputSchema: { type: 'object', properties: { job: { type: 'string' } } } },
+];
+function mcpCall(db, msg) {
+  const id = msg.id ?? null, m = msg.method || '';
+  const ok = result => ({ jsonrpc: '2.0', id, result });
+  const err = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
+  if (m === 'initialize') return ok({ protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'hackon', version: '1' } });
+  if (m === 'ping') return ok({});
+  if (m.startsWith('notifications/')) return null;
+  if (m === 'tools/list') return ok({ tools: MCP_TOOLS });
+  if (m === 'tools/call') {
+    const name = (msg.params || {}).name, a = (msg.params || {}).arguments || {};
+    const text = t => ok({ content: [{ type: 'text', text: t }] });
+    try {
+      if (name === 'list_hackathons') {
+        const rows = db.prepare("SELECT id,title,host,starts,ends,cap FROM events WHERE listed=1 AND ends >= date('now') ORDER BY starts LIMIT 20").all().map(e => getEvent(db, e.id));
+        return text(rows.length ? rows.map(e => `- ${e.title} · ${e.starts}${e.ends !== e.starts ? '~' + e.ends : ''} · ${e.host} 주최 · 참가 ${e.teams}팀${e.cap ? ' · 남은 자리 ' + e.seatsLeft : ''} · ${mailSite()}/e/${e.id}`).join('\n') : '지금 열린 대회가 없습니다. 열려면 ' + mailSite() + '/app');
+      }
+      if (name === 'list_problems') {
+        const rows = openRequests(db);
+        return text(rows.length ? rows.map(r => `- [${r.id}] ${r.name}: ${r.topic || r.pain}${r.done ? ' (됐다의 기준: ' + r.done + ')' : ''} · 풀이 ${r.solutions}`).join('\n') + `\n\n풀이는 ${mailSite()}/problems 에서` : '올라온 문제가 없습니다.');
+      }
+      if (name === 'post_problem') { const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact }); return text(`올렸습니다. 받는 링크(열쇠 포함, 본인만): ${mailSite()}/r/${r.id}?k=${r.rkey}`); }
+      if (name === 'news') return text(newsMd(db, JOBS.includes(a.job) ? a.job : ''));
+    } catch (e) { return text('실패: ' + e.message); }
+    return err(-32602, '없는 도구입니다');
+  }
+  return err(-32601, '없는 메서드입니다');
 }
 
 /* 팀에 딸린 표를 이름으로 찾는다 — 스키마가 늘어도 휴지통이 반쪽이 안 되게. */
@@ -1444,7 +1557,10 @@ function open(file) {
   /* 해커온뉴스 — 6시간마다 밖에서 제목·주소만 모은다(본문은 안 가져온다). key 가 주소라 같은 글은 한 번만. */
   db.exec(`CREATE TABLE IF NOT EXISTS news(
     id INTEGER PRIMARY KEY, src TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL,
-    note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);      // 별점 옆 한 줄
+    note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);
+  try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
+  try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(카카오 닉네임)
+  try { db.exec("ALTER TABLE news ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}    // 제보자 계정 — 하루 5건 상한      // 별점 옆 한 줄
   /* 이 표가 생기기 전에 띄운 공지(events.notice)를 한 번 옮겨 둔다 — 안 그러면 큰 화면엔 공지가 있는데
      공개 페이지 «소식»은 비어 «있는 것을 없음으로» 그린다. 시각은 notice_at 그대로 */
   for (const r of db.prepare("SELECT id, notice, notice_at FROM events WHERE notice<>'' AND id NOT IN (SELECT event FROM notices)").all())
@@ -2302,6 +2418,9 @@ function tv(db, event) {
   return {
     title: e.title, host: e.host, due: e.due, plan: e.plan,
     starts: e.starts, ends: e.ends,
+    /* 로고 벽 — 후원 로고와 같은 크기로 심사·멘토 «이름»도 건다. 시간을 준 사람의 자리다 */
+    judges: db.prepare(`SELECT p.name FROM pledges p JOIN needs n ON n.id = p.need
+                        WHERE n.event=? AND n.kind IN ('judge','mentor') AND p.status IN ('ok','done') ORDER BY p.id`).all(event).map(r => r.name),
     teams: rows.length,
     done: rows.filter(r => r.url).length,
     /* 아직 안 낸 팀 이름은 마감 한 시간 전부터만 띄운다.
@@ -3020,6 +3139,15 @@ function routes(db) {
         res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'no-cache' });
         return res.end(sitemap(db));
       }
+      /* /news.md 와 /mcp 는 /api/ 밖에 있다 — 클로드·카카오 AI 채팅이 그대로 부르는 주소라 짧게 둔다 */
+      if (p === '/news.md' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' }); return res.end(newsMd(db, JOBS.includes(u.searchParams.get('job')) ? u.searchParams.get('job') : '')); }
+      if (p === '/mcp' && req.method === 'POST') {
+        const msg = await body(req);
+        const out = Array.isArray(msg) ? msg.map(x => mcpCall(db, x)).filter(Boolean) : mcpCall(db, msg);
+        if (out === null) { res.writeHead(202); return res.end(); }
+        return json(res, 200, out);
+      }
+      if (p === '/mcp' && req.method === 'GET') return json(res, 200, { name: 'hackon', transport: 'streamable-http (POST only)', tools: MCP_TOOLS.map(t => t.name) });
       if (p.startsWith('/api/')) {
         const q = Object.fromEntries(u.searchParams);
         let m;
@@ -3787,8 +3915,13 @@ function routes(db) {
         /* ── 받는 사람(후원자·의뢰자) ── */
         if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/solutions$/)) && req.method === 'POST')
           return json(res, 201, addSolution(db, m[1], await body(req)));   // 문제 은행 — 대회 없이 «풀었습니다»
-        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, rows: newsList(db) });
-        if (p === '/news.md' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' }); return res.end(newsMd(db)); }
+        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, rows: newsList(db, 9, JOBS.includes(q.job) ? q.job : ''), loggedIn: !!cookieOwner });
+        if (p === '/api/news/tip' && req.method === 'POST') {
+          if (!cookieOwner) throw new HttpError(401, '제보는 카카오 로그인이 필요합니다');
+          const o = db.prepare('SELECT name FROM owners WHERE id=?').get(cookieOwner);
+          return json(res, 201, addTip(db, cookieOwner, (o && o.name) || '', await body(req)));
+        }
+        if (p === '/api/rank' && req.method === 'GET') return json(res, 200, { rows: rank(db) });
         if (p === '/api/requests' && req.method === 'POST')
           return json(res, 201, addRequest(db, await body(req)));          // 누구나 — 열쇠는 여기서 딱 한 번
         if (p === '/api/requests' && req.method === 'GET')
@@ -4007,7 +4140,7 @@ function routes(db) {
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
-               || p === '/ask' || p === '/problems' || p.match(/^\/r\/[a-z0-9]+$/)
+               || p === '/ask' || p === '/problems' || p === '/rank' || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
 
       /* 화면 파일은 /e/<id> 같은 깊은 주소에서도 그대로 나간다. 그 안의 <script src="qr.js">
@@ -5230,6 +5363,19 @@ function selftest() {
     ok(!JSON.stringify(openRequests(db)).includes('k@x.test'), '공개 목록엔 풀이 연락처가 없다');
   }
   ok(newsMd(db).startsWith('# 해커온뉴스'), '뉴스 마크다운 머리');
+  ok(parseFeed('<feed><entry><title>A</title><link rel="alternate" href="https://a.example/1"/></entry></feed>', 5)[0].url === 'https://a.example/1'
+     && parseFeed('<rss><item><title><![CDATA[B]]></title><link>https://b.example/2</link></item></rss>', 5)[0].title === 'B', 'RSS 와 Atom 둘 다 읽는다');
+  ok(jobOf('인스타 릴스 광고 카피를 AI 로') === '마케팅' && jobOf('Figma 에 이미지 생성 붙이기') === '디자인' && jobOf('가게 예약 문자 자동화') === '소상공인' && jobOf('오늘 날씨') === '', '직무 자동 분류');
+  {
+    const tip = addTip(db, 'own1', '제보 김', { job: '마케팅', title: '카피 초안 도구', url: 'https://t.example/1' });
+    ok(tip.job === '마케팅' && newsList(db, 9, '마케팅').some(r => r.src === 'tip' && r.by === '제보 김'), '제보가 직무 태그로 실린다');
+    let dup = false; try { addTip(db, 'own1', '제보 김', { title: 'x', url: 'https://t.example/1' }); } catch { dup = true; } ok(dup, '같은 주소 제보는 거절');
+    const m1 = mcpCall(db, { jsonrpc: '2.0', id: 1, method: 'tools/list' }); ok(m1.result.tools.length === 4, 'MCP 도구 넷');
+    const m2 = mcpCall(db, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_problems' } }); ok(/문구점 박/.test(m2.result.content[0].text), 'MCP 문제 은행');
+    const m3 = mcpCall(db, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'post_problem', arguments: { name: 'MCP 가게', pain: '장부', contact: 'm@x.test' } } }); ok(/\/r\/[a-z0-9]+\?k=/.test(m3.result.content[0].text), 'MCP 로 문제 올리기 → 받는 링크');
+    ok(mcpCall(db, { jsonrpc: '2.0', id: 4, method: 'nope' }).error.code === -32601 && mcpCall(db, { method: 'notifications/initialized' }) === null, 'MCP 오류·알림');
+    const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
+  }
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
@@ -5254,7 +5400,7 @@ if (require.main === module) {
   setInterval(tick, 10 * 60 * 1000).unref();
   /* 해커온뉴스 — 켜지고 15초 뒤 한 번, 그 뒤 6시간마다. 밖이 죽어도 앱은 산다. */
   setTimeout(() => newsTick(db).catch(() => {}), 15000).unref();
-  setInterval(() => newsTick(db).catch(() => {}), 6 * 60 * 60 * 1000).unref();
+  setInterval(() => newsTick(db).catch(() => {}), 3 * 60 * 60 * 1000).unref();
   /* 한 시간마다 D-3·D-1 리마인더. 발송 열쇠가 없으면 아예 안 돈다 — 장부에 «건너뜀»이 매시간 쌓이지 않게. */
   if (RESEND_KEY) {
     const mailTick = () => { try { for (const mm of [...remindDue(db), ...doneDue(db)]) void sendMail(db, mm); } catch (e) { console.error('리마인더 실패', e.message); } };
