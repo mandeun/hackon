@@ -916,7 +916,7 @@ async function sponsorPage() {
     </div>
 
     <h3>자리와 금액</h3>
-    <p class="sub">아래 금액은 <b>주최자가 정한 희망가</b>입니다. 확정 금액이 아니고, 이야기해서 정합니다.
+    <p class="sub">아래 금액은 <b>주최자가 정한 희망가</b>입니다. 확정 금액이 아니고, 이야기해서 정합니다. 자리에서 모인 돈이 그대로 <b>상금과 간식</b>이 됩니다.
       이 앱은 돈을 받지 않습니다 — 주고받는 것은 주최자와 직접 하십니다.</p>
     ${rows.length ? rows.map(n => `<div class="card" data-need-card="${esc(String(n.id))}">
       <h3>${esc(needKind(n.kind))} · ${esc(n.label)}
@@ -2127,6 +2127,9 @@ const SCREEN = {
         <input id="e-chat" value="${esc(e.chat || '')}" placeholder="https://open.kakao.com/o/…" inputmode="url">
         <label>문제가 생기면 이 사람에게 <span class="pill">참가자 화면에 그대로 보입니다</span></label>
         <input id="e-safety" value="${esc(e.safety || '')}" maxlength="120" placeholder="예) 운영진 공용 help@… · 익명 신고 폼 forms.gle/…">
+        <label>입금 안내 <span class="pill">자리를 맡아 확정된 분에게만</span></label>
+        <input id="e-pay" value="${esc(e.pay || '')}" maxlength="120" placeholder="예) 카카오뱅크 3333-… 유재원 · 입금 뒤 카톡으로 알려 주세요">
+        <div class="meta">앱은 돈을 만지지 않습니다. 자리 값은 주최자에게 직접 — 모인 돈이 상금·간식이 됩니다.</div>
         <div class="meta">개인 이름·번호보다 <b>운영진 공용 주소</b>와 <b>익명으로 알릴 길</b>을 적어 주세요.</div>
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
         <label>진행 순서 <span class="pill">현장 화면과 공개 페이지가 같이 씁니다</span></label>
@@ -2728,6 +2731,7 @@ const SCREEN = {
         <div class="meta">${esc(ev.host)} 주최 · ${esc(ev.starts)}${ev.due ? ' · 제출 마감 ' + esc(ev.due.replace('T', ' ')) : ''} · <a href="/e/${esc(ev.id)}">대회 페이지</a></div>
         <div class="meta" style="margin-top:6px">참가 <b>${ev.teams}</b>팀${ev.closed ? ` · 완주 <b>${ev.finished}</b>팀${ev.finishRate !== null ? ' · 완주율 <b>' + ev.finishRate + '%</b>' : ''}` : ''}</div></div>
       <div class="card"><h3>받으시는 것</h3><div class="meta">${esc(RECEIVE[g.kind] || RECEIVE.other)}</div></div>
+      ${(g.status === 'ok' || g.status === 'done') && ev.pay ? `<div class="card" id="pay-line"><h3>입금 안내</h3><div class="meta">${esc(ev.pay)}</div><div class="meta" style="margin-top:6px">앱은 돈을 만지지 않습니다. 주최자에게 직접 — 모인 돈이 상금·간식이 됩니다.</div></div>` : ''}
       ${!ev.closed ? `<div class="card"><h3>결과물은 마감 뒤에</h3><div class="meta">마감이 지나면 상위 셋과 결과 보고서 주소가 열립니다.</div></div>`
       : `<div class="card"><h3>완주 상위 셋</h3>
           ${v.top.length ? v.top.map(t => `<div class="meta" style="margin-top:6px"><b>${t.rank}위 · ${esc(t.name)}</b>${t.note ? ' · ' + esc(t.note) : ''}${t.url ? ` · <a href="${esc(t.url)}" target="_blank" rel="noopener">열기</a>` : ''}</div>`).join('') : '<div class="meta">제출한 팀이 아직 없습니다.</div>'}
@@ -2858,7 +2862,13 @@ const SCREEN = {
       cells.push(`<div>${logo ? `<img src="${esc(logo)}" alt="${esc(sp.name)}" onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:this.alt}))">` : `<b>${esc(sp.name)}</b>`}<span class="who">함께한 곳</span></div>`);
     }
     if ((d.judges || []).length) cells.push(`<div class="names"><span class="who">심사·멘토</span><b>${d.judges.map(esc).join('<br>')}</b></div>`);
-    while (cells.length < 6) cells.push(`<div class="open"><span class="who">이 자리 비었습니다</span><b>${esc(shareBase().replace(/^https?:\/\//, ''))}/give/${esc(cur)}</b><span class="who">장소 · 심사 · 간식 · 크레딧 — 맡아 주시면 여기 이름이 큽니다</span></div>`);
+    const opens = (d.open || []).slice();
+    while (cells.length < 6) {
+      const n = opens.shift();
+      cells.push(n
+        ? `<div class="open"><span class="who">이 자리 비었습니다</span><b>${esc(needKind(n.kind))} · ${esc(n.label)}</b><span class="who" style="font-size:3vh;color:#fff;font-weight:900">${+n.price ? '희망가 ' + won(n.price) : '금액은 이야기해서'}</span><span class="who">${esc(shareBase().replace(/^https?:\/\//, ''))}/give/${esc(cur)} · 맡으면 여기 이름이 큽니다 · 돈은 주최자에게 직접</span></div>`
+        : `<div class="open"><span class="who">이 자리 비었습니다</span><b>${esc(shareBase().replace(/^https?:\/\//, ''))}/give/${esc(cur)}</b><span class="who">장소 · 심사 · 간식 · 크레딧 — 맡아 주시면 여기 이름이 큽니다</span></div>`);
+    }
     const wallOn = TVWALL || ((d.sponsors || []).length > 0 && now.getMinutes() % 10 === 0 && now.getSeconds() < 30);
     const wall = wallOn ? `<div class="tvwall" style="grid-template-columns:repeat(3,1fr)">${cells.slice(0, 6).join('')}</div>` : '';
     const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
@@ -3817,6 +3827,7 @@ function wire() {
         wifi: $('#e-wifi') ? $('#e-wifi').value.trim() : undefined,
         chat: $('#e-chat') ? $('#e-chat').value.trim() : undefined,
         safety: $('#e-safety') ? $('#e-safety').value.trim() : undefined,
+        pay: $('#e-pay') ? $('#e-pay').value.trim() : undefined,
         topic: $('#e-topic').value, due: $('#e-due').value, plan } });
       flash('채웠습니다');
     } catch (e) { flash(e.message, true); }

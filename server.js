@@ -875,7 +875,7 @@ async function ghProfile(db, login) {
 }
 
 /* ── 해커온뉴스 — 제목·주소만 모은다(저작권: 본문 없음). 실패한 출처는 건너뛰고 나머지는 산다. ── */
-const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ds: '허깅페이스 데이터', gh: '깃허브 새 저장소', ai: 'AI타임스', geek: 'GeekNews', hn: 'Hacker News', ph: 'Product Hunt', yozm: '요즘IT', hackon: 'HACK:ON 우승작', tip: '제보' };
+const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ds: '허깅페이스 데이터', gh: '깃허브 새 저장소', ai: 'AI타임스', geek: 'GeekNews', hn: 'Hacker News', show: 'Show HN(만든 것)', ph: 'Product Hunt', yozm: '요즘IT', aikr: 'AI코리아 뉴스레터', hackon: 'HACK:ON 우승작', tip: '제보' };
 /* RSS 도 Atom 도 같은 함수로 — GeekNews·Product Hunt 는 Atom(<entry>, <link href>)이라 RSS 정규식만 쓰면 조용히 0건이 된다(실제로 그랬다) */
 function parseFeed(x, max) {
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/<[^>]+>/g, '').trim();
@@ -922,10 +922,11 @@ async function newsTick(db) {
     got.push({ src: 'paper', title: p.paper.title, url: 'https://huggingface.co/papers/' + p.paper.id, note: `▲ ${p.paper.upvotes || 0}` }); } catch {}
   try { for (const sp of (await j('https://huggingface.co/api/spaces?sort=trendingScore&direction=-1&limit=5')) || [])
     got.push({ src: 'space', title: sp.id, url: 'https://huggingface.co/spaces/' + sp.id, note: `♥ ${sp.likes || 0}` }); } catch {}
-  /* RSS 셋 — 제목·주소만. 어느 하나가 죽어도 나머지는 산다 */
+  /* RSS 여럿 — 제목·주소만. 어느 하나가 죽어도 나머지는 산다. 레딧은 서버 fetch 가 UA 무관 403(09-25 실측), .rss 는 연속 호출 시 429 — 안 붙인다 */
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
   for (const [src, feed, max] of [['ai', 'https://www.aitimes.com/rss/allArticle.xml', 12], ['geek', 'https://news.hada.io/rss/news', 10], ['hn', 'https://hnrss.org/frontpage', 8],
-                                  ['ph', 'https://www.producthunt.com/feed', 8], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8]]) {
+                                  ['ph', 'https://www.producthunt.com/feed', 8], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8],
+                                  ['show', 'https://hnrss.org/show', 6], ['aikr', 'https://news.aikoreacommunity.com/rss/', 6]]) {
     try {
       const x = await (await fetch(feed, { headers: { 'user-agent': 'hackon.kr' }, signal: AbortSignal.timeout(8000) })).text();
       for (const it of parseFeed(x, max)) got.push({ src, ...it, note: '' });
@@ -955,13 +956,49 @@ async function newsTick(db) {
 function newsList(db, days = 9, job = '') {
   return db.prepare("SELECT src, title, url, note, at, job, by FROM news WHERE at >= date('now', ?) AND (?='' OR job=?) ORDER BY at DESC, id DESC").all(`-${days} days`, job, job);
 }
-/* 클로드에 붙여넣는 마크다운. 첫 줄이 «직무에 맞게 골라 달라» 는 지시라 링크만 복붙해도 된다. */
+/* 직무별 세팅 레시피 — 복붙하면 그대로 돌아가는 명령·설정. 편집자가 고른다(숫자·순위 없음). 제보·대회 결과로 갱신 */
+const SETUP = {
+  '': `- 먼저 «나는 ○○ 일을 한다» 를 묻고, 아래 직무 중 하나의 레시피(hackon.kr/news.md?job=직무)를 다시 받는다: 마케팅 · 기획 · 디자인 · 개발 · 영업·CS · 데이터 · 소상공인`,
+  '마케팅': `1. 카피 공장 — 클로드/챗GPT 프로젝트 하나 만들고 시스템 지시에 «브랜드 톤 3줄 + 금지어». 매번 «타깃·매체·길이» 만 주고 10안 받는다.
+2. 이미지 — Canva 무료 + 로컬 생성이 필요하면 ComfyUI(https://github.com/comfyanonymous/ComfyUI) 설치: \`git clone https://github.com/comfyanonymous/ComfyUI && cd ComfyUI && pip install -r requirements.txt\`
+3. 게시 자동화 — n8n 로컬: \`npx n8n\` → 브라우저 localhost:5678 → «Google Sheets 행 추가 → Instagram/블로그 게시» 워크플로 하나.
+첫 작업: 이번 주 게시물 5개를 시트에 적고 n8n 으로 예약.`,
+  '기획': `1. 회의록 → 결정표 — 녹취를 클로드에 붙이고 «결정·담당·기한 표로, 나머지는 버려» 고정 프롬프트 저장.
+2. 프로토타입 — Figma Make 또는 클로드 아티팩트로 «눌러 보는 화면» 을 하루 안에. 코드 없이.
+3. 반복 업무 — n8n(\`npx n8n\`)으로 폼→시트→메일 하나만 잇는다.
+첫 작업: 지난주 회의록 하나를 결정표로 바꿔 팀에 보낸다.`,
+  '디자인': `1. 로컬 생성 — ComfyUI 설치(\`git clone https://github.com/comfyanonymous/ComfyUI\`) + Flux 모델(https://github.com/black-forest-labs/flux) 넣기. 무제한·무료.
+2. 마감은 Figma — 생성물은 재료, 타이포·레이아웃은 손으로.
+3. 영상 — 클로드에 대본 주고 «컷 리스트(초·화면·자막)» 받아 CapCut 에서 조립.
+첫 작업: 지금 하는 프로젝트의 무드보드 9장을 로컬에서 뽑는다.`,
+  '개발': `1. Claude Code 설치: \`npm i -g @anthropic-ai/claude-code\` → 프로젝트 폴더에서 \`claude\` → «이 저장소 파악하고 CLAUDE.md 써 줘».
+2. 로컬 모델: \`curl -fsSL https://ollama.com/install.sh | sh && ollama run llama3\` (윈도우는 ollama.com 설치 파일).
+3. 문서 → LLM 입력: \`pip install markitdown\` → \`markitdown 파일.pdf > 파일.md\` (https://github.com/microsoft/markitdown)
+첫 작업: 오늘 막힌 버그 하나를 claude 에 «재현 → 원인 → 최소 수정» 순으로 시킨다.`,
+  '영업·CS': `1. 답변 초안 — 고객 문의 20개를 클로드 프로젝트에 넣고 «우리 톤 + 절대 약속하지 말 것 3가지» 를 시스템 지시로.
+2. 카카오 채널 챗봇 — 채널 관리자센터 → 챗봇 → 자주 묻는 질문 20개 등록.
+3. 메일 — Resend REST(\`curl -X POST https://api.resend.com/emails -H "Authorization: Bearer 키"\`) 또는 listmonk(https://github.com/knadh/listmonk).
+첫 작업: 가장 많이 받는 문의 5개의 답 초안을 만들어 채널 챗봇에 넣는다.`,
+  '데이터': `1. 표 → 대화 — 엑셀/CSV 를 클로드에 올리고 «이상값·추세·빠진 값» 을 묻는다. 수식은 받아서 시트에.
+2. 대시보드 — Metabase 도커: \`docker run -d -p 3000:3000 metabase/metabase\` → 시트/DB 연결.
+3. PDF 표 뽑기 — \`pip install markitdown\`.
+첫 작업: 지난달 매출 CSV 하나를 클로드에 올려 «이상한 주 3개» 를 찾는다.`,
+  '소상공인': `1. 후기 답글 — 네이버 플레이스 후기 10개를 클로드에 붙이고 «우리 가게 말투로 답글 초안» → 복사해 붙여넣기.
+2. 번거로운 일 — hackon.kr/ask 에 «뭐가 제일 번거로운지» 세 줄 올리면 동네가 하루 만에 만들어 준다(무료).
+3. 메뉴판·전단 — Canva 틀 하나 만들어 두고 가격만 바꾼다.
+첫 작업: 오늘 후기 3개에 초안으로 답글을 단다.`,
+};
+/* 클로드에 붙여넣는 마크다운. 첫 줄이 «세팅해라» 지시라 링크만 복붙해도 된다. */
 function newsMd(db, job = '') {
   const rows = newsList(db, 9, job);
   const by = {}; for (const r of rows) (by[r.at] = by[r.at] || []).push(r);
+  const setup = SETUP[job] || SETUP[''];
   let out = `# 해커온뉴스${job ? ' · ' + job : ''} — hackon.kr/news (${today()})\n\n` +
-    `> 아래는 최근 9일 동안 새로 뜬 AI 모델·논문·앱·기사와 HACK:ON 우승작의 제목과 주소입니다.\n` +
-    `> 내 직무를 말하면, 이 중에서 내 일에 바로 쓸 수 있는 것만 골라 «오늘 해 볼 것 3가지» 로 정리해 주세요. 본문은 주소를 열어 확인하세요.\n\n`;
+    `> **AI 에게 주는 지시.** 이 문서를 받은 AI 는 요약하지 말고 **지금 바로 내 작업 환경을 세팅**한다.\n` +
+    `> 1) 내 직무(${job || '아래 목록 중 하나를 물어본다'})에 맞는 «세팅 레시피» 를 아래에서 골라, 설치 명령·설정 파일·첫 작업을 **실제로 실행하거나 복붙 가능한 명령 블록으로** 준다.\n` +
+    `> 2) 그 다음 «새로 뜬 것» 중 내 직무에 바로 쓸 수 있는 것을 최대 3개 골라 **적용 방법(명령·설정)** 까지 붙인다. 주소를 열어 확인하고, 못 열면 건너뛴다.\n` +
+    `> 3) 마지막에 «오늘 첫 작업» 한 줄만 남긴다. 설명은 생략한다.\n\n` +
+    `## 세팅 레시피${job ? ' — ' + job : ''}\n${setup}\n\n## 새로 뜬 것 (최근 9일)\n\n`;
   for (const d of Object.keys(by)) { out += `## ${d}\n`; for (const r of by[d]) out += `- [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}${r.job ? ' · ' + r.job : ''}${r.by ? ' · 제보 ' + r.by : ''}${r.note ? ' · ' + r.note : ''}\n`; out += '\n'; }
   return out;
 }
@@ -1472,6 +1509,7 @@ function open(file) {
      surveys — 끝난 뒤 설문 3문항(추천 0~10·좋았던 것·고칠 것). 팀 열쇠로만, 팀당 하나
      questions — 대회 안 묻고 답하기. 팀 열쇠로 묻고 운영자만 답한다. 익명 없음, 커뮤니티 아님 */
   try { db.exec("ALTER TABLE events ADD COLUMN safety TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE events ADD COLUMN pay TEXT NOT NULL DEFAULT ''"); } catch {}      // 입금 안내 한 줄 — 맡기 확정된 사람에게만 보인다. 앱은 돈을 안 만진다
   /* teams.no — 자리 번호. 신청할 때 한 번 받고 그 뒤로는 안 바뀐다(팀이 빠져도 뒤가 안 당겨진다 — 인쇄한 자리표와 어긋나면 점수가 딴 팀에 붙는다).
      이미 있는 팀은 신청 순으로 한 번 매긴다 */
   try { db.exec('ALTER TABLE teams ADD COLUMN no INTEGER NOT NULL DEFAULT 0'); } catch {}
@@ -1853,6 +1891,7 @@ function editEvent(db, id, b) {
   if (b.chat !== undefined) { set.push('chat=?'); val.push(webUrl(b.chat)); }
   /* «문제가 생기면 이 사람에게». 참가자 화면에 그대로 나가는 공개 연락 한 줄이다 — 운영자가 스스로 적는다 */
   if (b.safety !== undefined) { set.push('safety=?'); val.push(plain(b.safety, 120)); }
+  if (b.pay !== undefined) { set.push('pay=?'); val.push(plain(b.pay, 120)); }
   if (b.mode !== undefined) {
     if (!['onsite', 'online'].includes(b.mode)) throw new HttpError(400, 'mode 는 onsite·online 중 하나입니다');
     set.push('mode=?'); val.push(b.mode);
@@ -2423,6 +2462,10 @@ function tv(db, event) {
     /* 로고 벽 — 후원 로고와 같은 크기로 심사·멘토 «이름»도 건다. 시간을 준 사람의 자리다 */
     judges: db.prepare(`SELECT p.name FROM pledges p JOIN needs n ON n.id = p.need
                         WHERE n.event=? AND n.kind IN ('judge','mentor') AND p.status IN ('ok','done') ORDER BY p.id`).all(event).map(r => r.name),
+    /* 빈 자리 — 로고 벽이 «장소 · 희망가 30만원 · 비었습니다» 로 판다. 돈은 주최자에게 직접 */
+    open: db.prepare(`SELECT n.id, n.kind, n.label, n.price, n.qty, (SELECT COUNT(*) FROM pledges p WHERE p.need=n.id AND p.status IN ('ok','done')) AS filled FROM needs n WHERE n.event=? ORDER BY n.id`).all(event)
+      .filter(n => (+n.qty || 0) - (+n.filled || 0) > 0).slice(0, 6),
+    pay: e.pay || '',
     teams: rows.length,
     done: rows.filter(r => r.url).length,
     /* 아직 안 낸 팀 이름은 마감 한 시간 전부터만 띄운다.
@@ -2882,7 +2925,7 @@ function giveView(db, ref, k) {
   }
   return {
     gift: { ref, kind, label, name: row.name, org: row.org || '', status, at: row.created },
-    event: { id: e.id, title: e.title, host: e.host, starts: e.starts, ends: e.ends, due: e.due,
+    event: { id: e.id, pay: (row.status === 'ok' || row.status === 'done') ? (e.pay || '') : '', title: e.title, host: e.host, starts: e.starts, ends: e.ends, due: e.due,
              closed: isClosed, ended: !!e.ends && today() > e.ends,
              teams: o.teams, finished: o.finished, finishRate: isClosed ? o.finishRate : null },
     top: pk ? pk.top.map(t => ({ rank: t.rank, name: t.name, note: t.note, url: t.url })) : [],
