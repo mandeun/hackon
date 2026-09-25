@@ -595,6 +595,7 @@ async function api(path, opt) {
                ...(cur && jkeyOf(cur) ? { 'x-jkey': jkeyOf(cur) } : {}),
                ...(cur && vkeyOf(cur) ? { 'x-vkey': vkeyOf(cur) } : {}),
                ...(RKEY ? { 'x-rkey': RKEY } : {}),
+               ...(opt?.pkey ? { 'x-pkey': opt.pkey } : {}),
                ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
@@ -2442,7 +2443,7 @@ const SCREEN = {
       <label>후원 열쇠</label><input id="gk-in" placeholder="영문과 숫자 10자">
       <div style="height:12px"></div><button class="btn" id="gk-go">열기</button>`;
     if (!GKEY) return keyPrompt('');
-    let v; try { v = await api(`/give/${curGift}/view?k=${encodeURIComponent(GKEY)}`); } catch (e) { return keyPrompt('열쇠가 맞지 않습니다.'); }
+    let v; try { v = await api(`/give/${curGift}/view`, { pkey: GKEY }); } catch (e) { return keyPrompt('열쇠가 맞지 않습니다.'); }
     const g = v.gift, ev = v.event;
     const ST = { pending: ['아직 확인 전', 'warn'], ok: ['확인됨 · 공개 장부에 올랐습니다', 'ok'], done: ['확인됨 · 끝났습니다', 'ok'], no: ['운영자가 거절했습니다', ''] };
     const st = ST[g.status] || ['아직 확인 전', 'warn'];
@@ -3651,7 +3652,7 @@ function wire() {
     if (!box.hidden) { box.hidden = true; box.innerHTML = ''; b.textContent = '열어보기'; return; }
     box.hidden = false; b.textContent = '접기';
     box.innerHTML = `<div class="trynote">안 뜨면 만든 분이 다른 곳에서 못 열게 막아 둔 것입니다. 새 창으로 여세요.</div>
-      <iframe src="${esc(url)}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups allow-same-origin" style="width:100%;height:min(62vh,520px);border:1px solid var(--rule);border-radius:12px;background:#fff"></iframe>`;
+      <iframe src="${esc(url)}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups" style="width:100%;height:min(62vh,520px);border:1px solid var(--rule);border-radius:12px;background:#fff"></iframe>`;
   });
   document.querySelectorAll('[data-verdict]').forEach(b => b.onclick = async () => {
     const tid = b.dataset.verdict, nt = document.querySelector(`[data-vnote-r="${tid}"]`);
@@ -4043,7 +4044,7 @@ function wire() {
     if (!c) return flash('참가할 때 쓴 연락처를 넣어 주세요', true);
     if (!starOf('run') && !starOf('worth')) return flash('별을 하나라도 눌러 주세요', true);
     try {
-      await api(`/events/${cur}/rate`, { method: 'POST', body: {
+      await api(`/events/${cur}/rate`, { method: 'POST', tkey: tkeyOf(localStorage.getItem('hackon.team.' + cur) || ''), body: {
         contact: c, run: starOf('run'), worth: starOf('worth'), note: $('#rv-n').value.trim() } });
       localStorage.setItem('hackon.contact', c);
       flash('남겨 주셔서 고맙습니다');
@@ -4341,9 +4342,9 @@ else if (PUB || JUD || VOT || TVM) {
                  try { localStorage.setItem('hackon.team.' + cur, r.id); localStorage.setItem('hackon.tkey.' + r.id, tk); } catch (_) {}
                  history.replaceState(null, '', location.pathname); render(); }).catch(() => {}); }
   if (JUD) { const k = new URLSearchParams(location.search).get('k');
-             if (k) try { localStorage.setItem('hackon.jkey.' + cur, k); } catch (_) {} }
+             if (k) { try { localStorage.setItem('hackon.jkey.' + cur, k); } catch (_) {} history.replaceState(null, '', location.pathname); } }
   if (VOT) { const k = new URLSearchParams(location.search).get('k');
-             if (k) try { localStorage.setItem('hackon.vkey.' + cur, k); } catch (_) {} }
+             if (k) { try { localStorage.setItem('hackon.vkey.' + cur, k); } catch (_) {} history.replaceState(null, '', location.pathname); } }
 }
 if (TVM) {
   document.body.classList.add('tv');

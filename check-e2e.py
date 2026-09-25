@@ -1356,6 +1356,54 @@ with sync_playwright() as p:
     A(pg.query_selector("#tv-pitch") is not None and "분" in pg.inner_text("#tv-pitch"), f"발표 타이머가 큰 화면에 없다: {pg.inner_text('.tvbig')[:60] if pg.query_selector('.tvbig') else '?'}")
     ok("접근성 critical·serious 0 (다섯 화면) · 발표 타이머")
 
+    # ── 2026-09-26 보안 감사 22건 반영 — 서버가 죽지 않고, 열쇠가 안 새고, 파일이 안 열린다 ──
+    def raw(path, payload=None, method=None, headers=None):
+        h = {"content-type": "application/json", **(headers or {})}
+        req = urllib.request.Request(BASE + path, method=method or ("POST" if payload is not None else "GET"), data=json.dumps(payload).encode() if payload is not None else None, headers=h)
+        try:
+            with urllib.request.urlopen(req) as r: return r.status, r.read().decode("utf-8", "replace"), dict(r.headers)
+        except urllib.error.HTTPError as e_: return e_.code, e_.read().decode("utf-8", "replace"), dict(e_.headers)
+    # 1·2·20 — 이상한 입력에 죽지 않는다
+    _, se = post("/api/events", {"title": "감사검사"}); SE, SK, SJ = se["id"], se["okey"], se["jkey"]
+    A(raw("/api/events", {"id": SE, "title": "x"})[0] in (201, 400, 409) and raw("/api/health")[0] == 200, "기존 id 로 만들기에 서버가 죽거나 이상한 코드를 낸다")
+    A(raw("/api/events", {"title": {"a": 1}})[0] == 400 and raw("/api/health")[0] == 200, "제목이 객체인데 서버가 죽거나 400 이 아니다")
+    _, st1 = post(f"/api/events/{SE}/teams", {"name": "감사팀", "email": "a@audit.test", "agree": True})
+    A(raw(f"/api/teams/{st1['id']}/score", {"judge": {"a": 1}, "values": {"idea": 50}}, headers={"x-jkey": SJ})[0] == 400 and raw("/api/health")[0] == 200, "심사위원 이름이 객체인데 서버가 죽는다")
+    A(raw(f"/api/teams/{st1['id']}/score", {"judge": "J", "values": {"idea": "50"}}, headers={"x-jkey": SJ})[0] == 400, "문자열 점수가 저장됐다")
+    # 3 — 망가진 사본으로 되살리기
+    A(raw("/api/events/restore", {"event": {"id": "zz1", "title": {"a": 1}}, "teams": []}, headers={"x-owner": se["owner"]})[0] == 400 and raw("/api/health")[0] == 200, "망가진 사본에 서버가 죽거나 400 이 아니다")
+    # 4·13 — 사본에 열쇠가 없다
+    dtxt = raw(f"/api/events/{SE}/dump", headers={"x-okey": SK})[1]
+    A(all(k not in dtxt for k in ['"okey"', '"owner"', '"jkey"', '"vkey"', '"tkey"', '"pkey"', '"rkey"']), "사본에 열쇠 칸이 남아 있다")
+    # 5·6 — 소스·DB·백업이 정적 경로로 안 열린다
+    for pth in ["/server.js", "/package.json", "/check-e2e.py", "/data/check.db", "/.gitignore", "/GUIDE.md"]:
+        A(raw(pth)[0] == 404, f"{pth} 가 정적으로 열린다")
+    A(raw("/qr.js")[0] == 200 and raw("/sw.js")[0] == 200, "화면 파일이 안 열린다")
+    # 7 — 열쇠 없는 쓰기 도배는 300번 뒤 429
+    last = None
+    for i in range(301): last = raw("/api/zz-rate-probe", {"x": i})[0]
+    A(last == 429, f"301번째 쓰기가 429 가 아니다: {last}")
+    # 8 — CSV 수식 주입
+    post(f"/api/events/{SE}/teams", {"name": "=1+1", "email": "f@audit.test", "agree": True})
+    csvt = raw(f"/api/events/{SE}/export.csv", headers={"x-okey": SK})[1]
+    A("'=1+1" in csvt and ",=1+1" not in csvt, "CSV 에 «=1+1» 이 수식 그대로 나간다")
+    # 11 — 보안 헤더
+    hd = {k.lower(): v for k, v in raw("/app")[2].items()}
+    A("content-security-policy" in hd and hd.get("x-content-type-options") == "nosniff" and "referrer-policy" in hd, f"보안 헤더가 없다: {list(hd)[:6]}")
+    # 12 — 팀 이름 길이
+    _, longt = post(f"/api/events/{SE}/teams", {"name": "긴" * 5000, "email": "l@audit.test", "agree": True})
+    A(len([r for r in api(f"/api/events/{SE}/board") ["rows"] if r["id"] == longt["id"]][0]["name"]) <= 40, "5000자 팀 이름이 그대로 저장됐다")
+    # 15 — 운영자 열쇠는 헤더로만
+    A(raw(f"/api/events/{SE}/export.csv?k={SK}")[0] == 403 and raw(f"/api/events/{SE}/export.csv", headers={"x-okey": SK})[0] == 200, "?k= 쿼리로 운영자 열쇠가 먹는다")
+    # 16·17 — id 선점·음수
+    _, sq = post("/api/events", {"id": "zzsquat", "title": "선점", "prize": -5, "cap": -3})
+    A(sq["id"] != "zzsquat" and api(f"/api/events/{sq['id']}")["prize"] == 0 and api(f"/api/events/{sq['id']}")["cap"] == 0, "id 를 밖에서 정하거나 음수가 저장된다")
+    # 14 — 심사 링크의 열쇠가 주소창에서 사라진다 · 19 — 미리보기 iframe 에 allow-same-origin 없음
+    visit(f"/j/{SE}?k={SJ}")
+    A(pg.evaluate("location.search") == "", "심사 링크를 열었는데 주소창에 열쇠가 남아 있다")
+    A("allow-same-origin" not in pg.content(), "미리보기 iframe 이 같은 출처 권한을 가진다")
+    ok("보안 감사 반영 — 죽지 않음·사본에 열쇠 없음·소스 404·도배 429·CSV·헤더·길이·쿼리 열쇠 403·id·음수·주소창 열쇠")
+
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")
@@ -1774,12 +1822,12 @@ with sync_playwright() as p:
     A("skill" in prof and "manner" in prof, "실력과 매너가 따로 안 나온다")
     ok(f"프로필 — 연락처 0건, 참가 이력 {len(prof['history'])}건")
 
-    # 평가는 그 대회에 있던 사람만
+    # 평가는 그 대회에 있던 사람만 — 이메일이 아니라 팀 열쇠로 본인 확인(감사 10)
+    MYTK = post(f"/api/teams/{withc[0]['id']}/relink", {}, OK)[1]["link"].split("t=")[1]
     A(post(f"/api/events/{ev}/rate",
-           {"contact": "남@example.test", "run": 5, "worth": 5})[0] == 403,
-      "참가 안 한 사람이 대회를 평가했다")
-    A(post(f"/api/events/{ev}/rate", {"contact": CONTACT, "run": 5, "worth": 4,
-                                      "note": "진행이 매끄러웠습니다"})[0] == 200,
+           {"contact": CONTACT, "run": 5, "worth": 5})[0] == 403,
+      "이메일만 들고 대회를 평가했다")
+    A(post(f"/api/events/{ev}/rate", {"run": 5, "worth": 4, "note": "진행이 매끄러웠습니다"}, tkey=MYTK)[0] == 200,
       "참가자가 대회를 평가 못 한다")
     hrep = api(f"/api/events/{ev}/rep")
     A(hrep["n"] == 1, f"대회 평가가 안 쌓였다: {hrep}")
@@ -1787,11 +1835,10 @@ with sync_playwright() as p:
     A(pid not in json.dumps(hrep, ensure_ascii=False), "누가 평가했는지가 샜다")
     ok("대회 평가 — 참가자만, 3건 미만은 숫자를 안 보여 줌")
 
-    # 프로필 고치기는 연락처를 아는 사람만
-    A(post(f"/api/people/{pid}", {"contact": "틀린@example.test", "handle": "해커"})[0] == 403,
-      "남이 남의 프로필을 고쳤다")
-    A(post(f"/api/people/{pid}", {"contact": CONTACT, "handle": "산책러",
-                                  "level": "만들 줄 앎"})[0] == 200, "본인이 못 고친다")
+    # 프로필 고치기는 그 사람의 팀 열쇠로만 — 이메일은 남이 알 수 있다
+    A(post(f"/api/people/{pid}", {"contact": CONTACT, "handle": "해커"})[0] == 403,
+      "이메일만 들고 남의 프로필을 고쳤다")
+    A(post(f"/api/people/{pid}", {"handle": "산책러", "level": "만들 줄 앎"}, tkey=MYTK)[0] == 200, "본인이 못 고친다")
     A(api(f"/api/people/{pid}")["handle"] == "산책러", "고친 이름이 안 남는다")
 
     # 프로필 화면이 열리고, 거기에도 연락처가 없다

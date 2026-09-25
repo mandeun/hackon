@@ -1257,12 +1257,14 @@ function cookieOf(req, name) {
 
 /* 열쇠를 마구 넣어 보는 것을 막는다. 12자 열쇠라도 무한히 시도하면 언젠가 맞는다. */
 const tries = new Map();
-function tooMany(ip) {
+function tooMany(ip, limit = 30) {
   const now = Date.now(), t = tries.get(ip) || { n: 0, at: now };
   if (now - t.at > 600000) { t.n = 0; t.at = now; }
   t.n++; tries.set(ip, t);
-  return t.n > 30;
+  return t.n > limit;
 }
+/* 열쇠 없는 쓰기(신청·후원·질문·피드백·요청·whoami)는 IP+길로 10분에 WRITE_LIMIT 번(감사 7·9). 검사는 한 IP 라 넉넉히 둔다 */
+const WRITE_LIMIT = +(process.env.WRITE_LIMIT || 300);
 
 /** 이 컴퓨터의 랜 주소. 참가자 폰은 localhost 로 못 온다.
     유선과 무선이 다를 수 있어서 찾은 것을 다 준다. */
@@ -1344,7 +1346,7 @@ function editEvent(db, id, b) {
   for (const k of EDITABLE) {
     if (b[k] === undefined) continue;
     set.push(`${k}=?`);
-    val.push(k === 'prize' || k === 'cap' ? (+b[k] || 0) : String(b[k]));
+    val.push(k === 'prize' || k === 'cap' ? Math.max(0, +b[k] || 0) : plain(b[k], k === 'topic' ? 200 : k === 'wifi' ? 200 : 80));
   }
   if (b.budget !== undefined) { set.push('budget=?'); val.push(Math.max(0, Math.floor(+b.budget || 0))); }
   /* 오픈 대화방 주소. http(s) 가 아니면 빈 값으로 — javascript: 같은 것이 공개 페이지에 걸리면 안 된다 */
@@ -1446,8 +1448,10 @@ function moreTeam(db, id, b, can) {
 }
 
 function createEvent(db, b) {
+  b.title = plain(b.title, 80);
   if (!b.title) throw new HttpError(400, '대회 이름이 필요합니다');
-  const id = b.id || nid();
+  /* id 는 서버가 정한다 — 밖에서 고르게 두면 /e/hackon 같은 이름을 선점한다(감사 16). 검사·되살리기만 _id 로 */
+  const id = b._id || nid();
   const okey = crypto.randomBytes(5).toString('hex');   // 운영자 열쇠. 만든 사람만 받는다
   const jkey = crypto.randomBytes(5).toString('hex');   // 심사 열쇠. 심사위원에게만 준다
   const vkey = crypto.randomBytes(5).toString('hex');   // 관객 투표 열쇠. 현장 큰 화면에 QR 로
@@ -1457,9 +1461,9 @@ function createEvent(db, b) {
   if (sum !== 100) throw new HttpError(400, `심사 배점 합이 ${sum} 입니다. 100 이어야 합니다`);
   db.prepare(`INSERT INTO events(id,title,host,topic,starts,ends,prize,cap,rubric,due)
               VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, b.title, b.host || '주최자', b.topic || '',
-         b.starts || today(), b.ends || b.starts || today(),
-         +b.prize || 0, +b.cap || 0, JSON.stringify(rubric), b.due || '');
+    .run(id, b.title, plain(b.host, 40) || '주최자', plain(b.topic, 200),
+         plain(b.starts, 10) || today(), plain(b.ends, 10) || plain(b.starts, 10) || today(),
+         Math.max(0, +b.prize || 0), Math.max(0, +b.cap || 0), JSON.stringify(rubric), plain(b.due, 16));
   /* 연 사람을 붙인다. 열쇠를 안 갖고 왔으면 새로 하나 만들어 준다. */
   let owner = String(b.owner || '').trim();
   if (!owner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(owner)) {
@@ -1580,6 +1584,8 @@ function getEvent(db, id) {
 }
 
 function joinTeam(db, event, b) {
+  /* 길이 상한 — 본문 100KB 를 한 칸에 밀어 넣는 것을 막는다(감사 12) */
+  b.name = plain(b.name, 40); b.role = plain(b.role, 40); b.found = plain(b.found, 40); b.note = plain(b.note, 300); b.want = plain(b.want, 120);
   const e = getEvent(db, event);
   if (!b.name) throw new HttpError(400, '팀 이름이 필요합니다');
   /* 동의 없이 연락처를 받지 않는다. 화면에서 체크박스를 지워도 여기서 막힌다. */
@@ -1701,6 +1707,7 @@ function card(db, team) {
 }
 
 function score(db, team, b) {
+  b.judge = plain(b.judge, 40);
   if (!b.judge) throw new HttpError(400, '심사위원 이름이 필요합니다');
   const t = db.prepare('SELECT event FROM teams WHERE id=?').get(team);
   if (!t) throw new HttpError(404, '없는 팀입니다');
@@ -1708,7 +1715,7 @@ function score(db, team, b) {
   const keys = new Set(rubric.map(r => r.key));
   for (const [k, v] of Object.entries(b.values || {})) {
     if (!keys.has(k)) throw new HttpError(400, `심사 항목이 아닙니다: ${k}`);
-    if (!(v >= 0 && v <= 100)) throw new HttpError(400, '점수는 0~100 입니다');
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 100) throw new HttpError(400, '점수는 0~100 입니다');
     db.prepare(`INSERT INTO scores(team,judge,key,value) VALUES(?,?,?,?)
                 ON CONFLICT(team,judge,key) DO UPDATE SET value=excluded.value`)
       .run(team, b.judge, k, v);
@@ -1792,7 +1799,7 @@ function board(db, event, admin = false) {
     /* 마감 전에는 제출 링크를 안 내려보낸다.
        먼저 낸 팀의 결과물을 뒤에 내는 팀이 보고 만들 수 있기 때문이다.
        제목과 설명은 그대로 둔다 - 무엇을 만들고 있는지는 서로 알아야 같이 하는 느낌이 난다.
-       운영자와 심사위원은 언제든 본다. */
+       운영자만 언제든 본다. 심사위원도 마감 뒤에 본다(judgeView 의 hideUrl 과 같은 선). */
     if (!admin && !closed(e)) { delete row.url; row.hidden = !!t.url; }
     /* 개인정보는 운영자에게만. 화면에서 감추면 브라우저 콘솔에서 다 보인다. */
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
@@ -1857,7 +1864,7 @@ function setSeats(db, id, b, can) {
      연락처 확인은 can 과 무관하다 - 여기서 can 을 같이 묶었다가 검사가 한 번 걸렸다. */
   const owns = !!((can && can.admin)
     || (t.person && b.contact && pidOf(db, b.contact) === t.person));
-  if (!owns && (b.remove !== undefined || b.size !== undefined))
+  if (!owns && (b.remove !== undefined || b.size !== undefined))   // 빈자리 채우기(add)는 현장에서 누구나 — 의도된 문(감사 18 은 의도로 판정), 속도 제한은 걸린다
     throw new HttpError(403, '팀원을 빼거나 정원을 바꾸는 것은 그 팀만 할 수 있습니다');
   const s0 = seats(t);
   let size = b.size === undefined ? s0.size : Math.min(Math.max(+b.size || 1, 1), 9);
@@ -2125,14 +2132,17 @@ function setFollowup(db, id, b) {
 function dump(db, event) {
   const e = db.prepare('SELECT * FROM events WHERE id=?').get(event);
   if (!e) throw new HttpError(404, '없는 대회입니다');
-  delete e.okey;   // 백업 파일에도 열쇠는 안 담는다
+  /* 백업 파일에는 열쇠를 하나도 안 담는다 — okey 뿐 아니라 owner(주최자 열쇠: 이걸로 그 사람의 모든 대회가 열린다)·jkey·vkey 도(감사 4).
+     팀·후원·받는 사람 열쇠(tkey·pkey·rkey)는 아래 표에서 지운다(감사 13). 되살리면 새 열쇠를 준다 */
+  delete e.okey; delete e.owner; delete e.jkey; delete e.vkey;
+  const strip = (rows, keys) => rows.map(r => { const o = { ...r }; for (const k of keys) delete o[k]; return o; });
   const teams = db.prepare('SELECT * FROM teams WHERE event=? ORDER BY id').all(event);
   const ids = teams.map(t => t.id);
   const inIds = ids.length ? `(${ids.join(',')})` : '(0)';
   return {
     saved: new Date().toISOString(),
     event: e,
-    teams,
+    teams: strip(teams, ['tkey']),
     submissions: db.prepare(`SELECT * FROM submissions WHERE team IN ${inIds}`).all(),
     scores: db.prepare(`SELECT * FROM scores WHERE team IN ${inIds}`).all(),
     reviews: db.prepare(`SELECT * FROM reviews WHERE team IN ${inIds}`).all(),
@@ -2142,11 +2152,11 @@ function dump(db, event) {
     assignments: db.prepare(`SELECT * FROM assignments WHERE team IN ${inIds}`).all(),
     /* 2026-09-23 밤 — 되살리기(restore)가 쓰는 나머지 표. 이게 없으면 사본이 절반이다 */
     needs: db.prepare('SELECT * FROM needs WHERE event=? ORDER BY id').all(event),
-    pledges: db.prepare('SELECT * FROM pledges WHERE event=? ORDER BY id').all(event),
-    offers: db.prepare('SELECT * FROM offers WHERE event=? ORDER BY id').all(event),
+    pledges: strip(db.prepare('SELECT * FROM pledges WHERE event=? ORDER BY id').all(event), ['pkey']),
+    offers: strip(db.prepare('SELECT * FROM offers WHERE event=? ORDER BY id').all(event), ['pkey']),
     votes: db.prepare('SELECT * FROM votes WHERE event=? ORDER BY id').all(event),
     notices: db.prepare('SELECT * FROM notices WHERE event=? ORDER BY id').all(event),
-    requests: db.prepare('SELECT * FROM requests WHERE event=? ORDER BY created, id').all(event),
+    requests: strip(db.prepare('SELECT * FROM requests WHERE event=? ORDER BY created, id').all(event), ['rkey']),
     verdicts: db.prepare(`SELECT v.* FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.event=?`).all(event),
     surveys: db.prepare('SELECT * FROM surveys WHERE event=? ORDER BY at').all(event),
     questions: db.prepare('SELECT * FROM questions WHERE event=? ORDER BY id').all(event),
@@ -2160,33 +2170,37 @@ function dump(db, event) {
 function restoreEvent(db, d, owner) {
   if (!d || !d.event || !d.event.id) throw new HttpError(400, '사본 파일이 아닙니다');
   const e = d.event;
-  if (!owner || !e.owner || owner !== e.owner) throw new HttpError(403, '이 사본을 만든 주최자 열쇠가 필요합니다');
+  /* 사본에는 주최자 열쇠가 없다(감사 4). 되살리는 사람의 주최자 열쇠가 실제로 있는 열쇠여야 하고, 되살린 대회는 그 사람 것이 된다 */
+  if (!owner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(owner)) throw new HttpError(403, '주최자 열쇠가 필요합니다');
+  if (typeof e.title !== 'string' || !e.title) throw new HttpError(400, '사본 파일이 아닙니다');
   if (db.prepare('SELECT 1 FROM events WHERE id=?').get(e.id)) throw new HttpError(409, '같은 id 의 대회가 살아 있습니다');
   const cols = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
   const okey = crypto.randomBytes(5).toString('hex');   // 사본엔 운영자 열쇠가 없다. 새로 준다
-  const row = { ...e, okey };
+  const row = { ...e, okey, owner, jkey: crypto.randomBytes(5).toString('hex'), vkey: crypto.randomBytes(5).toString('hex') };
+  for (const k of Object.keys(row)) if (row[k] !== null && typeof row[k] === 'object') throw new HttpError(400, '사본 파일이 아닙니다: ' + k);
   const keys = cols.filter(c => row[c] !== undefined);
   db.prepare(`INSERT INTO events(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`).run(...keys.map(k => row[k]));
   const ins = (table, r, drop = ['id']) => {
     const tc = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
     const ks = tc.filter(c => !drop.includes(c) && r[c] !== undefined);
+    for (const k of ks) if (r[k] !== null && typeof r[k] === 'object') throw new HttpError(400, '사본 파일이 아닙니다: ' + table + '.' + k);
     return Number(db.prepare(`INSERT INTO ${table}(${ks.join(',')}) VALUES(${ks.map(() => '?').join(',')})`).run(...ks.map(k => r[k])).lastInsertRowid);
   };
   const tmap = {}, nmap = {};
-  for (const t of d.teams || []) tmap[t.id] = ins('teams', t);
+  for (const t of d.teams || []) tmap[t.id] = ins('teams', { ...t, tkey: crypto.randomBytes(5).toString('hex') });   // 새 팀 열쇠 — 되살린 뒤 «팀 링크 다시 보내기»로 준다
   for (const n of d.needs || []) nmap[n.id] = ins('needs', n);
   for (const x of d.submissions || []) if (tmap[x.team]) ins('submissions', { ...x, team: tmap[x.team] });
   for (const x of d.scores || []) if (tmap[x.team]) ins('scores', { ...x, team: tmap[x.team] });
   for (const x of d.reviews || []) if (tmap[x.team]) ins('reviews', { ...x, team: tmap[x.team] });
   for (const x of d.assignments || []) if (tmap[x.team]) ins('assignments', { ...x, team: tmap[x.team] });
   for (const x of d.votes || []) if (tmap[x.team]) ins('votes', { ...x, team: tmap[x.team] });
-  for (const x of d.pledges || []) if (nmap[x.need]) ins('pledges', { ...x, need: nmap[x.need] });
-  for (const x of d.offers || []) ins('offers', x);
+  for (const x of d.pledges || []) if (nmap[x.need]) ins('pledges', { ...x, need: nmap[x.need], pkey: crypto.randomBytes(5).toString('hex') });
+  for (const x of d.offers || []) ins('offers', { ...x, pkey: crypto.randomBytes(5).toString('hex') });
   for (const x of d.notices || []) ins('notices', x);
   for (const x of d.sponsors || []) ins('sponsors', x);
   for (const x of d.outcomes || []) ins('outcomes', x);
   for (const x of d.supporters || []) ins('supporters', x);
-  for (const x of d.requests || []) if (!db.prepare('SELECT 1 FROM requests WHERE id=?').get(x.id)) ins('requests', x, []);
+  for (const x of d.requests || []) if (!db.prepare('SELECT 1 FROM requests WHERE id=?').get(x.id)) ins('requests', { ...x, rkey: crypto.randomBytes(5).toString('hex') }, []);
   for (const x of d.verdicts || []) if (tmap[x.team]) ins('verdicts', { ...x, team: tmap[x.team] });
   for (const x of d.surveys || []) if (tmap[x.team]) ins('surveys', { ...x, team: tmap[x.team] });
   for (const x of d.questions || []) if (tmap[x.team]) ins('questions', { ...x, team: tmap[x.team] });
@@ -2441,7 +2455,8 @@ function icsOf(e, base) {
 /* ── 내보내기(CSV). 운영자만 — 연락처가 실린다. 첫 줄에 BOM 을 넣어 엑셀이 한글을 제대로 연다 ── */
 function csvOf(db, event, withContact = true) {
   const b = board(db, event, true);
-  const cell = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const cell = v => { let s = String(v == null ? '' : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;   // 엑셀이 수식으로 읽는 첫 글자(감사 8)
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   /* 스태프 방에 올릴 판은 «연락 빼고»로 받는다 — 연락처 열 자체가 없다 */
   const head = ['자리', '팀', ...(withContact ? ['연락처'] : []), '역할', '체크인', '제출 주소', '점수', '보정 점수', '순위'];
   const lines = [head.join(',')];
@@ -2559,6 +2574,13 @@ function followSummary(db, event) {
 /* #region reuse:http-kit — HttpError·MIME·body()·json(). 이 네 개가 한 세트다 */
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 
+/* 밖으로 나가는 파일 전부. 여기 없는 이름은 404 — 새 화면 파일을 만들면 여기에 적는다 */
+const STATIC_OK = new Set(['home.html', 'hack-on.html', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg']);
+/* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
+const SEC_HEADERS = {
+  'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https: data: blob:; connect-src 'self'; frame-src https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+  'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-frame-options': 'DENY',
+};
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
@@ -2612,7 +2634,7 @@ function routes(db) {
           return json(res, 200, rows);
         }
 
-        const key = req.headers['x-okey'] || q.k || '';
+        const key = req.headers['x-okey'] || '';   // 헤더로만 — ?k= 는 접근 로그·기록에 남는다(감사 15)
         /* 주최자를 알아내는 길이 둘이다.
            로그인했으면 서명된 쿠키, 아니면 브라우저가 들고 있는 열쇠. */
         const cookieOwner = unsign(db, cookieOf(req, 'hackon_s'));
@@ -2627,8 +2649,12 @@ function routes(db) {
         /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 받아 브라우저가 x-jkey 로 실어 보낸다. */
         const jkey = req.headers['x-jkey'] || '';
 
+        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + (req.socket.remoteAddress || '') + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
+          throw new HttpError(429, '요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
+
         if (p === '/api/events' && req.method === 'POST') {
           const b = await body(req);
+          delete b._id;                 // 안에서만 쓰는 칸 — 밖에서 못 정한다
           if (owner) b.owner = owner;   // 이미 연 적이 있으면 그 사람 것으로 묶는다
           /* «지난 대회에서 가져오기». 그 대회의 운영 열쇠(fromKey)나 주최자여야 한다 — 공개 id 만으로 남의 설정을 베끼는 길을 막는다.
              가져오는 것: 기준표·주제·상금·정원·진행 순서·현장/온라인·대화방·신고 창구·자리(개수만). 사람은 안 가져온다. */
@@ -2674,7 +2700,7 @@ function routes(db) {
         }
         /* 준 사람의 화면 — 열쇠는 쿼리(k)로 온다. 받는 사람(/r) 과 같은 모양 */
         if ((m = p.match(/^\/api\/give\/([po]\d+)\/view$/)) && req.method === 'GET')
-          return json(res, 200, giveView(db, m[1], String(q.k || req.headers['x-pkey'] || '')));
+          return json(res, 200, giveView(db, m[1], String(req.headers['x-pkey'] || '')));
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/survey$/)) && req.method === 'GET')
           return json(res, 200, surveySummary(db, m[1], isAdmin(db, m[1], key, owner)));
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/survey$/)) && req.method === 'POST')
@@ -2745,8 +2771,9 @@ function routes(db) {
           return json(res, 200, profile(db, m[1]));
         if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})$/)) && req.method === 'POST') {
           const b = await body(req);
-          /* 본인 확인은 연락처로 한다. 연락처를 아는 사람만 자기 이름을 고칠 수 있다. */
-          if (pidOf(db, b.contact) !== m[1]) throw new HttpError(403, '본인 확인이 안 됩니다');
+          /* 본인 확인은 팀 열쇠로 — 이메일은 남이 알 수 있다(감사 10). 그 사람이 신청한 팀의 열쇠여야 한다 */
+          const tk = req.headers['x-tkey'] || '';
+          if (!tk || !db.prepare('SELECT 1 FROM teams WHERE tkey=? AND person=?').get(tk, m[1])) throw new HttpError(403, '본인 확인이 안 됩니다 — 신청한 브라우저에서 고쳐 주세요');
           db.prepare('UPDATE people SET handle=?, level=? WHERE id=?')
             .run(String(b.handle || '').slice(0, 20),
                  LEVELS.includes(b.level) ? b.level : '', m[1]);
@@ -2774,10 +2801,10 @@ function routes(db) {
         /* 평가는 필수가 아니다. 같은 대회에 있던 사람만 할 수 있다. */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/rate$/)) && req.method === 'POST') {
           const b = await body(req);
-          const me2 = pidOf(db, b.contact);
-          if (!me2 || !db.prepare('SELECT 1 FROM teams WHERE event=? AND person=?')
-                        .get(m[1], me2))
-            throw new HttpError(403, '이 대회에 참가한 분만 평가할 수 있습니다');
+          const tkr = req.headers['x-tkey'] || '';
+          const meRow = tkr ? db.prepare('SELECT person FROM teams WHERE event=? AND tkey=?').get(m[1], tkr) : null;
+          const me2 = meRow && meRow.person;
+          if (!me2) throw new HttpError(403, '이 대회에 참가한 분만 평가할 수 있습니다 — 신청한 브라우저에서');
           const g = v => Math.min(5, Math.max(0, +v || 0));
           if (b.target) {
             if (b.target === me2) throw new HttpError(400, '본인은 평가할 수 없습니다');
@@ -3462,16 +3489,21 @@ function routes(db) {
          화면 쪽은 상대 경로로 두고, 어느 깊이로 오든 여기서 뿌리로 되돌린다. */
       const rel = p.endsWith('/qr.js') ? '/qr.js' : p;
 
-      /* #region reuse:static — 경로 탈출 방지 + MIME + 스트림. 그대로 복사해 쓴다 */
-      const f = path.join(ROOT,
-        p === '/' ? 'home.html' : pub ? 'hack-on.html' : decodeURIComponent(rel));
+      /* #region reuse:static — 화이트리스트 + 경로 탈출 방지 + MIME + 스트림.
+         뿌리가 프로젝트 폴더라 server.js·package.json·data/ 까지 열렸다(감사 5·6, 오답노트 E7). 이제 화면 파일만 나간다 */
+      const name = p === '/' ? 'home.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
+      if (!STATIC_OK.has(name)) throw new HttpError(404, '없습니다');
+      const f = path.join(ROOT, name);
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
       if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) throw new HttpError(404, '없습니다');
-      res.writeHead(200, { 'content-type': MIME[path.extname(f)] || 'application/octet-stream' });
+      res.writeHead(200, { 'content-type': MIME[path.extname(f)] || 'application/octet-stream', ...SEC_HEADERS });
       fs.createReadStream(f).pipe(res);
       /* #endregion reuse:static */
     } catch (e) {
-      json(res, e.code || 500, { error: e.message });
+      /* e.code 가 숫자가 아닌 오류(ERR_SQLITE_ERROR·ERR_INVALID_ARG_TYPE)가 writeHead 로 가면 프로세스가 죽는다(감사 1·2·3·20) */
+      const code = Number.isInteger(e.code) && e.code >= 400 && e.code < 600 ? e.code : 500;
+      if (code === 500) console.error('[500]', p, e && e.message);
+      json(res, code, { error: code === 500 ? '서버 오류' : e.message });
     }
   };
 }

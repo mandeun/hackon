@@ -22,7 +22,7 @@ self.addEventListener('fetch', e => {
     fetch(e.request)
       .then(r => {
         /* 받아 온 것으로 캐시를 갈아 끼운다. 다음에 인터넷이 끊겨도 최신이 나온다. */
-        if (r && r.ok && u.origin === self.location.origin) {
+        if (r && r.ok && u.origin === self.location.origin && !u.search) {   // ?k=<열쇠> 가 붙은 주소는 캐시에 안 남긴다(감사 21)
           const copy = r.clone();
           caches.open(CACHE).then(c => c.put(e.request, copy));
         }
