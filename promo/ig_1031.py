@@ -44,18 +44,18 @@ h1 b{{color:{LIME}}}
 
 REEL = f"""<!doctype html><meta charset="utf-8"><style>
 html,body{{margin:0;background:{INK};color:#fff;{FONT};width:540px;height:960px;overflow:hidden}}
-.w{{position:absolute;inset:0;padding:0 44px;display:flex;flex-direction:column;justify-content:center}}
+.w{{position:absolute;inset:0;padding:120px 44px 0;display:flex;flex-direction:column;justify-content:flex-start}}   /* 위부터 쌓아 아래 안전영역(250px)을 비운다 */
 .k{{font-size:22px;font-weight:700;color:{LIME};letter-spacing:2px;opacity:0;animation:up .35s .1s forwards}}
-h1{{font-size:54px;font-weight:900;line-height:1.18;margin:10px 0 0;opacity:0;animation:up .4s .35s forwards}}
+h1{{font-size:50px;font-weight:900;line-height:1.18;margin:10px 0 0;opacity:0;animation:up .4s .35s forwards}}
 h1 b{{color:{LIME}}}
-.seat{{margin-top:26px;display:flex;align-items:center;gap:14px;font-size:30px;font-weight:800;opacity:0;animation:up .3s forwards}}
+.seat{{margin-top:18px;display:flex;align-items:center;gap:14px;font-size:30px;font-weight:800;opacity:0;animation:up .3s forwards}}
 .seat i{{width:22px;height:22px;border-radius:50%;border:3px solid {LIME};display:inline-block;position:relative}}
 .seat i::after{{content:'';position:absolute;inset:4px;border-radius:50%;background:{LIME};opacity:0;animation:pop .25s forwards;animation-delay:inherit}}
 .seat small{{font-size:20px;color:{MIST};font-weight:600}}
-.fx{{margin-top:34px;font-size:24px;color:{MIST};font-weight:600;line-height:1.5;opacity:0;animation:up .35s 6.2s forwards}}
-.cta{{margin-top:28px;align-self:flex-start;background:{LIME};color:{INK};font-size:28px;font-weight:900;padding:16px 26px;border-radius:12px;opacity:0;animation:pop .35s 8.6s forwards}}
-.u{{position:absolute;left:44px;bottom:250px;font-size:26px;font-weight:800;letter-spacing:2px;opacity:0;animation:up .3s 9s forwards}}
-.ex{{position:absolute;left:44px;right:44px;bottom:206px;font-size:15px;color:{MIST};opacity:0;animation:up .3s 9.2s forwards}}
+.fx{{margin-top:24px;font-size:21px;color:{MIST};font-weight:600;line-height:1.5;opacity:0;animation:up .35s 6.2s forwards}}
+.cta{{margin-top:20px;align-self:flex-start;background:{LIME};color:{INK};font-size:28px;font-weight:900;padding:16px 26px;border-radius:12px;opacity:0;animation:pop .35s 8.6s forwards}}
+.u{{margin-top:22px;font-size:24px;font-weight:800;letter-spacing:2px;opacity:0;animation:up .3s 9s forwards}}
+.ex{{margin-top:6px;font-size:14px;color:{MIST};opacity:0;animation:up .3s 9.2s forwards}}
 @keyframes up{{to{{opacity:1;transform:translateY(0)}}from{{transform:translateY(14px)}}}}
 @keyframes pop{{to{{opacity:1;transform:scale(1)}}from{{transform:scale(.6)}}}}
 </style><div class="w">
