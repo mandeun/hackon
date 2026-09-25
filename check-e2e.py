@@ -1278,8 +1278,8 @@ with sync_playwright() as p:
     pg.fill("#g-name", "포도가게"); pg.fill("#g-contact", "010-0000-9999"); pg.click("#g-send"); pg.wait_for_timeout(1200)
     A(pg.query_selector("#give-link") is not None and "/s/" in pg.inner_text("#give-link"), "보낸 뒤 내 후원 화면 링크가 없다")
     glink = pg.inner_text("#give-link").strip(); gref = glink.split("/s/")[1].split("?")[0]; gk = glink.split("k=")[1]
-    A(code_of(f"/api/give/{gref}/view?k=nope") == 403, "틀린 열쇠로 후원 화면이 열렸다")
-    gv = api(f"/api/give/{gref}/view?k={gk}")
+    A(code_of(f"/api/give/{gref}/view") == 403, "열쇠 없이 후원 화면이 열렸다")
+    gv = json.load(urllib.request.urlopen(urllib.request.Request(BASE + f"/api/give/{gref}/view", headers={"x-pkey": gk})))
     A(gv["gift"]["status"] == "pending" and "010-0000-9999" not in json.dumps(gv) and gv["top"] == [], "후원 화면에 연락처가 있거나 마감 전에 결과물이 있다")
     visit(f"/s/{gref}?k={gk}")
     A("k=" not in pg.url, "후원 열쇠가 주소창에 남아 있다")
@@ -1287,7 +1287,9 @@ with sync_playwright() as p:
     # 운영자가 링크를 다시 만들면 옛 열쇠는 죽는다
     A(post(f"/api/give/{gref}/rekey", {})[0] == 403, "열쇠 없이 후원 링크가 새로 나왔다")
     st, rk2 = post(f"/api/give/{gref}/rekey", {}, FK); A(st == 200 and rk2["link"].startswith(f"/s/{gref}?k="), f"후원 링크 다시가 안 된다: {st} {rk2}")
-    A(code_of(f"/api/give/{gref}/view?k={gk}") == 403, "옛 후원 열쇠가 아직 열린다")
+    try:
+        urllib.request.urlopen(urllib.request.Request(BASE + f"/api/give/{gref}/view", headers={"x-pkey": gk})); A(False, "옛 후원 열쇠가 아직 열린다")
+    except urllib.error.HTTPError as e_: A(e_.code == 403, f"옛 후원 열쇠 응답이 403 이 아니다: {e_.code}")
     # (7) 내보내기 — 운영 열쇠만, 심사·팀 열쇠는 403, «연락 빼고»엔 연락처 열 없음
     A(code_of(f"/api/events/{FE}/export.csv") == 403 and code_of(f"/api/events/{FE}/export.csv", jkey=FJ) == 403, "열쇠 없이·심사 열쇠로 CSV 가 나왔다")
     csv_full = urllib.request.urlopen(urllib.request.Request(f"{BASE}/api/events/{FE}/export.csv", headers={"x-okey": FK})).read().decode("utf-8-sig")
@@ -1327,7 +1329,7 @@ with sync_playwright() as p:
     A(pg.query_selector("#tv-seats") is not None, "큰 화면에 자리 번호 띠가 없다")
     visit(f"/e/{FE}")
     A(pg.query_selector("#sv") is not None, "마감 뒤 참가팀 브라우저에 설문 칸이 없다")
-    gv2 = api(f"/api/give/{gref}/view?k={rk2['link'].split('k=')[1]}")
+    gv2 = json.load(urllib.request.urlopen(urllib.request.Request(BASE + f"/api/give/{gref}/view", headers={"x-pkey": rk2['link'].split('k=')[1]})))
     A(gv2["survey"]["n"] == 3 and gv2["survey"]["recommend"] == 7 and "갑질" not in json.dumps(gv2), "후원 화면 설문 요약이 틀리거나 서술이 샜다")
     # (11) 지난 대회에서 가져오기 — 열쇠 없이 403, 상금은 안 오고 기준표·자리·신고 창구는 온다. 만들기 화면은 여전히 이름 하나
     A(post("/api/events", {"title": "복사", "from": FE})[0] == 403, "지난 대회 열쇠 없이 복사됐다")
@@ -1403,6 +1405,79 @@ with sync_playwright() as p:
     A(pg.evaluate("location.search") == "", "심사 링크를 열었는데 주소창에 열쇠가 남아 있다")
     A("allow-same-origin" not in pg.content(), "미리보기 iframe 이 같은 출처 권한을 가진다")
     ok("보안 감사 반영 — 죽지 않음·사본에 열쇠 없음·소스 404·도배 429·CSV·헤더·길이·쿼리 열쇠 403·id·음수·주소창 열쇠")
+    # ── 2026-09-26 짝 비교 심사 — 두 팀 중 나은 쪽만 고른다 ──
+    _, pe = post("/api/events", {"title": "짝비교검사"}); PE, PK, PJ = pe["id"], pe["okey"], pe["jkey"]
+    pteams = []
+    for nm in ["가팀", "나팀", "다팀"]:
+        _, t = post(f"/api/events/{PE}/teams", {"name": nm, "email": nm + "@x.io", "agree": True})
+        A(post(f"/api/teams/{t['id']}/submit", {"url": f"https://example.com/{t['id']}"}, tkey=t["tkey"])[0] == 200,
+          "짝 비교용 팀이 제출을 못 한다")
+        pteams.append(t)
+    pids = [t["id"] for t in pteams]
+    # 켜는 것은 운영자만. 켜면 참가자가 알도록 소식에 한 줄 남는다.
+    A(post(f"/api/events/{PE}/pmode", {"on": 1})[0] == 403, "열쇠 없이 짝 비교가 켜졌다")
+    A(post(f"/api/events/{PE}/pmode", {"on": 1}, PK)[0] == 200, "운영자가 짝 비교를 못 켠다")
+    A(any("짝 비교" in n["text"] for n in api(f"/api/events/{PE}/notices")), "짝 비교 전환이 소식에 안 남았다")
+    # 쌍은 심사 열쇠를 든 사람에게만 준다
+    JN = urllib.parse.quote("검사심사")
+    A(code_of(f"/api/events/{PE}/pair?judge={JN}") == 403, "심사 열쇠 없이 쌍이 나왔다")
+    pv = api(f"/api/events/{PE}/pair?judge={JN}", jkey=PJ)
+    A(not pv["done"] and pv["a"]["id"] != pv["b"]["id"], f"서로 다른 두 팀이 안 온다: {pv}")
+    # 나중에 신청한 팀부터 이기게 고른다(다 > 나 > 가). 신청 순과 반대라야,
+    # 승률 정렬을 지웠을 때 팀 번호 순으로 그냥 맞아떨어지는 일이 없다.
+    rank = {tid: i for i, tid in enumerate(pids)}
+    seen = 0
+    while not pv["done"]:
+        a, bb = pv["a"]["id"], pv["b"]["id"]
+        w = a if rank[a] > rank[bb] else bb
+        st, r = post(f"/api/events/{PE}/pair", {"judge": "검사심사", "a": a, "b": bb, "winner": w}, jkey=PJ)
+        A(st == 200, f"고른 것이 저장이 안 된다: {st}")
+        seen += 1
+        A(r["n"] == seen, f"비교 수가 안 맞는다: {r} (={seen})")
+        A(seen <= 3, "세 팀인데 쌍이 셋보다 많다")
+        pv = api(f"/api/events/{PE}/pair?judge={JN}", jkey=PJ)
+    A(seen == 3 and pv["n"] == 3, f"세 팀이면 쌍이 셋이다: {seen}")
+    prow = api(f"/api/events/{PE}/board", key=PK)["rows"]
+    A([r["id"] for r in prow] == pids[::-1], f"승률 순위가 고른 대로가 아니다: {[(r['name'], r['pscore']) for r in prow]}")
+    A(prow[0]["pscore"] == 100 and prow[2]["pscore"] == 0 and prow[0]["pairs"] == 2, f"승률이 틀렸다: {prow[0]}")
+    # 같은 쌍을 순서만 뒤집어 다시 고르면 덮어쓴다 — 비교 수는 안 늘고 이긴 쪽만 옮겨간다
+    w0 = [r for r in prow if r["id"] == pids[0]][0]["wins"]
+    st, r2 = post(f"/api/events/{PE}/pair", {"judge": "검사심사", "a": pids[1], "b": pids[0], "winner": pids[0]}, jkey=PJ)
+    A(st == 200 and r2["n"] == 3, f"같은 쌍을 다시 골랐는데 비교 수가 늘었다: {r2}")
+    now2 = [r for r in api(f"/api/events/{PE}/board", key=PK)["rows"] if r["id"] == pids[0]][0]
+    A(now2["wins"] == w0 + 1 and now2["pairs"] == 2, f"덮어쓰기가 이긴 쪽을 안 옮겼다: {now2}")
+    post(f"/api/events/{PE}/pair", {"judge": "검사심사", "a": pids[1], "b": pids[0], "winner": pids[1]}, jkey=PJ)
+    # 비교가 없는 팀은 0% 가 아니라 «모름»이고 맨 뒤다
+    _, t4 = post(f"/api/events/{PE}/teams", {"name": "라팀", "email": "d@x.io", "agree": True})
+    post(f"/api/teams/{t4['id']}/submit", {"url": "https://example.com/4"}, tkey=t4["tkey"])
+    prow = api(f"/api/events/{PE}/board", key=PK)["rows"]
+    A(prow[-1]["id"] == t4["id"] and prow[-1]["pscore"] is None and prow[-1]["wins"] is None,
+      f"비교 0 인 팀이 0% 로 그려졌다: {prow[-1]}")
+    A(api(f"/api/events/{PE}/board")["rows"][0]["pscore"] is None, "마감 전인데 손님에게 승률이 샜다")
+    # 브라우저 — 운영 화면의 «짝 비교» 단추, 심사 화면의 두 팀 카드
+    pg.evaluate(f"localStorage.setItem('hackon.okey.{PE}', '{PK}')")
+    visit(f"/app#{PE}")
+    A(pg.query_selector("#b-pmode") is not None and "짝 비교 켜짐" in pg.inner_text("#jcard"),
+      f"운영 화면에 짝 비교 단추·켜짐 표시가 없다: {pg.inner_text('#jcard')[:80]}")
+    pg.evaluate("localStorage.setItem('hackon.judge', '브라우저심사')")
+    visit(f"/j/{PE}?k={PJ}")
+    A(pg.query_selector("#pair-a") is not None and pg.query_selector("#pair-pick-a") is not None,
+      f"심사 화면에 두 팀 카드·고르기 단추가 없다: {pg.inner_text('#view')[:100]}")
+    A(pg.query_selector(".sl input[type=range]") is None, "짝 비교인데 점수 슬라이더가 떠 있다")
+    A("0번 비교했습니다" in pg.inner_text("#pair-n"), f"비교 횟수 줄이 틀렸다: {pg.inner_text('#pair-n')}")
+    was_pair = pg.inner_text("#pair-a") + "|" + pg.inner_text("#pair-b")
+    pg.click("#pair-pick-a"); pg.wait_for_timeout(1000)
+    A("1번 비교했습니다" in pg.inner_text("#pair-n"), f"누른 뒤 비교 횟수가 안 늘었다: {pg.inner_text('#pair-n')}")
+    A(pg.inner_text("#pair-a") + "|" + pg.inner_text("#pair-b") != was_pair, "누른 뒤에도 같은 쌍이 떠 있다")
+    pg.evaluate("localStorage.removeItem('hackon.judge')")
+    # 마감 뒤에는 심사 방식을 더 못 바꾼다 (vmode·ranked 와 같은 규칙)
+    post(f"/api/events/{PE}", {"due": "2020-01-01T00:00"}, PK, method="PATCH")
+    A(post(f"/api/events/{PE}/pmode", {"on": 0}, PK)[0] == 409, "마감 뒤에 짝 비교가 꺼졌다")
+    A(api(f"/api/events/{PE}/tv")["ranks"][0]["score"] == api(f"/api/events/{PE}/board", key=PK)["rows"][0]["pscore"],
+      "큰 화면 순위가 승률을 안 쓴다")
+    visit(f"/e/{PE}")
+    A("승률" in pg.inner_text("#view"), "공개 순위 표에 승률 열이 없다")
+    ok("짝 비교 심사 — 소식·쌍 고르기·승률 순위·모름은 0 이 아님·마감 뒤 잠김")
 
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
