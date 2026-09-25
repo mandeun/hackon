@@ -38,7 +38,7 @@
 
 <style>
 :root{
-  --pg:#EEF1F4; --card:#fff; --soft:#F4F6F8; --acc:#2350F5; --ink:#191F28; --grey:#5B6470; --hair:#EAECEF;
+  --pg:#EEF1F4; --card:#fff; --soft:#F4F6F8; --acc:#0B1020; --on:#C8F53B; --ink:#191F28; --grey:#5B6470; --hair:#EAECEF;
   --sans:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif;
   --mono:ui-monospace,Consolas,monospace;
 }
@@ -83,7 +83,7 @@ input::placeholder{color:#8a8a8a}
 
 /* 표제. 한 문장과 단추 둘. 폰(390px)에서 접힘 위에 단추가 들어와야 한다. */
 .hero{padding:28px 0 10px}
-.hero .eyebrow{font-size:14px;font-weight:700;color:var(--acc);margin-bottom:10px}
+.hero .eyebrow{font-size:14px;font-weight:700;color:var(--ink);margin-bottom:10px}
 .hero h1{font-size:clamp(30px,7.2vw,46px);font-weight:850;letter-spacing:-.045em;line-height:1.12}
 .hero .lead{margin-top:14px;font-size:17px;color:var(--grey);line-height:1.6;text-wrap:pretty}
 .hero .cta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
@@ -127,7 +127,7 @@ section{background:var(--card);border-radius:22px;padding:28px 26px;margin:14px 
 
 /* 점 — 이 앱의 캐릭터. 점판의 동그라미 하나. 자리가 켜지면 파랗게 차고 살짝 튄다. */
 .hd{display:inline-block;width:14px;height:14px;border-radius:50%;border:2.5px solid #AEB6C8;box-sizing:border-box;vertical-align:-2px;margin-right:8px}
-.hd.on{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 4px rgba(35,80,245,.18);animation:hdpop .6s ease-out}
+.hd.on{background:var(--on);border-color:var(--on);box-shadow:0 0 0 4px rgba(200,245,59,.28);animation:hdpop .6s ease-out}
 @keyframes hdpop{0%{transform:scale(.6)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){ .hd.on{animation:none} }
 /* 앱 피드백 한 줄 */
@@ -345,7 +345,7 @@ document.getElementById('hero-go').addEventListener('click', function(ev){
   var el = document.getElementById('list');
   if (!대회들.length) { location.href = '/app'; return; }
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  el.style.transition = 'box-shadow .3s'; el.style.boxShadow = '0 0 0 3px #2350F5';
+  el.style.transition = 'box-shadow .3s'; el.style.boxShadow = '0 0 0 3px #C8F53B';
   setTimeout(function(){ el.style.boxShadow = ''; }, 1400);
 });
 document.getElementById('q').addEventListener('input', 그리기);
