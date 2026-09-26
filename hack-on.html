@@ -304,7 +304,16 @@ nav .i{font-size:17px}
 .kko{background:#fff;color:var(--ink);font-weight:800;border-radius:10px;padding:11px 16px;border:1px solid var(--rule);
      display:inline-block;text-decoration:none;font-size:14.5px}
 .kko:hover{filter:brightness(.96)}
-.kko.sm{padding:8px 13px;font-size:13.5px;font-weight:700}   /* 접힌 «다른 것으로» 안의 둘 */
+.kko.sm{padding:8px 13px;font-size:13.5px;font-weight:700}
+/* 로그인 단추 한 벌 — 셋을 같은 크기로 세로로 쌓는다. 좁은 화면에서 옆으로 늘어놓으면
+   글자가 줄바꿈되며 높이가 제각각이 된다. 넓으면 한 줄에 셋. */
+.loginset{display:grid;gap:8px;margin-top:8px}
+.loginset .kko{width:100%;text-align:center;box-sizing:border-box}
+@media (min-width:560px){.loginset{grid-template-columns:repeat(3,1fr)}}
+/* 어느 것이 무엇인지 한눈에 — 왼쪽 띠로만 표시한다. 면 전체를 칠하면 셋이 서로 싸운다 */
+.loginset .b-kakao {box-shadow:inset 3px 0 0 #FEE500}
+.loginset .b-google{box-shadow:inset 3px 0 0 #4285F4}
+.loginset .b-naver {box-shadow:inset 3px 0 0 #03C75A}
 /* 열쇠는 가려 둔다. 어깨너머로 보이면 그걸로 끝이다 */
 .hid{filter:blur(5px);transition:filter .15s;cursor:pointer;user-select:none}
 .hid.on{filter:none;user-select:text}
@@ -775,6 +784,7 @@ const DEMO = {
 
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '', curReq = '', curGift = '', GKEY = '';
 let MAKE_REQ = '';   // «이 문제로 내 대회 열기»로 들어온 의뢰 id. 만들 때 첫 주제로 붙는다
+let WANT_LOGIN = false;   // 첫 화면 «로그인» 으로 들어왔나. 그러면 목록 맨 위에 로그인 카드를 세운다
 /* 열쇠 없는 모드(2026-09-25): 로그인이 하나라도 켜져 있으면 운영자 열쇠를 화면에서 통째로 뺀다 — 로그인이 곧 열쇠.
    열쇠는 서버·비상용 주소(/app?k=…#대회)에만 남는다. 로그인이 없는 서버(로컬·파일 모드)는 예전 열쇠 화면 그대로. */
 const loginOn = () => !!(AUTH && AUTH.providers && AUTH.providers.length);
@@ -787,11 +797,12 @@ function loginBtns(tail, style) {
   const ps = (AUTH && AUTH.providers) || [];
   if (!ps.length) return '';
   const end = tail || '로 로그인';
-  const one = (x, cls, st) => `<a class="kko${cls}" href="/auth/${esc(x.id)}"${st ? ` style="${st}"` : ''}>${esc(x.label)}${end}</a>`;
-  return one(ps[0], '', style) + (ps.length > 1
-    ? `<details class="more" style="margin-top:8px"><summary>다른 것으로 로그인</summary><div class="in">
-         ${ps.slice(1).map((x) => one(x, ' sm', 'margin:4px 6px 0 0')).join('')}</div></details>`
-    : '');
+  /* 셋을 나란히, 같은 크기로 세운다. 전에는 첫 단추만 크게 두고 나머지를 접었는데,
+     접힌 것은 «없는 것» 이다 — 카카오를 안 쓰는 사람이 로그인 앞에서 멈춘다.
+     네이버 검수 기준도 «로그인 버튼이 눈에 띄게 드러나야 한다» 를 명시한다. */
+  return `<div class="loginset"${style ? ` style="${style}"` : ''}>`
+    + ps.map((x) => `<a class="kko b-${esc(x.id)}" href="/auth/${esc(x.id)}">${esc(x.label)}${end}</a>`).join('')
+    + '</div>';
 }
 /* 이미 붙은 로그인 말고 더 붙일 수 있는 것들. 한 사람이 둘로 갈리는 것을 본인이 막는 길이다 */
 const loginRest = () => ((AUTH && AUTH.providers) || [])
@@ -1841,11 +1852,12 @@ async function render() {
   $('#mode').hidden = LIVE;
   $('#mode').className = 'chip';
   const who = $('#who');
-  /* 머리띠는 좁다 — 여기만 첫 공급자 하나로 두고, 나머지는 본문 카드에서 고른다 */
+  /* 머리띠는 좁다 — «로그인» 한 마디만 두고, 누르면 셋을 같은 크기로 보여 주는 카드로 간다.
+     여기에 공급자 하나를 박으면 나머지를 쓰는 사람이 «나는 못 쓰나» 하고 지나친다 */
   if (who) who.innerHTML = loginOn()
     ? (AUTH.loggedIn
         ? `<a href="/auth/logout" class="chip" style="margin-left:6px">${esc(AUTH.name || '로그인됨')} · 나가기</a>`
-        : `<a href="/auth/${esc(AUTH.providers[0].id)}" class="chip" style="margin-left:6px;background:#FEE500;color:#191600;font-weight:800">${esc(AUTH.providers[0].label)} 로그인</a>`)
+        : `<a href="/app?login=1" class="chip" style="margin-left:6px;font-weight:800">로그인</a>`)   /* 노랑은 카카오 색이다. 셋을 받는 단추에 한 곳의 색을 입히지 않는다 */
     : '';
   // 팀 화면은 순위에서 들어가는 곳이라 아래 탭은 '순위'를 켜 둔다
   const navOn = tab === 'team' ? 'board' : tab;
@@ -1864,6 +1876,14 @@ async function render() {
 
 const SCREEN = {
   async home() {
+    /* «로그인» 으로 들어온 사람에게는 목록보다 로그인이 먼저다. 셋을 같은 크기로 세운다 —
+       하나만 크게 두면 나머지 둘을 쓰는 사람이 여기서 멈춘다 */
+    const loginBox = (WANT_LOGIN && loginOn() && !(AUTH && AUTH.loggedIn)) ? `
+      <div class="card"><h3>로그인</h3>
+        <div class="meta">쓰던 것으로 들어오세요. 어느 것으로 들어와도 내가 연 대회가 따라옵니다.
+          비밀번호는 없습니다.</div>
+        ${loginBtns()}
+      </div>` : '';
     const list = LIVE ? await api('/events') : DEMO.events;
     let my = null, trash = null;
     if (LIVE && myKey()) { try { my = await api('/mine'); } catch { my = null; } }
@@ -1900,7 +1920,9 @@ const SCREEN = {
       <div style="height:22px"></div>` : '';
 
     /* 열쇠를 잃은 운영자의 문. 전에는 열린 대회가 0건일 때만 그려져서, 대회가 하나라도 있으면 돌아올 길이 없었다(대역 ②) */
-    const findBox = `${my ? '' : keyless() ? `<div class="card">
+    /* 위에 로그인 카드를 세웠으면 여기서 또 세우지 않는다 — 같은 화면에 같은 단추가 두 벌
+       나오면 어느 쪽을 눌러야 하나 판단이 생긴다(검사가 6개를 세어 잡았다) */
+    const findBox = `${my || loginBox ? '' : keyless() ? `<div class="card">
         <h3>전에 연 대회를 찾으시나요</h3>
         <div class="meta">대회를 만들 때 쓴 것으로 로그인하면 다 나옵니다.</div>
         <div style="height:8px"></div>${loginBtns()}
@@ -1925,14 +1947,14 @@ const SCREEN = {
         <div style="height:8px"></div><button class="btn sec sm" id="rs-go">되살리기</button></details>`}`;
     /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
        그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
-    if (!list.length && my && my.events.length) return mineBox + `
+    if (!list.length && my && my.events.length) return loginBox + mineBox + `
       <div class="card">
         <h3>다음에 할 일</h3>
         <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
       </div>` + findBox;
-    if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
+    if (!list.length) return loginBox + mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
-    return mineBox + `<h2>열린 대회</h2>` +
+    return loginBox + mineBox + `<h2>열린 대회</h2>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
         <div class="body"><h3>${esc(e.title)}</h3>
@@ -1945,7 +1967,7 @@ const SCREEN = {
     /* 열쇠 없는 모드: 로그인 없이 만들면 그 대회를 다른 기기에서 못 찾는다 — 만들기 전에 로그인 */
     if (keyless() && !(AUTH && AUTH.loggedIn)) return `<h2>대회를 열려면<br>먼저 로그인</h2>
       <p class="sub">한 번이면 됩니다. 그래야 어느 폰·컴퓨터에서든 내 대회가 열립니다. 열쇠나 비밀번호는 없습니다.</p>
-      <div class="card">${loginBtns('로 로그인하고 열기')}
+      <div class="card">${loginBtns()}
       <div class="meta" style="margin-top:10px">별명만 받습니다. 전화번호는 안 받습니다.
         이메일은 그쪽에서 줄 때만, «구글로 들어온 분이 지난번 카카오로 들어온 그분인가»를 알아보는 데만 씁니다 —
         주소는 저장하지 않습니다(<a href="/privacy" target="_blank" rel="noopener">처리방침</a>).</div></div>`;
@@ -5232,6 +5254,7 @@ else if (location.hash.length > 1 && new URLSearchParams(location.search).get('k
   cur = location.hash.slice(1); try { localStorage.setItem('hackon.okey.' + cur, new URLSearchParams(location.search).get('k')); } catch (_) {}
   history.replaceState(null, '', location.pathname + location.hash); tab = 'board';
 }
+else if (new URLSearchParams(location.search).get('login')) { WANT_LOGIN = true; tab = 'home'; history.replaceState(null, '', location.pathname); }   // 첫 화면 «로그인» → 목록 맨 위에 로그인 카드
 else if (new URLSearchParams(location.search).get('make')) { tab = 'make'; history.replaceState(null, '', location.pathname); }   // 첫 화면 «대회 열기» → 바로 만들기
 else if (new URLSearchParams(location.search).get('req')) { MAKE_REQ = new URLSearchParams(location.search).get('req'); tab = 'make'; history.replaceState(null, '', location.pathname); }
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }

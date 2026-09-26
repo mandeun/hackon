@@ -243,7 +243,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a id="nav-manual" href="#">운영 매뉴얼</a>
     </nav>
     <nav class="tools" aria-label="도구">
-      <a id="nav-login" href="#" style="display:none">로그인</a>
+      <a id="nav-login" href="/app?login=1" style="display:none">로그인</a>
       <a id="nav-open" href="/app?make=1" class="btn s">대회 열기</a>
     </nav>
   </div>
@@ -577,8 +577,10 @@ fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
   var ps = a.providers || [];
   if (!ps.length) return;
   el.style.display = '';
-  el.textContent = ps[0].label + ' 로그인';
-  el.href = '/auth/' + ps[0].id;
+  /* 머리띠에는 «로그인» 한 마디만. 누르면 앱에서 셋을 같은 크기로 보여 준다 —
+     여기에 첫 공급자 이름을 박으면 나머지 둘을 쓰는 사람이 «나는 못 쓰나» 하고 지나친다 */
+  el.textContent = '로그인';
+  el.href = '/app?login=1';
   if (a.loggedIn) { el.textContent = (a.name || '내 대회') + ' 보기'; el.href = '/app'; }
 }).catch(function(){});
 </script>

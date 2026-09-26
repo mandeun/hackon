@@ -2901,28 +2901,36 @@ with sync_playwright() as pw:
     pg.goto(f"{LOGIN_BASE}/app?make=1", wait_until="networkidle")
     pg.wait_for_selector("body[data-ready='1']", timeout=10000)
     # 로그인이 켜진 서버에서는 로그인 없이 대회를 열 수 없다 — 먼저 로그인 문이 나온다
-    first = pg.locator("a.kko").first
-    A(first.is_visible(), "로그인 단추가 화면에 없다")
-    A(first.inner_text().startswith("카카오"), f"첫 단추가 카카오가 아니다: {first.inner_text()}")
-    A(pg.locator("a.kko:visible").count() == 1, "단추 셋을 한꺼번에 늘어놓았다 — 하나만 크게 보여야 한다")
-    fold = pg.locator("details.more summary").filter(has_text="다른 것으로 로그인")
-    A(fold.count() == 1, "«다른 것으로 로그인» 접힌 자리가 없다")
-    fold.click()
+    # 셋이 같은 크기로 다 보여야 한다. 접어 두면 안 쓰는 사람은 거기서 멈춘다
+    A(pg.locator("a.kko:visible").count() == 3, "로그인 단추 셋이 다 보이지 않는다")
+    A(pg.locator("details.more summary").filter(has_text="다른 것으로 로그인").count() == 0,
+      "아직 접힌 자리가 남아 있다")
     hrefs = pg.eval_on_selector_all("a.kko", "els => els.map(e => e.getAttribute('href'))")
     A(sorted(hrefs) == ["/auth/google", "/auth/kakao", "/auth/naver"],
-      f"펴도 셋이 아니다: {hrefs}")
-    A(pg.locator("a.kko:visible").count() == 3, "펴도 단추가 다 안 보인다")
+      f"단추가 셋이 아니다: {hrefs}")
+    # 크기가 같아야 «같은 크기»다 — 폭이 20px 넘게 차이 나면 하나만 큰 것이다
+    boxes = pg.eval_on_selector_all("a.kko", "els => els.map(e => e.getBoundingClientRect().width)")
+    A(max(boxes) - min(boxes) < 20, f"단추 폭이 제각각이다: {[round(b) for b in boxes]}")
+    A(pg.inner_text("a.kko >> nth=0").startswith("카카오"), "첫 단추가 카카오가 아니다")
     A("전화번호는 안 받습니다" in pg.inner_text("body") and "주소는 저장하지 않습니다" in pg.inner_text("body"),
       "무엇을 받는지 화면이 말하지 않는다")
     # 첫 화면 머리띠는 좁으니 하나만
     pg.goto(f"{LOGIN_BASE}/", wait_until="networkidle")
     pg.wait_for_timeout(800)
     A(pg.locator("#nav-login").is_visible(), "첫 화면 로그인 단추가 안 보인다")
-    A(pg.get_attribute("#nav-login", "href") == "/auth/kakao",
-      "첫 화면 단추가 첫 공급자로 안 간다: " + str(pg.get_attribute("#nav-login", "href")))
-    A(pg.inner_text("#nav-login") == "카카오 로그인", "첫 화면 단추 이름이 다르다: " + pg.inner_text("#nav-login"))
+    A(pg.get_attribute("#nav-login", "href") == "/app?login=1",
+      "첫 화면 단추가 로그인 화면으로 안 간다: " + str(pg.get_attribute("#nav-login", "href")))
+    A(pg.inner_text("#nav-login") == "로그인",
+      "첫 화면 단추에 공급자 이름이 박혀 있다: " + pg.inner_text("#nav-login"))
+    # 그 단추를 실제로 눌러 셋이 뜨는지 — 주소만 맞고 화면이 안 그려지면 소용없다
+    pg.click("#nav-login")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    pg.wait_for_timeout(700)
+    A(pg.locator("a.kko:visible").count() == 3,
+      f"«로그인» 을 눌렀는데 셋이 안 뜬다: {pg.locator('a.kko:visible').count()}")
+    A("로그인" in pg.inner_text("body"), "로그인 카드가 없다")
     ctx.close()
     b.close()
-ok("화면이 단추를 그린다 — 하나만 크게, 나머지는 접어서 (첫 화면·만들기 화면)")
+ok("화면이 단추 셋을 같은 크기로 그린다 — 접힌 것 없음, «로그인» 을 누르면 실제로 뜬다")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
