@@ -2311,7 +2311,7 @@ function pastDue(db, team) {
 
 function submit(db, team, b) {
   if (pastDue(db, team)) throw new HttpError(409, '제출 마감이 지났습니다');
-  const prev = db.prepare('SELECT show, show_at FROM submissions WHERE team=?').get(team);
+  const prev = db.prepare('SELECT url, show, show_at FROM submissions WHERE team=?').get(team);
   /* 제출 폼도 동의 체크칸을 같이 보낸다. 안 보내면 지금 값을 그대로 둔다 -
      칸이 없는 옛 화면이 저장할 때 남의 동의를 꺼 버리면 안 된다. */
   const on = b.show === undefined ? (prev ? prev.show : 0) : (b.show ? 1 : 0);
@@ -2322,7 +2322,10 @@ function submit(db, team, b) {
               ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note,
                 aiuse=excluded.aiuse, aidrop=excluded.aidrop,
                 show=excluded.show, show_at=excluded.show_at, sale=excluded.sale, at=datetime('now')`)
-    .run(team, webUrl(b.url), b.note || '',
+    /* 빈 주소로는 이미 낸 주소를 덮지 않는다. 다시 열어 설명만 고친 참가자가
+       먼저 낸 주소를 잃고 순위표에 «미제출» 로 바뀌었다(대역시험 1).
+       주소를 바꾸려면 새 주소를 적는다 — 지우는 길은 두지 않는다. */
+    .run(team, webUrl(b.url) || ((prev && prev.url) || ''), b.note || '',
          (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at, sale);
   /* 어느 주제·요청으로 만들었나. 이 대회에 붙은 요청만 고를 수 있다. 안 보내면 그대로 */
   if (b.request !== undefined) {
@@ -2563,7 +2566,16 @@ function closed(e) {
   return today() > e.ends;
 }
 
-function board(db, event, admin = false) {
+/** 이 브라우저가 든 팀 열쇠로 그 대회의 «내 팀» 을 찾는다. 없으면 0.
+    열쇠가 빈 값인 옛 팀이 걸리지 않게 열쇠가 있을 때만 묻는다. */
+function myTeamOf(db, event, tkey) {
+  const tk = String(tkey || '');
+  if (!tk) return 0;
+  const r = db.prepare("SELECT id FROM teams WHERE event=? AND tkey=? AND tkey<>''").get(event, tk);
+  return r ? r.id : 0;
+}
+
+function board(db, event, admin = false, mine = 0) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
@@ -2629,7 +2641,9 @@ function board(db, event, admin = false) {
        먼저 낸 팀의 결과물을 뒤에 내는 팀이 보고 만들 수 있기 때문이다.
        제목과 설명은 그대로 둔다 - 무엇을 만들고 있는지는 서로 알아야 같이 하는 느낌이 난다.
        운영자만 언제든 본다. 심사위원도 마감 뒤에 본다(judgeView 의 hideUrl 과 같은 선). */
-    if (!admin && !closed(e)) { delete row.url; row.hidden = !!t.url; }
+    /* 다만 mine(팀 열쇠를 낸 그 팀)에게는 자기 것을 돌려준다 — 안 주면 제출 칸이
+       비어 보이고, 설명만 고쳐 내는 순간 주소가 지워졌다(대역시험 1). */
+    if (!admin && !closed(e) && !(mine && String(t.id) === String(mine))) { delete row.url; row.hidden = !!t.url; }
     /* 개인정보는 운영자에게만. 화면에서 감추면 브라우저 콘솔에서 다 보인다. */
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
                   delete row.photo; delete row.came; delete row.apply;
@@ -3913,7 +3927,8 @@ function routes(db) {
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/board$/))) {
           const adm = isAdmin(db, m[1], key, owner);
-          const bd = board(db, m[1], adm);
+          /* 팀 열쇠를 들고 온 브라우저에게는 그 팀 것만 감추지 않는다(board 의 mine). */
+          const bd = board(db, m[1], adm, adm ? 0 : myTeamOf(db, m[1], req.headers['x-tkey'] || ''));
           /* 심사 링크를 만들려면 운영자에게 심사 열쇠가 필요하다. 손님에겐 절대 안 준다. */
           if (adm) { const kk = db.prepare('SELECT jkey, vkey, judged FROM events WHERE id=?').get(m[1]);
                      bd.event.jkey = kk.jkey; bd.event.vkey = kk.vkey; bd.event.judged = kk.judged;
@@ -6161,6 +6176,28 @@ function selftest() {
     }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
   }
+  /* ── 대역시험 1 — 다시 낸다고 먼저 낸 주소가 지워지면 안 된다 ── */
+  {
+    const eu = createEvent(db, { title: '덮어쓰기 검사', starts: '2026-01-10', ends: '2026-01-10' });
+    editEvent(db, eu.id, { due: '2099-01-01T00:00' });
+    const tu = joinTeam(db, eu.id, { name: '낸팀', agree: true, email: 'over@x.test' });
+    const urlOf = () => db.prepare('SELECT url FROM submissions WHERE team=?').get(tu).url;
+    submit(db, tu, { url: 'https://example.com/first', note: '첫 설명' });
+    submit(db, tu, { note: '설명만 고침' });
+    ok(urlOf() === 'https://example.com/first', '주소 칸을 안 보내면 먼저 낸 주소가 남는다');
+    submit(db, tu, { url: '', note: '빈 칸으로 다시' });
+    ok(urlOf() === 'https://example.com/first', '빈 주소로는 먼저 낸 주소를 못 덮는다');
+    ok(board(db, eu.id, true).rows[0].done === true, '빈 주소를 내도 순위표가 «미제출» 로 안 바뀐다');
+    submit(db, tu, { url: 'https://example.com/second' });
+    ok(urlOf() === 'https://example.com/second', '새 주소는 그대로 덮어쓴다');
+    /* 다시 열었을 때 칸을 채우려면 마감 전에도 «내 팀» 주소가 내려와야 한다 */
+    const tk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tu).tkey;
+    ok(board(db, eu.id, false).rows[0].url === undefined, '마감 전 남에게는 제출 주소를 안 준다');
+    ok(board(db, eu.id, false, tu).rows[0].url === 'https://example.com/second', '마감 전에도 내 팀 주소는 내려온다');
+    ok(myTeamOf(db, eu.id, tk) === tu && myTeamOf(db, eu.id, 'nope') === 0 && myTeamOf(db, eu.id, '') === 0,
+       '팀 열쇠로 내 팀을 찾는다');
+  }
+
   /* ── 개인정보 6개월 삭제 — 처리방침의 약속 ── */
   {
     const oldEv = createEvent(db, { title: '옛대회', starts: '2025-01-10', ends: '2025-01-10' });
