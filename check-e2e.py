@@ -553,6 +553,9 @@ with sync_playwright() as p:
     def openFold(name):
         pg.click(f"summary:has-text('{name}')")
         pg.wait_for_timeout(300)
+    # 아직 «오시나요»에 답한 팀이 없다 — 확정은 0 이 아니라 «모름»으로 그린다
+    dc0 = pg.evaluate("document.getElementById('desk-count').textContent")
+    A("확정 모름" in dc0, f"답이 없을 때 확정을 «모름»으로 안 그린다: {dc0!r}")
     openFold("등록 데스크")
     pg.click("[data-came]")
     pg.wait_for_timeout(700)
@@ -1508,8 +1511,12 @@ with sync_playwright() as p:
     row = [r for r in api(f"/api/events/{FE}/board", key=FK)["rows"] if r["id"] == FT["id"]][0]
     A(row.get("confirmed") not in ("", None, "no"), f"«올 거예요» 를 눌렀는데 재확인이 안 남았다: {row.get('confirmed')!r}")
     A(row.get("role") == "만들기" and int(row.get("size") or 0) == 3, f"D-3 카드에서 채운 역할·인원이 안 남았다: {row.get('role')!r} {row.get('size')!r}")
+    # 운영 화면의 인원은 «신청 N · 확정 M» 두 칸이다 (Hack Club: 확정한 수가 실제 참가 수에 가깝다)
+    visit(f"/app#{FE}")
+    dc = pg.evaluate("document.getElementById('desk-count').textContent")
+    A("확정 1팀" in dc and "확정 모름" not in dc, f"«신청 N · 확정 M» 이 안 그려진다: {dc!r}")
     post(f"/api/events/{FE}", {"starts": ev0["starts"], "ends": ev0["ends"]}, FK, method="PATCH")
-    ok("참석 재확인 — 3일 전부터 묻고, 답이 주최자 표에 남는다")
+    ok("참석 재확인 — 3일 전부터 묻고, 답이 주최자 표와 «신청 N · 확정 M» 에 남는다")
     # (6) 팀 휴지통 — 지우면 빠지고, 되살리면 같은 id 로 돌아온다 (참가자 링크가 산다)
     n0 = len(api(f"/api/events/{FE}/board", key=FK)["rows"])
     st, tr = post(f"/api/teams/{FT['id']}", {}, FK, method="DELETE")

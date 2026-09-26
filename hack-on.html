@@ -2580,7 +2580,15 @@ const SCREEN = {
         ${d.trash.map(t => `<div class="shrow" style="margin-top:6px;align-items:center"><span>${esc(t.name)} <span class="meta">${esc(String(t.at).slice(0, 16))}${t.by === 'team' ? ' · 본인이 취소' : ''}</span></span><button class="btn sec sm" data-untrash="${t.id}">되살리기</button></div>`).join('')}</div></details>` : ''}
       <p class="sub" style="margin-top:12px">팀을 누르면 제출·심사 화면이 열립니다. <b>☆</b> 추천작 · <b>🔗</b> 팀을 잃은 참가자에게 주는 링크(본인 확인 뒤) · <b>✏️</b> 이름 고치기 · <b>🗑</b> 지우기(휴지통에서 되살릴 수 있습니다).</p>
       <details id="sec-desk"${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
-        <div class="meta">절반쯤 오는 게 정상입니다.</div>
+        ${(() => {
+          /* 신청 N · 확정 M 두 칸. 아직 아무도 «오시나요»에 답하지 않았으면 M 은 «모름»이다 —
+             0 으로 그리면 «아무도 안 온다»로 읽힌다(모름을 없음으로 그리지 않는다).
+             Hack Club 조직자 안내서: 신청의 절반쯤 오고, 확정한 수가 실제 참가 수에 가깝다. */
+          const asked = d.rows.filter(r => r.confirmed).length;
+          const yes = d.rows.filter(r => r.confirmed && r.confirmed !== 'no').length;
+          return `<div class="meta" id="desk-count">신청 <b>${d.rows.length}</b>팀 · 확정 <b>${asked ? yes + '팀' : '모름'}</b>${
+            asked ? ' — 간식·자리는 확정 수로 잡습니다.' : ' — 아직 아무도 답하지 않았습니다. 3일 전부터 묻고, 절반쯤 오는 게 정상입니다.'}</div>`;
+        })()}
         <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
         ${d.rows.map(r => `<tr>
           <td>${esc(r.name)}</td>

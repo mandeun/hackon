@@ -3365,9 +3365,12 @@ function csvOf(db, event, withContact = true) {
   const cell = v => { let s = String(v == null ? '' : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;   // 엑셀이 수식으로 읽는 첫 글자(감사 8)
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   /* 스태프 방에 올릴 판은 «연락 빼고»로 받는다 — 연락처 열 자체가 없다 */
-  const head = ['자리', '팀', ...(withContact ? ['연락처'] : []), '역할', '체크인', '제출 주소', '점수', '보정 점수', '순위'];
+  /* 확정 칸은 «온다 / 못 옴 / 모름» 셋이다. 아직 안 물은 팀을 «못 옴»이나 빈 칸으로 적으면
+     간식·자리를 그 숫자로 잡게 된다 — 모름은 모름으로 적는다. */
+  const conf = v => (v === 'no' ? '못 옴' : v ? '온다' : '모름');
+  const head = ['자리', '팀', ...(withContact ? ['연락처'] : []), '역할', '확정', '체크인', '제출 주소', '점수', '보정 점수', '순위'];
   const lines = [head.join(',')];
-  for (const r of b.rows) lines.push([r.no, r.name, ...(withContact ? [r.contact] : []), r.role, r.came, r.url || '', r.score, r.rscore, r.rank].map(cell).join(','));
+  for (const r of b.rows) lines.push([r.no, r.name, ...(withContact ? [r.contact] : []), r.role, conf(r.confirmed), r.came, r.url || '', r.score, r.rscore, r.rank].map(cell).join(','));
   lines.push('', ['자리 종류', '자리', '이름', '소속', '상태'].join(','));
   for (const x of pledgesOf(db, event).filter(x => x.status === 'ok' || x.status === 'done'))
     lines.push([x.kind, x.label, x.name, x.org, x.status].map(cell).join(','));
@@ -5689,6 +5692,11 @@ function selftest() {
   ok(board(db, ev, true).rows.find(r => r.id === t1).confirmed === 'no', '«못 가요» 가 주최자 표에 실린다');
   db.prepare("UPDATE teams SET confirmed=? WHERE id=?").run(new Date().toISOString(), t1);
   ok(board(db, ev, true).rows.find(r => r.id === t1).confirmed.length > 4, '«올 거예요» 가 주최자 표에 실린다');
+  /* 내보내기에도 확정 칸이 있어야 준비 수량을 그 숫자로 잡는다. 안 물은 팀은 «모름» — 빈 칸이 아니다 */
+  const cvLines = csvOf(db, ev).split('\n');
+  ok(cvLines[0].split(',').includes('확정'), 'CSV 머리줄에 확정 칸이 있다');
+  ok(cvLines.slice(1, 4).some(l => l.split(',').includes('온다'))
+     && cvLines.slice(1, 4).some(l => l.split(',').includes('모름')), 'CSV 확정 칸은 온다·모름을 갈라 적는다');
   db.prepare("UPDATE teams SET came=datetime('now') WHERE id=?").run(t1);
   ok(outcomes(db, ev).came === 1, '체크인이 세어진다');
   ok(outcomes(db, ev).photo === 1, '촬영 동의가 세어진다');
