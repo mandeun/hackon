@@ -116,6 +116,8 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
   border-radius:50%;background:var(--navy);border:3px solid #fff;
   box-shadow:0 1px 5px rgba(43,51,40,.35);cursor:pointer}
 .sl b{width:2.6em;text-align:right;font-size:17px;font-variant-numeric:tabular-nums}
+/* 만점. 「—」 만 있으면 몇 점 만점인지 알 수가 없다. */
+.sl .mx{font-size:12px;color:var(--ink3);white-space:nowrap}
 /* 추천 태그. 누르면 아래 칸에 문장이 들어간다. 빈 칸을 마주하면 아무도 안 쓴다. */
 .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .tags button{border:1px solid var(--rule);background:#fff;border-radius:999px;
@@ -3268,14 +3270,18 @@ const SCREEN = {
       </div>
 
       <div class="card">
+        ${/* 만점을 옆에 적는다. 전에는 «—» 하나뿐이라 몇 점 만점인지, 지금 몇 점인지를 알 수 없었다(대역시험 3).
+              data-init 은 «손 안 댄 자리»의 값이다. range 는 value 를 비우면 브라우저가 가운데(50)로 앉히므로,
+              끌기 전과 같은 값이면 아직 모름으로 본다 — 50 을 점수로 저장하던 길을 여기서 끊는다. */''}
         ${d.event.rubric.map(r => { const v = t.mine[r.key] ?? ''; return `
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
           <div class="sl">
-            <input type="range" min="0" max="100" step="5" value="${v}"
+            <input type="range" min="0" max="100" step="5" value="${v}" data-init="${v === '' ? 50 : v}"
                    style="--p:${v === '' ? 0 : v}%" class="jv-${esc(t.id)}${v === '' ? ' unset' : ''}" data-key="${esc(r.key)}"
                    aria-label="${esc(r.label)} 점수">
-            <b>${v === '' ? '—' : v}</b>
+            <b>${v === '' ? '—' : v}</b><span class="mx">/ 100점</span>
           </div>${hintLine(r)}`; }).join('')}
+        <div class="meta">각 항목 <b>100점 만점</b>, 5점 단위입니다. 끌지 않은 항목은 «—» 로 남고 점수가 안 들어갑니다.</div>
       </div>
 
       <div class="card">
@@ -4602,8 +4608,17 @@ function wire() {
   });
 
   document.querySelectorAll('[data-jsave]').forEach(b => b.onclick = async () => {
-    const id = b.dataset.jsave, values = {};
-    document.querySelectorAll('.jv-' + id).forEach(i => { if (i.value !== '') values[i.dataset.key] = +i.value; });
+    const id = b.dataset.jsave, values = {}, blank = [];
+    /* 손 안 댄 항목은 «모름»이라 안 보낸다. range 는 value 를 비우면 가운데(50)로 앉으므로
+       «i.value !== ''» 는 언제나 참이었다 — 그래서 안 만진 항목이 50점으로 저장됐다(대역시험 3). */
+    document.querySelectorAll('.jv-' + id).forEach(i => {
+      const 만짐 = !i.classList.contains('unset') || i.value !== (i.dataset.init || '');
+      if (만짐) values[i.dataset.key] = +i.value;
+      else blank.push((i.getAttribute('aria-label') || i.dataset.key).replace(/ 점수$/, ''));
+    });
+    /* 빈 항목이 있으면 한 번만 묻는다. 그대로 저장하면 그 항목은 «모름» 으로 남고,
+       평균에도 순위에도 안 들어간다 — 50 으로 채우지 않는다. */
+    if (blank.length && !confirm(`아직 안 매긴 항목이 있습니다 — ${blank.join(' · ')}.\n그대로 저장하면 이 항목은 빈칸으로 남습니다. 저장할까요?`)) return;
     const g = document.querySelector('.jg-' + id), nx = document.querySelector('.jn2-' + id);
     try {
       await api(`/teams/${id}/score`, { method: 'POST',
@@ -4622,7 +4637,7 @@ function wire() {
   /* 슬라이더를 끌면 옆 숫자와 채워진 길이가 따라온다. 화면을 다시 그리지 않는다. */
   document.querySelectorAll('.sl input[type=range]').forEach(r => {
     const num = r.parentElement.querySelector('b');
-    r.oninput = () => { r.classList.remove('unset'); num.textContent = r.value; r.style.setProperty('--p', r.value + '%'); };
+    r.oninput = () => { r.classList.remove('unset'); r.dataset.init = ''; num.textContent = r.value; r.style.setProperty('--p', r.value + '%'); };
   });
 
   /* 추천 태그 - 누르면 아래 칸에 문장이 들어간다. 이미 있으면 다시 안 넣는다. */

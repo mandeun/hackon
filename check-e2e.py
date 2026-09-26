@@ -692,6 +692,44 @@ with sync_playwright() as p:
     ok("전체 비교 — 앞 팀으로 돌아가 점수를 고칠 수 있다")
     jctx.close()
 
+    # ── 손 안 댄 항목은 50 점이 아니다 (대역시험 3) ──
+    # range 는 value 를 비우면 브라우저가 가운데(50)에 앉힌다. 전에는 그 50 이 그대로 저장돼
+    # 화면은 내내 «—» 인데 주최자 순위표에는 «50점 · 심사 1명» 이 올라갔다.
+    jc4 = b.new_context()
+    jp4 = jc4.new_page()
+    jp4.on("pageerror", lambda e: errs.append("빈칸심사:" + str(e)))
+    jp4.goto(f"{BASE}/j/{ev}?k={JK}")
+    jp4.wait_for_selector("body[data-ready='1']", timeout=8000)
+    jp4.fill("#jn", "빈칸심사")
+    jp4.click("#jn-go")
+    jp4.wait_for_timeout(700)
+    A("100점" in jp4.inner_text("#view"), "심사 화면에 몇 점 만점인지가 안 적혀 있다")
+    ans = {"yes": False, "asked": []}
+    jp4.on("dialog", lambda d: (ans["asked"].append(d.message), d.accept() if ans["yes"] else d.dismiss()))
+    tgt = jp4.query_selector("[data-jsave]").get_attribute("data-jsave")
+
+    def mine_of(name):
+        jv4 = api(f"/api/events/{ev}/judge?judge=" + urllib.parse.quote(name), jkey=JK)
+        return [t for t in jv4["teams"] if str(t["id"]) == tgt][0]["mine"]
+
+    jp4.click(f'[data-jsave="{tgt}"]')
+    jp4.wait_for_timeout(800)
+    A(ans["asked"], "하나도 안 매겼는데 묻지도 않고 저장했다")
+    A(mine_of("빈칸심사") == {}, f"«아니오» 를 눌렀는데 점수가 들어갔다: {mine_of('빈칸심사')}")
+
+    # 한 항목만 끌고 «예» — 끈 것만 들어가고 나머지는 빈칸으로 남아야 한다
+    ans["yes"] = True
+    ans["asked"].clear()
+    key1 = jp4.evaluate("""(id) => { const r = document.querySelector('.jv-' + id);
+        r.value = 85; r.dispatchEvent(new Event('input', { bubbles: true })); return r.dataset.key; }""", tgt)
+    jp4.click(f'[data-jsave="{tgt}"]')
+    jp4.wait_for_timeout(900)
+    A(ans["asked"], "빈 항목이 남았는데 안 물었다")
+    got = mine_of("빈칸심사")
+    A(got == {key1: 85}, f"끌지 않은 항목이 같이 저장됐다: {got}")
+    jc4.close()
+    ok("심사 — 만점을 적고, 손 안 댄 항목은 50 이 아니라 빈칸으로 남는다")
+
     # ── 주최자 열쇠 — 로그인 없이 내 대회를 따라오게 한다 ──
     def api_owner(path):
         req = urllib.request.Request(BASE + path)
@@ -2703,6 +2741,9 @@ with sync_playwright() as pw:
     jo.click("#jn-go")
     jo.wait_for_timeout(900)
     A(len(jo.query_selector_all("input[type=range]")) == 4, "인터넷 없이 심사 화면이 깨진다")
+    # 손 안 댄 항목은 이제 저장되지 않는다. 심사위원이 실제로 하는 일(끌기)을 그대로 한다.
+    jo.evaluate("""() => document.querySelectorAll('.sl input[type=range]').forEach((r, n) => {
+        r.value = [70, 75, 80, 85][n]; r.dispatchEvent(new Event('input', { bubbles: true })); })""")
     jo.click("[data-jsave]")
     jo.wait_for_timeout(900)
     A(api(f"/api/events/{oev['id']}/board", key=OK2)["rows"][0]["judges"] == 1,

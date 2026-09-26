@@ -2586,13 +2586,25 @@ function board(db, event, admin = false, mine = 0) {
   /* 심사위원별 등수 보정(MLH 의 stack ranking 을 눈금으로). 관대한 심사위원의 90점과 짠 심사위원의 70점이
      같은 «1등»일 수 있다 — 각 심사위원 안에서 등수를 매겨 100~0 으로 펴고, 팀은 자기를 본 심사위원들의 평균을 받는다.
      한 팀만 본 심사위원은 그 팀에 100 을 준다(비교가 없으니 «모름»이지만 0 으로 그리면 벌이 된다). */
-  const perJudge = {};
+  const perJudge = {}, gaveW = {};
   for (const sc of db.prepare(`SELECT s.team, s.judge, s.key, s.value FROM scores s
                                JOIN teams t ON t.id = s.team WHERE t.event = ?`).all(event)) {
     const w = (e.rubric.find(r => r.key === sc.key) || {}).weight || 0;
     perJudge[sc.judge] = perJudge[sc.judge] || {};
+    gaveW[sc.judge] = gaveW[sc.judge] || {};
     perJudge[sc.judge][sc.team] = (perJudge[sc.judge][sc.team] || 0) + sc.value * w / 100;
+    gaveW[sc.judge][sc.team] = (gaveW[sc.judge][sc.team] || 0) + w;
   }
+  /* 일부 항목만 매긴 심사위원. 안 매긴 항목은 «모름» 이지 0 이 아니다 —
+     0 으로 두면 그 팀만 혼자 낮아져 등수 보정이 거짓말을 한다.
+     그 심사위원이 «실제로 본 항목» 의 배점으로 나눠 같은 자에 올린다.
+     다 매겼으면 나누는 값이 그대로라 아무것도 안 바뀐다(대역시험 3). */
+  const WTOT = e.rubric.reduce((a, r) => a + (+r.weight || 0), 0);
+  for (const j of Object.keys(perJudge))
+    for (const t of Object.keys(perJudge[j])) {
+      const gw = gaveW[j][t];
+      if (gw > 0 && gw < WTOT) perJudge[j][t] = perJudge[j][t] * WTOT / gw;
+    }
   const rankPts = {};   // team -> [points per judge]
   for (const j of Object.keys(perJudge)) {
     const ts = Object.entries(perJudge[j]).sort((a, b) => b[1] - a[1]);
@@ -6176,6 +6188,32 @@ function selftest() {
     }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
   }
+  /* ── 대역시험 3 — 손 안 댄 심사 항목은 «모름» 이다. 50 도 0 도 아니다 ── */
+  {
+    const ej = createEvent(db, { title: '부분 심사 검사', starts: '2026-01-10', ends: '2026-01-10' });
+    const q1 = joinTeam(db, ej.id, { name: '다맞은팀', agree: true, email: 'pa@x.test' });
+    const q2 = joinTeam(db, ej.id, { name: '한항목팀', agree: true, email: 'pb@x.test' });
+    const q3 = joinTeam(db, ej.id, { name: '낮은팀', agree: true, email: 'pc@x.test' });
+    score(db, q1, { judge: '반만본사람', values: { idea: 80, make: 80, use: 80, tell: 80 } });
+    score(db, q2, { judge: '반만본사람', values: { idea: 80 } });                   // 나머지는 손을 안 댔다
+    score(db, q3, { judge: '반만본사람', values: { idea: 40, make: 40, use: 40, tell: 40 } });
+    ok(db.prepare('SELECT COUNT(*) c FROM scores WHERE team=? AND judge=?').get(q2, '반만본사람').c === 1,
+       '안 매긴 항목은 줄이 아예 안 생긴다');
+    ok(!db.prepare("SELECT 1 FROM scores WHERE team=? AND key='make'").get(q2), '안 매긴 항목에 50 이 안 들어간다');
+    const R = Object.fromEntries(board(db, ej.id, true).rows.map(r => [r.name, r]));
+    ok(R['한항목팀'].score === 24, '가중 총점은 매긴 항목만 센다 (80×0.30 = 24)');
+    ok(R['한항목팀'].judges === 1, '부분 점수도 «심사 1명» 으로 센다');
+    /* 등수 보정(rscore) — 80점을 준 두 팀은 같은 자리여야 한다. 안 매긴 항목을 0 으로 세면
+       한항목팀이 24 로 떨어져 낮은팀(40)보다 뒤로 밀린다. */
+    ok(R['다맞은팀'].rscore === R['한항목팀'].rscore && R['다맞은팀'].rscore > R['낮은팀'].rscore,
+       '안 매긴 항목이 등수 보정을 끌어내리지 않는다 ('
+       + [R['다맞은팀'].rscore, R['한항목팀'].rscore, R['낮은팀'].rscore].join('/') + ')');
+    /* 심사 화면이 그 항목을 빈칸으로 그릴 수 있어야 한다 */
+    const jv = judgeView(db, ej.id, '반만본사람');
+    const mine = jv.teams.find(t => t.id === q2).mine;
+    ok(mine.idea === 80 && mine.make === undefined, '심사 화면은 안 매긴 항목을 빈칸으로 받는다');
+  }
+
   /* ── 대역시험 1 — 다시 낸다고 먼저 낸 주소가 지워지면 안 된다 ── */
   {
     const eu = createEvent(db, { title: '덮어쓰기 검사', starts: '2026-01-10', ends: '2026-01-10' });
