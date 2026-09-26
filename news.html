@@ -30,6 +30,9 @@ main{max-width:720px;margin:0 auto;padding:10px 20px 60px}
 .jobs{display:flex;gap:6px;flex-wrap:wrap;margin-top:18px}
 .chip{border:1.5px solid var(--hair);background:#fff;border-radius:999px;padding:8px 13px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;color:var(--grey)}
 .chip[aria-pressed=true]{background:var(--ink);color:var(--on);border-color:var(--ink)}
+/* 칩에 건수를 붙인다 — 누르기 전에 빈 탭인지 보인다. 0 은 «모름»이 아니라 «없음»이라 숫자로 적는다 */
+.chip .n{margin-left:5px;font-size:12px;font-weight:700;opacity:.55;font-variant-numeric:tabular-nums}
+.chip[data-n="0"]{opacity:.5;border-style:dashed}
 .card{background:#fff;border:1px solid var(--hair);border-radius:16px;padding:16px;margin-top:18px}
 .card h2{font-size:17px;margin:0 0 6px} .card .m{font-size:13px;color:var(--grey);line-height:1.55}
 .how li{margin:8px 0;font-size:14.5px;line-height:1.5} .how b{font-weight:800} .how a{color:var(--moss)}
@@ -96,7 +99,16 @@ const HOW = {
   const jobsEl = document.getElementById('jobs'), list = document.getElementById('list'), how = document.getElementById('how');
   let d; try { d = await (await fetch('/api/news')).json(); } catch { d = { src: {}, jobs: Object.keys(HOW), rows: [] }; }
   const SRC = d.src || {}, JOBS = d.jobs || Object.keys(HOW), rows = d.rows || [];
-  jobsEl.innerHTML = ['all', ...JOBS].map(k => `<button class="chip" data-k="${esc(k)}" aria-pressed="${k === cur}">${k === 'all' ? '전체' : esc(k)}</button>`).join('');
+  /* 직무별 건수. 세는 규칙은 draw() 의 scope 와 반드시 같다 — «우리 우승작»(src=hackon)은 어느 직무에서나 보인다.
+     둘이 어긋나면 칩엔 3 이라 적혀 있는데 눌러 보니 0 줄인 화면이 된다. */
+  function jobCounts(rows, jobs) {
+    const c = { all: rows.length };
+    for (const j of jobs) c[j] = rows.filter(r => r.job === j || r.src === 'hackon').length;
+    return c;
+  }
+  window.jobCounts = jobCounts;   /* check-e2e.py 가 부른다 */
+  const CNT = jobCounts(rows, JOBS);
+  jobsEl.innerHTML = ['all', ...JOBS].map(k => `<button class="chip" data-k="${esc(k)}" data-n="${CNT[k] || 0}" aria-pressed="${k === cur}">${k === 'all' ? '전체' : esc(k)}<span class="n">${CNT[k] || 0}</span></button>`).join('');
   jobsEl.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; cur = b.dataset.k; [...jobsEl.children].forEach(c => c.setAttribute('aria-pressed', c.dataset.k === cur)); history.replaceState(null, '', cur === 'all' ? '/news' : '/news?job=' + encodeURIComponent(cur)); draw(); };
   /* 지난번 본 것 뒤로 새로 들어온 것 — 이 브라우저 기준(localStorage). 처음이면 오늘 것 */
   let seen = 0; try { seen = +localStorage.getItem('hackon.news.seen') || 0; } catch (_) {}

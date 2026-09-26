@@ -1630,6 +1630,19 @@ function open(file) {
       hidden      INTEGER NOT NULL DEFAULT 0,      -- 운영자가 내린 것. 지우지 않고 감춘다
       at          TEXT NOT NULL DEFAULT (datetime('now')),
       answered_at TEXT NOT NULL DEFAULT '')`);
+  /* 신고 — 남이 쓴 것(질문·팀 이름·제출물·후원자 이름)이 불쾌할 때 누구나 넣는다.
+     앱스토어 심사 지침 1.2 가 «신고 수단»을 요구한다. 운영자가 보고, 질문이면 hidden 으로 내린다.
+     로그인이 없으므로 누가 넣었는지는 묻지 않는다 — 넣는 문턱을 낮게 둔다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS reports(
+      id      INTEGER PRIMARY KEY,
+      event   TEXT NOT NULL DEFAULT '',
+      kind    TEXT NOT NULL,                    -- question | team | submission | sponsor | other
+      ref     TEXT NOT NULL DEFAULT '',         -- 무엇에 대한 신고인가 (질문 번호 등)
+      reason  TEXT NOT NULL,
+      note    TEXT NOT NULL DEFAULT '',
+      done    INTEGER NOT NULL DEFAULT 0,       -- 운영자가 처리함
+      at      TEXT NOT NULL DEFAULT (datetime('now')))`);
+
   /* 공지는 한 줄(events.notice, 큰 화면 띠)로 남기되 지난 소식도 쌓아 둔다 —
      참가자가 «지금 뭐가 바뀌었나»를 공개 페이지에서 시각과 함께 본다. */
   db.exec(`CREATE TABLE IF NOT EXISTS notices(
@@ -3475,6 +3488,22 @@ function needsSummary(db, event) {
            pending: kinds.reduce((s, k) => s + k.pending, 0), kinds };
 }
 
+/* 신고 넣기. 로그인이 없으니 누구인지 묻지 않는다 — 문턱을 낮게 둔다.
+   속도 제한은 위쪽 전역 규칙(WRITE_LIMIT)이 이미 건다. */
+const REPORT_KINDS = ['question', 'team', 'submission', 'sponsor', 'other'];
+function addReport(db, b) {
+  const kind = REPORT_KINDS.includes(String(b.kind)) ? String(b.kind) : 'other';
+  const reason = plain(b.reason, 60);
+  if (!reason) throw new HttpError(400, '무엇이 문제인지 골라 주세요');
+  const event = plain(b.event, 20);
+  /* 없는 대회 번호를 받아 두면 운영자가 못 보는 신고가 쌓인다. 있는 것만 붙인다. */
+  if (event && !db.prepare('SELECT 1 FROM events WHERE id=?').get(event))
+    throw new HttpError(404, '없는 대회입니다');
+  const r = db.prepare('INSERT INTO reports(event,kind,ref,reason,note) VALUES(?,?,?,?,?)')
+    .run(event, kind, plain(b.ref, 40), reason, plain(b.note, 300));
+  return { id: Number(r.lastInsertRowid) };
+}
+
 /* 팀 열쇠나 신청 때 적은 연락처로만 쓴다. 둘 다 없으면 누구 팀의 답인지 모른다 */
 function addFollowup(db, event, b, req) {
   let team = null;
@@ -3703,6 +3732,21 @@ function routes(db) {
           return json(res, 200, hideQuestion(db, m[1]));
         }
         /* 심사 진행 알림 — «심사 n/m 팀 봤습니다»를 소식에. 참가자가 기다리는 동안 어디까지 왔는지 안다(MLH) */
+        /* 신고 — 누구나 넣는다. 앱스토어 지침 1.2 의 «신고 수단». */
+        if (p === '/api/reports' && req.method === 'POST')
+          return json(res, 201, addReport(db, await body(req)));
+        /* 들어온 신고 보기·처리 — 그 대회의 운영자만. 연락처가 아니라 내용이 실린다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/reports$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner);
+          return json(res, 200, db.prepare('SELECT id,kind,ref,reason,note,done,at FROM reports WHERE event=? ORDER BY done, id DESC LIMIT 200').all(m[1]));
+        }
+        if ((m = p.match(/^\/api\/reports\/(\d+)\/done$/)) && req.method === 'POST') {
+          const rp = db.prepare('SELECT event FROM reports WHERE id=?').get(+m[1]);
+          if (!rp) throw new HttpError(404, '없는 신고입니다');
+          needAdmin(db, rp.event, key, owner);
+          db.prepare('UPDATE reports SET done=1 WHERE id=?').run(+m[1]);
+          return json(res, 200, { ok: true });
+        }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/progress$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);
           const bd = board(db, m[1], true);
@@ -6160,6 +6204,25 @@ function selftest() {
       db.prepare("DELETE FROM requests WHERE contact IN ('flood@x.test','other@x.test')").run();   /* 도배 줄이 뒤 검사의 목록을 밀어내지 않게 치운다 */
     }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
+  }
+  /* ── 신고 — 앱스토어 심사 지침 1.2 가 요구하는 «신고 수단» ── */
+  {
+    const ev = createEvent(db, { title: '신고 대회', starts: today(), ends: today() });
+    const r1 = addReport(db, { event: ev.id, kind: 'question', ref: '7', reason: '욕설·비방', note: '심한 말' });
+    ok(r1.id > 0, '신고가 들어간다');
+    let noReason = false;
+    try { addReport(db, { event: ev.id, kind: 'question' }); } catch { noReason = true; }
+    ok(noReason, '이유 없는 신고는 막힌다');
+    let ghost = false;
+    try { addReport(db, { event: 'zzzzzzzz', kind: 'other', reason: 'x' }); } catch { ghost = true; }
+    ok(ghost, '없는 대회로는 신고를 못 넣는다 — 운영자가 못 보는 신고가 쌓이면 안 된다');
+    ok(addReport(db, { event: ev.id, kind: '아무거나', reason: '기타' }) &&
+       db.prepare("SELECT kind FROM reports WHERE event=? ORDER BY id DESC").get(ev.id).kind === 'other',
+       '모르는 갈래는 other 로 떨어진다');
+    const rows = db.prepare('SELECT id,done FROM reports WHERE event=?').all(ev.id);
+    ok(rows.length === 2 && rows.every(x => x.done === 0), '운영자 목록에 처리 전으로 뜬다');
+    db.prepare('UPDATE reports SET done=1 WHERE id=?').run(r1.id);
+    ok(db.prepare('SELECT done FROM reports WHERE id=?').get(r1.id).done === 1, '처리 표시가 남는다');
   }
   /* ── 개인정보 6개월 삭제 — 처리방침의 약속 ── */
   {

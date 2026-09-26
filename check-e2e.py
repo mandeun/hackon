@@ -2759,5 +2759,39 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 
+# ── 11. 직무 칩이 «누르기 전에» 빈 탭인지 알려주는가 ──────────
+# 칩 일곱이 다 살아 있는 것처럼 보이면, 눌러 본 사람만 그 탭이 빈 걸 안다.
+# 그리고 칩에 적힌 수는 눌렀을 때 보이는 줄 수와 반드시 같아야 한다 — 어긋나면 빈 탭보다 나쁘다.
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_context(viewport={"width": 412, "height": 900}).new_page()
+    pg.goto(f"{BASE}/news", wait_until="networkidle")
+    pg.wait_for_selector(".chip[data-k]")
+    chips = pg.evaluate(
+        "[...document.querySelectorAll('.chip[data-k]')]"
+        ".map(c => ({k: c.dataset.k, n: c.dataset.n,"
+        " txt: c.querySelector('.n') && c.querySelector('.n').textContent}))")
+    A(len(chips) >= 8, f"칩이 전체+직무7 이 아니다: {len(chips)}개")
+    A(all(c["n"] is not None for c in chips), f"칩에 건수(data-n)가 없다: {chips}")
+    A(all(c["txt"] == c["n"] for c in chips), f"칩에 보이는 수와 data-n 이 다르다: {chips}")
+    # 빈 DB 라 직무 칩은 전부 0 이어야 하고, 0 은 점선으로 보여야 한다
+    zero = [c for c in chips if c["k"] != "all" and c["n"] == "0"]
+    A(len(zero) == len(chips) - 1, f"빈 DB 인데 0 이 아닌 직무 칩이 있다: {chips}")
+    A(pg.evaluate("""getComputedStyle(document.querySelector('.chip[data-n="0"]')).borderStyle""")
+      == "dashed", "0건 칩이 점선으로 표시되지 않는다 — 눌러 보기 전엔 빈 걸 모른다")
+    # 세는 규칙이 draw() 의 scope 와 같은가. scope 를 여기 따로 적는다 —
+    # 화면 코드를 그대로 베끼면 둘이 같이 틀려도 검사가 통과한다.
+    agree = pg.evaluate("""() => {
+        const rows = [{job:'개발',src:'lob'}, {job:'개발',src:'gh'},
+                      {job:'기획',src:'yozm'}, {job:'',src:'hackon'}];
+        const jobs = ['개발', '기획', '소상공인'];
+        const c = window.jobCounts(rows, jobs);
+        return c.all === rows.length &&
+               jobs.every(j => c[j] === rows.filter(r => r.job === j || r.src === 'hackon').length);
+    }""")
+    A(agree, "칩 건수가 draw() 의 scope 규칙과 어긋난다 — 칩엔 n 인데 눌러 보면 다른 수가 나온다")
+    ok("직무 칩이 건수를 함께 낸다 — 0건은 점선, 세는 규칙은 화면과 같다")
+    b.close()
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
