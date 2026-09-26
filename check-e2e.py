@@ -1719,7 +1719,15 @@ with sync_playwright() as p:
     fp.goto(BASE + "/app"); fp.wait_for_selector("body[data-ready='1']", timeout=8000)
     A(fp.query_selector("#ow-in") is not None and fp.query_selector("#rs-file") is not None, "열쇠 없는 브라우저의 «대회» 탭에 열쇠 찾기·되살리기 칸이 없다")
     fctx.close()
-    ok("대역 ①②④⑤ — 공개 페이지에서 결과물 내기 · 열쇠 찾기 상시 · 여는 사람 칸 · 첫 화면에서 바로 만들기")
+    # ③ /give 로 들어와 확인된 후원은 큰 화면·보고서의 «함께한 곳»에 실린다 — 약속한 대로. 대기 중이거나 «밖에서 구함»은 안 실린다
+    _, gn = post(f"/api/events/{FE}/needs", {"kind": "snack", "label": "커피", "qty": 1}, FK)
+    _, gp = post(f"/api/needs/{gn['id']}/pledge", {"name": "포도가게 김", "org": "포도가게", "contact": "010-1"})
+    A(all(sp["name"] != "포도가게" for sp in api(f"/api/events/{FE}/tv")["sponsors"]), "확인 전 후원이 큰 화면에 실렸다")
+    A(post(f"/api/pledges/{gp['id']}/status", {"status": "ok"}, FK)[0] == 200, "후원 확인이 안 된다")
+    tvs = api(f"/api/events/{FE}/tv")["sponsors"]; pks = api(f"/api/events/{FE}/pack")["sponsors"]
+    A(any(sp["name"] == "포도가게" for sp in tvs) and any(sp["name"] == "포도가게" and sp["kind"] == "현물" for sp in pks), "확인된 /give 후원이 큰 화면·보고서 «함께한 곳»에 없다")
+    A("010-1" not in json.dumps(tvs) + json.dumps(pks), "후원자 연락처가 큰 화면·보고서로 샜다")
+    ok("대역 ①②③④⑤ — 결과물 내기 · 열쇠 찾기 상시 · /give 후원자도 함께한 곳 · 여는 사람 · 첫 화면에서 바로 만들기")
 
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})

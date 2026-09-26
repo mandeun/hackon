@@ -439,6 +439,7 @@ function pack(db, event, admin) {
     }, {})).map(([k, c]) => ({ k, c })).sort((a, b) => b.c - a.c));
 
   const sponsors = db.prepare('SELECT * FROM sponsors WHERE event=? ORDER BY amount DESC').all(event)
+    .concat(pledgeSponsors(db, event).map(x => ({ ...x, done: '' })))
     .map(x => {
       const list = TIERS[x.kind] || TIERS['크레딧'];
       const hit = new Set(String(x.done || '').split(',').filter(v => v !== ''));
@@ -2574,7 +2575,7 @@ function tv(db, event) {
     crew: crew(db, event),
     /* 협찬사 로고. 금액은 안 보낸다 - 벽에 걸리는 화면이다. */
     sponsors: db.prepare('SELECT name, kind, logo, link FROM sponsors WHERE event=? ORDER BY amount DESC')
-                .all(event),
+                .all(event).concat(pledgeSponsors(db, event).map(x => ({ name: x.name, kind: x.kind, logo: '', link: '' }))),
   };
 }
 
@@ -3134,6 +3135,15 @@ function csvOf(db, event, withContact = true) {
   for (const x of pledgesOf(db, event).filter(x => x.status === 'ok' || x.status === 'done'))
     lines.push([x.kind, x.label, x.name, x.org, x.status].map(cell).join(','));
   return '\ufeff' + lines.join('\n') + '\n';
+}
+
+/* 확인된 후원(pledge)을 협찬사 모양으로. /give 로 들어온 사람도 큰 화면·보고서의 «함께한 곳»에 실린다 —
+   «큰 화면에 함께한 곳으로 실립니다. 끝나면 결과 보고서를 받습니다»라고 약속했다(대역 ③). 연락처는 안 싣는다 */
+const NEED_LABEL_KIND = { venue: '장소', cash: '현금', judge: '심사', prize: '상품', mentor: '멘토', snack: '현물', other: '현물' };
+function pledgeSponsors(db, event) {
+  return db.prepare(`SELECT p.id, p.name, p.org, n.kind FROM pledges p JOIN needs n ON n.id = p.need
+                     WHERE p.event = ? AND p.status IN ('ok','done') AND p.note <> '앱 밖에서 구함' ORDER BY p.id`).all(event)
+    .map(r => ({ id: 'p' + r.id, name: r.org || r.name, kind: NEED_LABEL_KIND[r.kind] || '현물', amount: 0, logo: '', link: '', proof: '', fromGive: true }));
 }
 
 /* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
