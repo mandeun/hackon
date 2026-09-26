@@ -1495,6 +1495,8 @@ function open(file) {
   try { db.exec("UPDATE teams SET sponsor_ok=1 WHERE share<>'' AND sponsor_ok=0"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN tkey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN wifi TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 모이는 곳. «언제» 는 있는데 «어디» 를 적을 칸이 아예 없었다 — 대역 셋이 여기서 멈췄다(대역시험 4). */
+  try { db.exec("ALTER TABLE events ADD COLUMN place TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN person TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN notice TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN notice_at TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -1999,13 +2001,14 @@ const RUBRICS = {
 const DEFAULT_RUBRIC = RUBRICS['만들기'].rows;
 
 /** 대회를 만든 뒤 나머지를 채운다. 처음부터 다 물으면 만들다가 그만둔다. */
-const EDITABLE = ['title', 'host', 'topic', 'starts', 'ends', 'prize', 'cap', 'due', 'wifi'];
+const EDITABLE = ['title', 'host', 'topic', 'starts', 'ends', 'prize', 'cap', 'due', 'wifi', 'place'];
 function editEvent(db, id, b) {
   const set = [], val = [];
   for (const k of EDITABLE) {
     if (b[k] === undefined) continue;
     set.push(`${k}=?`);
-    val.push(k === 'prize' || k === 'cap' ? Math.max(0, +b[k] || 0) : plain(b[k], k === 'topic' ? 200 : k === 'wifi' ? 200 : 80));
+    val.push(k === 'prize' || k === 'cap' ? Math.max(0, +b[k] || 0)
+             : plain(b[k], k === 'topic' ? 200 : k === 'wifi' ? 200 : k === 'place' ? 120 : 80));
   }
   if (b.budget !== undefined) { set.push('budget=?'); val.push(Math.max(0, Math.floor(+b.budget || 0))); }
   /* 오픈 대화방 주소. http(s) 가 아니면 빈 값으로 — javascript: 같은 것이 공개 페이지에 걸리면 안 된다 */
@@ -2311,7 +2314,7 @@ function pastDue(db, team) {
 
 function submit(db, team, b) {
   if (pastDue(db, team)) throw new HttpError(409, '제출 마감이 지났습니다');
-  const prev = db.prepare('SELECT show, show_at FROM submissions WHERE team=?').get(team);
+  const prev = db.prepare('SELECT url, show, show_at FROM submissions WHERE team=?').get(team);
   /* 제출 폼도 동의 체크칸을 같이 보낸다. 안 보내면 지금 값을 그대로 둔다 -
      칸이 없는 옛 화면이 저장할 때 남의 동의를 꺼 버리면 안 된다. */
   const on = b.show === undefined ? (prev ? prev.show : 0) : (b.show ? 1 : 0);
@@ -2322,7 +2325,10 @@ function submit(db, team, b) {
               ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note,
                 aiuse=excluded.aiuse, aidrop=excluded.aidrop,
                 show=excluded.show, show_at=excluded.show_at, sale=excluded.sale, at=datetime('now')`)
-    .run(team, webUrl(b.url), b.note || '',
+    /* 빈 주소로는 이미 낸 주소를 덮지 않는다. 다시 열어 설명만 고친 참가자가
+       먼저 낸 주소를 잃고 순위표에 «미제출» 로 바뀌었다(대역시험 1).
+       주소를 바꾸려면 새 주소를 적는다 — 지우는 길은 두지 않는다. */
+    .run(team, webUrl(b.url) || ((prev && prev.url) || ''), b.note || '',
          (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at, sale);
   /* 어느 주제·요청으로 만들었나. 이 대회에 붙은 요청만 고를 수 있다. 안 보내면 그대로 */
   if (b.request !== undefined) {
@@ -2563,7 +2569,16 @@ function closed(e) {
   return today() > e.ends;
 }
 
-function board(db, event, admin = false) {
+/** 이 브라우저가 든 팀 열쇠로 그 대회의 «내 팀» 을 찾는다. 없으면 0.
+    열쇠가 빈 값인 옛 팀이 걸리지 않게 열쇠가 있을 때만 묻는다. */
+function myTeamOf(db, event, tkey) {
+  const tk = String(tkey || '');
+  if (!tk) return 0;
+  const r = db.prepare("SELECT id FROM teams WHERE event=? AND tkey=? AND tkey<>''").get(event, tk);
+  return r ? r.id : 0;
+}
+
+function board(db, event, admin = false, mine = 0) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
@@ -2574,13 +2589,25 @@ function board(db, event, admin = false) {
   /* 심사위원별 등수 보정(MLH 의 stack ranking 을 눈금으로). 관대한 심사위원의 90점과 짠 심사위원의 70점이
      같은 «1등»일 수 있다 — 각 심사위원 안에서 등수를 매겨 100~0 으로 펴고, 팀은 자기를 본 심사위원들의 평균을 받는다.
      한 팀만 본 심사위원은 그 팀에 100 을 준다(비교가 없으니 «모름»이지만 0 으로 그리면 벌이 된다). */
-  const perJudge = {};
+  const perJudge = {}, gaveW = {};
   for (const sc of db.prepare(`SELECT s.team, s.judge, s.key, s.value FROM scores s
                                JOIN teams t ON t.id = s.team WHERE t.event = ?`).all(event)) {
     const w = (e.rubric.find(r => r.key === sc.key) || {}).weight || 0;
     perJudge[sc.judge] = perJudge[sc.judge] || {};
+    gaveW[sc.judge] = gaveW[sc.judge] || {};
     perJudge[sc.judge][sc.team] = (perJudge[sc.judge][sc.team] || 0) + sc.value * w / 100;
+    gaveW[sc.judge][sc.team] = (gaveW[sc.judge][sc.team] || 0) + w;
   }
+  /* 일부 항목만 매긴 심사위원. 안 매긴 항목은 «모름» 이지 0 이 아니다 —
+     0 으로 두면 그 팀만 혼자 낮아져 등수 보정이 거짓말을 한다.
+     그 심사위원이 «실제로 본 항목» 의 배점으로 나눠 같은 자에 올린다.
+     다 매겼으면 나누는 값이 그대로라 아무것도 안 바뀐다(대역시험 3). */
+  const WTOT = e.rubric.reduce((a, r) => a + (+r.weight || 0), 0);
+  for (const j of Object.keys(perJudge))
+    for (const t of Object.keys(perJudge[j])) {
+      const gw = gaveW[j][t];
+      if (gw > 0 && gw < WTOT) perJudge[j][t] = perJudge[j][t] * WTOT / gw;
+    }
   const rankPts = {};   // team -> [points per judge]
   for (const j of Object.keys(perJudge)) {
     const ts = Object.entries(perJudge[j]).sort((a, b) => b[1] - a[1]);
@@ -2629,7 +2656,9 @@ function board(db, event, admin = false) {
        먼저 낸 팀의 결과물을 뒤에 내는 팀이 보고 만들 수 있기 때문이다.
        제목과 설명은 그대로 둔다 - 무엇을 만들고 있는지는 서로 알아야 같이 하는 느낌이 난다.
        운영자만 언제든 본다. 심사위원도 마감 뒤에 본다(judgeView 의 hideUrl 과 같은 선). */
-    if (!admin && !closed(e)) { delete row.url; row.hidden = !!t.url; }
+    /* 다만 mine(팀 열쇠를 낸 그 팀)에게는 자기 것을 돌려준다 — 안 주면 제출 칸이
+       비어 보이고, 설명만 고쳐 내는 순간 주소가 지워졌다(대역시험 1). */
+    if (!admin && !closed(e) && !(mine && String(t.id) === String(mine))) { delete row.url; row.hidden = !!t.url; }
     /* 개인정보는 운영자에게만. 화면에서 감추면 브라우저 콘솔에서 다 보인다. */
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
                   delete row.photo; delete row.came; delete row.apply;
@@ -3355,6 +3384,7 @@ function icsOf(e, base) {
     'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z',
     'DTSTART;VALUE=DATE:' + d(e.starts), 'DTEND;VALUE=DATE:' + next(e.ends || e.starts),
     'SUMMARY:' + esc(e.title), 'URL:' + base + '/e/' + e.id,
+    ...(e.place ? ['LOCATION:' + esc(e.place)] : []),
     'DESCRIPTION:' + esc((e.topic ? '주제 ' + e.topic + '. ' : '') + (e.due ? '제출 마감 ' + e.due.replace('T', ' ') + '. ' : '') + base + '/e/' + e.id),
     'END:VEVENT', 'END:VCALENDAR'].join('\r\n') + '\r\n';
 }
@@ -3582,7 +3612,7 @@ function routes(db) {
              들어온 사람이 "여긴 빈 곳이구나" 하고 나간다. */
         {
           const rows = db.prepare(
-            `SELECT id,title,host,starts,ends,prize,
+            `SELECT id,title,host,starts,ends,prize,place,
                     (julianday('now') - julianday(created)) AS ageDays,
                     (julianday(ends)  - julianday('now'))   AS dueDays
              FROM events WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all();
@@ -3913,7 +3943,8 @@ function routes(db) {
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/board$/))) {
           const adm = isAdmin(db, m[1], key, owner);
-          const bd = board(db, m[1], adm);
+          /* 팀 열쇠를 들고 온 브라우저에게는 그 팀 것만 감추지 않는다(board 의 mine). */
+          const bd = board(db, m[1], adm, adm ? 0 : myTeamOf(db, m[1], req.headers['x-tkey'] || ''));
           /* 심사 링크를 만들려면 운영자에게 심사 열쇠가 필요하다. 손님에겐 절대 안 준다. */
           if (adm) { const kk = db.prepare('SELECT jkey, vkey, judged FROM events WHERE id=?').get(m[1]);
                      bd.event.jkey = kk.jkey; bd.event.vkey = kk.vkey; bd.event.judged = kk.judged;
@@ -6161,6 +6192,71 @@ function selftest() {
     }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
   }
+  /* ── 대역시험 4 — «어디로 가면 되나». 모이는 곳을 적을 칸이 아예 없었다 ── */
+  {
+    const ep = createEvent(db, { title: '장소 검사', starts: '2026-02-10', ends: '2026-02-10' });
+    ok(getEvent(db, ep.id).place === '', '새 대회의 모이는 곳은 빈칸이다');
+    editEvent(db, ep.id, { place: '서울 마포구 와우산로 94 학생회관 3층 <b>' });
+    ok(getEvent(db, ep.id).place === '서울 마포구 와우산로 94 학생회관 3층 b', '모이는 곳을 적고 꺾쇠는 빠진다');
+    editEvent(db, ep.id, { place: '가'.repeat(200) });
+    ok(getEvent(db, ep.id).place.length === 120, '모이는 곳은 120자까지');
+    editEvent(db, ep.id, { place: '연세로 50' });
+    ok(getEvent(db, ep.id).place === '연세로 50', '적은 뒤에도 고칠 수 있다');
+    editEvent(db, ep.id, { prize: 1000 });
+    ok(getEvent(db, ep.id).place === '연세로 50', '다른 칸만 보내면 모이는 곳은 그대로');
+    ok(icsOf(getEvent(db, ep.id), 'https://x.test').includes('LOCATION:연세로 50'), '캘린더 파일에 장소가 실린다');
+    editEvent(db, ep.id, { place: '' });
+    ok(!icsOf(getEvent(db, ep.id), 'https://x.test').includes('LOCATION'), '안 적었으면 캘린더에 빈 장소를 안 넣는다');
+  }
+
+  /* ── 대역시험 3 — 손 안 댄 심사 항목은 «모름» 이다. 50 도 0 도 아니다 ── */
+  {
+    const ej = createEvent(db, { title: '부분 심사 검사', starts: '2026-01-10', ends: '2026-01-10' });
+    const q1 = joinTeam(db, ej.id, { name: '다맞은팀', agree: true, email: 'pa@x.test' });
+    const q2 = joinTeam(db, ej.id, { name: '한항목팀', agree: true, email: 'pb@x.test' });
+    const q3 = joinTeam(db, ej.id, { name: '낮은팀', agree: true, email: 'pc@x.test' });
+    score(db, q1, { judge: '반만본사람', values: { idea: 80, make: 80, use: 80, tell: 80 } });
+    score(db, q2, { judge: '반만본사람', values: { idea: 80 } });                   // 나머지는 손을 안 댔다
+    score(db, q3, { judge: '반만본사람', values: { idea: 40, make: 40, use: 40, tell: 40 } });
+    ok(db.prepare('SELECT COUNT(*) c FROM scores WHERE team=? AND judge=?').get(q2, '반만본사람').c === 1,
+       '안 매긴 항목은 줄이 아예 안 생긴다');
+    ok(!db.prepare("SELECT 1 FROM scores WHERE team=? AND key='make'").get(q2), '안 매긴 항목에 50 이 안 들어간다');
+    const R = Object.fromEntries(board(db, ej.id, true).rows.map(r => [r.name, r]));
+    ok(R['한항목팀'].score === 24, '가중 총점은 매긴 항목만 센다 (80×0.30 = 24)');
+    ok(R['한항목팀'].judges === 1, '부분 점수도 «심사 1명» 으로 센다');
+    /* 등수 보정(rscore) — 80점을 준 두 팀은 같은 자리여야 한다. 안 매긴 항목을 0 으로 세면
+       한항목팀이 24 로 떨어져 낮은팀(40)보다 뒤로 밀린다. */
+    ok(R['다맞은팀'].rscore === R['한항목팀'].rscore && R['다맞은팀'].rscore > R['낮은팀'].rscore,
+       '안 매긴 항목이 등수 보정을 끌어내리지 않는다 ('
+       + [R['다맞은팀'].rscore, R['한항목팀'].rscore, R['낮은팀'].rscore].join('/') + ')');
+    /* 심사 화면이 그 항목을 빈칸으로 그릴 수 있어야 한다 */
+    const jv = judgeView(db, ej.id, '반만본사람');
+    const mine = jv.teams.find(t => t.id === q2).mine;
+    ok(mine.idea === 80 && mine.make === undefined, '심사 화면은 안 매긴 항목을 빈칸으로 받는다');
+  }
+
+  /* ── 대역시험 1 — 다시 낸다고 먼저 낸 주소가 지워지면 안 된다 ── */
+  {
+    const eu = createEvent(db, { title: '덮어쓰기 검사', starts: '2026-01-10', ends: '2026-01-10' });
+    editEvent(db, eu.id, { due: '2099-01-01T00:00' });
+    const tu = joinTeam(db, eu.id, { name: '낸팀', agree: true, email: 'over@x.test' });
+    const urlOf = () => db.prepare('SELECT url FROM submissions WHERE team=?').get(tu).url;
+    submit(db, tu, { url: 'https://example.com/first', note: '첫 설명' });
+    submit(db, tu, { note: '설명만 고침' });
+    ok(urlOf() === 'https://example.com/first', '주소 칸을 안 보내면 먼저 낸 주소가 남는다');
+    submit(db, tu, { url: '', note: '빈 칸으로 다시' });
+    ok(urlOf() === 'https://example.com/first', '빈 주소로는 먼저 낸 주소를 못 덮는다');
+    ok(board(db, eu.id, true).rows[0].done === true, '빈 주소를 내도 순위표가 «미제출» 로 안 바뀐다');
+    submit(db, tu, { url: 'https://example.com/second' });
+    ok(urlOf() === 'https://example.com/second', '새 주소는 그대로 덮어쓴다');
+    /* 다시 열었을 때 칸을 채우려면 마감 전에도 «내 팀» 주소가 내려와야 한다 */
+    const tk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tu).tkey;
+    ok(board(db, eu.id, false).rows[0].url === undefined, '마감 전 남에게는 제출 주소를 안 준다');
+    ok(board(db, eu.id, false, tu).rows[0].url === 'https://example.com/second', '마감 전에도 내 팀 주소는 내려온다');
+    ok(myTeamOf(db, eu.id, tk) === tu && myTeamOf(db, eu.id, 'nope') === 0 && myTeamOf(db, eu.id, '') === 0,
+       '팀 열쇠로 내 팀을 찾는다');
+  }
+
   /* ── 개인정보 6개월 삭제 — 처리방침의 약속 ── */
   {
     const oldEv = createEvent(db, { title: '옛대회', starts: '2025-01-10', ends: '2025-01-10' });

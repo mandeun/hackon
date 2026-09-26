@@ -116,6 +116,8 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
   border-radius:50%;background:var(--navy);border:3px solid #fff;
   box-shadow:0 1px 5px rgba(43,51,40,.35);cursor:pointer}
 .sl b{width:2.6em;text-align:right;font-size:17px;font-variant-numeric:tabular-nums}
+/* 만점. 「—」 만 있으면 몇 점 만점인지 알 수가 없다. */
+.sl .mx{font-size:12px;color:var(--ink3);white-space:nowrap}
 /* 추천 태그. 누르면 아래 칸에 문장이 들어간다. 빈 칸을 마주하면 아무도 안 쓴다. */
 .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .tags button{border:1px solid var(--rule);background:#fff;border-radius:999px;
@@ -773,6 +775,9 @@ const DEMO = {
 
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '', curReq = '', curGift = '', GKEY = '';
 let MAKE_REQ = '';   // «이 문제로 내 대회 열기»로 들어온 의뢰 id. 만들 때 첫 주제로 붙는다
+/* 맨 위 «참가자 주소 복사» 를 한 번 누르면 그 주소를 화면에도 한 줄 띄운다.
+   성공 알림(flash)이 화면을 다시 그리므로 상태로 들고 있어야 살아남는다. */
+let QURL_SHOWN = false;
 /* 열쇠 없는 모드(2026-09-25): 카카오 로그인이 켜져 있으면 운영자 열쇠를 화면에서 통째로 뺀다 — 로그인이 곧 열쇠.
    열쇠는 서버·비상용 주소(/app?k=…#대회)에만 남는다. 카카오가 없는 서버(로컬·파일 모드)는 예전 열쇠 화면 그대로. */
 const keyless = () => !!(LIVE && AUTH && AUTH.kakao);
@@ -2197,7 +2202,9 @@ const SCREEN = {
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
           <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
-          ${e.mode === 'online' ? `<li><span class="ic" aria-hidden="true">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
+          ${e.mode === 'online' ? `<li><span class="ic" aria-hidden="true">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>`
+            : `<li><span class="ic" aria-hidden="true">📍</span><span><span class="k">어디</span><span class="v">${
+                e.place ? esc(e.place) : '<b class="late">아직 안 적었습니다</b> — 기본 탭 «모이는 곳»'}</span></span></li>`}
           <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
@@ -2206,12 +2213,15 @@ const SCREEN = {
         ${LIVE ? `<span id="qurl" hidden>${esc(shareBase())}/e/${esc(e.id)}</span>
         <div class="quick">
           <a href="/e/${esc(e.id)}" target="_blank" rel="noopener"><span aria-hidden="true">👀</span>공개 페이지</a>
-          <button id="b-qcopy"><span aria-hidden="true">🔗</span>주소 복사</button>
+          <button id="b-qcopy"><span aria-hidden="true">🔗</span>참가자 주소 복사</button>
           <a href="/tv/${esc(e.id)}" target="_blank" rel="noopener"><span aria-hidden="true">📺</span>큰 화면</a>
           <button id="b-csv" title="참가팀·연락처·순위·장부를 CSV 로"><span aria-hidden="true">📄</span>내보내기</button>
           <button id="b-csv0" title="연락처 열이 없는 판 — 스태프 방에 올릴 때"><span aria-hidden="true">🧾</span>연락 빼고</button>
           ${d.closed ? `<button id="b-share-result" data-title="${esc(e.title)}"><span aria-hidden="true">📣</span>결과 공유 글</button>` : ''}
         </div>
+        ${/* 복사만 하고 화면에는 한 글자도 안 보여 줘서, 전화로 불러 줄 것도 손으로 적을 것도 없었다(대역시험 7) */''}
+        <div class="meta" id="qurl-line"${QURL_SHOWN ? '' : ' hidden'} style="margin-top:6px;word-break:break-all">${
+          QURL_SHOWN ? esc(shareBase() + '/e/' + e.id) : ''}</div>
         <div class="meta" style="margin-top:6px">참가자에게 QR 을 보여 줄 곳은 <b>큰 화면</b>입니다. 심사·투표 QR 은 아래 «보낼 주소»에 있습니다.</div>` : '<button class="btn sec sm" id="b-pub" style="margin-top:14px">공개 페이지 미리보기</button>'}
       </section>
 
@@ -2266,7 +2276,7 @@ const SCREEN = {
              <button class="btn sm" id="b-list">첫 화면 목록에 올리기</button>
            </div>`}
 
-      ${(() => { return `<details${폄('정보')}>
+      ${(() => { return `<details id="sec-info"${폄('정보')}>
         <summary>${todo ? '아직 안 정한 것' : '대회 정보 고치기'}
           <span class="when">${todo ? '여는 중' : '날짜 · 상금 · 진행 순서'}</span></summary><div class="in">
         <div class="meta">비워 둬도 대회는 돌아갑니다.</div>
@@ -2285,6 +2295,9 @@ const SCREEN = {
         </div>
         <label>여는 사람 <span class="pill">공개 페이지에 «○○ 주최»로</span></label><input id="e-host" value="${esc(e.host || '')}" maxlength="40" placeholder="이름 또는 모임 이름">
         <label>주제</label><input id="e-topic" value="${esc(e.topic)}" placeholder="예) 생활 불편">
+        <label>모이는 곳 <span class="pill">공개 페이지 «언제» 옆에 뜹니다</span></label>
+        <input id="e-place" value="${esc(e.place || '')}" maxlength="120" placeholder="예) 서울 마포구 와우산로 94 학생회관 3층 · 온라인이면 «온라인»">
+        <div class="meta">참가자가 «어디로 가면 되나» 를 여기서만 읽습니다. 건물·층·호수까지 적어 주세요.</div>
         <label>와이파이 <span class="pill">큰 화면에 뜹니다</span></label>
         <input id="e-wifi" value="${esc(e.wifi || '')}" placeholder="이름 / 비밀번호">
         <label>오픈 대화방 주소 <span class="pill">공개 페이지에 걸립니다</span></label>
@@ -2543,19 +2556,27 @@ const SCREEN = {
               심사 주소는 심사 직전에 그 자리에서 보여 준다.
               셋을 나란히 늘어놓으면 주최자가 볼 때마다 '지금 뭘 복사하지'를 판단해야 한다.
               QR 은 접힌 채로도 그려져 있다 - 펴면 바로 찍을 수 있다. */''}
+        ${/* 심사 주소는 «열쇠가 든 주소» 가 주인공이다. 전에는 눈에 띄는 것이 «심사위원 화면 열기» 뿐이라,
+              주최자가 주소창의 열쇠 없는 /j/<id> 를 복사해 보냈고 심사위원은 열쇠 칸 앞에서 멈췄다(대역시험 2).
+              그래서 복사할 주소를 위로, 여는 단추를 아래로 놓았다. */''}
+        <div style="margin-top:16px">
+          ${linkBox(`${shareBase()}/j/${e.id}${e.jkey ? '?k=' + e.jkey : ''}`, 'jlink', 'b-copyj',
+            '<b>심사위원용.</b> 열쇠가 들어 있습니다. 이 주소를 그대로 보내세요.')}
+          <div class="meta" style="margin-top:6px"><b>심사위원에게만</b> 보내세요. 순위는 안 보입니다.
+            링크가 흘렀으면 열쇠를 새로 만드세요 — 옛 주소는 바로 죽습니다.
+            <button class="btn sec sm" data-rekey="jkey" style="margin-left:6px">심사 열쇠 새로</button></div>
+        </div>
+
         <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn sec sm" id="b-tv">행사장 큰 화면 띄우기</button>
           <button class="btn sec sm" id="b-jopen">심사위원 화면 열기</button>
         </div>
-        <div class="meta" style="margin-top:6px">당일 아침 이 노트북에서 큰 화면을 열고 F11. <b>심사 링크는 심사위원에게만</b> — 열쇠가 들어 있습니다.</div>
+        <div class="meta" style="margin-top:6px">당일 아침 이 노트북에서 큰 화면을 열고 F11. 심사 화면은 <b>내가 확인할 때</b> 여는 것입니다 — 보낼 주소는 위에 있습니다.</div>
 
         <details style="margin-top:12px"><summary>주소를 직접 복사해야 한다면</summary><div class="in">
           ${linkBox(`${shareBase()}/tv/${e.id}`, 'tvlink', 'b-copyt',
             '<b>행사장 큰 화면용.</b>')}
-          ${linkBox(`${shareBase()}/j/${e.id}${e.jkey ? '?k=' + e.jkey : ''}`, 'jlink', 'b-copyj',
-            '<b>심사위원용.</b> 심사 열쇠가 들어 있습니다. 순위는 안 보입니다.')}
-          <div class="meta" style="margin-top:8px">링크가 흘렀으면 열쇠를 새로 만드세요. 옛 링크는 바로 죽습니다.
-            <button class="btn sec sm" data-rekey="jkey" style="margin-left:6px">심사 열쇠 새로</button>
+          <div class="meta" style="margin-top:8px">관객 투표 링크가 흘렀으면 열쇠를 새로 만드세요.
             <button class="btn sec sm" data-rekey="vkey" style="margin-left:4px">투표 열쇠 새로</button></div>
         </div></details>
       </div></details>
@@ -2654,6 +2675,10 @@ const SCREEN = {
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
           <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          ${/* «언제» 옆에 «어디». 전에는 적을 칸이 아예 없어서 참가자가 갈 곳을 못 읽었다(대역시험 4).
+                안 적었으면 «없음»이 아니라 «아직 안 정해졌습니다» — 모름을 없음으로 그리지 않는다. */''}
+          <li><span class="ic" aria-hidden="true">📍</span><span><span class="k">어디</span><span class="v" id="place-line">${
+            e.place ? esc(e.place) : (e.mode === 'online' ? '온라인 · 제출만 받습니다' : '<span class="hint">아직 안 정해졌습니다 — 주최자에게 물어보세요</span>')}</span></span></li>
           ${e.topic ? `<li><span class="ic" aria-hidden="true">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span class="hint">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
@@ -2738,7 +2763,7 @@ const SCREEN = {
           <div class="meta">1. <b>내 팀 링크</b>를 나에게만 보내 두세요 — 폰을 바꿔도 이걸로 돌아옵니다.<br>
             2. ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : `당일(${esc(e.starts)}) 마감 전에`} 여기서 결과물 주소를 냅니다.</div>
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
-          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 내기</button><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
           <div style="margin-top:10px"><button class="btn sec sm" id="nx-rename">팀 이름 고치기</button> <button class="btn sec sm" id="nx-cancel">신청 취소</button></div>
         </div>`; })()}
 
@@ -3260,14 +3285,18 @@ const SCREEN = {
       </div>
 
       <div class="card">
+        ${/* 만점을 옆에 적는다. 전에는 «—» 하나뿐이라 몇 점 만점인지, 지금 몇 점인지를 알 수 없었다(대역시험 3).
+              data-init 은 «손 안 댄 자리»의 값이다. range 는 value 를 비우면 브라우저가 가운데(50)로 앉히므로,
+              끌기 전과 같은 값이면 아직 모름으로 본다 — 50 을 점수로 저장하던 길을 여기서 끊는다. */''}
         ${d.event.rubric.map(r => { const v = t.mine[r.key] ?? ''; return `
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
           <div class="sl">
-            <input type="range" min="0" max="100" step="5" value="${v}"
+            <input type="range" min="0" max="100" step="5" value="${v}" data-init="${v === '' ? 50 : v}"
                    style="--p:${v === '' ? 0 : v}%" class="jv-${esc(t.id)}${v === '' ? ' unset' : ''}" data-key="${esc(r.key)}"
                    aria-label="${esc(r.label)} 점수">
-            <b>${v === '' ? '—' : v}</b>
+            <b>${v === '' ? '—' : v}</b><span class="mx">/ 100점</span>
           </div>${hintLine(r)}`; }).join('')}
+        <div class="meta">각 항목 <b>100점 만점</b>, 5점 단위입니다. 끌지 않은 항목은 «—» 로 남고 점수가 안 들어갑니다.</div>
       </div>
 
       <div class="card">
@@ -3530,7 +3559,9 @@ const SCREEN = {
 
   /* 팀 한 곳 — 참가팀은 제출하고, 심사위원은 점수를 넣는다. 같은 화면을 둘이 나눠 쓴다. */
   async team() {
-    const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
+    /* 팀 열쇠를 같이 보낸다 — 마감 전이라도 «내 팀» 의 제출 주소는 받아야 한다.
+       안 받으면 칸이 비어 보이고, 설명만 고쳐 내는 순간 먼저 낸 주소가 지워졌다(대역시험 1). */
+    const d = LIVE ? await api(`/events/${cur}/board`, { tkey: tkeyOf(curTeam) }) : { event: DEMO.event, rows: DEMO.board };
     const t = d.rows.find(r => String(r.id) === String(curTeam)) || d.rows[0];
     if (!t) return `<h2>팀이 없습니다</h2>`;
     const cardData = LIVE ? await api(`/teams/${t.id}/card`) : null;
@@ -3538,7 +3569,12 @@ const SCREEN = {
     return `<button class="btn sec sm" data-go="board">← 순위로</button>
       <h2 style="margin-top:12px">${esc(t.name)}</h2>
       ${(d.event.sponsors || []).length ? `<div class="meta">함께하는 곳</div>${logoBand(d.event.sponsors)}<div style="height:6px"></div>` : ''}
-      <p class="sub">${t.rank}위 · ${t.score}점 · 심사 ${t.judges}명</p>
+      ${/* 마감 전에는 서버가 순위·점수를 안 준다(심사 중에 순위가 보이면 심사위원이 맞춘다).
+            그걸 그대로 찍어서 «null위 · null점» 이 참가자 화면에 떴다(대역시험 6).
+            상태는 셋이다 — 있음 / 없음 / 모름. 모름을 0 으로도 null 로도 그리지 않는다. */''}
+      <p class="sub" id="team-head">${
+        (t.rank == null || t.score == null) ? '아직 순위 없음' : `${t.rank}위 · ${t.score}점`
+      } · 심사 ${t.judges == null ? '모름' : t.judges + '명'}</p>
       ${(d.judges || []).length ? `<div class="meta" style="margin:-8px 0 12px">
         본 사람 ${(t.by || []).map(esc).join(', ') || '없음'}${
           (() => { const no = (d.judges || []).filter(j => !(t.by || []).includes(j));
@@ -3625,7 +3661,10 @@ const SCREEN = {
         <div style="height:9px"></div><button class="btn sm" id="fu-save">보내기</button>
       </div>
 
-      ${(d.event.vmode || d.event.pmode) ? `<div class="card"><h3>심사</h3><div class="meta">${d.event.vmode ? '관객 평가로 돌린 대회라 점수 입력이 없습니다.' : '짝 비교로 돌린 대회라 점수 입력이 없습니다. 심사 링크에서 고릅니다.'}</div></div>` : `<div class="card">
+      ${/* 심사 칸은 «심사 열쇠를 가진 브라우저» 에만 그린다. 전에는 참가자에게도 그대로 보여서,
+            자기 팀에 100점을 넣고 눌러 본 뒤에야 서버 403 으로 막혔다(대역시험 5).
+            막는 것과 «보여 주지 않는 것»은 다른 일이다 — 없는 권한은 화면에도 없어야 한다. */''}
+      ${(d.event.vmode || d.event.pmode) ? `<div class="card"><h3>심사</h3><div class="meta">${d.event.vmode ? '관객 평가로 돌린 대회라 점수 입력이 없습니다.' : '짝 비교로 돌린 대회라 점수 입력이 없습니다. 심사 링크에서 고릅니다.'}</div></div>` : !jkeyOf(cur) ? '' : `<div class="card">
         <h3>심사</h3>
         <div class="meta">심사위원이 씁니다. 이름이 같으면 이전 점수를 고칩니다.</div>
         <label>심사위원 이름</label>
@@ -4041,6 +4080,7 @@ function wire() {
         starts: $('#e-starts').value, ends: $('#e-ends').value,
         prize: $('#e-prize').value, cap: $('#e-cap').value,
         wifi: $('#e-wifi') ? $('#e-wifi').value.trim() : undefined,
+        place: $('#e-place') ? $('#e-place').value.trim() : undefined,
         chat: $('#e-chat') ? $('#e-chat').value.trim() : undefined,
         safety: $('#e-safety') ? $('#e-safety').value.trim() : undefined,
         pay: $('#e-pay') ? $('#e-pay').value.trim() : undefined,
@@ -4592,8 +4632,17 @@ function wire() {
   });
 
   document.querySelectorAll('[data-jsave]').forEach(b => b.onclick = async () => {
-    const id = b.dataset.jsave, values = {};
-    document.querySelectorAll('.jv-' + id).forEach(i => { if (i.value !== '') values[i.dataset.key] = +i.value; });
+    const id = b.dataset.jsave, values = {}, blank = [];
+    /* 손 안 댄 항목은 «모름»이라 안 보낸다. range 는 value 를 비우면 가운데(50)로 앉으므로
+       «i.value !== ''» 는 언제나 참이었다 — 그래서 안 만진 항목이 50점으로 저장됐다(대역시험 3). */
+    document.querySelectorAll('.jv-' + id).forEach(i => {
+      const 만짐 = !i.classList.contains('unset') || i.value !== (i.dataset.init || '');
+      if (만짐) values[i.dataset.key] = +i.value;
+      else blank.push((i.getAttribute('aria-label') || i.dataset.key).replace(/ 점수$/, ''));
+    });
+    /* 빈 항목이 있으면 한 번만 묻는다. 그대로 저장하면 그 항목은 «모름» 으로 남고,
+       평균에도 순위에도 안 들어간다 — 50 으로 채우지 않는다. */
+    if (blank.length && !confirm(`아직 안 매긴 항목이 있습니다 — ${blank.join(' · ')}.\n그대로 저장하면 이 항목은 빈칸으로 남습니다. 저장할까요?`)) return;
     const g = document.querySelector('.jg-' + id), nx = document.querySelector('.jn2-' + id);
     try {
       await api(`/teams/${id}/score`, { method: 'POST',
@@ -4612,7 +4661,7 @@ function wire() {
   /* 슬라이더를 끌면 옆 숫자와 채워진 길이가 따라온다. 화면을 다시 그리지 않는다. */
   document.querySelectorAll('.sl input[type=range]').forEach(r => {
     const num = r.parentElement.querySelector('b');
-    r.oninput = () => { r.classList.remove('unset'); num.textContent = r.value; r.style.setProperty('--p', r.value + '%'); };
+    r.oninput = () => { r.classList.remove('unset'); r.dataset.init = ''; num.textContent = r.value; r.style.setProperty('--p', r.value + '%'); };
   });
 
   /* 추천 태그 - 누르면 아래 칸에 문장이 들어간다. 이미 있으면 다시 안 넣는다. */
@@ -4713,7 +4762,12 @@ function wire() {
     flash(msg);
   };
   const qc = $('#b-qcopy');
-  if (qc) qc.onclick = () => copyAny('#qurl', '공개 주소를 복사했습니다');
+  if (qc) qc.onclick = () => {
+    /* 누른 뒤에 주소를 한 줄 보여 준다 — 붙여 넣을 데가 없는 자리(전화로 불러 주기·칠판)가 있다.
+       먼저 켜 둔다. copyAny 의 성공 알림이 화면을 다시 그리면서 이 줄이 뜬다. */
+    QURL_SHOWN = true;
+    copyAny('#qurl', '참가자 주소를 복사했습니다');
+  };
   const copy = $('#b-copy');
   if (copy) copy.onclick = () => copyAny('.share', '공개 주소를 복사했습니다');
   const copyj = $('#b-copyj');

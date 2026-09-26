@@ -198,12 +198,28 @@ with sync_playwright() as p:
     pg.fill("#e-ends", "2026-10-12")
     pg.fill("#e-prize", "3000000")
     pg.fill("#e-topic", "생활 불편")
+    # «어디로 가면 되나» — 대역 셋이 여기서 멈췄다. 기본 탭에 칸이 하나 있어야 한다.
+    A(pg.query_selector("#e-place") is not None, "기본 탭에 «모이는 곳» 칸이 없다")
+    pg.fill("#e-place", "서울 마포구 와우산로 94 학생회관 3층")
     pg.fill("#e-due", due)
     pg.click("#e-save")
     pg.wait_for_timeout(900)
     ee = api(f"/api/events/{ev}")
     A(ee["prize"] == 3000000 and ee["due"] == due and ee["topic"] == "생활 불편",
       f"나중에 채운 것이 안 들어갔다: {ee}")
+    A(ee["place"] == "서울 마포구 와우산로 94 학생회관 3층", f"모이는 곳이 안 저장됐다: {ee.get('place')!r}")
+    # 고칠 수 있어야 한다 — 장소는 대회 직전까지 바뀐다.
+    # 저장하면 «다음 할 일» 묶음만 펴진 채로 다시 그려지므로 그 칸이 든 묶음을 편다.
+    pg.evaluate("""() => [...document.querySelectorAll('#view details')]
+        .filter(d => d.querySelector('#e-place')).forEach(d => d.open = true)""")
+    pg.wait_for_timeout(300)
+    pg.fill("#e-place", "서울 마포구 백범로 35 다산관 101호")
+    pg.click("#e-save")
+    pg.wait_for_timeout(900)
+    A(api(f"/api/events/{ev}")["place"] == "서울 마포구 백범로 35 다산관 101호", "모이는 곳을 고칠 수 없다")
+    ics = urllib.request.urlopen(BASE + f"/api/events/{ev}/ics").read().decode()
+    A("LOCATION:서울 마포구 백범로 35 다산관 101호" in ics, f"캘린더 파일에 장소가 없다: {ics}")
+    ok("모이는 곳 — 기본 탭에 적고, 고치고, 캘린더 파일에 실린다")
     A(pg.evaluate("cur") == ev, "만든 뒤 그 대회로 안 옮겨 갔다")
     A(len(api(f"/api/events/{ev}")["rubric"]) == 4, "심사 기본값이 안 깔렸다")
     ok(f"대회 개설 — {ev} · 심사 기준 기본값 4항목")
@@ -312,6 +328,7 @@ with sync_playwright() as p:
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
     A(pg.is_hidden("#empty"), "대회가 있는데 «아직 열린 대회가 없습니다» 가 그대로 보인다")
     A("우리 동네 문제 해결 해커톤" in pg.inner_text("#grid"), "올린 대회가 첫 화면 목록에 안 그려진다")
+    A("다산관 101호" in pg.inner_text("#grid"), f"첫 화면 카드에 모이는 곳이 없다: {pg.inner_text('#grid')[:300]}")
     ok("첫 화면 목록 — 이름만 넣은 대회는 안 뜬다. 올려야 뜨고, 뜨면 빈 안내는 사라진다")
 
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
@@ -396,6 +413,47 @@ with sync_playwright() as p:
         A(leak not in j2, f"심사 화면에 '{leak}' 가 샜다")
     jc2.close()
     ok("심사 눈높이가 심사위원에게는 안 보인다")
+
+    # ── 탭 줄의 «기본» 은 기본 묶음을 편다 ──
+    # 대역시험 덤: data-sec="sec-info" 인데 그 <details> 에 id 가 없어 아무것도 안 펴졌다.
+    visit(f"/app#{ev}")
+    pg.evaluate("() => { const d = document.getElementById('sec-info'); if (d) d.open = false; }")
+    pg.click('[data-sec="sec-info"]')
+    pg.wait_for_timeout(300)
+    A(pg.evaluate("() => { const d = document.getElementById('sec-info'); return !!d && d.open; }"), "«기본» 단추를 눌렀는데 기본 묶음이 안 펴진다")
+    ok("탭 줄 «기본» 이 기본 묶음을 편다")
+
+    # ── 심사 주소는 열쇠를 품은 채로, 접지 않은 자리에, «열기» 보다 앞에 ──
+    # 대역시험 2: 눈에 띄는 «심사위원 화면 열기» 만 보고 주소창의 /j/<id> 를 복사해 보내면
+    # 받은 사람은 열쇠 칸 앞에서 멈춘다. 보낼 주소가 먼저 보여야 한다.
+    visit(f"/app#{ev}")
+    pg.click('[data-sec="sec-links"]')
+    pg.wait_for_timeout(400)
+    A(pg.is_visible("#jlink"), "«주소» 탭을 열었는데 심사 주소가 접힌 채다 (또 접기를 펴야 한다)")
+    jl = pg.inner_text("#jlink").strip()
+    A(f"/j/{ev}?k={JK}" in jl, f"눈에 보이는 심사 주소에 열쇠가 없다: {jl}")
+    A(pg.is_visible("#b-copyj"), "심사 주소 복사 단추가 안 보인다")
+    # 문서 순서 — 복사할 주소가 여는 단추보다 앞
+    order = pg.evaluate("""() => {
+        const a = document.getElementById('jlink'), b = document.getElementById('b-jopen');
+        return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? 'link-first' : 'open-first';
+    }""")
+    A(order == "link-first", "«심사위원 화면 열기» 가 열쇠 든 심사 주소보다 위에 있다")
+    ok("심사 주소 — 열쇠 든 주소가 먼저, «열기» 는 그 아래")
+
+    # ── 맨 위 «주소 복사» 는 무슨 주소인지 밝히고, 누르면 화면에 보여 준다 (대역시험 7) ──
+    # 전에는 이름이 탭 줄의 «주소» 와 같아서 어느 주소인지 알 수 없었고,
+    # 눌러도 클립보드에만 들어가 읽어 줄 것이 한 글자도 없었다.
+    visit(f"/app#{ev}")
+    A("참가자 주소 복사" in pg.inner_text("#b-qcopy"),
+      f"맨 위 복사 단추가 무슨 주소인지 안 밝힌다: {pg.inner_text('#b-qcopy')!r}")
+    A(pg.is_hidden("#qurl-line"), "누르지도 않았는데 주소 줄이 떠 있다")
+    pg.click("#b-qcopy")
+    pg.wait_for_timeout(500)
+    A(pg.is_visible("#qurl-line"), "«참가자 주소 복사» 를 눌렀는데 화면에 주소가 안 뜬다")
+    A(f"/e/{ev}" in pg.inner_text("#qurl-line"),
+      f"보여 주는 주소가 참가자용이 아니다: {pg.inner_text('#qurl-line')!r}")
+    ok("맨 위 «참가자 주소 복사» — 누르면 그 주소를 한 줄 보여 준다")
 
     # 로고를 누르면 처음으로 — 어디서 헤매도 여기로 돌아온다
     visit(f"/app#{ev}")
@@ -673,6 +731,44 @@ with sync_playwright() as p:
       "전체 비교에서 그 팀으로 못 돌아간다")
     ok("전체 비교 — 앞 팀으로 돌아가 점수를 고칠 수 있다")
     jctx.close()
+
+    # ── 손 안 댄 항목은 50 점이 아니다 (대역시험 3) ──
+    # range 는 value 를 비우면 브라우저가 가운데(50)에 앉힌다. 전에는 그 50 이 그대로 저장돼
+    # 화면은 내내 «—» 인데 주최자 순위표에는 «50점 · 심사 1명» 이 올라갔다.
+    jc4 = b.new_context()
+    jp4 = jc4.new_page()
+    jp4.on("pageerror", lambda e: errs.append("빈칸심사:" + str(e)))
+    jp4.goto(f"{BASE}/j/{ev}?k={JK}")
+    jp4.wait_for_selector("body[data-ready='1']", timeout=8000)
+    jp4.fill("#jn", "빈칸심사")
+    jp4.click("#jn-go")
+    jp4.wait_for_timeout(700)
+    A("100점" in jp4.inner_text("#view"), "심사 화면에 몇 점 만점인지가 안 적혀 있다")
+    ans = {"yes": False, "asked": []}
+    jp4.on("dialog", lambda d: (ans["asked"].append(d.message), d.accept() if ans["yes"] else d.dismiss()))
+    tgt = jp4.query_selector("[data-jsave]").get_attribute("data-jsave")
+
+    def mine_of(name):
+        jv4 = api(f"/api/events/{ev}/judge?judge=" + urllib.parse.quote(name), jkey=JK)
+        return [t for t in jv4["teams"] if str(t["id"]) == tgt][0]["mine"]
+
+    jp4.click(f'[data-jsave="{tgt}"]')
+    jp4.wait_for_timeout(800)
+    A(ans["asked"], "하나도 안 매겼는데 묻지도 않고 저장했다")
+    A(mine_of("빈칸심사") == {}, f"«아니오» 를 눌렀는데 점수가 들어갔다: {mine_of('빈칸심사')}")
+
+    # 한 항목만 끌고 «예» — 끈 것만 들어가고 나머지는 빈칸으로 남아야 한다
+    ans["yes"] = True
+    ans["asked"].clear()
+    key1 = jp4.evaluate("""(id) => { const r = document.querySelector('.jv-' + id);
+        r.value = 85; r.dispatchEvent(new Event('input', { bubbles: true })); return r.dataset.key; }""", tgt)
+    jp4.click(f'[data-jsave="{tgt}"]')
+    jp4.wait_for_timeout(900)
+    A(ans["asked"], "빈 항목이 남았는데 안 물었다")
+    got = mine_of("빈칸심사")
+    A(got == {key1: 85}, f"끌지 않은 항목이 같이 저장됐다: {got}")
+    jc4.close()
+    ok("심사 — 만점을 적고, 손 안 댄 항목은 50 이 아니라 빈칸으로 남는다")
 
     # ── 주최자 열쇠 — 로그인 없이 내 대회를 따라오게 한다 ──
     def api_owner(path):
@@ -1855,10 +1951,40 @@ with sync_playwright() as p:
     pg.evaluate(f"localStorage.setItem('hackon.team.{FE}', '{FT['id']}'); localStorage.setItem('hackon.tkey.{FT['id']}', '{FT['tkey']}')")
     post(f"/api/events/{FE}", {"due": "2099-01-01T23:59"}, FK, method="PATCH")
     visit(f"/e/{FE}")
-    A(pg.query_selector("#nx-submit") is not None, "참가자 화면에 «결과물 내기» 단추가 없다")
+    A(pg.query_selector("#nx-submit") is not None, "참가자 화면에 «결과물 제출하기» 단추가 없다")
     pg.click("#nx-submit"); pg.wait_for_selector("#s-url", timeout=8000)
     pg.fill("#s-url", "https://example.com/from-public"); pg.click("#s-save"); pg.wait_for_timeout(900)
     A(any(r["id"] == FT["id"] and (r.get("hidden") or r.get("url")) for r in api(f"/api/events/{FE}/board")["rows"]), "공개 페이지에서 낸 결과물이 저장되지 않았다")
+
+    # ── 참가자 화면에 심사 칸이 보이면 안 된다 (대역시험 5) ──
+    # 서버는 403 으로 막지만, 넣고 눌러 본 뒤에야 안다. 없는 권한은 화면에도 없어야 한다.
+    # pg 는 주최자 브라우저라 심사 열쇠를 이미 들고 있다. 참가자는 새 브라우저로 흉내 낸다.
+    pctx = b.new_context(viewport={"width": 390, "height": 844})
+    pp = pctx.new_page()
+    pp.on("pageerror", lambda e: errs.append("참가자팀:" + str(e)))
+    pp.goto(BASE + "/app"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    pp.evaluate(f"localStorage.setItem('hackon.team.{FE}', '{FT['id']}'); localStorage.setItem('hackon.tkey.{FT['id']}', '{FT['tkey']}')")
+    pp.goto(f"{BASE}/e/{FE}"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    # 안내 글은 «③ 제출» · «제출 마감» 인데 단추만 «내기» 라 대역 B 가 «제출» 을 찾아 헤맸다(대역시험 8)
+    A("제출" in pp.inner_text("#nx-submit"),
+      f"결과물 단추 이름이 안내 글(«③ 제출»)과 다른 낱말이다: {pp.inner_text('#nx-submit')!r}")
+    pp.click("#nx-submit"); pp.wait_for_selector("#s-url", timeout=8000)
+    A(pp.query_selector("#j-save") is None and pp.query_selector("#j-name") is None,
+      "심사 열쇠가 없는 브라우저의 팀 화면에 심사위원 점수 칸이 있다")
+    A("점수 저장" not in pp.inner_text("#view"), "심사 열쇠가 없는데 «점수 저장» 이 보인다")
+    A(len(pp.query_selector_all(".j-v")) == 0, "심사 열쇠가 없는데 점수 칸이 그려졌다")
+    # 점수가 아직 없을 때 «null위 · null점» 이 아니라 «아직 순위 없음» (대역시험 6)
+    th = pp.inner_text("#team-head")
+    A("null" not in th, f"팀 화면 머리에 null 이 찍혔다: {th!r}")
+    A("아직 순위 없음" in th, f"점수 전인데 «아직 순위 없음» 이 아니다: {th!r}")
+    A(re.search(r"심사 \d+명", th), f"심사 인원이 숫자로 안 나온다(모름도 아니고 빈 값): {th!r}")
+    # 열쇠를 넣으면 그때 그려진다 — 감추기만 하는 게 아니라 열쇠로 가른다
+    pp.evaluate(f"localStorage.setItem('hackon.jkey.{FE}', '{FJ}')")
+    pp.goto(f"{BASE}/e/{FE}"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    pp.click("#nx-submit"); pp.wait_for_selector("#s-url", timeout=8000)
+    A(pp.query_selector("#j-save") is not None, "심사 열쇠가 있는데도 점수 칸이 안 보인다")
+    pctx.close()
+    ok("팀 화면 — 심사 열쇠가 없으면 심사 칸을 아예 안 그린다")
     # ② 열쇠를 잃은 운영자 — 열린 대회가 있어도 «전에 연 대회를 찾으시나요» 칸이 있다 (새 브라우저 = 열쇠 없음)
     fctx = b.new_context(viewport={"width": 390, "height": 844}); fp = fctx.new_page()
     fp.goto(BASE + "/app"); fp.wait_for_selector("body[data-ready='1']", timeout=8000)
@@ -1880,7 +2006,7 @@ with sync_playwright() as p:
     A(pg.query_selector("#gd-hint") is not None, "지우기가 잠겨 있을 때 이유 한 줄이 없다")
     visit(f"/e/{FE}/report")
     A("온 팀(기록 없음)" in pg.inner_text("#view") or "온 팀" in pg.inner_text("#view"), "보고서 온 팀 칸이 없다")
-    ok("대역 ①②③④⑤ + 덤 — 결과물 내기 · 열쇠 찾기 상시 · /give 후원자도 함께한 곳 · 여는 사람 · 첫 화면에서 바로 만들기 · 관객 평가 뒤 점수 칸 없음 · 지우기 안내")
+    ok("대역 ①②③④⑤ + 덤 — 결과물 제출하기 · 열쇠 찾기 상시 · /give 후원자도 함께한 곳 · 여는 사람 · 첫 화면에서 바로 만들기 · 관객 평가 뒤 점수 칸 없음 · 지우기 안내")
 
     # ── 정적 화이트리스트 회귀 방지 — 화면 파일이 참조하는 로컬 자산은 전부 200 이어야 한다 (hero.jpg 가 404 로 나갔던 날) ──
     import glob as _glob
@@ -2177,6 +2303,10 @@ with sync_playwright() as p:
         .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-')) || '?')""")
     A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i == "nt-bell" or i.startswith("fb-") for i in ids),
       f"공개 화면에 신청·줄 수 있는 것·소식 알림·피드백 말고 다른 칸이 있다: {ids}")
+    # 「언제」 옆에 「어디」. 대역 B·C 가 페이지 전체에서 갈 곳을 못 찾았다.
+    A(pub.is_visible("#place-line"), "공개 페이지에 «어디» 줄이 없다")
+    A("다산관 101호" in pub.inner_text("#place-line"),
+      f"공개 페이지 «어디» 가 비었다: {pub.inner_text('#place-line')!r}")
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
                  "함께한 곳", "오픈에이아이",
@@ -2685,6 +2815,9 @@ with sync_playwright() as pw:
     jo.click("#jn-go")
     jo.wait_for_timeout(900)
     A(len(jo.query_selector_all("input[type=range]")) == 4, "인터넷 없이 심사 화면이 깨진다")
+    # 손 안 댄 항목은 이제 저장되지 않는다. 심사위원이 실제로 하는 일(끌기)을 그대로 한다.
+    jo.evaluate("""() => document.querySelectorAll('.sl input[type=range]').forEach((r, n) => {
+        r.value = [70, 75, 80, 85][n]; r.dispatchEvent(new Event('input', { bubbles: true })); })""")
     jo.click("[data-jsave]")
     jo.wait_for_timeout(900)
     A(api(f"/api/events/{oev['id']}/board", key=OK2)["rows"][0]["judges"] == 1,
