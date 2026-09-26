@@ -2763,7 +2763,7 @@ const SCREEN = {
           <div class="meta">1. <b>내 팀 링크</b>를 나에게만 보내 두세요 — 폰을 바꿔도 이걸로 돌아옵니다.<br>
             2. ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : `당일(${esc(e.starts)}) 마감 전에`} 여기서 결과물 주소를 냅니다.</div>
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
-          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 내기</button><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
           <div style="margin-top:10px"><button class="btn sec sm" id="nx-rename">팀 이름 고치기</button> <button class="btn sec sm" id="nx-cancel">신청 취소</button></div>
         </div>`; })()}
 

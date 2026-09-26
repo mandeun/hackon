@@ -1938,7 +1938,7 @@ with sync_playwright() as p:
     pg.evaluate(f"localStorage.setItem('hackon.team.{FE}', '{FT['id']}'); localStorage.setItem('hackon.tkey.{FT['id']}', '{FT['tkey']}')")
     post(f"/api/events/{FE}", {"due": "2099-01-01T23:59"}, FK, method="PATCH")
     visit(f"/e/{FE}")
-    A(pg.query_selector("#nx-submit") is not None, "참가자 화면에 «결과물 내기» 단추가 없다")
+    A(pg.query_selector("#nx-submit") is not None, "참가자 화면에 «결과물 제출하기» 단추가 없다")
     pg.click("#nx-submit"); pg.wait_for_selector("#s-url", timeout=8000)
     pg.fill("#s-url", "https://example.com/from-public"); pg.click("#s-save"); pg.wait_for_timeout(900)
     A(any(r["id"] == FT["id"] and (r.get("hidden") or r.get("url")) for r in api(f"/api/events/{FE}/board")["rows"]), "공개 페이지에서 낸 결과물이 저장되지 않았다")
@@ -1952,6 +1952,9 @@ with sync_playwright() as p:
     pp.goto(BASE + "/app"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
     pp.evaluate(f"localStorage.setItem('hackon.team.{FE}', '{FT['id']}'); localStorage.setItem('hackon.tkey.{FT['id']}', '{FT['tkey']}')")
     pp.goto(f"{BASE}/e/{FE}"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    # 안내 글은 «③ 제출» · «제출 마감» 인데 단추만 «내기» 라 대역 B 가 «제출» 을 찾아 헤맸다(대역시험 8)
+    A("제출" in pp.inner_text("#nx-submit"),
+      f"결과물 단추 이름이 안내 글(«③ 제출»)과 다른 낱말이다: {pp.inner_text('#nx-submit')!r}")
     pp.click("#nx-submit"); pp.wait_for_selector("#s-url", timeout=8000)
     A(pp.query_selector("#j-save") is None and pp.query_selector("#j-name") is None,
       "심사 열쇠가 없는 브라우저의 팀 화면에 심사위원 점수 칸이 있다")
@@ -1990,7 +1993,7 @@ with sync_playwright() as p:
     A(pg.query_selector("#gd-hint") is not None, "지우기가 잠겨 있을 때 이유 한 줄이 없다")
     visit(f"/e/{FE}/report")
     A("온 팀(기록 없음)" in pg.inner_text("#view") or "온 팀" in pg.inner_text("#view"), "보고서 온 팀 칸이 없다")
-    ok("대역 ①②③④⑤ + 덤 — 결과물 내기 · 열쇠 찾기 상시 · /give 후원자도 함께한 곳 · 여는 사람 · 첫 화면에서 바로 만들기 · 관객 평가 뒤 점수 칸 없음 · 지우기 안내")
+    ok("대역 ①②③④⑤ + 덤 — 결과물 제출하기 · 열쇠 찾기 상시 · /give 후원자도 함께한 곳 · 여는 사람 · 첫 화면에서 바로 만들기 · 관객 평가 뒤 점수 칸 없음 · 지우기 안내")
 
     # ── 정적 화이트리스트 회귀 방지 — 화면 파일이 참조하는 로컬 자산은 전부 200 이어야 한다 (hero.jpg 가 404 로 나갔던 날) ──
     import glob as _glob
