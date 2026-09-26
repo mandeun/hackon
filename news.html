@@ -32,7 +32,8 @@ main{max-width:720px;margin:0 auto;padding:10px 20px 60px}
 .chip[aria-pressed=true]{background:var(--ink);color:var(--on);border-color:var(--ink)}
 /* 칩에 건수를 붙인다 — 누르기 전에 빈 탭인지 보인다. 0 은 «모름»이 아니라 «없음»이라 숫자로 적는다 */
 .chip .n{margin-left:5px;font-size:12px;font-weight:700;opacity:.55;font-variant-numeric:tabular-nums}
-.chip[data-n="0"]{opacity:.5;border-style:dashed}
+/* 0 은 «소식이 없다»는 뜻일 뿐이다 — 어느 직무든 레시피(«지금 이렇게 쓴다»)는 있으니 죽은 탭처럼 흐리지 않는다 */
+.chip[data-n="0"]{border-style:dashed}
 .card{background:#fff;border:1px solid var(--hair);border-radius:16px;padding:16px;margin-top:18px}
 .card h2{font-size:17px;margin:0 0 6px} .card .m{font-size:13px;color:var(--grey);line-height:1.55}
 .how li{margin:8px 0;font-size:14.5px;line-height:1.5} .how b{font-weight:800} .how a{color:var(--moss)}
@@ -128,7 +129,7 @@ const HOW = {
     if (HOW[cur]) { how.hidden = false; document.getElementById('how-t').textContent = cur + ' — 지금 이렇게 쓴다'; document.getElementById('how-l').innerHTML = HOW[cur].map(([t, h, u]) => `<li><b>${esc(t)}</b> — ${esc(h)}${u && ok(u) ? ` · <a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${u.startsWith('/') ? '열기' : '깃허브'}</a>` : ''}</li>`).join(''); }
     else how.hidden = true;
     const rs = scope;
-    if (!rs.length) { list.innerHTML = `<div class="empty">${cur === 'all' ? '아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.' : '이 직무로 분류된 소식이 아직 없습니다. 아래 «제보» 가 첫 줄이 됩니다.'}</div>`; return; }
+    if (!rs.length) { list.innerHTML = `<div class="empty">${cur === 'all' ? '아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.' : '이 직무로 들어온 소식은 아직 없습니다. 위 «지금 이렇게 쓴다» 는 그대로 쓸 수 있고, «제보» 가 이 칸의 첫 줄이 됩니다.'}</div>`; return; }
     const by = {}; for (const r of rs) (by[r.at] = by[r.at] || []).push(r);
     list.innerHTML = Object.keys(by).map(day => `<div class="day"><h3>${esc(day)}</h3>${by[day].map(r => `<div class="it">
       <span class="s ${esc(r.src)}">${esc(SRC[r.src] || r.src)}</span>

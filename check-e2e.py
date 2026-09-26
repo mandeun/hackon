@@ -2793,6 +2793,17 @@ with sync_playwright() as pw:
         return s;
     }""")
     A(style == "dashed", f"0건 칩이 점선으로 표시되지 않는다 (border-style: {style})")
+    # 소식이 0건인 직무에도 «지금 이렇게 쓴다» 레시피는 있어야 한다 — 그게 그 탭의 값이다.
+    # 소상공인은 수집원 열여덟 곳 어디에도 공급이 없어 늘 0 건이다(2026-09-27 실측).
+    for c in chips:
+        if c["k"] == "all":
+            continue
+        pg.click(f'.chip[data-k="{c["k"]}"]')
+        pg.wait_for_timeout(120)
+        A(pg.is_visible("#how") and pg.inner_text("#how-t").startswith(c["k"]),
+          f"«{c['k']}» 탭에 레시피가 안 보인다 (소식 {c['n']}건)")
+        A(len(pg.query_selector_all("#how-l li")) >= 1,
+          f"«{c['k']}» 레시피에 줄이 없다")
     # 세는 규칙이 draw() 의 scope 와 같은가. scope 를 여기 따로 적는다 —
     # 화면 코드를 그대로 베끼면 둘이 같이 틀려도 검사가 통과한다.
     agree = pg.evaluate("""() => {
