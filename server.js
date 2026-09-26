@@ -3254,7 +3254,9 @@ function followSummary(db, event) {
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 
 /* 밖으로 나가는 파일 전부. 여기 없는 이름은 404 — 새 화면 파일을 만들면 여기에 적는다 */
-const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg']);
+const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg',
+  /* 첫 화면 표제 사진과 링크 미리보기 그림. 빠져 있어서 둘 다 404 였다 — CSS 는 있는데 사진만 안 나왔다 */
+  'hero.jpg', 'og.png']);
 /* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
 const SEC_HEADERS = {
   'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https: data: blob:; connect-src 'self'; frame-src https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",

@@ -27,13 +27,13 @@
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;
-     display:flex;justify-content:center;min-height:100vh;
+     display:flex;justify-content:center;min-height:100dvh;
      -webkit-font-smoothing:antialiased}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;border:0;background:none}
 button{cursor:pointer}
 input,select,textarea{border:1px solid var(--rule);border-radius:9px;padding:9px 11px;width:100%;background:#fff}
 :focus-visible{outline:2px solid var(--navy);outline-offset:2px}
-#app{width:100%;max-width:460px;background:var(--paper);min-height:100vh;
+#app{width:100%;max-width:460px;background:var(--paper);min-height:100dvh;
      box-shadow:0 8px 40px rgba(43,51,40,.13);display:flex;flex-direction:column}
 
 /* PC 모드. 폰 폭 그대로 두면 모니터에서 가운데 기둥 하나가 된다.
@@ -73,7 +73,7 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
   border:2px solid var(--ink3)}
 .prow.key::before{border-color:var(--navy);background:var(--navy)}
 .prow.hot::before{border-color:var(--bad);background:var(--bad)}
-.prow input[type=time]{width:94px;flex:none;padding:8px 5px;font-size:14px;
+.prow input[type=time]{width:94px;flex:none;padding:8px 5px;font-size:14px;min-height:44px;
   font-variant-numeric:tabular-nums}
 /* 시계 아이콘이 칸을 다 먹는다. 눌러서 고르는 것은 그대로 된다. */
 .prow input[type=time]::-webkit-calendar-picker-indicator{display:none}
@@ -81,7 +81,7 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
 .prow input.what{flex:1;min-width:0}
 .prow .len{flex:none;width:4.4em;text-align:right;font-size:12px;color:var(--ink3);
   font-variant-numeric:tabular-nums}
-.prow .del{flex:none;width:26px;color:var(--ink3);font-size:19px;line-height:1}
+.prow .del{flex:none;width:44px;color:var(--ink3);font-size:19px;line-height:1}
 .prow .del:hover{color:var(--bad)}
 
 /* 확성기. 벽에서도 읽혀야 하니 크고 노랗게. */
@@ -101,10 +101,13 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
 .stars button{font-size:26px;line-height:1;color:var(--rule);padding:2px}
 .stars button.on{color:#E8A33D}
 
-/* 심사 - 손가락으로 끌어서 점수를 준다. 폰에서 숫자를 치는 것보다 훨씬 빠르다. */
+/* 심사 - 손가락으로 끌어서 점수를 준다. 폰에서 숫자를 치는 것보다 훨씬 빠르다.
+   막대는 6px 로 보이되 손가락이 닿는 자리는 44px 이다 - 6px 짜리를 폰에서 끌 수는 없다. */
 .sl{display:flex;align-items:center;gap:11px;margin-top:5px}
-.sl input[type=range]{flex:1;appearance:none;height:6px;border-radius:3px;padding:0;
-  background:linear-gradient(90deg,var(--navy) var(--p,70%),var(--rule) var(--p,70%))}
+.sl input[type=range]{flex:1;appearance:none;height:44px;border:0;border-radius:3px;padding:0;
+  touch-action:manipulation;
+  background:linear-gradient(90deg,var(--navy) var(--p,0%),var(--rule) var(--p,0%)) center/100% 6px no-repeat}
+.sl input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .sl input[type=range]::-webkit-slider-thumb{appearance:none;width:26px;height:26px;
   border-radius:50%;background:var(--navy);border:3px solid #fff;
   box-shadow:0 1px 5px rgba(43,51,40,.35);cursor:pointer}
@@ -155,7 +158,7 @@ header{padding:14px 16px 0;border-bottom:1px solid var(--rule);flex:none;backgro
 /* 눌러서 고르는 칩. .chip 은 이미 «작은 배지»라 이름을 따로 쓴다 */
 .picks{display:flex;flex-wrap:wrap;gap:7px;margin:6px 0 2px}
 .pick{font-size:13px;font-weight:600;padding:8px 13px;border-radius:99px;
-      border:1.5px solid var(--rule);background:#fff;color:var(--ink2);cursor:pointer;min-height:38px}
+      border:1.5px solid var(--rule);background:#fff;color:var(--ink2);cursor:pointer;min-height:44px}
 .pick.on{background:var(--acc);border-color:var(--acc);color:#fff}
 
 main{flex:1;overflow:auto;padding:20px 16px 24px}
@@ -195,7 +198,7 @@ details .in>.card{border:0;padding:0;margin:0;background:none}
    멀리서 보이는 것이 전부라 다른 화면의 규칙을 따르지 않는다. */
 body.tv{background:#141824;display:block}
 body.tv #app{max-width:none;background:#141824;box-shadow:none;color:#F4F6FA;
-             height:100vh;min-height:0}
+             height:100dvh;min-height:0}
 body.tv header,body.tv nav,body.tv #toast{display:none}
 /* main 에 height 를 또 주면 #app 이 100vh 보다 커져서 아래가 빈다. flex 로만 채운다. */
 body.tv main{padding:3.2vh 3vw;overflow:hidden;flex:1;min-height:0;
@@ -298,6 +301,11 @@ nav .i{font-size:17px}
 .hid{filter:blur(5px);transition:filter .15s;cursor:pointer;user-select:none}
 .hid.on{filter:none;user-select:text}
 .shrow .share{flex:1;margin-top:0}
+/* 건너뛰기 링크. 평소엔 안 보이고 키보드로 오면 나온다 */
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.sr:focus{position:fixed;top:8px;left:8px;width:auto;height:auto;overflow:visible;clip:auto;z-index:99;
+  display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;
+  background:var(--navy);color:#fff;font-weight:700;text-decoration:none}
 @media print{
   body{background:#fff}
   #app{max-width:none;box-shadow:none;min-height:0}
@@ -318,14 +326,14 @@ nav .i{font-size:17px}
 .dots .dotrow{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 12px}
 .dot{flex:0 0 18px;width:18px;height:18px;border-radius:50%;border:2px solid #5A6275;box-sizing:border-box}
 .dot.wait{border-color:var(--warn)}
-.dot.on{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 4px rgba(35,80,245,.28)}
+.dot.on{background:var(--on);border-color:var(--on);box-shadow:0 0 0 4px rgba(200,245,59,.26)}
 .dot.pop{animation:dotpop .25s ease-out}
 @keyframes dotpop{0%{transform:scale(.6)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
 .dots .sum{font-size:13px;color:#C9D0DE;line-height:1.7}
 .dots .sum b{color:#fff;font-variant-numeric:tabular-nums}
 .dots .empty{font-size:13px;color:#AEB6C8;margin-top:8px}
 .btn,.tab,button{min-height:44px}
-.btn.sm{min-height:40px}
+.btn.sm{min-height:44px}
 .contact{font-size:13px;color:var(--ink2);margin-top:4px}
 .contact b{color:var(--ink)}
 
@@ -348,11 +356,11 @@ header{position:sticky;top:0;z-index:20;background:rgba(242,244,246,.88);
 .hrow{padding-bottom:10px}
 .logo svg{height:20px}
 .chip{background:#fff;font-size:12px;padding:4px 10px;font-weight:600}
-main{padding:8px 16px 28px}
-h2{font-size:25px;line-height:1.35;letter-spacing:-.04em;margin:12px 4px 8px}
+main{padding:8px 16px 32px}
+h2{font-size:25px;line-height:1.35;letter-spacing:-.04em;margin:12px 4px 8px;text-wrap:balance}
 h3{letter-spacing:-.03em}
 main > h3{font-size:19px;margin:28px 4px 10px !important}
-.sub{font-size:15px;color:var(--ink2);margin:0 4px 18px;line-height:1.65}
+.sub{font-size:15px;color:var(--ink2);margin:0 4px 16px;line-height:1.65;text-wrap:pretty}
 .meta{font-size:14px;color:#5C6474;line-height:1.65}   /* 연한 초록·노랑 카드 위에서도 4.5:1 */
 .meta b{color:var(--ink2)}
 label{font-size:14px;color:var(--ink2);margin:18px 0 8px}
@@ -370,7 +378,9 @@ label{font-size:14px;color:var(--ink2);margin:18px 0 8px}
 input,select,textarea{background:var(--fill);border:1.5px solid transparent;border-radius:12px;
   padding:13px 15px;font-size:16px;transition:border-color .12s,background .12s}
 input:focus,select:focus,textarea:focus{outline:0;background:#fff;border-color:var(--acc)}
-input::placeholder,textarea::placeholder{color:#B0B8C1}
+/* 마우스로 눌렀을 때는 테두리만, 키보드로 왔을 때는 고리까지 */
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+input::placeholder,textarea::placeholder{color:#646E7C}   /* B0B8C1 은 회색 칸 위에서 1.8:1 이었다 */
 input:disabled{color:var(--ink2);-webkit-text-fill-color:var(--ink2);opacity:1}
 select{appearance:none;-webkit-appearance:none;padding-right:38px;cursor:pointer;
   background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238B95A1' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 15px center}
@@ -384,7 +394,7 @@ input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
 .btn:active{opacity:1;transform:scale(.97)}
 .btn.sec{background:var(--fill);color:var(--ink2);border:0}
 .btn.sec:hover{background:#E8EBED;filter:none}
-.btn.sm{padding:9px 14px;font-size:14px;border-radius:10px;min-height:40px}
+.btn.sm{padding:9px 14px;font-size:14px;border-radius:10px;min-height:44px}
 .card .btn.sec,details .btn.sec{background:#F2F4F6}
 
 .pill{border-radius:6px;padding:3px 7px;font-size:12px;background:var(--acc-l);color:var(--acc);vertical-align:2px}
@@ -408,7 +418,7 @@ input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
 .news li{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--rule);font-size:14px}
 .news li .w{color:var(--ink3);font-size:12.5px;white-space:nowrap}
 .bgchips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 6px}
-.bgchip{border:1px solid var(--rule);background:#fff;color:var(--ink);border-radius:99px;padding:6px 12px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;min-height:36px}
+.bgchip{border:1px solid var(--rule);background:#fff;color:var(--ink);border-radius:99px;padding:6px 12px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;min-height:44px}
 .bgchip.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 .bgchip span{font-size:11px;opacity:.85;margin-left:4px}
 
@@ -460,7 +470,7 @@ details details{background:var(--soft);border-radius:14px}
 .ck input{width:22px;height:22px;margin-top:0;cursor:pointer}
 
 .err{background:var(--bad-l);color:var(--bad);border:0;border-radius:14px;padding:14px 16px;font-size:14.5px}
-.ok-msg{background:#E5F7EE;color:#0E8A57;border:0;border-radius:14px;padding:14px 16px;font-size:14.5px}
+.ok-msg{background:#E5F7EE;color:var(--ok-t);border:0;border-radius:14px;padding:14px 16px;font-size:14.5px}
 
 /* 알림은 아래에서 올라오는 검은 알약. 토스·당근이 전부 이 모양이라 사람들이 이미 읽을 줄 안다. */
 #toast{bottom:calc(92px + env(safe-area-inset-bottom))}
@@ -502,6 +512,13 @@ a{color:var(--acc)}   /* 링크도 잉크. 파랑은 안 쓴다(BRAND) */
 .facts li{display:flex;gap:12px;align-items:flex-start;font-size:15px;color:var(--ink);line-height:1.5}
 .facts .ic{flex:none;width:36px;height:36px;border-radius:12px;background:var(--soft);
   display:grid;place-items:center;font-size:18px}
+/* 사실 줄에서는 타일을 걷어낸다 - 똑같은 회색 네모 일곱 개가 서열을 지운다.
+   칸 너비는 그대로라 줄이 어긋나지 않는다. */
+.facts li:not(:has(a)) .ic{background:none}
+/* 누를 수 있는 줄만 타일을 남기고, 손가락 자리를 44px 로 주고, 꺾쇠로 알린다 */
+.facts li:has(a) .ic{background:var(--acc-l)}
+.facts .v a{display:inline-flex;align-items:center;min-height:44px}
+.facts .v a::after{content:'\203A';font-size:19px;line-height:1;margin-left:4px}
 .facts .k{display:block;font-size:13px;color:var(--ink3);font-weight:600;margin-bottom:1px}
 .facts .v{font-weight:700}
 .hero .due{background:var(--soft);margin:18px 0 0}
@@ -553,7 +570,7 @@ a{color:var(--acc)}   /* 링크도 잉크. 파랑은 안 쓴다(BRAND) */
 #cta{position:sticky;bottom:0;z-index:15;padding:12px 16px calc(12px + env(safe-area-inset-bottom));
   background:linear-gradient(rgba(242,244,246,0),var(--pg) 30%);transition:opacity .18s,transform .18s}
 #cta.away{opacity:0;transform:translateY(16px);pointer-events:none}
-#cta .btn{box-shadow:0 8px 24px rgba(35,80,245,.28)}
+#cta .btn{box-shadow:0 8px 24px rgba(11,16,32,.26)}   /* 그림자는 바탕 색을 따라간다 */
 .logo{align-items:center}
 .hrow{min-height:44px}
 body.guest #mode,body.guest #who{display:none}   /* 카카오 로그인도 주최자 것이다 */
@@ -566,6 +583,7 @@ body.tv #cta{display:none}
 </style>
 </head>
 <body>
+<a href="#view" class="sr">본문으로 건너뛰기</a>
 <div id="app">
   <header>
     <div class="hrow">
@@ -584,7 +602,7 @@ body.tv #cta{display:none}
   </header>
   <main id="view"></main>
   <div id="cta" hidden></div>
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
   <nav>
     <button data-t="home" class="on"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg></span>대회</button>
     <button data-t="make"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="6"/><path d="M12 8v8M8 12h8"/></svg></span>열기</button>
@@ -2035,21 +2053,21 @@ const SCREEN = {
         <div class="top">${badge(e)}<span>운영 화면</span></div>
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
-          <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
-          ${e.mode === 'online' ? `<li><span class="ic">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
-          <li><span class="ic">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
+          <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          ${e.mode === 'online' ? `<li><span class="ic" aria-hidden="true">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
+          <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
-          ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
+          ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
         </ul>
         ${dueBox(e)}
         ${LIVE ? `<span id="qurl" hidden>${esc(shareBase())}/e/${esc(e.id)}</span>
         <div class="quick">
-          <a href="/e/${esc(e.id)}" target="_blank" rel="noopener"><span>👀</span>공개 페이지</a>
-          <button id="b-qcopy"><span>🔗</span>주소 복사</button>
-          <a href="/tv/${esc(e.id)}" target="_blank" rel="noopener"><span>📺</span>큰 화면</a>
-          <button id="b-csv" title="참가팀·연락처·순위·장부를 CSV 로"><span>📄</span>내보내기</button>
-          <button id="b-csv0" title="연락처 열이 없는 판 — 스태프 방에 올릴 때"><span>📄</span>연락 빼고</button>
-          ${d.closed ? `<button id="b-share-result" data-title="${esc(e.title)}"><span>📣</span>결과 공유 글</button>` : ''}
+          <a href="/e/${esc(e.id)}" target="_blank" rel="noopener"><span aria-hidden="true">👀</span>공개 페이지</a>
+          <button id="b-qcopy"><span aria-hidden="true">🔗</span>주소 복사</button>
+          <a href="/tv/${esc(e.id)}" target="_blank" rel="noopener"><span aria-hidden="true">📺</span>큰 화면</a>
+          <button id="b-csv" title="참가팀·연락처·순위·장부를 CSV 로"><span aria-hidden="true">📄</span>내보내기</button>
+          <button id="b-csv0" title="연락처 열이 없는 판 — 스태프 방에 올릴 때"><span aria-hidden="true">🧾</span>연락 빼고</button>
+          ${d.closed ? `<button id="b-share-result" data-title="${esc(e.title)}"><span aria-hidden="true">📣</span>결과 공유 글</button>` : ''}
         </div>
         <div class="meta" style="margin-top:6px">참가자에게 QR 을 보여 줄 곳은 <b>큰 화면</b>입니다. 심사·투표 QR 은 아래 «보낼 주소»에 있습니다.</div>` : '<button class="btn sec sm" id="b-pub" style="margin-top:14px">공개 페이지 미리보기</button>'}
       </section>
@@ -2483,15 +2501,15 @@ const SCREEN = {
         <div class="top">${badge(e)}<span>${esc(e.host)} 주최</span></div>
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
-          <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
-          ${e.topic ? `<li><span class="ic">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
-          <li><span class="ic">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
+          <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          ${e.topic ? `<li><span class="ic" aria-hidden="true">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
+          <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
-          ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
-          <li><span class="ic">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span style="color:var(--ink3);font-weight:500">· 카톡 방에 한 번</span></span></span></li>
-          <li><span class="ic">🗓️</span><span><span class="k">내 달력에</span><span class="v"><a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 캘린더에 넣기</a></span></span></li>
-          ${e.chat ? `<li><span class="ic">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
-          ${e.safety ? `<li><span class="ic">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
+          ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
+          <li><span class="ic" aria-hidden="true">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span style="color:var(--ink3);font-weight:500">· 카톡 방에 한 번</span></span></span></li>
+          <li><span class="ic" aria-hidden="true">🗓️</span><span><span class="k">내 달력에</span><span class="v"><a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 캘린더에 넣기</a></span></span></li>
+          ${e.chat ? `<li><span class="ic" aria-hidden="true">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
+          ${e.safety ? `<li><span class="ic" aria-hidden="true">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
         </ul>
         ${dueBox(e)}
          ${ended ? `<p class="meta" id="ended-line" style="margin:12px 0 0"><b>끝난 대회입니다.</b> <a href="/e/${esc(e.id)}/report">결과 보고서 보기</a></p>`
@@ -2782,7 +2800,7 @@ const SCREEN = {
         </div>
         <div class="solbox" id="sol-${esc(r.id)}" hidden style="margin-top:10px">
           <div class="row"><div><label>이름</label><input data-sol-name placeholder="팀·별명"></div><div><label>연락처 <span class="pill">낸 분만 봄</span></label><input data-sol-contact placeholder="선택"></div></div>
-          <label>결과물 주소</label><input data-sol-url placeholder="https://... (누르면 열리는 주소)">
+          <label>결과물 주소</label><input data-sol-url placeholder="https://… (누르면 열리는 주소)">
           <label>한 줄</label><input data-sol-note placeholder="무엇을 어떻게 (선택)">
           <div style="height:10px"></div><button class="btn sm" data-sol-go="${esc(r.id)}">보내기</button>
         </div>
@@ -2869,7 +2887,7 @@ const SCREEN = {
     const cells = [];
     for (const sp of (d.sponsors || []).slice(0, 5)) {
       const logo = /^(https?:\/\/|\/api\/sponsors\/\d+\/logo$)/i.test(String(sp.logo || '')) ? sp.logo : '';
-      cells.push(`<div>${logo ? `<img src="${esc(logo)}" alt="${esc(sp.name)}" onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:this.alt}))">` : `<b>${esc(sp.name)}</b>`}<span class="who">함께한 곳</span></div>`);
+      cells.push(`<div>${logo ? `<img src="${esc(logo)}" alt="${esc(sp.name)}" loading="lazy" decoding="async" height="44" onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:this.alt}))">` : `<b>${esc(sp.name)}</b>`}<span class="who">함께한 곳</span></div>`);
     }
     if ((d.judges || []).length) cells.push(`<div class="names"><span class="who">심사·멘토</span><b>${d.judges.map(esc).join('<br>')}</b></div>`);
     const opens = (d.open || []).slice();
@@ -3094,8 +3112,9 @@ const SCREEN = {
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
           <div class="sl">
             <input type="range" min="0" max="100" step="5" value="${v}"
-                   style="--p:${v}%" class="jv-${esc(t.id)}" data-key="${esc(r.key)}">
-            <b>${v}</b>
+                   style="--p:${v === '' ? 0 : v}%" class="jv-${esc(t.id)}" data-key="${esc(r.key)}"
+                   aria-label="${esc(r.label)} 점수">
+            <b>${v === '' ? '—' : v}</b>
           </div>${hintLine(r)}`; }).join('')}
       </div>
 
@@ -3382,7 +3401,7 @@ const SCREEN = {
           ? `<div class="err" style="margin:8px 0 0">마감이 지나 더는 낼 수 없습니다.
              진행자가 마감을 미루면 다시 열립니다.</div>` : ''}
         <label>링크 <span class="pill">배포한 주소</span></label>
-        <div class="shrow"><input id="s-url" value="${esc(t.url || '')}" placeholder="https://... (누르면 바로 열리는 주소)" style="flex:1"><button type="button" class="btn sec sm" id="s-try" title="내기 전에 새 창에서 열어 봅니다">새 창에서 확인</button></div>
+        <div class="shrow"><input id="s-url" value="${esc(t.url || '')}" placeholder="https://… (누르면 바로 열리는 주소)" style="flex:1"><button type="button" class="btn sec sm" id="s-try" title="내기 전에 새 창에서 열어 봅니다">새 창에서 확인</button></div>
         <div class="meta" id="s-url-hint"></div>
         <div class="meta">제출해야 후원 크레딧과 프로필 «완주»가 남습니다. 미완이어도 주소는 내세요.</div>
         ${t.seats ? `<label>팀 자리 <span class="pill">밖에서 구한 분은 게스트로</span></label>
