@@ -1706,6 +1706,8 @@ with sync_playwright() as p:
     A(acodes[20] == 429, f"21번째 신청이 429 가 아니다: {acodes[20]}")
     A("10분" in raw(f"/api/events/{AE}/teams", {"name": "막기말", "email": "capz@x.io", "agree": True})[1],
       "막는 말에 언제 다시 되는지가 없다")
+    # e — 열쇠 없이 지운 대회 목록은 403 (400 이 아니다)
+    A(code_of("/api/mine/trash") == 403, f"열쇠 없이 지운 대회 목록을 물었더니 403 이 아니다: {code_of('/api/mine/trash')}")
     # 8 — CSV 수식 주입
     post(f"/api/events/{SE}/teams", {"name": "=1+1", "email": "f@audit.test", "agree": True})
     csvt = raw(f"/api/events/{SE}/export.csv", headers={"x-okey": SK})[1]

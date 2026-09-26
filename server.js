@@ -3073,7 +3073,8 @@ function restoreEvent(db, d, owner) {
    목록에는 제목·지운 날·팀 수만 싣는다. 사본(json)은 절대 안 나간다 —
    나가면 열쇠 없는 사본이라도 «누가 어디에 신청했나»가 통째로 흘러간다. */
 function eventTrash(db, owner) {
-  if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+  /* 열쇠 없이 물으면 403 이다 — 400 은 «보낸 것이 잘못됐다» 는 뜻이라 «권한이 없다» 를 가린다(감사 e) */
+  if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');
   return db.prepare('SELECT id, event, title, json, at FROM event_trash WHERE owner=? ORDER BY id DESC').all(owner)
     .map(r => {
       let teams = 0;
@@ -3852,11 +3853,9 @@ function routes(db) {
           if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
           return json(res, 200, mine(db, owner));
         }
-        /* 지운 대회 목록 — 내 것만. 남의 휴지통은 한 줄도 안 보인다 */
-        if (p === '/api/mine/trash' && req.method === 'GET') {
-          if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+        /* 지운 대회 목록 — 내 것만. 남의 휴지통은 한 줄도 안 보인다. 열쇠 없으면 eventTrash 가 403 을 낸다 */
+        if (p === '/api/mine/trash' && req.method === 'GET')
           return json(res, 200, eventTrash(db, owner));
-        }
         /* 되살리기 — 파일 첨부 없이. 경로가 /api/trash/:id/restore 가 아닌 이유는 그쪽이 팀 휴지통 자리라서다 */
         if ((m = p.match(/^\/api\/mine\/trash\/(\d+)\/restore$/)) && req.method === 'POST') {
           return json(res, 200, untrashEvent(db, +m[1], owner));
@@ -4656,6 +4655,10 @@ function selftest() {
     ok(db.prepare('SELECT COUNT(*) c FROM team_trash WHERE event=?').get(tv.id).c === 1, '휴지통에 한 줄 남는다');
     const back = untrashTeam(db, trId);
     ok(back.same && back.id === ta, '되살리면 같은 id 로 돌아온다 — 팀 링크가 산다');
+    /* 지운 대회 목록을 열쇠 없이 물으면 403 — 400 은 «보낸 것이 잘못됐다» 라 권한 없음을 가린다(감사 e) */
+    let trCode = 0;
+    try { eventTrash(db, ''); } catch (e) { trCode = e.code; }
+    ok(trCode === 403, '열쇠 없이 지운 대회 목록을 물으면 403 이 아니다');
     /* 메일 — 열쇠가 없으면 보내지 않고 장부에만 남는다. 리마인더는 D-3·D-1 한 번씩, 답한 팀·못 온다는 팀은 건너뛴다 */
     const jm = joinMail(db, ta);
     ok(jm && jm.to === 'trash@x.test' && jm.text.includes(`/e/${tv.id}?t=${tkeyA}`), '신청 메일에 팀 링크가 들어간다');
