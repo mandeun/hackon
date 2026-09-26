@@ -3563,7 +3563,12 @@ const SCREEN = {
     return `<button class="btn sec sm" data-go="board">← 순위로</button>
       <h2 style="margin-top:12px">${esc(t.name)}</h2>
       ${(d.event.sponsors || []).length ? `<div class="meta">함께하는 곳</div>${logoBand(d.event.sponsors)}<div style="height:6px"></div>` : ''}
-      <p class="sub">${t.rank}위 · ${t.score}점 · 심사 ${t.judges}명</p>
+      ${/* 마감 전에는 서버가 순위·점수를 안 준다(심사 중에 순위가 보이면 심사위원이 맞춘다).
+            그걸 그대로 찍어서 «null위 · null점» 이 참가자 화면에 떴다(대역시험 6).
+            상태는 셋이다 — 있음 / 없음 / 모름. 모름을 0 으로도 null 로도 그리지 않는다. */''}
+      <p class="sub" id="team-head">${
+        (t.rank == null || t.score == null) ? '아직 순위 없음' : `${t.rank}위 · ${t.score}점`
+      } · 심사 ${t.judges == null ? '모름' : t.judges + '명'}</p>
       ${(d.judges || []).length ? `<div class="meta" style="margin:-8px 0 12px">
         본 사람 ${(t.by || []).map(esc).join(', ') || '없음'}${
           (() => { const no = (d.judges || []).filter(j => !(t.by || []).includes(j));

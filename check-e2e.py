@@ -1943,6 +1943,11 @@ with sync_playwright() as p:
       "심사 열쇠가 없는 브라우저의 팀 화면에 심사위원 점수 칸이 있다")
     A("점수 저장" not in pp.inner_text("#view"), "심사 열쇠가 없는데 «점수 저장» 이 보인다")
     A(len(pp.query_selector_all(".j-v")) == 0, "심사 열쇠가 없는데 점수 칸이 그려졌다")
+    # 점수가 아직 없을 때 «null위 · null점» 이 아니라 «아직 순위 없음» (대역시험 6)
+    th = pp.inner_text("#team-head")
+    A("null" not in th, f"팀 화면 머리에 null 이 찍혔다: {th!r}")
+    A("아직 순위 없음" in th, f"점수 전인데 «아직 순위 없음» 이 아니다: {th!r}")
+    A("심사 0명" in th, f"심사 인원이 «0명» 으로 안 나온다: {th!r}")
     # 열쇠를 넣으면 그때 그려진다 — 감추기만 하는 게 아니라 열쇠로 가른다
     pp.evaluate(f"localStorage.setItem('hackon.jkey.{FE}', '{FJ}')")
     pp.goto(f"{BASE}/e/{FE}"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
