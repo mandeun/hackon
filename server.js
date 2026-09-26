@@ -1463,6 +1463,14 @@ function open(file) {
     id INTEGER PRIMARY KEY, team INTEGER NOT NULL, event TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '', tkey TEXT NOT NULL DEFAULT '', json TEXT NOT NULL,
     at TEXT NOT NULL DEFAULT (datetime('now')), by TEXT NOT NULL DEFAULT '')`);
+  /* 지운 대회의 휴지통. 팀 휴지통(team_trash)과 같은 모양이다 — 지우면 여기 오고, 되살리면 같은 id 로 돌아온다.
+     사본(json)에는 열쇠가 하나도 없다(dump 가 지운다). 되살릴 권한은 사본이 아니라 이 줄의 owner 로 본다 —
+     주최자 열쇠는 서버가 따로 들고 있고, 사본을 손에 넣은 사람이 남의 대회를 되살리지 못한다.
+     events.owner 를 그대로 옮겨 두는 이유도 그것이다. 30일 지난 줄은 purgeOld 가 지운다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS event_trash(
+    id INTEGER PRIMARY KEY, event TEXT NOT NULL, owner TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '', json TEXT NOT NULL,
+    at TEXT NOT NULL DEFAULT (datetime('now')))`);
   /* 쇼케이스 동의 칸. 옛 배포판에는 없다. 없으면 0(=동의 안 함)으로 시작한다 -
      «모름» 을 «있음» 으로 그리지 않는다(오답노트 E22). 동의는 본인이 켜야 생긴다. */
   try { db.exec("ALTER TABLE submissions ADD COLUMN show INTEGER NOT NULL DEFAULT 0"); } catch {}
@@ -2778,7 +2786,7 @@ function eventLoad(db, event) {
 }
 const emptyEvent = load => Object.values(load).every(v => v === 0);
 function deleteEvent(db, event, b) {
-  const e = db.prepare('SELECT id, title FROM events WHERE id=?').get(event);
+  const e = db.prepare('SELECT id, title, owner FROM events WHERE id=?').get(event);
   if (!e) throw new HttpError(404, '없는 대회입니다');
   const load = eventLoad(db, event);
   if (!emptyEvent(load) && String((b && b.confirm) || '').trim() !== e.title)
@@ -2792,8 +2800,15 @@ function deleteEvent(db, event, b) {
     saved = path.join(dir, `hackon-${event}-${stamp}.json`);
     fs.writeFileSync(saved, JSON.stringify(copy, null, 2));
   } catch { saved = ''; }   // 디스크가 없어도 응답의 사본은 나간다. 화면이 파일로 받는다
+  /* 서버 안 휴지통. 파일 사본과 같은 것을 한 벌 더 둔다 — 파일은 노트북이 죽는 경우의 마지막 길이고,
+     보통은 주최자가 «대회» 탭의 «지운 대회»에서 한 번 눌러 되살린다. 열쇠는 사본에 없고 owner 칸에 있다. */
+  let trash = 0;
+  try {
+    trash = Number(db.prepare('INSERT INTO event_trash(event,owner,title,json) VALUES(?,?,?,?)')
+      .run(event, e.owner || '', e.title, JSON.stringify(copy)).lastInsertRowid);
+  } catch { trash = 0; }
   db.prepare('DELETE FROM events WHERE id=?').run(event);
-  return { ok: true, saved: path.basename(saved), dump: copy, load };
+  return { ok: true, saved: path.basename(saved), dump: copy, load, trash };
 }
 
 /* ── «받는 사람» — 후원자·의뢰자 역할 하나 ──
