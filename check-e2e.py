@@ -1698,6 +1698,14 @@ with sync_playwright() as p:
     last = None
     for i in range(301): last = raw("/api/zz-rate-probe", {"x": i})[0]
     A(last == 429, f"301번째 쓰기가 429 가 아니다: {last}")
+    # c — 한 대회에 같은 IP 가 팀을 계속 만들면 429 (APPLY_LIMIT, 검사 서버는 20)
+    _, ae = post("/api/events", {"title": "신청상한검사"}); AE = ae["id"]
+    acodes = [post(f"/api/events/{AE}/teams", {"name": f"막기{i}", "email": f"cap{i}@x.io", "agree": True})[0]
+              for i in range(21)]
+    A(acodes[:20] == [201] * 20, f"상한 안쪽 신청이 막혔다: {acodes[:20]}")
+    A(acodes[20] == 429, f"21번째 신청이 429 가 아니다: {acodes[20]}")
+    A("10분" in raw(f"/api/events/{AE}/teams", {"name": "막기말", "email": "capz@x.io", "agree": True})[1],
+      "막는 말에 언제 다시 되는지가 없다")
     # 8 — CSV 수식 주입
     post(f"/api/events/{SE}/teams", {"name": "=1+1", "email": "f@audit.test", "agree": True})
     csvt = raw(f"/api/events/{SE}/export.csv", headers={"x-okey": SK})[1]
@@ -1717,7 +1725,7 @@ with sync_playwright() as p:
     visit(f"/j/{SE}?k={SJ}")
     A(pg.evaluate("location.search") == "", "심사 링크를 열었는데 주소창에 열쇠가 남아 있다")
     A("allow-same-origin" not in pg.content(), "미리보기 iframe 이 같은 출처 권한을 가진다")
-    ok("보안 감사 반영 — 죽지 않음·사본에 열쇠 없음·소스 404·도배 429·CSV·헤더·길이·쿼리 열쇠 403·id·음수·주소창 열쇠")
+    ok("보안 감사 반영 — 죽지 않음·사본에 열쇠 없음·소스 404·도배 429·한 대회 신청 상한·CSV·헤더·길이·쿼리 열쇠 403·id·음수·주소창 열쇠")
     # ── 2026-09-26 짝 비교 심사 — 두 팀 중 나은 쪽만 고른다 ──
     _, pe = post("/api/events", {"title": "짝비교검사"}); PE, PK, PJ = pe["id"], pe["okey"], pe["jkey"]
     pteams = []

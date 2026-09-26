@@ -1902,6 +1902,13 @@ function tooMany(ip, limit = 30) {
 }
 /* 열쇠 없는 쓰기(신청·후원·질문·피드백·요청·whoami)는 IP+길로 10분에 WRITE_LIMIT 번(감사 7·9). 검사는 한 IP 라 넉넉히 둔다 */
 const WRITE_LIMIT = +(process.env.WRITE_LIMIT || 300);
+/* 한 대회에 같은 IP 가 팀을 계속 만드는 것은 따로 조인다. WRITE_LIMIT 은 길 단위라
+   «한 대회를 가짜 팀으로 채워 정원을 잠그는 것» 을 못 막는다. 10분에 APPLY_LIMIT 팀. */
+const APPLY_LIMIT = +(process.env.APPLY_LIMIT || 3);
+function applyGuard(ip, event) {
+  if (tooMany('apply:' + (ip || '') + ':' + event, APPLY_LIMIT))
+    throw new HttpError(429, '이 대회에 신청을 너무 많이 했습니다. 10분 뒤에 다시 됩니다');
+}
 
 /** 이 컴퓨터의 랜 주소. 참가자 폰은 localhost 로 못 온다.
     유선과 무선이 다를 수 있어서 찾은 것을 다 준다. */
@@ -3875,6 +3882,7 @@ function routes(db) {
           /* 팀 열쇠는 여기서 딱 한 번 나간다. 신청한 브라우저가 받아서 들고 있는다. */
           const jb = await body(req);
           delete jb._promote;   /* 내부 표식 — 밖에서 보내면 정원 검사를 건너뛴다. 경계에서 지운다 */
+          applyGuard(req.socket.remoteAddress, m[1]);   /* 한 IP 가 한 대회를 가짜 팀으로 채우는 것을 막는다 */
           const tid = joinTeam(db, m[1], jb);
           if (typeof tid === 'object') return json(res, 202, tid);   /* 정원이 차서 대기자로 — { waiting: 몇 번째 } */
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
@@ -5242,6 +5250,22 @@ function selftest() {
   ok(idA === pidOf(db, ' A@X.test '), '대소문자와 공백은 같은 사람으로 본다');
   ok(idA !== idB, '다른 연락처는 다른 사람이다');
   ok(pidOf(db, '') === '' && pidOf(db, 'a@b') === '', '너무 짧으면 열쇠를 안 만든다');
+  {
+    /* 한 대회에 같은 IP 가 팀을 계속 만드는 것 — APPLY_LIMIT 개까지(감사 c).
+       대회가 다르면 따로 센다. 현장에서 한 와이파이로 열 명이 신청하는 것을 막으면 안 되므로 상한은 env 로 뺀다. */
+    const gIp = '10.0.0.7', gEv = 'apply1', gEv2 = 'apply2';
+    for (let i = 0; i < APPLY_LIMIT; i++) applyGuard(gIp, gEv);
+    let gCode = 0, gMsg = '';
+    try { applyGuard(gIp, gEv); } catch (e) { gCode = e.code; gMsg = e.message; }
+    ok(gCode === 429, '한 대회에 신청을 계속 해도 안 막힌다');
+    ok(/10분/.test(gMsg), '막는 말에 언제 다시 되는지가 없다');
+    let gOther = true;
+    try { applyGuard(gIp, gEv2); } catch (e) { gOther = false; }
+    ok(gOther, '다른 대회 신청까지 같이 막힌다');
+    let gOtherIp = true;
+    try { applyGuard('10.0.0.8', gEv); } catch (e) { gOtherIp = false; }
+    ok(gOtherIp, '다른 사람 신청까지 같이 막힌다');
+  }
   {
     /* 내 열쇠 찾기 — 있는 연락처와 없는 연락처의 응답이 한 글자도 달라선 안 된다(감사 9).
        갈리는 것은 메일뿐이다. 응답이 갈리면 열쇠 없이 «이 사람 참가했나» 를 묻는 길이 된다. */
