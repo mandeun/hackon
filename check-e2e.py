@@ -1693,6 +1693,43 @@ with sync_playwright() as p:
     A("1번 비교했습니다" in pg.inner_text("#pair-n"), f"누른 뒤 비교 횟수가 안 늘었다: {pg.inner_text('#pair-n')}")
     A(pg.inner_text("#pair-a") + "|" + pg.inner_text("#pair-b") != was_pair, "누른 뒤에도 같은 쌍이 떠 있다")
     pg.evaluate("localStorage.removeItem('hackon.judge')")
+    # 방식은 한 번에 하나 — 켜면 나머지가 꺼지고, 무엇이 꺼졌는지 소식에 적힌다
+    A(post(f"/api/events/{PE}/vmode", {"on": 1}, PK)[0] == 200, "관객 평가를 못 켰다")
+    xe = api(f"/api/events/{PE}")
+    A(xe["vmode"] == 1 and xe["pmode"] == 0, f"관객 평가를 켰는데 짝 비교가 같이 켜져 있다: vmode={xe['vmode']} pmode={xe['pmode']}")
+    A("짝 비교는 껐습니다" in api(f"/api/events/{PE}/notices")[0]["text"],
+      f"무엇이 꺼졌는지 소식에 없다: {api(f'/api/events/{PE}/notices')[0]['text']}")
+    A(post(f"/api/events/{PE}/pmode", {"on": 1}, PK)[0] == 200, "짝 비교를 다시 못 켰다")
+    xe = api(f"/api/events/{PE}")
+    A(xe["pmode"] == 1 and xe["vmode"] == 0, f"짝 비교를 켰는데 관객 평가가 안 꺼졌다: vmode={xe['vmode']}")
+    A("관객 평가는 껐습니다" in api(f"/api/events/{PE}/notices")[0]["text"],
+      f"관객 평가를 껐다는 말이 소식에 없다: {api(f'/api/events/{PE}/notices')[0]['text']}")
+    # 보정 — 약한 팀만 이긴 전승 팀(승률 1등)이 상대의 세기까지 풀면 3등이 된다
+    _, bev = post("/api/events", {"title": "짝비교보정검사"}); BE, BK2, BJ2 = bev["id"], bev["okey"], bev["jkey"]
+    bt = {}
+    for nm in ["약", "강둘", "엑스", "강하나", "와이"]:      # 신청 순은 BT 순·승률 순 어느 쪽과도 다르다
+        _, t = post(f"/api/events/{BE}/teams", {"name": nm, "email": "b@x.io", "agree": True})
+        post(f"/api/teams/{t['id']}/submit", {"url": f"https://example.com/{t['id']}"}, tkey=t["tkey"])
+        bt[nm] = t["id"]
+    post(f"/api/events/{BE}/pmode", {"on": 1}, BK2)
+    for j, x, y, w in [("갑", "강하나", "약", "강하나"), ("갑", "강둘", "약", "강둘"), ("갑", "강하나", "강둘", "강하나"),
+                       ("갑", "엑스", "약", "엑스"), ("을", "엑스", "약", "엑스"),
+                       ("갑", "와이", "강하나", "와이"), ("갑", "와이", "강둘", "와이"), ("을", "와이", "강하나", "강하나")]:
+        A(post(f"/api/events/{BE}/pair", {"judge": j, "a": bt[x], "b": bt[y], "winner": bt[w]}, jkey=BJ2)[0] == 200,
+          "보정 자료의 비교가 저장이 안 된다")
+    brow = api(f"/api/events/{BE}/board", key=BK2)["rows"]
+    bx = [r for r in brow if r["name"] == "엑스"][0]
+    A(bx["wins"] == 2 and bx["pairs"] == 2, f"엑스가 전승이 아니다 — 승률 1등과 갈리는 자료가 아니다: {bx}")
+    A([r["name"] for r in brow] == ["강하나", "와이", "엑스", "강둘", "약"],
+      f"승률이 아니라 상대의 세기까지 푼 순위여야 한다: {[(r['name'], r['pscore']) for r in brow]}")
+    # 제출 없이도(현장 발표) — 안 낸 팀도 쌍에 오른다
+    post(f"/api/events/{BE}/teams", {"name": "안낸팀", "email": "n@x.io", "agree": True})
+    JN3 = urllib.parse.quote("현장심사")
+    A(api(f"/api/events/{BE}/pair?judge={JN3}", jkey=BJ2)["teams"] == 5, "기본인데 제출 안 한 팀이 쌍에 올랐다")
+    A(post(f"/api/events/{BE}/pmode", {"on": 1, "all": 1}, BK2)[0] == 200, "«제출 없이도»를 못 켰다")
+    pvall = api(f"/api/events/{BE}/pair?judge={JN3}", jkey=BJ2)
+    A(pvall["teams"] == 6 and pvall["event"]["pall"] is True,
+      f"«제출 없이도»를 켰는데 안 낸 팀이 안 올라온다: 팀 {pvall['teams']} pall {pvall['event'].get('pall')}")
     # 마감 뒤에는 심사 방식을 더 못 바꾼다 (vmode·ranked 와 같은 규칙)
     post(f"/api/events/{PE}", {"due": "2020-01-01T00:00"}, PK, method="PATCH")
     A(post(f"/api/events/{PE}/pmode", {"on": 0}, PK)[0] == 409, "마감 뒤에 짝 비교가 꺼졌다")
@@ -1700,7 +1737,7 @@ with sync_playwright() as p:
       "큰 화면 순위가 승률을 안 쓴다")
     visit(f"/e/{PE}")
     A("비교 점수" in pg.inner_text("#view"), "공개 순위 표에 비교 점수 열이 없다")
-    ok("짝 비교 심사 — 소식·쌍 고르기·BT 보정 순위·모름은 0 이 아님·마감 뒤 잠김")
+    ok("짝 비교 심사 — 쌍 고르기 · BT 보정 순위(승률과 다름) · 모름은 0 이 아님 · 방식 배타 · 제출 없이도 · 마감 뒤 잠김")
 
     # ── 대역이 찾은 것 ④⑤ — 첫 화면 «대회 열기»는 만들기 화면으로, 대회 정보에 «여는 사람» 칸 ──
     pg.goto(BASE + "/app?make=1"); pg.wait_for_selector("body[data-ready='1']", timeout=8000)
