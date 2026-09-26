@@ -414,6 +414,15 @@ with sync_playwright() as p:
     jc2.close()
     ok("심사 눈높이가 심사위원에게는 안 보인다")
 
+    # ── 탭 줄의 «기본» 은 기본 묶음을 편다 ──
+    # 대역시험 덤: data-sec="sec-info" 인데 그 <details> 에 id 가 없어 아무것도 안 펴졌다.
+    visit(f"/app#{ev}")
+    pg.evaluate("() => { const d = document.getElementById('sec-info'); if (d) d.open = false; }")
+    pg.click('[data-sec="sec-info"]')
+    pg.wait_for_timeout(300)
+    A(pg.evaluate("() => { const d = document.getElementById('sec-info'); return !!d && d.open; }"), "«기본» 단추를 눌렀는데 기본 묶음이 안 펴진다")
+    ok("탭 줄 «기본» 이 기본 묶음을 편다")
+
     # ── 심사 주소는 열쇠를 품은 채로, 접지 않은 자리에, «열기» 보다 앞에 ──
     # 대역시험 2: 눈에 띄는 «심사위원 화면 열기» 만 보고 주소창의 /j/<id> 를 복사해 보내면
     # 받은 사람은 열쇠 칸 앞에서 멈춘다. 보낼 주소가 먼저 보여야 한다.
