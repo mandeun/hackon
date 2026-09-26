@@ -1518,7 +1518,7 @@ function open(file) {
   try { db.exec('ALTER TABLE events ADD COLUMN ranked INTEGER NOT NULL DEFAULT 0'); } catch {}
   /* 2026-09-26 짝 비교 심사(Gavel·HackMIT 의 pairwise 를 하루짜리 규모로 줄인 것).
      pmode — 점수 슬라이더 대신 «두 팀 중 나은 쪽»만 고르게 한다. 처음 심사하는 사람은 60점과 70점을
-     가를 근거가 없지만 «둘 중 어느 쪽»은 고를 수 있다. 순위는 승률로 매긴다. */
+     가를 근거가 없지만 «둘 중 어느 쪽»은 고를 수 있다. 순위는 pairScores() 의 비교 점수로 매긴다. */
   try { db.exec('ALTER TABLE events ADD COLUMN pmode INTEGER NOT NULL DEFAULT 0'); } catch {}
   /* pall — 제출 여부와 상관없이 모든 팀을 쌍에 올린다. 현장에서 발표만 하는 대회는 낼 링크가 없다.
      기본은 0 이다 — 제출 대회에서 안 낸 팀을 올리면 나머지 팀이 공짜 승리를 얻는다. */
@@ -5635,7 +5635,7 @@ function selftest() {
     ok(pb.find(r => r.id === p1).pairs === 4, '같은 쌍을 다시 골라도 비교 수는 안 늘어난다');
     ok(pb.find(r => r.id === p1).wins === 1 && pb.find(r => r.id === p2).wins === 1,
        '같은 심사위원·같은 쌍은 덮어쓴다 — 이긴 쪽만 옮겨간다');
-    /* 한 번도 비교 안 된 팀은 승률이 «모름»(null)이다. 0 으로 그리면 꼴찌가 된다 */
+    /* 한 번도 비교 안 된 팀은 점수가 «모름»(null)이다. 0 으로 그리면 꼴찌가 된다 */
     const p4 = joinTeam(db, pe.id, { name: '넷', agree: true });
     submit(db, p4, { url: 'https://example.com/4' });
     const r4 = board(db, pe.id, true).rows.find(r => r.id === p4);
@@ -5644,10 +5644,10 @@ function selftest() {
     /* 새 팀이 들어오면 비교가 적은 쪽부터 다시 올린다 */
     const nx = nextPair(db, pe.id, '심사병');
     ok(nx && (nx[0].id === p4 || nx[1].id === p4), '비교 횟수가 적은 팀을 먼저 올린다');
-    /* 손님에게는 마감 전 승률·승수를 안 준다 — score 와 같은 규칙 */
+    /* 손님에게는 마감 전 비교 점수·승수를 안 준다 — score 와 같은 규칙 */
     const guest = board(db, pe.id, false).rows[0];
     ok(guest.pscore === null && guest.wins === null && guest.score === null, '마감 전 손님에게 짝 비교 점수가 안 샌다');
-    /* 큰 화면 순위는 pmode 면 승률을 쓴다 */
+    /* 큰 화면 순위는 pmode 면 비교 점수를 쓴다 */
     editEvent(db, pe.id, { due: '2020-01-01T00:00' });
     const tvr = tv(db, pe.id).ranks;
     ok(tvr.length === 4 && tvr[0].score === board(db, pe.id, true).rows[0].pscore,

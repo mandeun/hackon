@@ -1643,7 +1643,7 @@ with sync_playwright() as p:
     pv = api(f"/api/events/{PE}/pair?judge={JN}", jkey=PJ)
     A(not pv["done"] and pv["a"]["id"] != pv["b"]["id"], f"서로 다른 두 팀이 안 온다: {pv}")
     # 나중에 신청한 팀부터 이기게 고른다(다 > 나 > 가). 신청 순과 반대라야,
-    # 승률 정렬을 지웠을 때 팀 번호 순으로 그냥 맞아떨어지는 일이 없다.
+    # 비교 점수 정렬을 지웠을 때 팀 번호 순으로 그냥 맞아떨어지는 일이 없다.
     rank = {tid: i for i, tid in enumerate(pids)}
     seen = 0
     while not pv["done"]:
@@ -1657,7 +1657,7 @@ with sync_playwright() as p:
         pv = api(f"/api/events/{PE}/pair?judge={JN}", jkey=PJ)
     A(seen == 3 and pv["n"] == 3, f"세 팀이면 쌍이 셋이다: {seen}")
     prow = api(f"/api/events/{PE}/board", key=PK)["rows"]
-    A([r["id"] for r in prow] == pids[::-1], f"승률 순위가 고른 대로가 아니다: {[(r['name'], r['pscore']) for r in prow]}")
+    A([r["id"] for r in prow] == pids[::-1], f"짝 비교 순위가 고른 대로가 아니다: {[(r['name'], r['pscore']) for r in prow]}")
     A(prow[0]["pscore"] == 100 and prow[2]["pscore"] == 0 and prow[0]["pairs"] == 2, f"짝 비교 점수가 틀렸다: {prow[0]}")
     # 같은 쌍을 순서만 뒤집어 다시 고르면 덮어쓴다 — 비교 수는 안 늘고 이긴 쪽만 옮겨간다
     w0 = [r for r in prow if r["id"] == pids[0]][0]["wins"]
@@ -1672,7 +1672,7 @@ with sync_playwright() as p:
     prow = api(f"/api/events/{PE}/board", key=PK)["rows"]
     A(prow[-1]["id"] == t4["id"] and prow[-1]["pscore"] is None and prow[-1]["wins"] is None,
       f"비교 0 인 팀이 0% 로 그려졌다: {prow[-1]}")
-    A(api(f"/api/events/{PE}/board")["rows"][0]["pscore"] is None, "마감 전인데 손님에게 승률이 샜다")
+    A(api(f"/api/events/{PE}/board")["rows"][0]["pscore"] is None, "마감 전인데 손님에게 비교 점수가 샜다")
     # 브라우저 — 운영 화면의 «짝 비교» 단추, 심사 화면의 두 팀 카드
     pg.evaluate(f"localStorage.setItem('hackon.okey.{PE}', '{PK}')")
     visit(f"/app#{PE}")
@@ -1734,7 +1734,7 @@ with sync_playwright() as p:
     post(f"/api/events/{PE}", {"due": "2020-01-01T00:00"}, PK, method="PATCH")
     A(post(f"/api/events/{PE}/pmode", {"on": 0}, PK)[0] == 409, "마감 뒤에 짝 비교가 꺼졌다")
     A(api(f"/api/events/{PE}/tv")["ranks"][0]["score"] == api(f"/api/events/{PE}/board", key=PK)["rows"][0]["pscore"],
-      "큰 화면 순위가 승률을 안 쓴다")
+      "큰 화면 순위가 비교 점수를 안 쓴다")
     visit(f"/e/{PE}")
     A("비교 점수" in pg.inner_text("#view"), "공개 순위 표에 비교 점수 열이 없다")
     ok("짝 비교 심사 — 쌍 고르기 · BT 보정 순위(승률과 다름) · 모름은 0 이 아님 · 방식 배타 · 제출 없이도 · 마감 뒤 잠김")
