@@ -2558,12 +2558,19 @@ with sync_playwright() as pw:
             "[...document.querySelectorAll('[data-chip]')].find(e => !e.closest('details')).dataset.chip")
         A(pg.inner_text(f'[data-chip="{vid}"]').strip() == "아직 제보 없음",
           "제보가 0건인데 0 으로 그린다 (모름이어야 한다)")
+        # 제보 칸은 접혀 있다 — 안 가 본 곳에도 후기 폼이 펴져 있으면 목록이 못 읽힌다
+        A(not pg.is_visible(f"#vt-{vid}"), "제보 칸이 처음부터 펴져 있다 (목록이 길어진다)")
+        pg.click(f'[data-more="{vid}"]')
+        pg.wait_for_timeout(250)
+        A(pg.is_visible(f"#vt-{vid}"), "제보를 눌렀는데 칸이 안 펴진다")
         pg.fill(f"#vt-{vid}", "콘센트가 무대 옆에 있습니다")
         pg.click(f'[data-tip="{vid}"][data-kind="콘센트"]')
         pg.wait_for_timeout(1400)
         chip_now = pg.inner_text(f'[data-chip="{vid}"]')
         A("콘센트 1" in chip_now, f"제보를 넣었는데 칩이 그대로다: {chip_now}")
         A("콘센트가 무대 옆에 있습니다" in pg.inner_text("main"), "한 줄 메모가 카드에 안 보인다")
+        pg.click(f'[data-more="{vid}"]')
+        pg.wait_for_timeout(250)
         A(pg.input_value(f"#vt-{vid}") == "", "보낸 뒤에도 메모 칸이 안 비워졌다")
 
         # 순서 — 좋은 제보가 많은 곳이 앞으로, «안 맞아요» 가 많은 곳은 뒤로
