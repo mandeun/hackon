@@ -3081,6 +3081,12 @@ function restoreEvent(db, d, owner) {
 /* ── 지운 대회 휴지통 — 파일 첨부 없이 한 번 누르면 되는 길 ──
    목록에는 제목·지운 날·팀 수만 싣는다. 사본(json)은 절대 안 나간다 —
    나가면 열쇠 없는 사본이라도 «누가 어디에 신청했나»가 통째로 흘러간다. */
+/* 후원사 이름 — 객체·빈 값이 오면 SQLite 가 500 을 낸다(감사 20). 경계에서 400 으로 */
+function sponsorName(v) {
+  const n = plain(v, 40);
+  if (!n) throw new HttpError(400, '후원사 이름이 필요합니다');
+  return n;
+}
 function eventTrash(db, owner) {
   /* 열쇠 없이 물으면 403 이다 — 400 은 «보낸 것이 잘못됐다» 는 뜻이라 «권한이 없다» 를 가린다(감사 e) */
   if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');
@@ -3859,7 +3865,7 @@ function routes(db) {
           return json(res, 200, visitsOf(db, q.days));
         }
         if (p === '/api/mine' && req.method === 'GET') {
-          if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+          if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');   /* 400 은 «보낸 것이 잘못됐다» — 권한 문제는 403(감사 e) */
           return json(res, 200, mine(db, owner));
         }
         /* 지운 대회 목록 — 내 것만. 남의 휴지통은 한 줄도 안 보인다. 열쇠 없으면 eventTrash 가 403 을 낸다 */
@@ -3924,7 +3930,7 @@ function routes(db) {
           if (!link && b.domain) { const lf = logoFor(b.domain); if (lf.ok) link = 'https://' + lf.domain; }
           if (!logo && link) { const lf = logoFor(link.replace(/^https?:\/\//, '').split('/')[0]); if (lf.ok) logo = lf.url; }
           const r = db.prepare('INSERT INTO sponsors(event,name,kind,amount,note,logo,link) VALUES(?,?,?,?,?,?,?)')
-            .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '', logo, link);
+            .run(m[1], sponsorName(b.name), plain(b.kind, 20) || '현금', +b.amount || 0, plain(b.note, 200), logo, link);
           const sid = Number(r.lastInsertRowid);
           /* 직접 올린 파일 — data: 주소로 온다. 종류·크기를 보고 그대로 저장, 로고 주소는 우리 경로로 */
           const dm = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.logoData || ''));
@@ -5270,6 +5276,10 @@ function selftest() {
   ok(idA !== idB, '다른 연락처는 다른 사람이다');
   ok(pidOf(db, '') === '' && pidOf(db, 'a@b') === '', '너무 짧으면 열쇠를 안 만든다');
   {
+    /* 후원사 이름 — 객체·빈 값은 400, 문자열은 40자로 */
+    { let c = 0; try { sponsorName({ a: 1 }); } catch (e) { c = e.code; } ok(c === 400, '후원사 이름이 객체면 400');
+      c = 0; try { sponsorName(''); } catch (e) { c = e.code; } ok(c === 400, '후원사 이름이 비면 400');
+      ok(sponsorName(' <b>포도농장</b> ') === 'b포도농장/b', '후원사 이름은 태그 없이 다듬는다'); }
     /* clientIp — Fly 뒤에서는 헤더, 밖에서는 socket. 이걸 안 지키면 상한이 방문자 전체에 걸린다 */
     {
       const fake = (h, sock) => ({ headers: h, socket: { remoteAddress: sock } });
