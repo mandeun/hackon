@@ -27,13 +27,13 @@
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;
-     display:flex;justify-content:center;min-height:100vh;
+     display:flex;justify-content:center;min-height:100dvh;
      -webkit-font-smoothing:antialiased}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;border:0;background:none}
 button{cursor:pointer}
 input,select,textarea{border:1px solid var(--rule);border-radius:9px;padding:9px 11px;width:100%;background:#fff}
 :focus-visible{outline:2px solid var(--navy);outline-offset:2px}
-#app{width:100%;max-width:460px;background:var(--paper);min-height:100vh;
+#app{width:100%;max-width:460px;background:var(--paper);min-height:100dvh;
      box-shadow:0 8px 40px rgba(43,51,40,.13);display:flex;flex-direction:column}
 
 /* PC 모드. 폰 폭 그대로 두면 모니터에서 가운데 기둥 하나가 된다.
@@ -73,7 +73,7 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
   border:2px solid var(--ink3)}
 .prow.key::before{border-color:var(--navy);background:var(--navy)}
 .prow.hot::before{border-color:var(--bad);background:var(--bad)}
-.prow input[type=time]{width:94px;flex:none;padding:8px 5px;font-size:14px;
+.prow input[type=time]{width:94px;flex:none;padding:8px 5px;font-size:14px;min-height:44px;
   font-variant-numeric:tabular-nums}
 /* 시계 아이콘이 칸을 다 먹는다. 눌러서 고르는 것은 그대로 된다. */
 .prow input[type=time]::-webkit-calendar-picker-indicator{display:none}
@@ -81,7 +81,7 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
 .prow input.what{flex:1;min-width:0}
 .prow .len{flex:none;width:4.4em;text-align:right;font-size:12px;color:var(--ink3);
   font-variant-numeric:tabular-nums}
-.prow .del{flex:none;width:26px;color:var(--ink3);font-size:19px;line-height:1}
+.prow .del{flex:none;width:44px;color:var(--ink3);font-size:19px;line-height:1}
 .prow .del:hover{color:var(--bad)}
 
 /* 확성기. 벽에서도 읽혀야 하니 크고 노랗게. */
@@ -101,10 +101,17 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
 .stars button{font-size:26px;line-height:1;color:var(--rule);padding:2px}
 .stars button.on{color:#E8A33D}
 
-/* 심사 - 손가락으로 끌어서 점수를 준다. 폰에서 숫자를 치는 것보다 훨씬 빠르다. */
+/* 심사 - 손가락으로 끌어서 점수를 준다. 폰에서 숫자를 치는 것보다 훨씬 빠르다.
+   막대는 6px 로 보이되 손가락이 닿는 자리는 44px 이다 - 6px 짜리를 폰에서 끌 수는 없다. */
 .sl{display:flex;align-items:center;gap:11px;margin-top:5px}
-.sl input[type=range]{flex:1;appearance:none;height:6px;border-radius:3px;padding:0;
-  background:linear-gradient(90deg,var(--navy) var(--p,70%),var(--rule) var(--p,70%))}
+.sl input[type=range]{flex:1;appearance:none;height:44px;border:0;border-radius:3px;padding:0;
+  touch-action:manipulation;
+  background:linear-gradient(90deg,var(--navy) var(--p,0%),var(--rule) var(--p,0%)) center/100% 6px no-repeat}
+.sl input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+/* 아직 안 준 점수. 손잡이가 가운데 서 있는데 막대가 0 이면 «50점»으로 읽힌다.
+   속을 비워 «아직»을 그린다 — 있음·없음·모름 셋 중 모름. */
+.sl input[type=range].unset{background:var(--rule) center/100% 6px no-repeat}
+.sl input[type=range].unset::-webkit-slider-thumb{background:#fff;border:3px solid #C2C9D4}
 .sl input[type=range]::-webkit-slider-thumb{appearance:none;width:26px;height:26px;
   border-radius:50%;background:var(--navy);border:3px solid #fff;
   box-shadow:0 1px 5px rgba(43,51,40,.35);cursor:pointer}
@@ -155,7 +162,7 @@ header{padding:14px 16px 0;border-bottom:1px solid var(--rule);flex:none;backgro
 /* 눌러서 고르는 칩. .chip 은 이미 «작은 배지»라 이름을 따로 쓴다 */
 .picks{display:flex;flex-wrap:wrap;gap:7px;margin:6px 0 2px}
 .pick{font-size:13px;font-weight:600;padding:8px 13px;border-radius:99px;
-      border:1.5px solid var(--rule);background:#fff;color:var(--ink2);cursor:pointer;min-height:38px}
+      border:1.5px solid var(--rule);background:#fff;color:var(--ink2);cursor:pointer;min-height:44px}
 .pick.on{background:var(--acc);border-color:var(--acc);color:#fff}
 
 main{flex:1;overflow:auto;padding:20px 16px 24px}
@@ -195,7 +202,7 @@ details .in>.card{border:0;padding:0;margin:0;background:none}
    멀리서 보이는 것이 전부라 다른 화면의 규칙을 따르지 않는다. */
 body.tv{background:#141824;display:block}
 body.tv #app{max-width:none;background:#141824;box-shadow:none;color:#F4F6FA;
-             height:100vh;min-height:0}
+             height:100dvh;min-height:0}
 body.tv header,body.tv nav,body.tv #toast{display:none}
 /* main 에 height 를 또 주면 #app 이 100vh 보다 커져서 아래가 빈다. flex 로만 채운다. */
 body.tv main{padding:3.2vh 3vw;overflow:hidden;flex:1;min-height:0;
@@ -223,7 +230,7 @@ body.tv main{padding:3.2vh 3vw;overflow:hidden;flex:1;min-height:0;
 .tvspon .tvlogos{justify-content:center;flex:1;gap:3vw}
 .tvspon .tvlogos > *{font-size:4.2vh;color:#0B1020;font-weight:900}
 .tvspon .tvlogos img{height:9vh;max-width:22vw}
-.tvspon small{font-size:1.5vh;color:#5B6470;writing-mode:vertical-rl;letter-spacing:.2em}
+.tvspon small{font-size:2vh;color:#5B6470;writing-mode:vertical-rl;letter-spacing:.12em;font-weight:700}
 /* 로고 벽 — 화면을 6등분, 칸마다 로고 하나가 꽉 찬다. 10분마다 30초, L 키로 고정. 빈 칸은 «이 자리 비었습니다» 로 판다 */
 .tvwall{position:fixed;inset:0;background:#fff;z-index:9;display:grid;gap:1.2vh;padding:1.2vh;grid-template-rows:repeat(2,1fr)}
 .tvwall > div{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;border-radius:1.6vh;background:#F4F6F8;color:#0B1020;text-align:center;padding:2vh;overflow:hidden}
@@ -253,6 +260,8 @@ body.tv main{padding:3.2vh 3vw;overflow:hidden;flex:1;min-height:0;
 label{display:block;font-size:12.5px;color:var(--ink2);margin:10px 0 4px;font-weight:600}
 .btn{background:var(--navy);color:#fff;border-radius:10px;padding:11px 14px;font-weight:700;
      width:100%;text-align:center;transition:opacity .12s}
+/* 링크로 만든 단추. inline 이면 min-height 가 통하지 않는다 */
+a.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
 .btn:hover{opacity:.88}
 .btn:active{opacity:.75}
 .btn.sec{background:var(--bg2);color:var(--ink);border:1px solid var(--rule)}
@@ -298,6 +307,11 @@ nav .i{font-size:17px}
 .hid{filter:blur(5px);transition:filter .15s;cursor:pointer;user-select:none}
 .hid.on{filter:none;user-select:text}
 .shrow .share{flex:1;margin-top:0}
+/* 건너뛰기 링크. 평소엔 안 보이고 키보드로 오면 나온다 */
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.sr:focus{position:fixed;top:8px;left:8px;width:auto;height:auto;overflow:visible;clip:auto;z-index:99;
+  display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;
+  background:var(--navy);color:#fff;font-weight:700;text-decoration:none}
 @media print{
   body{background:#fff}
   #app{max-width:none;box-shadow:none;min-height:0}
@@ -318,14 +332,14 @@ nav .i{font-size:17px}
 .dots .dotrow{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 12px}
 .dot{flex:0 0 18px;width:18px;height:18px;border-radius:50%;border:2px solid #5A6275;box-sizing:border-box}
 .dot.wait{border-color:var(--warn)}
-.dot.on{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 4px rgba(35,80,245,.28)}
+.dot.on{background:var(--on);border-color:var(--on);box-shadow:0 0 0 4px rgba(200,245,59,.26)}
 .dot.pop{animation:dotpop .25s ease-out}
 @keyframes dotpop{0%{transform:scale(.6)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
 .dots .sum{font-size:13px;color:#C9D0DE;line-height:1.7}
 .dots .sum b{color:#fff;font-variant-numeric:tabular-nums}
 .dots .empty{font-size:13px;color:#AEB6C8;margin-top:8px}
 .btn,.tab,button{min-height:44px}
-.btn.sm{min-height:40px}
+.btn.sm{min-height:44px}
 .contact{font-size:13px;color:var(--ink2);margin-top:4px}
 .contact b{color:var(--ink)}
 
@@ -348,11 +362,11 @@ header{position:sticky;top:0;z-index:20;background:rgba(242,244,246,.88);
 .hrow{padding-bottom:10px}
 .logo svg{height:20px}
 .chip{background:#fff;font-size:12px;padding:4px 10px;font-weight:600}
-main{padding:8px 16px 28px}
-h2{font-size:25px;line-height:1.35;letter-spacing:-.04em;margin:12px 4px 8px}
+main{padding:8px 16px 32px}
+h2{font-size:25px;line-height:1.35;letter-spacing:-.04em;margin:12px 4px 8px;text-wrap:balance}
 h3{letter-spacing:-.03em}
 main > h3{font-size:19px;margin:28px 4px 10px !important}
-.sub{font-size:15px;color:var(--ink2);margin:0 4px 18px;line-height:1.65}
+.sub{font-size:15px;color:var(--ink2);margin:0 4px 16px;line-height:1.65;text-wrap:pretty}
 .meta{font-size:14px;color:#5C6474;line-height:1.65}   /* 연한 초록·노랑 카드 위에서도 4.5:1 */
 .meta b{color:var(--ink2)}
 label{font-size:14px;color:var(--ink2);margin:18px 0 8px}
@@ -370,7 +384,9 @@ label{font-size:14px;color:var(--ink2);margin:18px 0 8px}
 input,select,textarea{background:var(--fill);border:1.5px solid transparent;border-radius:12px;
   padding:13px 15px;font-size:16px;transition:border-color .12s,background .12s}
 input:focus,select:focus,textarea:focus{outline:0;background:#fff;border-color:var(--acc)}
-input::placeholder,textarea::placeholder{color:#B0B8C1}
+/* 마우스로 눌렀을 때는 테두리만, 키보드로 왔을 때는 고리까지 */
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+input::placeholder,textarea::placeholder{color:#646E7C}   /* B0B8C1 은 회색 칸 위에서 1.8:1 이었다 */
 input:disabled{color:var(--ink2);-webkit-text-fill-color:var(--ink2);opacity:1}
 select{appearance:none;-webkit-appearance:none;padding-right:38px;cursor:pointer;
   background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238B95A1' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 15px center}
@@ -384,7 +400,11 @@ input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
 .btn:active{opacity:1;transform:scale(.97)}
 .btn.sec{background:var(--fill);color:var(--ink2);border:0}
 .btn.sec:hover{background:#E8EBED;filter:none}
-.btn.sm{padding:9px 14px;font-size:14px;border-radius:10px;min-height:40px}
+.btn.sm{padding:9px 14px;font-size:14px;border-radius:10px;min-height:44px;min-width:44px}
+/* 표 안의 그림 단추만 예외. 44px 로 넓히면 마지막 칸이 커져서 줄 가운데가 단추 위로 오고,
+   «팀 줄 누르기»가 지우기 단추를 누르게 된다(e2e 가 잡았다). 28~34x44 로 두고 사이를 띄운다.
+   WCAG 2.2 AA 최소(24x24)는 넘는다. */
+td .btn.sm{min-width:0;margin-right:2px}
 .card .btn.sec,details .btn.sec{background:#F2F4F6}
 
 .pill{border-radius:6px;padding:3px 7px;font-size:12px;background:var(--acc-l);color:var(--acc);vertical-align:2px}
@@ -408,7 +428,7 @@ input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
 .news li{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--rule);font-size:14px}
 .news li .w{color:var(--ink3);font-size:12.5px;white-space:nowrap}
 .bgchips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 6px}
-.bgchip{border:1px solid var(--rule);background:#fff;color:var(--ink);border-radius:99px;padding:6px 12px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;min-height:36px}
+.bgchip{border:1px solid var(--rule);background:#fff;color:var(--ink);border-radius:99px;padding:6px 12px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;min-height:44px}
 .bgchip.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 .bgchip span{font-size:11px;opacity:.85;margin-left:4px}
 
@@ -460,7 +480,7 @@ details details{background:var(--soft);border-radius:14px}
 .ck input{width:22px;height:22px;margin-top:0;cursor:pointer}
 
 .err{background:var(--bad-l);color:var(--bad);border:0;border-radius:14px;padding:14px 16px;font-size:14.5px}
-.ok-msg{background:#E5F7EE;color:#0E8A57;border:0;border-radius:14px;padding:14px 16px;font-size:14.5px}
+.ok-msg{background:#E5F7EE;color:var(--ok-t);border:0;border-radius:14px;padding:14px 16px;font-size:14.5px}
 
 /* 알림은 아래에서 올라오는 검은 알약. 토스·당근이 전부 이 모양이라 사람들이 이미 읽을 줄 안다. */
 #toast{bottom:calc(92px + env(safe-area-inset-bottom))}
@@ -502,11 +522,21 @@ a{color:var(--acc)}   /* 링크도 잉크. 파랑은 안 쓴다(BRAND) */
 .facts li{display:flex;gap:12px;align-items:flex-start;font-size:15px;color:var(--ink);line-height:1.5}
 .facts .ic{flex:none;width:36px;height:36px;border-radius:12px;background:var(--soft);
   display:grid;place-items:center;font-size:18px}
+/* 사실 줄에서는 타일을 걷어낸다 - 똑같은 회색 네모 일곱 개가 서열을 지운다.
+   칸 너비는 그대로라 줄이 어긋나지 않는다. */
+.facts li:not(:has(a)) .ic{background:none}
+/* 누를 수 있는 줄만 타일을 남기고, 손가락 자리를 44px 로 주고, 꺾쇠로 알린다 */
+.facts li:has(a) .ic{background:var(--acc-l)}
+.facts .v a{display:inline-flex;align-items:center;min-height:44px}
+.facts .v a::after{content:'\203A';font-size:19px;line-height:1;margin-left:4px}
 .facts .k{display:block;font-size:13px;color:var(--ink3);font-weight:600;margin-bottom:1px}
 .facts .v{font-weight:700}
 .hero .due{background:var(--soft);margin:18px 0 0}
 .hero .due.hot{background:#FFF1EC}
 .quick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
+/* 빈 칸을 남기지 않는다 — 다섯 개면 마지막이 두 칸, 넷이면 마지막이 세 칸 */
+.quick > :last-child:nth-child(3n+1){grid-column:span 3}
+.quick > :last-child:nth-child(3n+2){grid-column:span 2}
 .quick a,.quick button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px;
   border-radius:14px;background:var(--soft);font-size:13px;font-weight:600;color:var(--ink2);
   text-decoration:none;min-height:0;transition:transform .1s}
@@ -553,7 +583,7 @@ a{color:var(--acc)}   /* 링크도 잉크. 파랑은 안 쓴다(BRAND) */
 #cta{position:sticky;bottom:0;z-index:15;padding:12px 16px calc(12px + env(safe-area-inset-bottom));
   background:linear-gradient(rgba(242,244,246,0),var(--pg) 30%);transition:opacity .18s,transform .18s}
 #cta.away{opacity:0;transform:translateY(16px);pointer-events:none}
-#cta .btn{box-shadow:0 8px 24px rgba(35,80,245,.28)}
+#cta .btn{box-shadow:0 8px 24px rgba(11,16,32,.26)}   /* 그림자는 바탕 색을 따라간다 */
 .logo{align-items:center}
 .hrow{min-height:44px}
 body.guest #mode,body.guest #who{display:none}   /* 카카오 로그인도 주최자 것이다 */
@@ -566,6 +596,7 @@ body.tv #cta{display:none}
 </style>
 </head>
 <body>
+<a href="#view" class="sr">본문으로 건너뛰기</a>
 <div id="app">
   <header>
     <div class="hrow">
@@ -584,7 +615,7 @@ body.tv #cta{display:none}
   </header>
   <main id="view"></main>
   <div id="cta" hidden></div>
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
   <nav>
     <button data-t="home" class="on"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg></span>대회</button>
     <button data-t="make"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="6"/><path d="M12 8v8M8 12h8"/></svg></span>열기</button>
@@ -699,9 +730,13 @@ const NEED_KIND = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심�
    상태는 G 하나에 둔다 — flash() 가 성공하면 화면을 통째로 다시 그리는데,
    단계를 DOM 에만 두면 «보냈습니다» 대신 첫 화면이 돌아온다. */
 document.head.insertAdjacentHTML('beforeend', `<style>
-.htabs{position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0 10px;margin:0 0 6px;background:var(--bg,#F4F5F7);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.htabs{position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0 10px;margin:0 0 6px;background:var(--bg,#F4F5F7);-webkit-overflow-scrolling:touch;scrollbar-width:none;
+  scroll-snap-type:x proximity;overscroll-behavior-x:contain;
+  /* 오른쪽 끝을 흐린다 — 잘린 자리가 보여야 «옆으로 더 있다»를 안다 */
+  -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);
+          mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent)}
 .htabs::-webkit-scrollbar{display:none}
-.htabs button{flex:0 0 auto;border:1px solid var(--rule,#DDE1E6);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink,#1A1E1D);cursor:pointer}
+.htabs button{flex:0 0 auto;scroll-snap-align:start;border:1px solid var(--rule,#DDE1E6);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink,#1A1E1D);cursor:pointer;touch-action:manipulation}
 .htabs button:active{background:#E9EEFF}
 </style>`);
 const GIVE_KINDS = [['venue','장소'], ['cash','돈'], ['judge','심사'], ['mentor','멘토'], ['snack','간식'], ['other','기타']];   // 칩은 여섯 — 화면마다 판단 하나(검사가 잠근다). 크레딧은 운영자가 올린 자리로만 받는다
@@ -2035,21 +2070,21 @@ const SCREEN = {
         <div class="top">${badge(e)}<span>운영 화면</span></div>
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
-          <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
-          ${e.mode === 'online' ? `<li><span class="ic">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
-          <li><span class="ic">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
+          <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          ${e.mode === 'online' ? `<li><span class="ic" aria-hidden="true">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
+          <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
-          ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
+          ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
         </ul>
         ${dueBox(e)}
         ${LIVE ? `<span id="qurl" hidden>${esc(shareBase())}/e/${esc(e.id)}</span>
         <div class="quick">
-          <a href="/e/${esc(e.id)}" target="_blank" rel="noopener"><span>👀</span>공개 페이지</a>
-          <button id="b-qcopy"><span>🔗</span>주소 복사</button>
-          <a href="/tv/${esc(e.id)}" target="_blank" rel="noopener"><span>📺</span>큰 화면</a>
-          <button id="b-csv" title="참가팀·연락처·순위·장부를 CSV 로"><span>📄</span>내보내기</button>
-          <button id="b-csv0" title="연락처 열이 없는 판 — 스태프 방에 올릴 때"><span>📄</span>연락 빼고</button>
-          ${d.closed ? `<button id="b-share-result" data-title="${esc(e.title)}"><span>📣</span>결과 공유 글</button>` : ''}
+          <a href="/e/${esc(e.id)}" target="_blank" rel="noopener"><span aria-hidden="true">👀</span>공개 페이지</a>
+          <button id="b-qcopy"><span aria-hidden="true">🔗</span>주소 복사</button>
+          <a href="/tv/${esc(e.id)}" target="_blank" rel="noopener"><span aria-hidden="true">📺</span>큰 화면</a>
+          <button id="b-csv" title="참가팀·연락처·순위·장부를 CSV 로"><span aria-hidden="true">📄</span>내보내기</button>
+          <button id="b-csv0" title="연락처 열이 없는 판 — 스태프 방에 올릴 때"><span aria-hidden="true">🧾</span>연락 빼고</button>
+          ${d.closed ? `<button id="b-share-result" data-title="${esc(e.title)}"><span aria-hidden="true">📣</span>결과 공유 글</button>` : ''}
         </div>
         <div class="meta" style="margin-top:6px">참가자에게 QR 을 보여 줄 곳은 <b>큰 화면</b>입니다. 심사·투표 QR 은 아래 «보낼 주소»에 있습니다.</div>` : '<button class="btn sec sm" id="b-pub" style="margin-top:14px">공개 페이지 미리보기</button>'}
       </section>
@@ -2409,10 +2444,10 @@ const SCREEN = {
         <td class="n">${e.vmode ? (r.votes ? r.vote + '★' : '—') : e.pmode ? (r.pscore === null ? '—' : r.pscore) : r.score}</td>
         <td class="n">${e.vmode ? (r.votes || 0) + '표' : e.pmode ? (r.pairs || 0) + '번' : r.judges + '명'}</td>
         <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
-          title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
-          <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button>
-          <button class="btn sec sm" data-rename="${r.id}" title="팀 이름 고치기" style="padding:4px 8px">✏️</button>
-          <button class="btn sec sm" data-trash="${r.id}" title="지우기 — 휴지통으로 가고 되살릴 수 있다" style="padding:4px 8px">🗑</button></td></tr>`).join('')}</table>
+          title="추천작으로 표시" aria-label="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
+          <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" aria-label="팀 링크 다시 주기" style="padding:4px 8px">🔗</button>
+          <button class="btn sec sm" data-rename="${r.id}" title="팀 이름 고치기" aria-label="팀 이름 고치기" style="padding:4px 8px">✏️</button>
+          <button class="btn sec sm" data-trash="${r.id}" title="지우기 — 휴지통으로 가고 되살릴 수 있다" aria-label="팀 지우기" style="padding:4px 8px">🗑</button></td></tr>`).join('')}</table>
       ${e.waiting ? `<div class="meta" style="margin-top:8px">대기 ${e.waiting}명 — «못 가요»·지움·정원 늘림으로 자리가 나면 앞에서부터 올라오고 메일이 갑니다(메일이 꺼져 있으면 🔗로 링크를 전해 주세요).</div>` : ''}
       ${(d.mails || []).length ? `<div class="meta" style="margin-top:8px">메일: ${d.mails.map(x => `${{ sent: '보냄', failed: '실패', skipped: '건너뜀(발송 열쇠 없음)' }[x.status] || x.status} ${x.c}`).join(' · ')}</div>` : ''}
       ${(d.trash || []).length ? `<details style="margin-top:8px"><summary>지운 팀 ${d.trash.length} <span class="when">되살릴 수 있습니다</span></summary><div class="in">
@@ -2492,15 +2527,15 @@ const SCREEN = {
         <div class="top">${badge(e)}<span>${esc(e.host)} 주최</span></div>
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
-          <li><span class="ic">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
-          ${e.topic ? `<li><span class="ic">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
-          <li><span class="ic">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
+          <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          ${e.topic ? `<li><span class="ic" aria-hidden="true">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
+          <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
-          ${+e.prize ? `<li><span class="ic">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
-          <li><span class="ic">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span style="color:var(--ink3);font-weight:500">· 카톡 방에 한 번</span></span></span></li>
-          <li><span class="ic">🗓️</span><span><span class="k">내 달력에</span><span class="v"><a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 캘린더에 넣기</a></span></span></li>
-          ${e.chat ? `<li><span class="ic">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
-          ${e.safety ? `<li><span class="ic">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
+          ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
+          <li><span class="ic" aria-hidden="true">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span style="color:var(--ink3);font-weight:500">· 카톡 방에 한 번</span></span></span></li>
+          <li><span class="ic" aria-hidden="true">🗓️</span><span><span class="k">내 달력에</span><span class="v"><a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 캘린더에 넣기</a></span></span></li>
+          ${e.chat ? `<li><span class="ic" aria-hidden="true">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
+          ${e.safety ? `<li><span class="ic" aria-hidden="true">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
         </ul>
         ${dueBox(e)}
          ${ended ? `<p class="meta" id="ended-line" style="margin:12px 0 0"><b>끝난 대회입니다.</b> <a href="/e/${esc(e.id)}/report">결과 보고서 보기</a></p>`
@@ -2791,7 +2826,7 @@ const SCREEN = {
         </div>
         <div class="solbox" id="sol-${esc(r.id)}" hidden style="margin-top:10px">
           <div class="row"><div><label>이름</label><input data-sol-name placeholder="팀·별명"></div><div><label>연락처 <span class="pill">낸 분만 봄</span></label><input data-sol-contact placeholder="선택"></div></div>
-          <label>결과물 주소</label><input data-sol-url placeholder="https://... (누르면 열리는 주소)">
+          <label>결과물 주소</label><input data-sol-url placeholder="https://… (누르면 열리는 주소)">
           <label>한 줄</label><input data-sol-note placeholder="무엇을 어떻게 (선택)">
           <div style="height:10px"></div><button class="btn sm" data-sol-go="${esc(r.id)}">보내기</button>
         </div>
@@ -2878,7 +2913,7 @@ const SCREEN = {
     const cells = [];
     for (const sp of (d.sponsors || []).slice(0, 5)) {
       const logo = /^(https?:\/\/|\/api\/sponsors\/\d+\/logo$)/i.test(String(sp.logo || '')) ? sp.logo : '';
-      cells.push(`<div>${logo ? `<img src="${esc(logo)}" alt="${esc(sp.name)}" onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:this.alt}))">` : `<b>${esc(sp.name)}</b>`}<span class="who">함께한 곳</span></div>`);
+      cells.push(`<div>${logo ? `<img src="${esc(logo)}" alt="${esc(sp.name)}" loading="lazy" decoding="async" height="44" onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:this.alt}))">` : `<b>${esc(sp.name)}</b>`}<span class="who">함께한 곳</span></div>`);
     }
     if ((d.judges || []).length) cells.push(`<div class="names"><span class="who">심사·멘토</span><b>${d.judges.map(esc).join('<br>')}</b></div>`);
     const opens = (d.open || []).slice();
@@ -3103,8 +3138,9 @@ const SCREEN = {
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
           <div class="sl">
             <input type="range" min="0" max="100" step="5" value="${v}"
-                   style="--p:${v}%" class="jv-${esc(t.id)}" data-key="${esc(r.key)}">
-            <b>${v}</b>
+                   style="--p:${v === '' ? 0 : v}%" class="jv-${esc(t.id)}${v === '' ? ' unset' : ''}" data-key="${esc(r.key)}"
+                   aria-label="${esc(r.label)} 점수">
+            <b>${v === '' ? '—' : v}</b>
           </div>${hintLine(r)}`; }).join('')}
       </div>
 
@@ -3391,7 +3427,7 @@ const SCREEN = {
           ? `<div class="err" style="margin:8px 0 0">마감이 지나 더는 낼 수 없습니다.
              진행자가 마감을 미루면 다시 열립니다.</div>` : ''}
         <label>링크 <span class="pill">배포한 주소</span></label>
-        <div class="shrow"><input id="s-url" value="${esc(t.url || '')}" placeholder="https://... (누르면 바로 열리는 주소)" style="flex:1"><button type="button" class="btn sec sm" id="s-try" title="내기 전에 새 창에서 열어 봅니다">새 창에서 확인</button></div>
+        <div class="shrow"><input id="s-url" value="${esc(t.url || '')}" placeholder="https://… (누르면 바로 열리는 주소)" style="flex:1"><button type="button" class="btn sec sm" id="s-try" title="내기 전에 새 창에서 열어 봅니다">새 창에서 확인</button></div>
         <div class="meta" id="s-url-hint"></div>
         <div class="meta">제출해야 후원 크레딧과 프로필 «완주»가 남습니다. 미완이어도 주소는 내세요.</div>
         ${t.seats ? `<label>팀 자리 <span class="pill">밖에서 구한 분은 게스트로</span></label>
@@ -4440,7 +4476,7 @@ function wire() {
   /* 슬라이더를 끌면 옆 숫자와 채워진 길이가 따라온다. 화면을 다시 그리지 않는다. */
   document.querySelectorAll('.sl input[type=range]').forEach(r => {
     const num = r.parentElement.querySelector('b');
-    r.oninput = () => { num.textContent = r.value; r.style.setProperty('--p', r.value + '%'); };
+    r.oninput = () => { r.classList.remove('unset'); num.textContent = r.value; r.style.setProperty('--p', r.value + '%'); };
   });
 
   /* 추천 태그 - 누르면 아래 칸에 문장이 들어간다. 이미 있으면 다시 안 넣는다. */

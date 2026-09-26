@@ -41,10 +41,15 @@
   --pg:#EEF1F4; --card:#fff; --soft:#F4F6F8; --acc:#0B1020; --on:#C8F53B; --ink:#191F28; --grey:#5B6470; --hair:#EAECEF;
   --sans:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif;
   --mono:ui-monospace,Consolas,monospace;
+  /* 흐린 글자. #8a8a8a 는 흰 바탕에서 3.45:1 이라 4050 눈에 안 읽혔다. 이 값은 5.2:1 */
+  --mute:#646E7C;
+  /* 간격 눈금 (awesome-design «Paper» 4/8/12/16/24/32). 숫자를 눈대중으로 안 고른다 */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html{scroll-padding-top:64px}
+html{scroll-padding-top:64px;scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto} }
 body{margin:0;background:var(--pg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;letter-spacing:-.01em;
   -webkit-font-smoothing:antialiased;word-break:keep-all;overflow-wrap:break-word;-webkit-tap-highlight-color:transparent}
 a{color:inherit}
@@ -61,43 +66,59 @@ p{margin:0}
 .btn{display:inline-flex;align-items:center;justify-content:center;min-height:52px;padding:14px 22px;border:0;border-radius:14px;
   background:var(--acc);color:#fff;font:700 16px/1.2 var(--sans);text-decoration:none;cursor:pointer;white-space:nowrap;touch-action:manipulation;
   transition:background-color .1s}
-.btn:hover{background:#1a44d8}
+.btn:hover{background:#1C2438}   /* 잉크를 한 칸 밝힌 것. 흰 글자 15.4:1 */
 .btn:active{transform:translateY(1px)}
 .btn.o{background:var(--soft);color:var(--ink)}
-.btn.o:hover{background:#E7EAEE}
+.btn.o:hover{background:#E1E5EA}
 .btn.s{min-height:42px;padding:10px 16px;font-size:14px;border-radius:11px}
 input,select{font:inherit;color:inherit;background:#fff;border:1.5px solid transparent;border-radius:14px;min-height:50px;padding:10px 12px}
 input:focus,select:focus{border-color:var(--acc);outline:none}
+input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 input[type=search]{-webkit-appearance:none;appearance:none}
-input::placeholder{color:#8a8a8a}
+input::placeholder{color:var(--mute)}
 
 /* 머리글. 로고와 «대회 열기» 한 줄, 그 아래 얇은 줄에 절 링크. */
 .top{position:sticky;top:0;z-index:5;background:rgba(238,241,244,.88);backdrop-filter:saturate(1.6) blur(14px);-webkit-backdrop-filter:saturate(1.6) blur(14px)}
 .top .wrap{display:flex;align-items:center;gap:14px;min-height:60px;font-size:14px;font-weight:600;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 .top a{text-decoration:none;white-space:nowrap}
-.top .logo{font-size:19px;font-weight:800;letter-spacing:-.02em;margin-right:auto}
+.top .logo{font-size:19px;font-weight:800;letter-spacing:-.02em;margin-right:auto;display:inline-flex;align-items:center;min-height:44px}
 .top nav.sec{display:flex;gap:16px;align-items:center;width:100%;order:9;color:var(--grey);font-size:13.5px}
+/* 손가락 자리. 22px 짜리 글줄은 폰에서 옆 것이 눌린다 */
+.top nav.sec a,.top nav.tools a{display:inline-flex;align-items:center;min-height:44px}
 .top nav.sec a:hover{color:var(--ink)}
 .top nav.tools{display:flex;gap:12px;align-items:center}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
 /* 표제. 한 문장과 단추 둘. 폰(390px)에서 접힘 위에 단추가 들어와야 한다. */
-.hero{padding:34px 0 30px;background:var(--acc) url(/hero.jpg) center/cover no-repeat;color:#fff;position:relative}
-.hero::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,16,32,.92) 0%,rgba(11,16,32,.72) 55%,rgba(11,16,32,.35) 100%)}
-.hero .wrap{position:relative}
-.hero .btn{background:var(--on);color:var(--acc)} .hero .btn.o{background:transparent;color:#fff;border-color:rgba(255,255,255,.45)}
+.hero{padding:var(--s6) 0 40px;background:var(--acc) url(/hero.jpg) center/cover no-repeat;color:#fff;position:relative}
+/* 덮개. 한 방향으로 고르게 미는 띠는 «만든 티»가 난다. 글자가 앉는 왼쪽만 눌러 덮고
+   오른쪽은 사진을 남긴다. 왼쪽 합성 불투명도가 .96 이라 흰 글자 대비는 그대로 15:1 위. */
+.hero::before{content:'';position:absolute;inset:0;background:
+  radial-gradient(130% 120% at 6% 28%,rgba(11,16,32,.97) 0%,rgba(11,16,32,.86) 42%,rgba(11,16,32,.30) 100%),
+  linear-gradient(180deg,rgba(11,16,32,.55) 0%,rgba(11,16,32,.72) 100%)}
+/* 종이 결. 완전히 평평한 면은 화면이 아니라 렌더처럼 보인다 (awesome-design «Paper») */
+.hero::after{content:'';position:absolute;inset:0;pointer-events:none;opacity:.055;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E")}
+.hero .wrap{position:relative;z-index:1}
+.hero .btn{background:var(--on);color:var(--acc)}
+.hero .btn:hover{background:#B3E02F}          /* 라임을 한 칸 눌렀다. 잉크 글자 12.3:1 */
+/* 유령 단추에 테두리가 없었다 — .btn 이 border:0 이라 border-color 가 먹지 않았다 */
+.hero .btn.o{background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.55)}
+.hero .btn.o:hover{background:rgba(255,255,255,.12);border-color:#fff}
 .hero .eyebrow{font-size:14px;font-weight:700;color:var(--on);margin-bottom:10px}
 .hero h1{font-size:clamp(30px,7.2vw,46px);font-weight:850;letter-spacing:-.045em;line-height:1.12}
 .hero .lead{margin-top:14px;font-size:17px;color:#D5DAE6;line-height:1.6;text-wrap:pretty}
-.hero .cta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
+.hero .cta{margin-top:var(--s5);display:flex;flex-wrap:wrap;gap:var(--s3)}
 @media (max-width:640px){ .hero .cta{flex-direction:column;align-items:stretch} .hero .cta .btn{width:100%} }
+/* 큰 화면에서는 표제가 숨을 쉬어야 한다. 720px 기둥에 34px 여백이면 띠처럼 보인다. */
+@media (min-width:900px){ .hero{padding:56px 0 64px} .hero .lead{max-width:46ch} }
 
 /* 절. 회색 바탕 위에 흰 카드 하나씩. */
-main{max-width:720px;margin:0 auto;padding:8px 20px 0}
-section{background:var(--card);border-radius:22px;padding:28px 26px;margin:14px 0}
-.head{margin-bottom:16px}
-.head h2{font-size:clamp(21px,2.6vw,26px)}
-.head p{font-size:15px;color:var(--grey);margin-top:8px;text-wrap:pretty}
+main{max-width:720px;margin:0 auto;padding:var(--s2) var(--s5) 0}
+section{background:var(--card);border-radius:22px;padding:var(--s5) var(--s5);margin:var(--s3) 0}
+.head{margin-bottom:var(--s4)}
+.head h2{font-size:clamp(22px,2.6vw,24px)}
+.head p{font-size:16px;color:var(--grey);margin-top:8px;text-wrap:pretty}
 
 /* 대회 목록. 한 줄이 대회 하나. 누르면 신청 칸이 바로 나온다. */
 .evs{display:block}
@@ -107,15 +128,24 @@ section{background:var(--card);border-radius:22px;padding:28px 26px;margin:14px 
 .ev:last-child{border-bottom:0}
 .ev .st{font:700 12px var(--mono);color:#5C6474}
 .ev .st.open{color:var(--acc)}
-.ev .t{font-weight:700;font-size:17px;line-height:1.3;text-wrap:pretty}
-.ev .m{font-size:13px;color:var(--grey);margin-top:2px}
+.ev .t{font-weight:700;font-size:18px;line-height:1.35;text-wrap:pretty}
+.ev .m{font-size:14px;color:var(--grey);margin-top:4px}
 .ev .n{grid-column:2;font-family:var(--mono);font-size:13.5px;color:var(--grey);font-variant-numeric:tabular-nums}
 .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
 .tools[hidden]{display:none}
-.tools .chip{padding:6px 14px;border-radius:99px;border:1px solid var(--hair);background:#fff;color:var(--ink);font:600 13px var(--sans);cursor:pointer;touch-action:manipulation;min-height:36px}
+.tools .chip{padding:6px 14px;border-radius:99px;border:1px solid var(--hair);background:#fff;color:var(--ink);font:600 13px var(--sans);cursor:pointer;touch-action:manipulation;min-height:44px}
 .tools .chip[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
-.tools select{min-height:36px;padding:4px 8px;font-size:13px;font-weight:600;border-radius:99px;border:1px solid var(--hair)}
-.tools input{flex:1 1 12em;min-height:36px;padding:4px 12px;font-size:14px;border-radius:99px;border:1px solid var(--hair)}
+
+.tools select{min-height:44px;padding:4px 8px;font-size:13px;font-weight:600;border-radius:99px;border:1px solid var(--hair)}
+.tools input{flex:1 1 12em;min-height:44px;padding:4px 12px;font-size:14px;border-radius:99px;border:1px solid var(--hair)}
+/* 기다리는 동안. 흰 여백만 두면 «고장났나» 로 읽힌다 */
+.sk{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px 12px;padding:16px 12px;align-items:center}
+.sk i{display:block;height:12px;border-radius:6px;background:linear-gradient(90deg,#EDF0F3 25%,#F7F9FB 37%,#EDF0F3 63%);
+  background-size:400% 100%;animation:skl 1.3s linear infinite}
+.sk i.w2{height:16px;width:78%}
+.sk i.w3{width:52%;grid-column:2}
+@keyframes skl{from{background-position:100% 0}to{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){ .sk i{animation:none} }
 .empty{background:var(--soft);border-radius:16px;padding:26px 20px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center}
 
 /* 우수작. 링크로 내보내지 않고 이 자리에서 연다. */
@@ -141,7 +171,7 @@ section{background:var(--card);border-radius:22px;padding:28px 26px;margin:14px 
 .give .cta{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .give .cta .btn{flex:1 1 auto}
 .give .mail{font-size:13.5px;color:var(--grey);margin-top:12px}
-.give .mail a{color:var(--grey)}
+.give .mail a{color:var(--grey);display:inline-flex;align-items:center;min-height:44px}
 
 /* 더 알아보기. 접혀 있다. */
 details.more{background:transparent;padding:4px 6px 0}
@@ -151,13 +181,17 @@ details.more summary::before{content:'＋ ';color:var(--acc)}
 details.more[open] summary::before{content:'－ '}
 details.more ul{margin:0;padding:0 0 12px 1.1em;color:var(--grey);font-size:15px}
 details.more li{margin:6px 0}
+details.more li a{display:inline-flex;align-items:center;min-height:44px}
 
 footer{padding:26px 0 40px;font-size:13px;color:var(--grey)}
 footer .wrap{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
-footer a{color:inherit}
+footer a{color:inherit;display:inline-flex;align-items:center;min-height:44px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.sr:focus{position:fixed;top:8px;left:8px;width:auto;height:auto;overflow:visible;clip:auto;z-index:99;
+  display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;
+  background:var(--acc);color:#fff;font-weight:700;text-decoration:none}
 @media (prefers-reduced-motion:reduce){ .btn{transition:none} .btn:active{transform:none} }
-@media (max-width:640px){ section{padding:22px 18px;border-radius:18px;margin:12px 0} main{padding:4px 14px 0} .wrap{padding:0 16px} }
+@media (max-width:640px){ section{padding:var(--s5) var(--s4);border-radius:18px;margin:var(--s3) 0} main{padding:var(--s1) var(--s3) 0} .wrap{padding:0 var(--s4)} }
 </style>
 </head>
 
@@ -221,7 +255,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <option value="big">참가 많은 순</option>
     </select>
   </div>
-  <div id="grid" class="evs" aria-live="polite"></div>
+  <div id="grid" class="evs" aria-live="polite" aria-busy="true"><div class="sk" aria-hidden="true"><i></i><i class="w2"></i><i class="w3"></i></div><div class="sk" aria-hidden="true"><i></i><i class="w2"></i><i class="w3"></i></div></div>
   <div id="empty" class="empty" hidden>
     <b>아직 열린 대회가 없습니다.</b>
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
@@ -327,6 +361,7 @@ function 그리기(){
     return String(a.starts).localeCompare(String(b.starts));
   });
   document.getElementById('count').textContent = 목록.length + '건';
+  document.getElementById('grid').removeAttribute('aria-busy');
   document.getElementById('empty').hidden = 목록.length > 0;
   document.getElementById('grid').innerHTML = 목록.map(function(e){
     var s = 상태(e), d = 남은날(e);
@@ -350,7 +385,8 @@ document.getElementById('hero-go').addEventListener('click', function(ev){
   ev.preventDefault();
   var el = document.getElementById('list');
   if (!대회들.length) { location.href = '/app'; return; }
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  var 천천히 = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ behavior: 천천히 ? 'smooth' : 'auto', block: 'start' });
   el.style.transition = 'box-shadow .3s'; el.style.boxShadow = '0 0 0 3px #C8F53B';
   setTimeout(function(){ el.style.boxShadow = ''; }, 1400);
 });
