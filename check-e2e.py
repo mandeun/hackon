@@ -1706,7 +1706,20 @@ with sync_playwright() as p:
     A(pg.query_selector("#e-host") is not None, "대회 정보에 «여는 사람» 칸이 없다")
     pg.fill("#e-host", "동네 모임"); pg.click("#e-save"); pg.wait_for_timeout(800)
     A(api(f"/api/events/{HE}")["host"] == "동네 모임", "«여는 사람»이 저장되지 않는다")
-    ok("대역 ④⑤ — 첫 화면에서 바로 만들기 · 여는 사람 칸")
+    # ① 참가자는 공개 페이지에서 바로 결과물을 낸다 — «다음에 할 일»의 단추가 팀 화면(제출 칸)을 연다
+    pg.evaluate(f"localStorage.setItem('hackon.team.{FE}', '{FT['id']}'); localStorage.setItem('hackon.tkey.{FT['id']}', '{FT['tkey']}')")
+    post(f"/api/events/{FE}", {"due": "2099-01-01T23:59"}, FK, method="PATCH")
+    visit(f"/e/{FE}")
+    A(pg.query_selector("#nx-submit") is not None, "참가자 화면에 «결과물 내기» 단추가 없다")
+    pg.click("#nx-submit"); pg.wait_for_selector("#s-url", timeout=8000)
+    pg.fill("#s-url", "https://example.com/from-public"); pg.click("#s-save"); pg.wait_for_timeout(900)
+    A(any(r["id"] == FT["id"] and (r.get("hidden") or r.get("url")) for r in api(f"/api/events/{FE}/board")["rows"]), "공개 페이지에서 낸 결과물이 저장되지 않았다")
+    # ② 열쇠를 잃은 운영자 — 열린 대회가 있어도 «전에 연 대회를 찾으시나요» 칸이 있다 (새 브라우저 = 열쇠 없음)
+    fctx = b.new_context(viewport={"width": 390, "height": 844}); fp = fctx.new_page()
+    fp.goto(BASE + "/app"); fp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    A(fp.query_selector("#ow-in") is not None and fp.query_selector("#rs-file") is not None, "열쇠 없는 브라우저의 «대회» 탭에 열쇠 찾기·되살리기 칸이 없다")
+    fctx.close()
+    ok("대역 ①②④⑤ — 공개 페이지에서 결과물 내기 · 열쇠 찾기 상시 · 여는 사람 칸 · 첫 화면에서 바로 만들기")
 
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})

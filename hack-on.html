@@ -1763,9 +1763,8 @@ const SCREEN = {
         <h3>다음에 할 일</h3>
         <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
       </div>`;
-    if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
-      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>
-      ${my ? '' : keyless() ? `<div class="card">
+    /* 열쇠를 잃은 운영자의 문. 전에는 열린 대회가 0건일 때만 그려져서, 대회가 하나라도 있으면 돌아올 길이 없었다(대역 ②) */
+    const findBox = `${my ? '' : keyless() ? `<div class="card">
         <h3>전에 연 대회를 찾으시나요</h3>
         <div class="meta">대회를 만들 때 쓴 카카오로 로그인하면 다 나옵니다.</div>
         <div style="height:8px"></div><a class="kko" href="/auth/kakao">카카오로 로그인</a>
@@ -1780,13 +1779,15 @@ const SCREEN = {
         <div class="meta" style="margin-top:8px">사본 파일을 넣으면 돌아오고, 주최자 열쇠가 이 기기에 있어야 합니다.</div>
         <input type="file" id="rs-file" accept="application/json" style="margin-top:8px">
         <div style="height:8px"></div><button class="btn sec sm" id="rs-go">되살리기</button></details>`;
+    if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
+      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
     return mineBox + `<h2>열린 대회</h2>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
         <div class="body"><h3>${esc(e.title)}</h3>
         <div class="meta">${badge(e)} ${esc(e.host)}${+e.prize ? ' · 상금 ' + won(e.prize) : ''}</div></div>
       </div>`).join('') +
-      (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '');
+      (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '') + findBox;
   },
 
   async make() {
@@ -2567,7 +2568,7 @@ const SCREEN = {
           <div class="meta">1. <b>내 팀 링크</b>를 나에게만 보내 두세요 — 폰을 바꿔도 이걸로 돌아옵니다.<br>
             2. 당일 ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : '마감 전에'} 여기서 결과물 주소를 냅니다.</div>
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
-          <div style="margin-top:8px"><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 내기</button><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
           <div style="margin-top:10px"><button class="btn sec sm" id="nx-rename">팀 이름 고치기</button> <button class="btn sec sm" id="nx-cancel">신청 취소</button></div>
         </div>`; })()}
 
