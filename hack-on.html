@@ -260,6 +260,8 @@ body.tv main{padding:3.2vh 3vw;overflow:hidden;flex:1;min-height:0;
 label{display:block;font-size:12.5px;color:var(--ink2);margin:10px 0 4px;font-weight:600}
 .btn{background:var(--navy);color:#fff;border-radius:10px;padding:11px 14px;font-weight:700;
      width:100%;text-align:center;transition:opacity .12s}
+/* 링크로 만든 단추. inline 이면 min-height 가 통하지 않는다 */
+a.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
 .btn:hover{opacity:.88}
 .btn:active{opacity:.75}
 .btn.sec{background:var(--bg2);color:var(--ink);border:1px solid var(--rule)}
@@ -398,7 +400,11 @@ input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
 .btn:active{opacity:1;transform:scale(.97)}
 .btn.sec{background:var(--fill);color:var(--ink2);border:0}
 .btn.sec:hover{background:#E8EBED;filter:none}
-.btn.sm{padding:9px 14px;font-size:14px;border-radius:10px;min-height:44px}
+.btn.sm{padding:9px 14px;font-size:14px;border-radius:10px;min-height:44px;min-width:44px}
+/* 표 안의 그림 단추만 예외. 44px 로 넓히면 마지막 칸이 커져서 줄 가운데가 단추 위로 오고,
+   «팀 줄 누르기»가 지우기 단추를 누르게 된다(e2e 가 잡았다). 28~34x44 로 두고 사이를 띄운다.
+   WCAG 2.2 AA 최소(24x24)는 넘는다. */
+td .btn.sm{min-width:0;margin-right:2px}
 .card .btn.sec,details .btn.sec{background:#F2F4F6}
 
 .pill{border-radius:6px;padding:3px 7px;font-size:12px;background:var(--acc-l);color:var(--acc);vertical-align:2px}
@@ -2429,10 +2435,10 @@ const SCREEN = {
         <td class="n">${e.vmode ? (r.votes ? r.vote + '★' : '—') : e.pmode ? (r.pscore === null ? '—' : r.pscore + '%') : r.score}</td>
         <td class="n">${e.vmode ? (r.votes || 0) + '표' : e.pmode ? (r.pairs || 0) + '번' : r.judges + '명'}</td>
         <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
-          title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
-          <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" style="padding:4px 8px">🔗</button>
-          <button class="btn sec sm" data-rename="${r.id}" title="팀 이름 고치기" style="padding:4px 8px">✏️</button>
-          <button class="btn sec sm" data-trash="${r.id}" title="지우기 — 휴지통으로 가고 되살릴 수 있다" style="padding:4px 8px">🗑</button></td></tr>`).join('')}</table>
+          title="추천작으로 표시" aria-label="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
+          <button class="btn sec sm" data-relink="${r.id}" title="기기를 바꾼 참가자에게 팀 링크를 다시 준다" aria-label="팀 링크 다시 주기" style="padding:4px 8px">🔗</button>
+          <button class="btn sec sm" data-rename="${r.id}" title="팀 이름 고치기" aria-label="팀 이름 고치기" style="padding:4px 8px">✏️</button>
+          <button class="btn sec sm" data-trash="${r.id}" title="지우기 — 휴지통으로 가고 되살릴 수 있다" aria-label="팀 지우기" style="padding:4px 8px">🗑</button></td></tr>`).join('')}</table>
       ${e.waiting ? `<div class="meta" style="margin-top:8px">대기 ${e.waiting}명 — «못 가요»·지움·정원 늘림으로 자리가 나면 앞에서부터 올라오고 메일이 갑니다(메일이 꺼져 있으면 🔗로 링크를 전해 주세요).</div>` : ''}
       ${(d.mails || []).length ? `<div class="meta" style="margin-top:8px">메일: ${d.mails.map(x => `${{ sent: '보냄', failed: '실패', skipped: '건너뜀(발송 열쇠 없음)' }[x.status] || x.status} ${x.c}`).join(' · ')}</div>` : ''}
       ${(d.trash || []).length ? `<details style="margin-top:8px"><summary>지운 팀 ${d.trash.length} <span class="when">되살릴 수 있습니다</span></summary><div class="in">

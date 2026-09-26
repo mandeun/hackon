@@ -81,7 +81,7 @@ input::placeholder{color:var(--mute)}
 .top{position:sticky;top:0;z-index:5;background:rgba(238,241,244,.88);backdrop-filter:saturate(1.6) blur(14px);-webkit-backdrop-filter:saturate(1.6) blur(14px)}
 .top .wrap{display:flex;align-items:center;gap:14px;min-height:60px;font-size:14px;font-weight:600;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 .top a{text-decoration:none;white-space:nowrap}
-.top .logo{font-size:19px;font-weight:800;letter-spacing:-.02em;margin-right:auto}
+.top .logo{font-size:19px;font-weight:800;letter-spacing:-.02em;margin-right:auto;display:inline-flex;align-items:center;min-height:44px}
 .top nav.sec{display:flex;gap:16px;align-items:center;width:100%;order:9;color:var(--grey);font-size:13.5px}
 /* 손가락 자리. 22px 짜리 글줄은 폰에서 옆 것이 눌린다 */
 .top nav.sec a,.top nav.tools a{display:inline-flex;align-items:center;min-height:44px}
@@ -181,6 +181,7 @@ details.more summary::before{content:'＋ ';color:var(--acc)}
 details.more[open] summary::before{content:'－ '}
 details.more ul{margin:0;padding:0 0 12px 1.1em;color:var(--grey);font-size:15px}
 details.more li{margin:6px 0}
+details.more li a{display:inline-flex;align-items:center;min-height:44px}
 
 footer{padding:26px 0 40px;font-size:13px;color:var(--grey)}
 footer .wrap{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
