@@ -108,6 +108,10 @@ body.wide:not(.tv) nav button{flex:none;min-width:132px}
   touch-action:manipulation;
   background:linear-gradient(90deg,var(--navy) var(--p,0%),var(--rule) var(--p,0%)) center/100% 6px no-repeat}
 .sl input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+/* 아직 안 준 점수. 손잡이가 가운데 서 있는데 막대가 0 이면 «50점»으로 읽힌다.
+   속을 비워 «아직»을 그린다 — 있음·없음·모름 셋 중 모름. */
+.sl input[type=range].unset{background:var(--rule) center/100% 6px no-repeat}
+.sl input[type=range].unset::-webkit-slider-thumb{background:#fff;border:3px solid #C2C9D4}
 .sl input[type=range]::-webkit-slider-thumb{appearance:none;width:26px;height:26px;
   border-radius:50%;background:var(--navy);border:3px solid #fff;
   box-shadow:0 1px 5px rgba(43,51,40,.35);cursor:pointer}
@@ -226,7 +230,7 @@ body.tv main{padding:3.2vh 3vw;overflow:hidden;flex:1;min-height:0;
 .tvspon .tvlogos{justify-content:center;flex:1;gap:3vw}
 .tvspon .tvlogos > *{font-size:4.2vh;color:#0B1020;font-weight:900}
 .tvspon .tvlogos img{height:9vh;max-width:22vw}
-.tvspon small{font-size:1.5vh;color:#5B6470;writing-mode:vertical-rl;letter-spacing:.2em}
+.tvspon small{font-size:2vh;color:#5B6470;writing-mode:vertical-rl;letter-spacing:.12em;font-weight:700}
 /* 로고 벽 — 화면을 6등분, 칸마다 로고 하나가 꽉 찬다. 10분마다 30초, L 키로 고정. 빈 칸은 «이 자리 비었습니다» 로 판다 */
 .tvwall{position:fixed;inset:0;background:#fff;z-index:9;display:grid;gap:1.2vh;padding:1.2vh;grid-template-rows:repeat(2,1fr)}
 .tvwall > div{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;border-radius:1.6vh;background:#F4F6F8;color:#0B1020;text-align:center;padding:2vh;overflow:hidden}
@@ -524,6 +528,9 @@ a{color:var(--acc)}   /* 링크도 잉크. 파랑은 안 쓴다(BRAND) */
 .hero .due{background:var(--soft);margin:18px 0 0}
 .hero .due.hot{background:#FFF1EC}
 .quick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
+/* 빈 칸을 남기지 않는다 — 다섯 개면 마지막이 두 칸, 넷이면 마지막이 세 칸 */
+.quick > :last-child:nth-child(3n+1){grid-column:span 3}
+.quick > :last-child:nth-child(3n+2){grid-column:span 2}
 .quick a,.quick button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px;
   border-radius:14px;background:var(--soft);font-size:13px;font-weight:600;color:var(--ink2);
   text-decoration:none;min-height:0;transition:transform .1s}
@@ -717,9 +724,13 @@ const NEED_KIND = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심�
    상태는 G 하나에 둔다 — flash() 가 성공하면 화면을 통째로 다시 그리는데,
    단계를 DOM 에만 두면 «보냈습니다» 대신 첫 화면이 돌아온다. */
 document.head.insertAdjacentHTML('beforeend', `<style>
-.htabs{position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0 10px;margin:0 0 6px;background:var(--bg,#F4F5F7);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.htabs{position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0 10px;margin:0 0 6px;background:var(--bg,#F4F5F7);-webkit-overflow-scrolling:touch;scrollbar-width:none;
+  scroll-snap-type:x proximity;overscroll-behavior-x:contain;
+  /* 오른쪽 끝을 흐린다 — 잘린 자리가 보여야 «옆으로 더 있다»를 안다 */
+  -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);
+          mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent)}
 .htabs::-webkit-scrollbar{display:none}
-.htabs button{flex:0 0 auto;border:1px solid var(--rule,#DDE1E6);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink,#1A1E1D);cursor:pointer}
+.htabs button{flex:0 0 auto;scroll-snap-align:start;border:1px solid var(--rule,#DDE1E6);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink,#1A1E1D);cursor:pointer;touch-action:manipulation}
 .htabs button:active{background:#E9EEFF}
 </style>`);
 const GIVE_KINDS = [['venue','장소'], ['cash','돈'], ['judge','심사'], ['mentor','멘토'], ['snack','간식'], ['other','기타']];   // 칩은 여섯 — 화면마다 판단 하나(검사가 잠근다). 크레딧은 운영자가 올린 자리로만 받는다
@@ -3112,7 +3123,7 @@ const SCREEN = {
           <label>${esc(r.label)} <span class="pill">${r.weight}%</span></label>
           <div class="sl">
             <input type="range" min="0" max="100" step="5" value="${v}"
-                   style="--p:${v === '' ? 0 : v}%" class="jv-${esc(t.id)}" data-key="${esc(r.key)}"
+                   style="--p:${v === '' ? 0 : v}%" class="jv-${esc(t.id)}${v === '' ? ' unset' : ''}" data-key="${esc(r.key)}"
                    aria-label="${esc(r.label)} 점수">
             <b>${v === '' ? '—' : v}</b>
           </div>${hintLine(r)}`; }).join('')}
@@ -4430,7 +4441,7 @@ function wire() {
   /* 슬라이더를 끌면 옆 숫자와 채워진 길이가 따라온다. 화면을 다시 그리지 않는다. */
   document.querySelectorAll('.sl input[type=range]').forEach(r => {
     const num = r.parentElement.querySelector('b');
-    r.oninput = () => { num.textContent = r.value; r.style.setProperty('--p', r.value + '%'); };
+    r.oninput = () => { r.classList.remove('unset'); num.textContent = r.value; r.style.setProperty('--p', r.value + '%'); };
   });
 
   /* 추천 태그 - 누르면 아래 칸에 문장이 들어간다. 이미 있으면 다시 안 넣는다. */

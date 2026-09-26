@@ -110,6 +110,8 @@ input::placeholder{color:var(--mute)}
 .hero .lead{margin-top:14px;font-size:17px;color:#D5DAE6;line-height:1.6;text-wrap:pretty}
 .hero .cta{margin-top:var(--s5);display:flex;flex-wrap:wrap;gap:var(--s3)}
 @media (max-width:640px){ .hero .cta{flex-direction:column;align-items:stretch} .hero .cta .btn{width:100%} }
+/* 큰 화면에서는 표제가 숨을 쉬어야 한다. 720px 기둥에 34px 여백이면 띠처럼 보인다. */
+@media (min-width:900px){ .hero{padding:56px 0 64px} .hero .lead{max-width:46ch} }
 
 /* 절. 회색 바탕 위에 흰 카드 하나씩. */
 main{max-width:720px;margin:0 auto;padding:var(--s2) var(--s5) 0}
