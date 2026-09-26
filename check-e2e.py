@@ -1928,6 +1928,28 @@ with sync_playwright() as p:
     pg.click("#nx-submit"); pg.wait_for_selector("#s-url", timeout=8000)
     pg.fill("#s-url", "https://example.com/from-public"); pg.click("#s-save"); pg.wait_for_timeout(900)
     A(any(r["id"] == FT["id"] and (r.get("hidden") or r.get("url")) for r in api(f"/api/events/{FE}/board")["rows"]), "공개 페이지에서 낸 결과물이 저장되지 않았다")
+
+    # ── 참가자 화면에 심사 칸이 보이면 안 된다 (대역시험 5) ──
+    # 서버는 403 으로 막지만, 넣고 눌러 본 뒤에야 안다. 없는 권한은 화면에도 없어야 한다.
+    # pg 는 주최자 브라우저라 심사 열쇠를 이미 들고 있다. 참가자는 새 브라우저로 흉내 낸다.
+    pctx = b.new_context(viewport={"width": 390, "height": 844})
+    pp = pctx.new_page()
+    pp.on("pageerror", lambda e: errs.append("참가자팀:" + str(e)))
+    pp.goto(BASE + "/app"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    pp.evaluate(f"localStorage.setItem('hackon.team.{FE}', '{FT['id']}'); localStorage.setItem('hackon.tkey.{FT['id']}', '{FT['tkey']}')")
+    pp.goto(f"{BASE}/e/{FE}"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    pp.click("#nx-submit"); pp.wait_for_selector("#s-url", timeout=8000)
+    A(pp.query_selector("#j-save") is None and pp.query_selector("#j-name") is None,
+      "심사 열쇠가 없는 브라우저의 팀 화면에 심사위원 점수 칸이 있다")
+    A("점수 저장" not in pp.inner_text("#view"), "심사 열쇠가 없는데 «점수 저장» 이 보인다")
+    A(len(pp.query_selector_all(".j-v")) == 0, "심사 열쇠가 없는데 점수 칸이 그려졌다")
+    # 열쇠를 넣으면 그때 그려진다 — 감추기만 하는 게 아니라 열쇠로 가른다
+    pp.evaluate(f"localStorage.setItem('hackon.jkey.{FE}', '{FJ}')")
+    pp.goto(f"{BASE}/e/{FE}"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    pp.click("#nx-submit"); pp.wait_for_selector("#s-url", timeout=8000)
+    A(pp.query_selector("#j-save") is not None, "심사 열쇠가 있는데도 점수 칸이 안 보인다")
+    pctx.close()
+    ok("팀 화면 — 심사 열쇠가 없으면 심사 칸을 아예 안 그린다")
     # ② 열쇠를 잃은 운영자 — 열린 대회가 있어도 «전에 연 대회를 찾으시나요» 칸이 있다 (새 브라우저 = 열쇠 없음)
     fctx = b.new_context(viewport={"width": 390, "height": 844}); fp = fctx.new_page()
     fp.goto(BASE + "/app"); fp.wait_for_selector("body[data-ready='1']", timeout=8000)

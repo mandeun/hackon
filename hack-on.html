@@ -3650,7 +3650,10 @@ const SCREEN = {
         <div style="height:9px"></div><button class="btn sm" id="fu-save">보내기</button>
       </div>
 
-      ${(d.event.vmode || d.event.pmode) ? `<div class="card"><h3>심사</h3><div class="meta">${d.event.vmode ? '관객 평가로 돌린 대회라 점수 입력이 없습니다.' : '짝 비교로 돌린 대회라 점수 입력이 없습니다. 심사 링크에서 고릅니다.'}</div></div>` : `<div class="card">
+      ${/* 심사 칸은 «심사 열쇠를 가진 브라우저» 에만 그린다. 전에는 참가자에게도 그대로 보여서,
+            자기 팀에 100점을 넣고 눌러 본 뒤에야 서버 403 으로 막혔다(대역시험 5).
+            막는 것과 «보여 주지 않는 것»은 다른 일이다 — 없는 권한은 화면에도 없어야 한다. */''}
+      ${(d.event.vmode || d.event.pmode) ? `<div class="card"><h3>심사</h3><div class="meta">${d.event.vmode ? '관객 평가로 돌린 대회라 점수 입력이 없습니다.' : '짝 비교로 돌린 대회라 점수 입력이 없습니다. 심사 링크에서 고릅니다.'}</div></div>` : !jkeyOf(cur) ? '' : `<div class="card">
         <h3>심사</h3>
         <div class="meta">심사위원이 씁니다. 이름이 같으면 이전 점수를 고칩니다.</div>
         <label>심사위원 이름</label>
