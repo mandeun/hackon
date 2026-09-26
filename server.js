@@ -835,6 +835,18 @@ async function sendMail(db, m) {
   } catch (e) { logMail(db, m, 'failed', e.message); return false; }
 }
 const mailSite = () => SITES[0] || `http://localhost:${PORT}`;
+/* 내 열쇠 찾기 — 있든 없든 같은 응답을 준다(감사 9). 참가한 연락처인지가 밖에서 안 읽혀야 한다.
+   참가 기록이 있을 때만 메일이 붙는다. 프로필 주소는 공개라(연락처가 안 담긴다) 메일로 보내도 된다. */
+function whoami(db, contact) {
+  const pid = pidOf(db, contact);
+  const has = !!(pid && db.prepare('SELECT 1 FROM people WHERE id=?').get(pid));
+  return {
+    body: { ok: true },
+    mail: has ? { kind: 'whoami', ref: pid, to: String(contact || '').trim(),
+      subject: '[HACK:ON] 참가 기록 주소입니다',
+      text: `이 연락처로 참가한 기록이 있습니다.\n\n내 기록: ${mailSite()}/p/${pid}\n\n이 주소에는 연락처가 담기지 않습니다. 찾지 않으셨다면 버리세요.\n\n답장은 hi@mandeun.com 으로.` } : null,
+  };
+}
 /* 신청 직후 — 팀 링크를 메일로도 남긴다(GUIDE §9 «확인 메일은 즉시 보냅니다»). 링크를 잃으면 재확인도 못 한다(이탈 감사 P6). */
 function joinMail(db, tid) {
   const t = db.prepare('SELECT t.id, t.name, t.contact, t.tkey, e.id AS event, e.title, e.starts FROM teams t JOIN events e ON e.id=t.event WHERE t.id=?').get(tid);
@@ -3759,13 +3771,11 @@ function routes(db) {
                  LEVELS.includes(b.level) ? b.level : '', m[1]);
           return json(res, 200, profile(db, m[1]));
         }
-        /* 내 열쇠 찾기. 연락처를 넣으면 그 사람의 프로필 주소가 나온다. */
+        /* 내 열쇠 찾기. 기록이 있으면 프로필 주소를 메일로 보낸다 — 응답만 봐서는 있는지 없는지 모른다(감사 9). */
         if (p === '/api/whoami' && req.method === 'POST') {
-          const b = await body(req);
-          const pid = pidOf(db, b.contact);
-          if (!pid || !db.prepare('SELECT 1 FROM people WHERE id=?').get(pid))
-            throw new HttpError(404, '그 연락처로 참가한 기록이 없습니다');
-          return json(res, 200, { id: pid });
+          const w = whoami(db, (await body(req)).contact);
+          if (w.mail) void sendMail(db, w.mail);
+          return json(res, 200, w.body);
         }
 
         if ((m = p.match(/^\/api\/teams\/(\d+)\/seats$/)) && req.method === 'POST') {
@@ -5232,6 +5242,16 @@ function selftest() {
   ok(idA === pidOf(db, ' A@X.test '), '대소문자와 공백은 같은 사람으로 본다');
   ok(idA !== idB, '다른 연락처는 다른 사람이다');
   ok(pidOf(db, '') === '' && pidOf(db, 'a@b') === '', '너무 짧으면 열쇠를 안 만든다');
+  {
+    /* 내 열쇠 찾기 — 있는 연락처와 없는 연락처의 응답이 한 글자도 달라선 안 된다(감사 9).
+       갈리는 것은 메일뿐이다. 응답이 갈리면 열쇠 없이 «이 사람 참가했나» 를 묻는 길이 된다. */
+    const wYes = whoami(db, 'a@x.test'), wNo = whoami(db, 'nosuch@nowhere.test');
+    ok(JSON.stringify(wYes.body) === JSON.stringify(wNo.body), '있는 연락처와 없는 연락처의 응답이 다르다');
+    ok(!JSON.stringify(wYes.body).includes(idA), '응답에 사람 열쇠가 실린다');
+    ok(wYes.mail && wYes.mail.text.includes('/p/' + idA), '기록이 있으면 메일에 내 기록 주소가 들어간다');
+    ok(wNo.mail === null, '기록이 없는 연락처에 메일을 보낸다');
+    ok(whoami(db, ' A@X.TEST ').mail !== null, '대소문자·공백이 다르면 못 찾는다');
+  }
   const prof = profile(db, idA);
   ok(prof.level === '해 봤음', '처음에 고른 실력이 남는다');
   ok(!JSON.stringify(prof).includes('x.test'), '프로필에 연락처가 안 나간다');

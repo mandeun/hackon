@@ -2319,14 +2319,15 @@ with sync_playwright() as p:
     withc = [r for r in api(f"/api/events/{ev}/board", key=OK)["rows"] if r.get("contact")]
     A(withc, "연락처를 넣은 팀이 하나도 없다")
     CONTACT = withc[0]["contact"]
+    # 열쇠 찾기는 있든 없든 같은 응답을 준다(감사 9). 찾으면 메일로만 알려 준다.
     who = post("/api/whoami", {"contact": CONTACT})
-    A(who[0] == 200, f"연락처로 사람을 못 찾는다: {who}")
-    pid = who[1]["id"]
+    non = post("/api/whoami", {"contact": "없는사람@example.test"})
+    A(who[0] == 200, f"연락처로 열쇠 찾기가 200 이 아니다: {who}")
+    A(who == non, f"있는 연락처와 없는 연락처의 응답이 다르다: {who} vs {non}")
+    A("@" not in json.dumps(who[1]) and "id" not in (who[1] or {}),
+      f"열쇠 찾기 응답에 사람 열쇠가 실렸다: {who[1]}")
+    pid = api(f"/api/teams/{withc[0]['id']}/card")["person"]
     A(len(pid) == 12, f"사람 열쇠 모양이 다르다: {pid}")
-    A(post("/api/whoami", {"contact": " " + CONTACT.upper() + " "})[1]["id"] == pid,
-      "대소문자·공백이 다른 사람으로 잡힌다")
-    A(post("/api/whoami", {"contact": "없는사람@example.test"})[0] == 404,
-      "없는 연락처인데 열쇠가 나온다")
 
     prof = api(f"/api/people/{pid}")
     blob = json.dumps(prof, ensure_ascii=False)
