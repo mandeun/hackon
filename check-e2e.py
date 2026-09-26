@@ -1676,8 +1676,12 @@ with sync_playwright() as p:
     # 브라우저 — 운영 화면의 «짝 비교» 단추, 심사 화면의 두 팀 카드
     pg.evaluate(f"localStorage.setItem('hackon.okey.{PE}', '{PK}')")
     visit(f"/app#{PE}")
-    A(pg.query_selector("#b-pmode") is not None and "짝 비교 켜짐" in pg.inner_text("#jcard"),
-      f"운영 화면에 짝 비교 단추·켜짐 표시가 없다: {pg.inner_text('#jcard')[:80]}")
+    A("짝 비교" in pg.inner_text("#jmode-now") and "짝 비교 켜짐" in pg.inner_text("#jcard"),
+      f"운영 화면에 «지금 방식 · 짝 비교» 줄이 없다: {pg.inner_text('#jcard')[:80]}")
+    A(pg.query_selector("#b-score") is not None and pg.query_selector("#b-vmode") is not None
+      and pg.query_selector("#b-vpeer") is not None and pg.query_selector("#b-pmode") is None,
+      "지금 방식이 단추로 또 나오거나 다른 셋이 단추로 없다")
+    A(pg.query_selector("#p-all") is not None, "«제출 없이도(현장 발표)» 체크가 없다")
     pg.evaluate("localStorage.setItem('hackon.judge', '브라우저심사')")
     visit(f"/j/{PE}?k={PJ}")
     A(pg.query_selector("#pair-a") is not None and pg.query_selector("#pair-pick-a") is not None,
@@ -1696,7 +1700,7 @@ with sync_playwright() as p:
       "큰 화면 순위가 승률을 안 쓴다")
     visit(f"/e/{PE}")
     A("비교 점수" in pg.inner_text("#view"), "공개 순위 표에 비교 점수 열이 없다")
-    ok("짝 비교 심사 — 소식·쌍 고르기·승률 순위·모름은 0 이 아님·마감 뒤 잠김")
+    ok("짝 비교 심사 — 소식·쌍 고르기·BT 보정 순위·모름은 0 이 아님·마감 뒤 잠김")
 
     # ── 대역이 찾은 것 ④⑤ — 첫 화면 «대회 열기»는 만들기 화면으로, 대회 정보에 «여는 사람» 칸 ──
     pg.goto(BASE + "/app?make=1"); pg.wait_for_selector("body[data-ready='1']", timeout=8000)
