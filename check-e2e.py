@@ -1417,7 +1417,10 @@ with sync_playwright() as p:
     _, tev = post("/api/events", {"title": "휴지통e2e"}); TEV, TOK, TOW = tev["id"], tev["okey"], tev["owner"]
     post(f"/api/events/{TEV}/needs", {"kind": "venue", "label": "장소"}, TOK)
     post(f"/api/events/{TEV}/teams", {"name": "휴지통팀", "email": "trash@x.test", "agree": True})
-    A(delete(f"/api/events/{TEV}", {"confirm": "휴지통e2e"}, TOK)[0] == 200, "휴지통 준비 삭제가 안 됐다")
+    st, tdel = delete(f"/api/events/{TEV}", {"confirm": "휴지통e2e"}, TOK)
+    A(st == 200 and tdel.get("notified") == 1, f"신청자 있는 대회를 지울 때 알림 수가 응답에 안 실린다: {st} {tdel}")
+    A(any("대회를 접습니다" in str(x.get("text")) for x in (tdel["dump"].get("notices") or [])),
+      "지우기 직전 사본에 «접습니다» 알림 줄이 없다 — 먼저 지우고 나중에 알린 것이다")
     tl = ownget("/api/mine/trash", TOW)
     A(len(tl) == 1 and tl[0]["event"] == TEV and tl[0]["title"] == "휴지통e2e" and tl[0]["teams"] == 1,
       f"내 휴지통 목록이 이상하다: {tl}")
