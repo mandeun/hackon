@@ -794,6 +794,14 @@ const view = $('#view');
 /* 구글 캘린더 종일 일정은 끝 날짜가 «다음 날»이다(배타). 하루 대회면 ends+1 */
 const gcalEnd = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10).replace(/-/g, ''); };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+/* 장소 제보 칩. 그릴 때와 제보를 넣은 뒤에 같은 함수를 쓴다 — 두 곳에 적으면 한쪽만 고치게 된다.
+   제보가 하나도 없으면 0 을 그리지 않는다. 없는 것과 «모르는 것» 은 다르다. */
+function vchip(t) {
+  if (!t || !t.n) return '<span class="pill">아직 제보 없음</span>';
+  const good = ['콘센트', '와이파이', '빌렸어요'].filter(k => t[k]).map(k => `${k} ${t[k]}`).join(' · ');
+  return (good ? `<span class="pill ok">${good}</span> ` : '')
+       + (t.안맞아요 ? `<span class="pill warn">안 맞아요 ${t.안맞아요}</span>` : '');
+}
 const won = n => (+n || 0).toLocaleString('ko-KR') + '원';
 const NEED_KIND = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
 /* ── «줄 수 있는 것을 주는» 흐름. 세 화면, 화면마다 판단 하나. ──
@@ -1963,9 +1971,47 @@ const SCREEN = {
     const ev = (LIVE && cur) ? await api(`/events/${cur}`).catch(() => null) : null;
     const lead = (LIVE && cur && ev && ev.admin)
       ? await api(`/events/${cur}/leads`).catch(() => null) : null;
+    /* 대회 시작일. 있으면 그 날 신청할 수 있는 곳부터 보여 준다. */
+    const vday = (ev && ev.starts) ? String(ev.starts).slice(0, 10) : '';
     /* 서울시 API 가 안 되면 null 이 온다. 그래도 나머지 화면은 그대로 돈다. */
-    const vn = await api(`/venues?size=${f.size}${vArea ? '&area=' + encodeURIComponent(vArea) : ''}`)
+    const vn = await api(`/venues?size=${f.size}&day=${encodeURIComponent(vday)}`
+                       + `${vArea ? '&area=' + encodeURIComponent(vArea) : ''}`)
       .catch(() => null);
+    /* 목록 셋 — 그 날 되는 곳 · 접수 기간이 안 맞는 곳 · 제보가 나쁜 곳(dim).
+       날짜를 모르면(fit=unknown) 안 되는 곳으로 몰지 않는다. */
+    const vBad = vn ? vn.rows.filter(r => r.dim) : [];
+    const vFit = vn ? vn.rows.filter(r => !r.dim && r.fit !== 'no') : [];
+    const vNo  = vn ? vn.rows.filter(r => !r.dim && r.fit === 'no') : [];
+    /* 장소 카드. 목록이 둘(그 날 되는 곳·접어 둔 곳)이라 함수로 뺀다. */
+    const vcard = r => `<div class="card">
+      <h3>${esc(r.name)}
+        <span class="pill ${r.state === '접수중' ? 'ok' : ''}">${esc(r.state)}</span>
+        ${r.fit === 'ok' ? '<span class="pill ok">이 날 접수 중</span>' : ''}
+        ${/무료/.test(r.pay) ? '<span class="pill ok">무료</span>' : ''}</h3>
+      <div class="meta">${esc(r.area)} · ${esc(r.place)} · ${esc(r.kind)}<br>
+        <b>${r.cap}명까지</b>${r.capKnown ? '' : ' <span class="pill">어림</span>'}
+        ${r.hours ? ' · ' + esc(r.hours) : ''}<br>
+        ${esc(r.pay)}${r.close ? ` · 접수 ${esc(r.close)}까지` : ''}
+        ${r.tel ? '<br>' + esc(r.tel) : ''}</div>
+      <div style="margin-top:9px" data-chip="${esc(r.id)}">${vchip(r.tips)}</div>
+      ${r.tips.notes.length ? `<div class="meta" style="margin-top:6px">${
+        r.tips.notes.map(nt => '“' + esc(nt) + '”').join('<br>')}</div>` : ''}
+      <div class="shrow" style="margin-top:9px">
+        <a class="btn sec sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">예약 페이지</a>
+        <button class="btn sec sm" data-vmail="${esc(r.name)}"
+          data-place="${esc(r.place)}" data-cap="${r.cap}">문의 메일</button>
+        ${lead ? `<button class="btn sec sm" data-lead="장소" data-src="예약"
+          data-name="${esc(r.name)}"
+          data-how="${esc(r.tel || r.url)}">대장에 넣기</button>` : ''}
+      </div>
+      <div class="meta" style="margin-top:12px">다녀오셨으면 한 줄 남겨 주세요.</div>
+      <input id="vt-${esc(r.id)}" maxlength="120" aria-label="${esc(r.name)} 제보 메모"
+        placeholder="한 줄 메모 (안 써도 됩니다)">
+      <div class="shrow" style="margin-top:9px">
+        ${['콘센트', '와이파이', '빌렸어요', '안 맞아요'].map(k =>
+          `<button class="btn sec sm" data-tip="${esc(r.id)}" data-kind="${k}">${k}</button>`).join('')}
+      </div>
+    </div>`;
 
     return `<h2>구하기</h2>
       <p class="sub">장소·심사위원·강사·스태프. 인원만 넣으면 <b>몇이 필요하고 어디서 구하는지</b>가 나옵니다.</p>
@@ -1985,8 +2031,9 @@ const SCREEN = {
 
       <h3 style="margin-top:18px">지금 빌릴 수 있는 곳</h3>
       ${vn && vn.rows.length ? `
-        <p class="sub">서울시 공공서비스예약에 <b>지금 올라와 있는</b> 곳입니다.
-          이 인원이 들어가는 곳만 골랐습니다.</p>
+        <p class="sub">서울시 공공서비스예약에서 이 인원이 드는 곳만 골랐습니다.</p>
+        <p class="sub">${vday ? `${esc(vday)} 에 접수하는 곳을 먼저 보여 줍니다.`
+                              : '대회 정보에 날짜를 넣으면 그 날 되는 곳부터 보여 줍니다.'}</p>
         <div class="row">
           <div><label>지역</label><select id="v-area">
             <option value="">서울 전체</option>
@@ -1995,28 +2042,22 @@ const SCREEN = {
           <div><label>&nbsp;</label>
             <div class="meta">${vn.rows.length}곳 · 공간시설 ${vn.total}건에서 골랐습니다</div></div>
         </div>
-        ${vn.rows.slice(0, 12).map(r => `<div class="card">
-          <h3>${esc(r.name)}
-            <span class="pill ${r.state === '접수중' ? 'ok' : ''}">${esc(r.state)}</span>
-            ${/무료/.test(r.pay) ? '<span class="pill ok">무료</span>' : ''}</h3>
-          <div class="meta">${esc(r.area)} · ${esc(r.place)} · ${esc(r.kind)}<br>
-            <b>${r.cap}명까지</b>${r.capKnown ? '' : ' <span class="pill">어림</span>'}
-            ${r.hours ? ' · ' + esc(r.hours) : ''}<br>
-            ${esc(r.pay)}${r.close ? ` · 접수 ${esc(r.close)}까지` : ''}
-            ${r.tel ? '<br>' + esc(r.tel) : ''}</div>
-          <div class="shrow" style="margin-top:9px">
-            <a class="btn sec sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">예약 페이지</a>
-            <button class="btn sec sm" data-vmail="${esc(r.name)}"
-              data-place="${esc(r.place)}" data-cap="${r.cap}">문의 메일</button>
-            ${lead ? `<button class="btn sec sm" data-lead="장소" data-src="예약"
-              data-name="${esc(r.name)}"
-              data-how="${esc(r.tel || r.url)}">대장에 넣기</button>` : ''}
-          </div>
-        </div>`).join('')}
+        ${vFit.length ? vFit.slice(0, 12).map(vcard).join('')
+                      : `<p class="sub">그 날 접수하는 곳은 지금 없습니다.</p>`}
+        ${vNo.length ? `<details><summary>접수 기간이 맞지 않는 곳 ${vNo.length}</summary>
+          <div class="in">
+            <p class="sub">대회 날에는 신청이 닫혀 있는 곳입니다.</p>
+            ${vNo.slice(0, 12).map(vcard).join('')}
+          </div></details>` : ''}
+        ${vBad.length ? `<details><summary>«안 맞아요» 제보가 많은 곳 ${vBad.length}</summary>
+          <div class="in">
+            <p class="sub">다녀온 분들이 아니라고 한 곳입니다.</p>
+            ${vBad.slice(0, 12).map(vcard).join('')}
+          </div></details>` : ''}
         <p class="sub">인원에 <b>어림</b>이 붙은 곳은 시설 종류로 짐작한 것입니다. 전화로 확인하세요.</p>`
-      : `<p class="sub">${vn ? '이 인원이 들어가는 곳이 지금은 안 올라와 있습니다.'
+      : `<p class="sub">${vn ? '이 인원이 드는 곳이 지금은 안 올라와 있습니다.'
                             : '서울시 예약 정보를 못 받아 왔습니다.'}
-          아래 창구로 직접 물어보세요.</p>`}
+          yeyak.seoul.go.kr 에서 직접 찾아보실 수 있습니다.</p>`}
 
       <h3 style="margin-top:18px">그 밖에 물어볼 곳</h3>
       <p class="sub">공공 예약에 안 올라오는 곳입니다. <b>빈자리와 가격은 저희가 알 수 없습니다</b> — 직접 물어보세요.</p>
@@ -4866,6 +4907,25 @@ function wire() {
         flash('복사했습니다');
       } catch { flash('복사가 안 됩니다. 직접 긁어서 복사해 주세요', true); }
     };
+  });
+
+  /* 장소 제보 — 콘센트·와이파이는 서울시 목록에 없다. 다녀온 사람만 안다.
+     메모는 있으면 같이 보낸다(선택). 저장이 끝난 뒤에 칩을 고친다. */
+  document.querySelectorAll('[data-tip]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.tip, box = $('#vt-' + id);
+    b.disabled = true;
+    try {
+      const r = await api(`/venues/${encodeURIComponent(id)}/tips`,
+        { method: 'POST', body: { kind: b.dataset.kind, note: box ? box.value.trim() : '' } });
+      if (box) box.value = '';
+      /* 저장이 끝난 뒤에 받은 값으로 칩을 고친다. 이 줄이 없으면 flash 의 다시 그리기가
+         실패했을 때(오프라인) 화면이 옛 숫자를 계속 들고 있다. 그 다음 flash 가
+         화면을 다시 그려서 순서(제보 많은 곳 먼저)까지 맞춰 준다. */
+      const chip = document.querySelector(`[data-chip="${id}"]`);
+      if (chip) chip.innerHTML = vchip(r.tips);
+      flash('제보 고맙습니다. 다음 분이 덜 헤맵니다');
+    } catch (e) { flash(e.message, true); }
+    b.disabled = false;
   });
 
   const varea = $('#v-area');

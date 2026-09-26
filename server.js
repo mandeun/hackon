@@ -34,11 +34,10 @@ const DBFILE = process.env.DB || path.join(ROOT, 'data', 'hackon.db');
    why 는 '왜 여기냐', check 는 '전화하기 전에 확인할 것'.
    빈자리나 가격을 우리가 알 수는 없다. 어디에 물어보면 되는지만 준다.
    2026-09 기준. 창구는 바뀔 수 있으니 안 열리면 이름으로 검색하면 된다. */
+/* 서울시 공공서비스예약은 여기 없다. 같은 창구가 위쪽 «지금 빌릴 수 있는 곳»에
+   실시간 목록으로 이미 나오는데, 이 표에도 있으면 한 화면에 같은 이름이 두 번 뜬다.
+   그 아래는 «공공 예약에 안 올라오는 곳» 이라고 적어 놓은 자리다. */
 const PLACES = [
-  { name: '서울시 공공서비스예약', where: '서울 전역', min: 15, max: 200,
-    cost: '무료~저렴', at: 'yeyak.seoul.go.kr',
-    why: '시·구 시설을 한 곳에서 예약한다. 개인도 신청할 수 있고 제일 싸다',
-    check: '주말·공휴일에 여는지, 전기 콘센트를 몇 개까지 쓸 수 있는지' },
   { name: '자치구 청년센터 · 무중력지대', where: '서울 자치구별', min: 15, max: 60,
     cost: '무료~저렴', at: '구청 청년정책과 또는 센터에 직접',
     why: '청년 대상 행사면 가장 잘 빌려준다. 우리 참가자 대부분이 해당된다',
@@ -694,13 +693,59 @@ async function fetchVenues() {
   return rows;
 }
 
-/** 인원과 지역으로 거른다. 접수 중인 곳이 먼저 온다. */
-function pickVenues(rows, size, area) {
+/* 제보 종류는 넷으로 닫는다. 라켓온에서 코트 정보를 제보로 채운 것과 같은 방식이다 —
+   외부 API 가 모르는 것만 사람에게 묻고, 쌓이는 만큼 맞는 곳만 앞으로 온다. */
+const TIP_KINDS = ['콘센트', '와이파이', '빌렸어요', '안 맞아요'];
+const TIP_GOOD = ['콘센트', '와이파이', '빌렸어요'];
+/* 응답 열쇠는 띄어쓰기 없이 쓴다(안맞아요) — 화면·검사에서 따옴표 없이 부르려고. */
+const tipKey = k => (k === '안 맞아요' ? '안맞아요' : k);
+const emptyTips = () => ({ n: 0, 콘센트: 0, 와이파이: 0, 빌렸어요: 0, 안맞아요: 0, notes: [] });
+
+/** 제보 줄을 장소별로 센다. DB 를 안 본다 — 검사에서 그냥 부를 수 있게 순수 함수로 둔다. */
+function tipRoll(rows) {
+  const out = {};
+  for (const r of rows || []) {
+    if (!TIP_KINDS.includes(r.kind)) continue;          // 목록에 없는 종류는 안 센다
+    const t = out[r.venue] || (out[r.venue] = emptyTips());
+    t.n++;
+    t[tipKey(r.kind)]++;
+    if (r.note) t.notes.push(r.note);
+  }
+  for (const t of Object.values(out)) t.notes = t.notes.slice(-3);   // 최근 세 줄만
+  return out;
+}
+const tipGood = t => (t ? TIP_GOOD.reduce((a, k) => a + (t[tipKey(k)] || 0), 0) : 0);
+/* «안 맞아요» 가 좋은 제보보다 많고 둘 이상이면 접는다. 한 사람 심통으로 곳이 사라지지 않게 둘부터다. */
+const tipBad = t => !!t && t.안맞아요 >= 2 && t.안맞아요 > tipGood(t);
+
+/** 대회 그 날에 이 곳을 신청할 수 있나. 답은 셋이다 —
+    'ok' 접수 기간 안이다(또는 기간을 안 알려 준 곳이라 막을 근거가 없다)
+    'no' 접수 기간이 그 날을 안 덮는다
+    'unknown' 대회 날짜를 모른다. «모름»을 «안 됨»으로 그리지 않는다. */
+function venueFit(v, day) {
+  const d = String(day || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return 'unknown';
+  const o = String(v.open || '').slice(0, 10), c = String(v.close || '').slice(0, 10);
+  if (!o && !c) return 'ok';
+  if (o && d < o) return 'no';
+  if (c && d > c) return 'no';
+  return 'ok';
+}
+
+/** 인원과 지역으로 거른다. day 를 주면 그 날 되는지(fit), tips 를 주면 제보(tips·dim)를 붙인다.
+    순서는 «좋은 제보가 많은 곳» → «접수 중» → «작은 곳». «안 맞아요» 가 많은 곳(dim)은 맨 뒤로 간다. */
+function pickVenues(rows, size, area, day, tips) {
   const n = Math.max(1, Math.min(2000, +size || 24));
   return rows
     .filter(r => r.cap >= n && r.lo <= n * 3)
     .filter(r => !area || r.area === area)
-    .sort((a, b) => (a.state === '접수중' ? 0 : 1) - (b.state === '접수중' ? 0 : 1)
+    .map(r => {
+      const t = (tips && tips[r.id]) || emptyTips();
+      return { ...r, fit: venueFit(r, day), tips: t, dim: tipBad(t) };
+    })
+    .sort((a, b) => (a.dim ? 1 : 0) - (b.dim ? 1 : 0)
+                 || tipGood(b.tips) - tipGood(a.tips)
+                 || (a.state === '접수중' ? 0 : 1) - (b.state === '접수중' ? 0 : 1)
                  || a.cap - b.cap)
     .slice(0, 40);
 }
@@ -1620,6 +1665,17 @@ function open(file) {
     )`);
   try { db.exec("ALTER TABLE votes ADD COLUMN note TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 문제 은행 — 대회 없이 «풀었습니다» 하고 보낸 결과. 연락처는 낸 사람(의뢰자)만 본다. */
+  /* 장소 제보 — 서울시 API 에 없는 것(콘센트·와이파이·실제로 빌렸는지)은 다녀온 사람만 안다.
+     한 줄은 «한 사람이 한 장소에 남긴 제보 하나»다. 자연키는 SVCID(venue) —
+     이름으로 묶으면 «야주개홀 (26. 10월)» 과 «(26. 12월)» 처럼 다른 예약 상품이 한 줄로 섞인다.
+     누가 썼는지는 안 담는다(연락처·계정 없음). 종류는 넷으로 닫혀 있다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS venue_tips(
+    id    INTEGER PRIMARY KEY,
+    venue TEXT NOT NULL,                                  -- 서울시 SVCID
+    kind  TEXT NOT NULL,                                   -- 콘센트 · 와이파이 · 빌렸어요 · 안 맞아요
+    note  TEXT NOT NULL DEFAULT '',                        -- 한 줄 메모(120자까지)
+    at    TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec('CREATE INDEX IF NOT EXISTS venue_tips_v ON venue_tips(venue)');
   db.exec(`CREATE TABLE IF NOT EXISTS solutions(
     id INTEGER PRIMARY KEY, request TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', contact TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')))`);
@@ -3645,14 +3701,33 @@ function routes(db) {
         if (p === '/api/venues' && req.method === 'GET') {
           let rows = [];
           try { rows = await fetchVenues(); } catch { rows = []; }
+          /* 제보는 우리 표라 서울시 API 가 죽어도 산다. 한 번에 읽어 장소별로 센다 —
+             거르기 전에 세야 «제보 많은 곳» 이 40곳 안으로 올라온다. */
+          const tips = tipRoll(db.prepare('SELECT venue, kind, note FROM venue_tips ORDER BY id').all());
           return json(res, 200, {
             live: SEOUL_KEY !== 'sample',
             total: rows.length,
-            rows: pickVenues(rows, q.size, q.area),
+            /* 대회 날짜를 보내면 그 날 신청할 수 있는 곳을 가려 준다. 안 보내면 fit 이 전부 unknown 이다. */
+            day: String(q.day || '').slice(0, 10),
+            rows: pickVenues(rows, q.size, q.area, q.day, tips),
             areas: [...new Set(rows.map(r => r.area))].filter(Boolean).sort(),
           });
         }
 
+        /* 장소 제보 — 열쇠 없이 누구나 한 줄. 도배는 위쪽 IP+길 상한(WRITE_LIMIT)이 이미 막는다.
+           이 가드가 막는 것: 목록에 없는 종류와 120자 넘는 메모, 그리고 SVCID 꼴이 아닌 주소.
+           목록에 있는 장소인지까지는 안 따진다 — 서울시 API 가 죽은 동안 제보를 못 넣게 되면 안 된다. */
+        if ((m = p.match(/^\/api\/venues\/([A-Za-z0-9_-]{1,40})\/tips$/)) && req.method === 'POST') {
+          const b = await body(req);
+          const kind = plain(b.kind, 12);
+          if (!TIP_KINDS.includes(kind)) throw new HttpError(400, '제보 종류가 목록에 없습니다');
+          const note = plain(b.note, 120);
+          db.prepare('INSERT INTO venue_tips(venue,kind,note) VALUES(?,?,?)').run(m[1], kind, note);
+          /* 저장이 끝난 뒤에 세서 돌려준다. 화면은 이 값으로 칩을 바로 고친다. */
+          const t = tipRoll(db.prepare('SELECT venue, kind, note FROM venue_tips WHERE venue=? ORDER BY id')
+                              .all(m[1]))[m[1]] || emptyTips();
+          return json(res, 201, { ok: true, venue: m[1], tips: t });
+        }
         if (p === '/api/draft' && req.method === 'GET')
           return json(res, 200, draftPlan(q.start, q.end, q.teams, q.kind));
         if (p === '/api/kinds' && req.method === 'GET')
@@ -5344,6 +5419,67 @@ function selftest() {
   ok(pickVenues(fake, 24)[0].state === '접수중', '접수 중인 곳이 먼저 온다');
   ok(pickVenues(fake, 500).length === 0, '아무 데도 못 받으면 빈 목록을 준다');
 
+  // 날짜 맞춤 — 대회 날이 접수 기간 안인가. 모름을 «안 됨»으로 그리지 않는다
+  const hall = { open: '2026-09-01', close: '2026-10-15' };
+  ok(venueFit(hall, '2026-10-11') === 'ok', '대회 날이 접수 기간 안이면 된다');
+  ok(venueFit(hall, '2026-08-31') === 'no' && venueFit(hall, '2026-10-16') === 'no',
+     '접수 기간 앞뒤로 벗어나면 안 된다');
+  ok(venueFit(hall, '2026-09-01') === 'ok' && venueFit(hall, '2026-10-15') === 'ok',
+     '첫날·마지막날은 되는 날이다');
+  ok(venueFit({ open: '', close: '' }, '2026-10-11') === 'ok',
+     '접수 기간을 안 알려 준 곳은 막지 않는다');
+  ok(venueFit(hall, '') === 'unknown' && venueFit(hall, '아무말') === 'unknown',
+     '대회 날짜가 없으면 «모름»이다 («안 됨»이 아니다)');
+  ok(venueFit({ open: '2026-09-01', close: '' }, '2026-08-01') === 'no'
+     && venueFit({ open: '', close: '2026-10-15' }, '2026-11-01') === 'no',
+     '한쪽만 있는 기간도 본다');
+  const fitRows = [{ area: '종로구', cap: 400, lo: 80, state: '접수중', open: '2026-09-01', close: '2026-10-15' },
+                   { area: '종로구', cap: 400, lo: 80, state: '접수종료', open: '2026-06-01', close: '2026-07-15' }];
+  const fv = pickVenues(fitRows, 100, '', '2026-10-11');
+  ok(fv.filter(r => r.fit === 'ok').length === 1 && fv.filter(r => r.fit === 'no').length === 1,
+     '목록에 그 날 되는 곳·안 되는 곳이 갈려 붙는다');
+  ok(pickVenues(fitRows, 100).every(r => r.fit === 'unknown'),
+     '날짜를 안 주면 아무 곳도 «안 됨»으로 표시하지 않는다');
+
+  // 제보 — 다녀온 사람이 남긴 것. 집계·순서·접기
+  const tipRows = [
+    { venue: 'A', kind: '콘센트', note: '벽마다 넉넉합니다' },
+    { venue: 'A', kind: '콘센트', note: '' },
+    { venue: 'A', kind: '와이파이', note: '' },
+    { venue: 'A', kind: '빌렸어요', note: '전화가 빠릅니다' },
+    { venue: 'B', kind: '안 맞아요', note: '주말에 안 엽니다' },
+    { venue: 'B', kind: '안 맞아요', note: '' },
+    { venue: 'C', kind: '없는종류', note: '세면 안 된다' },
+    { venue: 'D', kind: '콘센트', note: '하나' }, { venue: 'D', kind: '안 맞아요', note: '둘' },
+    { venue: 'D', kind: '안 맞아요', note: '셋' }, { venue: 'D', kind: '와이파이', note: '넷' },
+  ];
+  const roll = tipRoll(tipRows);
+  ok(roll.A.콘센트 === 2 && roll.A.와이파이 === 1 && roll.A.빌렸어요 === 1 && roll.A.안맞아요 === 0,
+     '제보를 종류별로 센다');
+  ok(roll.A.n === 4 && roll.A.notes.length === 2, '메모가 있는 것만 최근 세 줄까지 모은다');
+  ok(!roll.C, '목록에 없는 종류는 세지 않는다');
+  ok(tipRoll([]).D === undefined && Object.keys(tipRoll([])).length === 0,
+     '제보가 없으면 빈 집계다 (0 이 아니라 아무것도 없다)');
+  ok(roll.D.notes.length === 3 && roll.D.notes[0] === '둘', '메모는 최근 세 줄만 남는다');
+  ok(tipGood(roll.A) === 4 && tipGood(roll.B) === 0, '좋은 제보 셋을 합쳐 센다');
+  ok(!tipBad(roll.A) && tipBad(roll.B), '«안 맞아요» 가 좋은 제보보다 많고 둘 이상이면 접는다');
+  ok(!tipBad(roll.D), '좋은 제보와 같은 수면 접지 않는다 (' + roll.D.안맞아요 + ':' + tipGood(roll.D) + ')');
+  ok(!tipBad(tipRoll([{ venue: 'E', kind: '안 맞아요', note: '' }]).E),
+     '«안 맞아요» 한 건으로는 접지 않는다');
+  const tipCands = [
+    { id: 'A', area: '종로구', cap: 400, lo: 80, state: '접수중' },
+    { id: 'B', area: '종로구', cap: 100, lo: 80, state: '접수중' },
+    { id: 'Z', area: '종로구', cap: 120, lo: 80, state: '접수중' },
+  ];
+  const tv2 = pickVenues(tipCands, 100, '', '', roll);
+  ok(tv2[0].id === 'A', '좋은 제보가 많은 곳이 먼저 온다 (' + tv2.map(r => r.id).join('>') + ')');
+  ok(tv2[tv2.length - 1].id === 'B' && tv2[tv2.length - 1].dim === true,
+     '«안 맞아요» 가 많은 곳은 맨 뒤로 가고 접을 표시가 붙는다');
+  ok(tv2[1].id === 'Z' && tv2[1].tips.n === 0 && tv2[1].dim === false,
+     '제보가 없는 곳은 접지도 올리지도 않는다');
+  ok(pickVenues(tipCands, 100)[0].tips.n === 0,
+     '제보를 안 주면 모든 곳이 «아직 제보 없음»(n=0)이다');
+
   // 구하기 — 규모를 넣으면 필요한 것이 나온다
   const f24 = findHelp(24), f200 = findHelp(200);
   ok(f24.teams === 6, '24명이면 6팀 (' + f24.teams + ')');
@@ -5986,7 +6122,7 @@ if (require.main === module) {
   });
 }
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, showConsent, score, board, outcomes, allocate, tierOf, reallocate, BUDGET_RULE,
-                   card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
+                   card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, venueFit, tipRoll, tipGood, tipBad, TIP_KINDS, noticeOf, tv, crew, mine, record,
                    dump, backup, isAdmin,
                    visitPath, visitRef, countVisit, visitsOf,
                    addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary,

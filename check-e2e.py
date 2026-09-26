@@ -2504,6 +2504,91 @@ with sync_playwright() as pw:
     else:
         ok("빌릴 수 있는 곳 — 목록이 비었지만 화면은 살아 있다 (인터넷 없음)")
 
+    # ── 같은 창구가 한 화면에 두 번 나오지 않는다 ────────────────────
+    # 위쪽 «지금 빌릴 수 있는 곳» 이 이미 서울시 공공서비스예약 실시간 목록이다.
+    # 아래 창구 표에도 같은 이름이 있으면 한 화면에 같은 곳이 두 번 뜬다.
+    # 앞 단계가 300명으로 두고 갔다. 300명에는 창구가 0곳이라 그대로 보면 아무것도 안 본다.
+    pg.fill("#f-n", "24")
+    pg.dispatch_event("#f-n", "change")
+    pg.wait_for_timeout(900)
+    desks = pg.evaluate(
+        "[...document.querySelectorAll('[data-lead=\"장소\"][data-src=\"창구\"]')].map(b => b.dataset.name)")
+    A(len(desks) >= 3, f"창구가 {len(desks)}곳뿐이다 — 볼 것이 없는 화면에서 세고 있다")
+    A("서울시 공공서비스예약" not in desks, f"창구 표에 서울시 공공서비스예약이 또 있다: {desks}")
+    A(pg.inner_text("main").count("공공서비스예약") <= 1,
+      f"«공공서비스예약» 이 화면에 {pg.inner_text('main').count('공공서비스예약')}번 나온다")
+    ok(f"구하기 — 같은 창구가 두 번 안 나온다 (창구 {len(desks)}곳)")
+
+    # ── 장소: 대회 날짜 맞춤과 제보 ──────────────────────────────
+    # 24명으로는 표본(강당)이 안 걸린다. 100명으로 보면 네 건이 다 들어온다.
+    day = api(f"/api/events/{ev}")["starts"]
+    v100 = api(f"/api/venues?size=100&day={day}")
+    vids = [r["id"] for r in v100["rows"]]
+    if len(vids) >= 3:
+        A(v100["day"] == day, f"보낸 날짜가 응답에 없다: {v100['day']}")
+        A(all(r["fit"] in ("ok", "no") for r in v100["rows"]), "날짜를 보냈는데 fit 이 안 붙었다")
+        A(all(r["fit"] == "unknown" for r in api("/api/venues?size=100")["rows"]),
+          "날짜를 안 보냈는데 «안 됨»으로 갈렸다 (모름을 없음으로 그린다)")
+        pg.fill("#f-n", "100")
+        pg.dispatch_event("#f-n", "change")
+        pg.wait_for_timeout(1200)
+        nfit = sum(1 for r in v100["rows"] if r["fit"] == "ok")
+        nno = len(vids) - nfit
+        seen = pg.inner_text("main")
+        A(f"{day} 에 접수하는 곳을 먼저 보여 줍니다." in seen, "대회 날짜 안내가 화면에 없다")
+        if nfit:
+            A("이 날 접수 중" in seen, "그 날 되는 곳에 표가 안 붙었다")
+        if nno:
+            A(f"접수 기간이 맞지 않는 곳 {nno}" in seen, f"안 되는 곳 {nno}건이 안 접혔다")
+        ok(f"장소 날짜 맞춤 — {day} 에 되는 곳 {nfit}, 접은 곳 {nno}")
+
+        # 제보 — 화면에서 한 줄 넣으면 칩이 바뀐다
+        vid = pg.evaluate(
+            "[...document.querySelectorAll('[data-chip]')].find(e => !e.closest('details')).dataset.chip")
+        A(pg.inner_text(f'[data-chip="{vid}"]').strip() == "아직 제보 없음",
+          "제보가 0건인데 0 으로 그린다 (모름이어야 한다)")
+        pg.fill(f"#vt-{vid}", "콘센트가 무대 옆에 있습니다")
+        pg.click(f'[data-tip="{vid}"][data-kind="콘센트"]')
+        pg.wait_for_timeout(1400)
+        chip_now = pg.inner_text(f'[data-chip="{vid}"]')
+        A("콘센트 1" in chip_now, f"제보를 넣었는데 칩이 그대로다: {chip_now}")
+        A("콘센트가 무대 옆에 있습니다" in pg.inner_text("main"), "한 줄 메모가 카드에 안 보인다")
+        A(pg.input_value(f"#vt-{vid}") == "", "보낸 뒤에도 메모 칸이 안 비워졌다")
+
+        # 순서 — 좋은 제보가 많은 곳이 앞으로, «안 맞아요» 가 많은 곳은 뒤로
+        best, worst = vids[-1], vids[1]
+        for k in ("콘센트", "와이파이", "빌렸어요"):
+            A(post(f"/api/venues/{best}/tips", {"kind": k, "note": ""})[0] == 201, "제보가 저장이 안 된다")
+        for i in range(2):
+            post(f"/api/venues/{worst}/tips", {"kind": "안 맞아요", "note": ""})
+        after = api(f"/api/venues?size=100&day={day}")["rows"]
+        A(after[0]["id"] == best and after[0]["tips"]["n"] == 3,
+          f"제보 많은 곳이 맨 앞으로 안 왔다: {[r['id'][-4:] for r in after]}")
+        A(after[-1]["id"] == worst and after[-1]["dim"] is True,
+          f"«안 맞아요» 가 많은 곳이 맨 뒤·접기로 안 갔다: {after[-1]['id'][-4:]}")
+        A(next(r for r in after if r["id"] == vid)["tips"]["콘센트"] == 1,
+          "화면에서 넣은 제보가 서버에 안 남았다")
+        pg.dispatch_event("#f-n", "change")
+        pg.wait_for_timeout(1200)
+        A("«안 맞아요» 제보가 많은 곳 1" in pg.inner_text("main"), "나쁜 제보가 많은 곳이 안 접혔다")
+        ok(f"장소 제보 — 칩이 바뀌고 순서가 바뀐다 ({after[0]['id'][-4:]} 먼저, {worst[-4:]} 접힘)")
+    else:
+        ok("장소 날짜 맞춤·제보 — 목록이 비어 화면만 확인했다 (인터넷 없음)")
+
+    # ── 제보 도배 막기 — 목록에 없는 종류와 긴 메모 (인터넷 없이도 본다) ──
+    st_tip, tip1 = post("/api/venues/zzE2E/tips", {"kind": "콘센트", "note": "가" * 300})
+    A(st_tip == 201 and len(tip1["tips"]["notes"][0]) == 120,
+      f"120자 넘는 메모가 안 잘렸다: {st_tip} {len(tip1['tips']['notes'][0]) if tip1 else '?'}")
+    A(post("/api/venues/zzE2E/tips", {"kind": "몰라요", "note": ""})[0] == 400,
+      "목록에 없는 제보 종류가 들어갔다")
+    A(post("/api/venues/zzE2E/tips", {"kind": {"a": 1}, "note": ""})[0] == 400,
+      "종류가 객체인데 400 이 아니다")
+    ok("제보 — 120자에서 잘리고, 목록에 없는 종류는 막힌다")
+
+    pg.fill("#f-n", "24")
+    pg.dispatch_event("#f-n", "change")
+    pg.wait_for_timeout(900)
+
     # 보낼 메일 초안 — 마크다운이 들어가면 안 된다 (메일에서는 별표가 그냥 별표다)
     pg.fill("#f-n", "24")
     pg.dispatch_event("#f-n", "change")
