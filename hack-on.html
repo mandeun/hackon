@@ -1923,7 +1923,7 @@ const SCREEN = {
       <label>어떤 대회인가요 <span class="pill">누르면 채워집니다</span></label>
       <div class="gchips" id="f-types">${TEMPLATES.map((t, i) => `<button type="button" class="pick" data-tpl="${i}">${esc(t.chip)}</button>`).join('')}</div>
       <div class="meta" id="f-tplnote" style="margin:-2px 0 8px"></div>
-      <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 문제 해결 해커톤"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
+      <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 불편 하나 없애기"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
       ${rq ? `<label>어떻게 받을까요</label>
       <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button></div>
       <div class="meta" style="margin:-2px 0 8px">«온라인으로 결과물만»은 모이지 않습니다. 일주일 동안 각자 만들어 내고, 올린 분이 받아서 «됐다»를 답합니다.</div>` : ''}
