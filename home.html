@@ -449,6 +449,9 @@ fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list)
     var i = b.getAttribute('data-try'), box = document.getElementById('try-' + i), w = list[i];
     if (!box.hidden) { box.hidden = true; box.innerHTML = ''; b.textContent = '열어보기'; return; }
     box.hidden = false; b.textContent = '접기';
+    /* 우리 출처(hackon.kr 아래)에 올린 결과물은 프레임에 안 띄운다 — allow-same-origin 이 있어 우리 페이지·열쇠에 닿는다(레드팀 09-26 4번) */
+    var sameHost = false; try { sameHost = new URL(w.url, location.href).host === location.host; } catch (_) {}
+    if (sameHost) { box.innerHTML = '<div class="trynote">이 결과물은 <a href="' + esc(w.url) + '" target="_blank" rel="noopener">새 창에서 열기</a>로 보세요.</div>'; return; }
     box.innerHTML = '<div class="trynote">안 뜨면 만든 분이 다른 곳에서 못 열게 막아 둔 것입니다. ' +
       '<a href="' + esc(w.url) + '" target="_blank" rel="noopener">새 창에서 열기</a></div>' +
       '<iframe src="' + esc(w.url) + '" loading="lazy" referrerpolicy="no-referrer" ' +

@@ -1041,6 +1041,21 @@ with sync_playwright() as p:
     # 별표를 내리면 사라진다
     post(f"/api/teams/{ct['id']}/feature", {"on": 0}, CK)
     A(not any(w["event"] == CID for w in api("/api/showcase")), "추천작을 내렸는데 쇼케이스에 남았다")
+    # 같은 출처 결과물은 첫 화면 미리보기 프레임에 안 띄운다(allow-same-origin 이라 우리 열쇠에 닿는다) — 새 창 링크만
+    post(f"/api/events/{CID}", {"due": "2099-01-01T23:59"}, CK, method="PATCH")   # 마감을 다시 열어 새 팀이 내게 한다
+    _, sot = post(f"/api/events/{CID}/teams", {"name": "같은출처팀", "email": "so@example.com", "agree": True})
+    A(post(f"/api/teams/{sot['id']}/submit", {"url": BASE + "/e/" + CID, "note": "같은 출처"}, tkey=sot["tkey"])[0] == 200, "같은 출처 팀이 제출을 못 한다")
+    post(f"/api/events/{CID}", {"due": "2020-01-01T00:00"}, CK, method="PATCH")   # 쇼케이스는 마감 뒤에만
+    post(f"/api/teams/{sot['id']}/feature", {"on": 1}, CK); post(f"/api/teams/{sot['id']}/showcase", {"on": True}, tkey=sot["tkey"])
+    post(f"/api/teams/{ct['id']}/feature", {"on": 1}, CK)   # 다른 출처 팀도 다시 별표 — 프레임이 뜨는 대조군
+    pg.goto(BASE + "/"); pg.wait_for_timeout(1500)
+    card = pg.locator('#showcase-grid .ev:has-text("같은출처팀")').first
+    A(card.count() == 1, "같은 출처 팀이 첫 화면 쇼케이스에 없다")
+    card.locator('[data-try]').click(); pg.wait_for_timeout(500)
+    A(card.locator('iframe').count() == 0 and "새 창에서 열기" in card.inner_text(), "같은 출처 결과물이 프레임에 떴다")
+    other = pg.locator('#showcase-grid .ev:has-text("쇼케이스팀")').first
+    other.locator('[data-try]').click(); pg.wait_for_timeout(500)
+    A(other.locator('iframe').count() == 1, "다른 출처 결과물은 프레임에 떠야 한다")
     ok("추천작 — 운영자 별표 + 본인 동의 둘 다 있어야 뜨고, 마감 뒤에도 본인이 내릴 수 있다 (개인정보 없음)")
 
     # ── 예산으로 자리 나누기 — 금액 하나로 카드가 깔리고, 손댄 줄은 안 바뀐다 ──
@@ -1790,6 +1805,30 @@ with sync_playwright() as p:
     missing = [a for a in sorted(assets) if os.path.exists(a.lstrip("/")) and code_of(a) != 200]
     A(not missing, f"화면이 참조하는 자산이 서버에서 안 나온다(화이트리스트 누락): {missing}")
     ok(f"화면 자산 {len(assets)}개 전부 200 (화이트리스트)")
+
+    # ── 참가 취소 — 팀 열쇠로 마감 전에만, 남의 열쇠 403, 마감 뒤 409, 자리 번호는 안 당겨진다 ──
+    _, ce = post("/api/events", {"title": "취소검사"}); CE, CK = ce["id"], ce["okey"]
+    post(f"/api/events/{CE}", {"due": "2099-01-01T23:59"}, CK, method="PATCH")
+    _, c1 = post(f"/api/events/{CE}/teams", {"name": "첫팀", "email": "c1@x.io", "agree": True})
+    _, c2 = post(f"/api/events/{CE}/teams", {"name": "둘째팀", "email": "c2@x.io", "agree": True})
+    A(post(f"/api/teams/{c1['id']}", {}, method="DELETE")[0] == 403, "열쇠 없이 팀이 지워졌다")
+    A(post(f"/api/teams/{c1['id']}", {}, method="DELETE", tkey=c2["tkey"])[0] == 403, "남의 팀 열쇠로 팀이 지워졌다")
+    A(post(f"/api/teams/{c1['id']}", {}, method="DELETE", tkey=c1["tkey"])[0] == 200, "자기 팀을 취소 못 한다")
+    rows = api(f"/api/events/{CE}/board")["rows"]
+    A([r["no"] for r in rows] == [2], f"취소 뒤 자리 번호가 당겨졌다: {[r['no'] for r in rows]}")
+    post(f"/api/events/{CE}", {"due": "2020-01-01T00:00"}, CK, method="PATCH")
+    A(post(f"/api/teams/{c2['id']}", {}, method="DELETE", tkey=c2["tkey"])[0] == 409, "마감 뒤에 취소가 됐다")
+    A(post(f"/api/teams/{c2['id']}", {}, CK, method="DELETE")[0] == 200, "운영자가 마감 뒤에도 못 뺀다")
+    A(any(x["by"] == "team" for x in api(f"/api/events/{CE}/trash", key=CK)), "본인 취소가 휴지통에 안 남는다 — 운영자가 되살릴 수 없다")
+    # 브라우저 — «다음에 할 일» 카드의 참가 취소 단추
+    post(f"/api/events/{CE}", {"due": "2099-01-01T23:59"}, CK, method="PATCH")
+    _, c3 = post(f"/api/events/{CE}/teams", {"name": "셋째팀", "email": "c3@x.io", "agree": True})
+    pg.evaluate(f"localStorage.setItem('hackon.team.{CE}', '{c3['id']}'); localStorage.setItem('hackon.tkey.{c3['id']}', '{c3['tkey']}')")
+    visit(f"/e/{CE}")
+    A(pg.query_selector("#nx-cancel") is not None, "참가 취소 단추가 없다")
+    pg.once("dialog", lambda d: d.accept()); pg.click("#nx-cancel"); pg.wait_for_selector("#next-gone", timeout=8000)
+    A(not any(r["id"] == c3["id"] for r in api(f"/api/events/{CE}/board")["rows"]), "취소 단추가 팀을 안 지운다")
+    ok("참가 취소 — 팀 열쇠·마감 전·자리 번호 유지·단추")
 
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})

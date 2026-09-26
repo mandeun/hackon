@@ -876,7 +876,9 @@ async function ghProfile(db, login) {
 }
 
 /* ── 해커온뉴스 — 제목·주소만 모은다(저작권: 본문 없음). 실패한 출처는 건너뛰고 나머지는 산다. ── */
-const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ds: '허깅페이스 데이터', gh: '깃허브 새 저장소', ai: 'AI타임스', geek: 'GeekNews', hn: 'Hacker News', show: 'Show HN(만든 것)', ph: 'Product Hunt', yozm: '요즘IT', aikr: 'AI코리아 뉴스레터', hackon: 'HACK:ON 우승작', tip: '제보' };
+const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ds: '허깅페이스 데이터', gh: '깃허브 새 저장소', ai: 'AI타임스', geek: 'GeekNews', hn: 'Hacker News', show: 'Show HN(만든 것)', ph: 'Product Hunt', yozm: '요즘IT', aikr: 'AI코리아 뉴스레터', hackon: 'HACK:ON 우승작', tip: '제보',
+  /* 2026-09-26 커뮤니티 — 해커톤 글(dev.to·Medium 태그), 로브스터(HN 보다 조용한 개발자 커뮤니티), dev.to 한국 태그, GitHub·YC 블로그, 스매싱(디자인). 09-26 에 실제로 항목이 오는 것만 */
+  devhack: 'dev.to #hackathon', medhack: 'Medium #hackathon', lob: 'Lobsters', devkr: 'dev.to #korea', ghblog: 'GitHub 블로그', yc: 'Y Combinator 블로그', smash: 'Smashing Magazine' };
 /* RSS 도 Atom 도 같은 함수로 — GeekNews·Product Hunt 는 Atom(<entry>, <link href>)이라 RSS 정규식만 쓰면 조용히 0건이 된다(실제로 그랬다) */
 function parseFeed(x, max) {
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/<[^>]+>/g, '').trim();
@@ -927,7 +929,9 @@ async function newsTick(db) {
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
   for (const [src, feed, max] of [['ai', 'https://www.aitimes.com/rss/allArticle.xml', 12], ['geek', 'https://news.hada.io/rss/news', 10], ['hn', 'https://hnrss.org/frontpage', 8],
                                   ['ph', 'https://www.producthunt.com/feed', 8], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8],
-                                  ['show', 'https://hnrss.org/show', 6], ['aikr', 'https://news.aikoreacommunity.com/rss/', 6]]) {
+                                  ['show', 'https://hnrss.org/show', 6], ['aikr', 'https://news.aikoreacommunity.com/rss/', 6],
+                                  ['devhack', 'https://dev.to/feed/tag/hackathon', 5], ['medhack', 'https://medium.com/feed/tag/hackathon', 5], ['lob', 'https://lobste.rs/rss', 6],
+                                  ['devkr', 'https://dev.to/feed/tag/korea', 4], ['ghblog', 'https://github.blog/feed/', 4], ['yc', 'https://www.ycombinator.com/blog/rss', 4], ['smash', 'https://www.smashingmagazine.com/feed/', 4]]) {
     try {
       const x = await (await fetch(feed, { headers: { 'user-agent': 'hackon.kr' }, signal: AbortSignal.timeout(8000) })).text();
       for (const it of parseFeed(x, max)) got.push({ src, ...it, note: '' });
@@ -3243,6 +3247,25 @@ function pledgeSponsors(db, event) {
     .map(r => ({ id: 'p' + r.id, name: r.org || r.name, kind: NEED_LABEL_KIND[r.kind] || '현물', amount: 0, logo: '', link: '', proof: '', fromGive: true }));
 }
 
+/* 개인정보 보유 기간 — 처리방침 «대회 종료 후 6개월. 그 뒤 지웁니다». 끝난 지 180일 넘은 대회의 연락처를 빈 값으로.
+   팀·후원·제안·요청·피드백의 contact. 집계(완주율·장부 이름)는 남는다. 하루 한 번만 돈다(meta.purged_at) */
+function purgeOld(db, force = false) {
+  const today = new Date().toISOString().slice(0, 10);
+  const last = (db.prepare("SELECT v FROM meta WHERE k='purged_at'").get() || {}).v;
+  if (!force && last === today) return { skipped: true };
+  const old = db.prepare("SELECT id FROM events WHERE ends < date('now','-180 days')").all().map(r => r.id);
+  let n = 0;
+  for (const id of old) {
+    n += db.prepare("UPDATE teams SET contact='' WHERE event=? AND contact<>''").run(id).changes;
+    n += db.prepare("UPDATE pledges SET contact='' WHERE event=? AND contact<>''").run(id).changes;
+    n += db.prepare("UPDATE offers SET contact='' WHERE event=? AND contact<>''").run(id).changes;
+    n += db.prepare("UPDATE requests SET contact='' WHERE event=? AND contact<>''").run(id).changes;
+  }
+  try { n += db.prepare("UPDATE feedback SET contact='' WHERE contact<>'' AND at < date('now','-180 days')").run().changes; } catch {}
+  db.prepare("INSERT INTO meta(k,v) VALUES('purged_at',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(today);
+  return { events: old.length, cleared: n };
+}
+
 /* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
 function needsOf(db, event) {
   const pl = db.prepare('SELECT id, need, name, org, status, coi FROM pledges WHERE event=? ORDER BY id')
@@ -4132,6 +4155,7 @@ function routes(db) {
           const tk = String(req.headers['x-tkey'] || '');
           let by = 'team';
           if (!tk || tk !== t.tkey) { needAdmin(db, t.event, key, owner); by = 'admin'; }
+          else if (pastDue(db, t.id)) throw new HttpError(409, '제출 마감이 지나 취소할 수 없습니다. 운영자에게 말씀해 주세요');   // 본인 취소는 마감 전까지
           const trashed = trashTeam(db, t.id, by);
           promoteWaiting(db, t.event);
           return json(res, 200, { trash: trashed });
@@ -4320,17 +4344,22 @@ function routes(db) {
          키가 없으면 이 자리는 통째로 없는 것과 같다. */
       if (p === '/auth/kakao' && KAKAO) {
         const back = siteOf(req);
+        /* state — 이 브라우저가 시작한 로그인인지 돌아올 때 대조한다. 없으면 공격자가 자기 code 링크를 보내
+           피해자 브라우저를 공격자 카카오에 묶는다(레드팀 09-26 1번). 10분짜리 쿠키 */
+        const st = crypto.randomBytes(12).toString('hex');
         const u = 'https://kauth.kakao.com/oauth/authorize'
           + `?client_id=${encodeURIComponent(KAKAO)}`
           + `&redirect_uri=${encodeURIComponent(back + '/auth/kakao/done')}`
-          + '&response_type=code&scope=profile_nickname';
-        res.writeHead(302, { location: u });
+          + '&response_type=code&scope=profile_nickname' + `&state=${st}`;
+        res.writeHead(302, { location: u, 'set-cookie': `hackon_st=${st}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600` + (back.startsWith('https') ? '; Secure' : '') });
         return res.end();
       }
       if (p === '/auth/kakao/done' && KAKAO) {
         const back = siteOf(req);
         const code = u.searchParams.get('code');
         if (!code) { res.writeHead(302, { location: '/app' }); return res.end(); }
+        const stGot = u.searchParams.get('state') || '', stMine = cookieOf(req, 'hackon_st') || '';
+        if (!stMine || stGot !== stMine) throw new HttpError(403, '로그인 요청이 이 브라우저에서 시작된 것이 아닙니다. 다시 눌러 주세요');
         const form = new URLSearchParams({
           grant_type: 'authorization_code', client_id: KAKAO,
           redirect_uri: back + '/auth/kakao/done', code,
@@ -4375,6 +4404,7 @@ function routes(db) {
             `hackon_s=${encodeURIComponent(sign(db, oid))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`
             + (back.startsWith('https') ? '; Secure' : ''),
             'hackon_pre=; Path=/; Max-Age=0',
+            'hackon_st=; Path=/auth; Max-Age=0',
           ],
         });
         return res.end();
@@ -5799,6 +5829,21 @@ function selftest() {
     ok(mcpCall(db, { jsonrpc: '2.0', id: 4, method: 'nope' }).error.code === -32601 && mcpCall(db, { method: 'notifications/initialized' }) === null, 'MCP 오류·알림');
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
   }
+  /* ── 개인정보 6개월 삭제 — 처리방침의 약속 ── */
+  {
+    const oldEv = createEvent(db, { title: '옛대회', starts: '2025-01-10', ends: '2025-01-10' });
+    const newEv = createEvent(db, { title: '새대회', starts: today(), ends: today() });
+    const t1 = joinTeam(db, oldEv.id, { name: '옛팀', contact: 'old@x.test', agree: true });
+    const t2 = joinTeam(db, newEv.id, { name: '새팀', contact: 'new@x.test', agree: true });
+    const nd = addNeed(db, oldEv.id, { kind: 'snack', label: '간식', qty: 1 });
+    addPledge(db, nd.id, oldEv.id, { name: '가게', contact: '010-0' });
+    const r = purgeOld(db, true);
+    ok(r.events >= 1 && r.cleared >= 2, '끝난 지 180일 넘은 대회의 연락처가 지워진다 (' + JSON.stringify(r) + ')');
+    ok(db.prepare('SELECT contact FROM teams WHERE id=?').get(t1).contact === '' && db.prepare('SELECT contact FROM teams WHERE id=?').get(t2).contact === 'new@x.test', '옛 대회만 지우고 새 대회는 그대로');
+    ok(db.prepare("SELECT contact FROM pledges WHERE event=?").get(oldEv.id).contact === '', '후원자 연락처도 지워진다');
+    ok(board(db, oldEv.id, true).rows.length === 1, '팀 자체(완주율 집계)는 남는다');
+    ok(purgeOld(db).skipped === true, '같은 날엔 두 번 안 돈다');
+  }
   db.close();
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   ok(Array.isArray(lanIPs()), '랜 주소를 찾는다 (' + (lanIPs()[0] || '없음') + ')');
@@ -5821,6 +5866,8 @@ if (require.main === module) {
   const tick = () => { try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); } };
   tick();
   setInterval(tick, 10 * 60 * 1000).unref();
+  try { purgeOld(db); } catch (e) { console.error('purge', e.message); }
+  setInterval(() => { try { purgeOld(db); } catch (e) { console.error('purge', e.message); } }, 60 * 60 * 1000).unref();
   /* 해커온뉴스 — 켜지고 15초 뒤 한 번, 그 뒤 6시간마다. 밖이 죽어도 앱은 산다. */
   setTimeout(() => newsTick(db).catch(() => {}), 15000).unref();
   setInterval(() => newsTick(db).catch(() => {}), 3 * 60 * 60 * 1000).unref();
