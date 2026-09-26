@@ -2302,7 +2302,15 @@ function score(db, team, b) {
    심사위원마다 후하고 짠 차이가 애초에 생기지 않는다(Gavel·HackMIT).
    쌍은 작은 id 를 a 로 맞춰 저장한다 — (3,7)과 (7,3)은 같은 쌍이다. */
 function pairTeams(db, event) {
-  /* 제출한 팀만 비교한다. 안 낸 팀을 비교표에 올리면 나머지 팀이 공짜 승리를 얻는다. */
+  /* 제출한 팀만 비교한다. 안 낸 팀을 비교표에 올리면 나머지 팀이 공짜 승리를 얻는다.
+     pall(제출 없이도)은 그 규칙을 운영자가 일부러 끄는 자리다 — 현장에서 발표만 하는 대회는
+     낼 링크가 아예 없어서, 제출로 거르면 비교표가 통째로 빈다. */
+  const e = db.prepare('SELECT pall FROM events WHERE id=?').get(event);
+  if (e && e.pall)
+    return db.prepare(`SELECT t.id, t.name, t.no, COALESCE(s.url,'') url, COALESCE(s.note,'') note,
+                              COALESCE(s.aiuse,'') aiuse, COALESCE(s.aidrop,'') aidrop
+                       FROM teams t LEFT JOIN submissions s ON s.team = t.id
+                       WHERE t.event = ? ORDER BY t.id`).all(event);
   return db.prepare(`SELECT t.id, t.name, t.no, s.url, s.note, s.aiuse, s.aidrop
                      FROM teams t JOIN submissions s ON s.team = t.id
                      WHERE t.event = ? AND s.url <> '' ORDER BY t.id`).all(event);
@@ -2331,7 +2339,7 @@ function pairView(db, event, judge, admin = false) {
   const hideUrl = !admin && !closed(e);
   const n = db.prepare('SELECT COUNT(*) c FROM pairs WHERE event=? AND judge=?').get(event, judge).c;
   const head = { event: { id: e.id, title: e.title, rubric: e.rubric, due: e.due,
-                          starts: e.starts, ends: e.ends, pmode: !!e.pmode },
+                          starts: e.starts, ends: e.ends, pmode: !!e.pmode, pall: !!e.pall },
                  n, teams: pairTeams(db, event).length };
   const pr = nextPair(db, event, judge);
   if (!pr) return { ...head, done: true };
@@ -5719,6 +5727,28 @@ function selftest() {
     ok(xc === 409, '마감 뒤에는 짝 비교를 못 켠다');
     xc = 0; try { setVmode(db, xe.id, { on: 1 }); } catch (e) { xc = e.code; }
     ok(xc === 409, '마감 뒤에는 관객 평가도 못 켠다');
+  }
+  /* ── 2026-09-26 제출 없이도 비교 — 현장에서 발표만 하는 대회는 낼 링크가 없다 ── */
+  {
+    const fe = createEvent(db, { title: '현장발표', starts: today(), ends: today() });
+    const f1 = joinTeam(db, fe.id, { name: '낸팀', agree: true });
+    const f2 = joinTeam(db, fe.id, { name: '안낸팀', agree: true });
+    const f3 = joinTeam(db, fe.id, { name: '안낸팀둘', agree: true });
+    submit(db, f1, { url: 'https://example.com/f1' });
+    setPmode(db, fe.id, { on: 1 });
+    ok(pairView(db, fe.id, '심사', true).teams === 1 && nextPair(db, fe.id, '심사') === null,
+       '기본은 제출한 팀만 — 안 낸 팀은 쌍에 안 오른다');
+    setPmode(db, fe.id, { on: 1, all: 1 });
+    ok(getEvent(db, fe.id).pall === 1, 'pall 칸이 있다');
+    const fv = pairView(db, fe.id, '심사', true);
+    ok(fv.teams === 3 && fv.event.pall === true, '«제출 없이도»를 켜면 세 팀이 다 비교에 오른다');
+    const fp = nextPair(db, fe.id, '심사');
+    ok(fp && fp.length === 2, '제출이 없어도 쌍이 나온다');
+    savePair(db, fe.id, { judge: '심사', a: f2, b: f3, winner: f2 });
+    ok(board(db, fe.id, true).rows.find(r => r.id === f2).pscore === 100, '제출 안 한 팀도 비교 점수를 받는다');
+    ok(board(db, fe.id, true).rows.find(r => r.id === f1).pscore === null, '아직 안 붙은 팀은 모름이다');
+    setPmode(db, fe.id, { on: 1, all: 0 });
+    ok(pairView(db, fe.id, '심사', true).teams === 1, '«제출 없이도»를 끄면 다시 제출한 팀만 오른다');
   }
   {
     /* 유입 — 화면만 센다. 그림·스크립트까지 세면 숫자가 의미를 잃는다 */
