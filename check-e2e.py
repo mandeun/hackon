@@ -2717,7 +2717,7 @@ for prov, host in [("kakao", "kauth.kakao.com"), ("google", "accounts.google.com
       f"/auth/{prov} 의 state 쿠키가 없거나 무르다: {cookies}")
     A(loc.split("state=")[1].split("&")[0] == st[0].split("hackon_st=")[1].split(";")[0],
       f"/auth/{prov} — 보낸 state 와 쿠키에 심은 state 가 다르다")
-A(code_of("/auth/apple") == 404, "없는 공급자 주소가 열린다")
+A(hop("/auth/apple")[0] == 404, "없는 공급자 주소가 열린다")   # 키가 있는 서버에서 봐야 뜻이 있다
 ok("내보내는 주소 — 공급자별 도메인·state·돌아올 주소가 맞다 (카카오·구글·네이버)")
 
 # 돌아오는 길. 여기가 무르면 공격자가 자기 code 링크를 보내 피해자 계정을 가져간다
@@ -2734,7 +2734,40 @@ ok("돌아오는 길 — 이 브라우저가 시작한 로그인이 아니면 40
 pv = urllib.request.urlopen(LOGIN_BASE + "/privacy").read().decode("utf-8")
 for must in ["카카오·구글·네이버", "회원번호", "같은 사람인지", "저장하지 않"]:
     A(must in pv, f"처리방침에 «{must}» 이 없다 — 받는 것과 적힌 것이 다르다")
+# 적어 두고 안 보이게 하는 것은 안 적은 것이다 — 변이 시험에서 hidden 한 줄이 그대로 통과했다
+A("hidden" not in pv, "처리방침에 감춘 줄이 있다")
 ok("개인정보 처리방침이 로그인·이메일 씀씀이를 적고 있다")
 
+# 화면이 실제로 단추 셋을 그리는가. 서버가 목록을 준다고 화면이 그린다는 뜻은 아니다
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.goto(f"{LOGIN_BASE}/app?make=1", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    # 로그인이 켜진 서버에서는 로그인 없이 대회를 열 수 없다 — 먼저 로그인 문이 나온다
+    first = pg.locator("a.kko").first
+    A(first.is_visible(), "로그인 단추가 화면에 없다")
+    A(first.inner_text().startswith("카카오"), f"첫 단추가 카카오가 아니다: {first.inner_text()}")
+    A(pg.locator("a.kko:visible").count() == 1, "단추 셋을 한꺼번에 늘어놓았다 — 하나만 크게 보여야 한다")
+    fold = pg.locator("details.more summary").filter(has_text="다른 것으로 로그인")
+    A(fold.count() == 1, "«다른 것으로 로그인» 접힌 자리가 없다")
+    fold.click()
+    hrefs = pg.eval_on_selector_all("a.kko", "els => els.map(e => e.getAttribute('href'))")
+    A(sorted(hrefs) == ["/auth/google", "/auth/kakao", "/auth/naver"],
+      f"펴도 셋이 아니다: {hrefs}")
+    A(pg.locator("a.kko:visible").count() == 3, "펴도 단추가 다 안 보인다")
+    A("전화번호는 안 받습니다" in pg.inner_text("body") and "주소는 저장하지 않습니다" in pg.inner_text("body"),
+      "무엇을 받는지 화면이 말하지 않는다")
+    # 첫 화면 머리띠는 좁으니 하나만
+    pg.goto(f"{LOGIN_BASE}/", wait_until="networkidle")
+    pg.wait_for_timeout(800)
+    A(pg.locator("#nav-login").is_visible(), "첫 화면 로그인 단추가 안 보인다")
+    A(pg.get_attribute("#nav-login", "href") == "/auth/kakao",
+      "첫 화면 단추가 첫 공급자로 안 간다: " + str(pg.get_attribute("#nav-login", "href")))
+    A(pg.inner_text("#nav-login") == "카카오 로그인", "첫 화면 단추 이름이 다르다: " + pg.inner_text("#nav-login"))
+    ctx.close()
+    b.close()
+ok("화면이 단추를 그린다 — 하나만 크게, 나머지는 접어서 (첫 화면·만들기 화면)")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
