@@ -1,0 +1,16 @@
+# litestream 설정 — DB 를 볼륨 밖으로 한 벌 더 보낸다.
+#
+# 버킷 이름도 열쇠도 이 파일에 적지 않는다. 전부 환경변수에서 온다.
+# litestream 은 설정 파일의 ${이름} 을 스스로 펼친다(끄려면 -no-expand-env).
+#
+#   LITESTREAM_BUCKET      버킷 이름. 이 값이 비면 복제를 아예 안 한다(start.sh)
+#   LITESTREAM_ENDPOINT    S3 호환 끝점. Fly Tigris 면 fly.storage.tigris.dev
+#   AWS_ACCESS_KEY_ID      버킷 열쇠. fly secrets set 으로만 넣는다
+#   AWS_SECRET_ACCESS_KEY  같음
+#   DB                     복제할 DB 경로. Dockerfile 과 fly.toml 이 정한다
+#
+# 경로를 ${DB} 로 둔 이유: /data/hackon.db 를 세 번째 파일에 또 적지 않으려는 것이다.
+dbs:
+  - path: ${DB}
+    replica:
+      url: s3://${LITESTREAM_BUCKET}/hackon.db?endpoint=${LITESTREAM_ENDPOINT}&region=auto
