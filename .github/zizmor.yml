@@ -1,0 +1,12 @@
+# zizmor 기본 정책은 액션을 모두 커밋 해시로 고정하라고 한다.
+# 이 저장소는 손질하는 사람이 한 명이라, 아무도 갱신하지 않을 해시 일곱 개보다
+# 「믿는 발행자의 태그 고정」을 규칙으로 적어 둔다. 여기 없는 발행자의 액션은
+# 암묵 규칙(*: hash-pin)에 걸려 검사가 빨간불이 된다 — 새로 들이면 여기 적는다.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        actions/*: ref-pin
+        github/*: ref-pin
+        lycheeverse/lychee-action: ref-pin
+        zizmorcore/zizmor-action: ref-pin

@@ -4,7 +4,13 @@ FROM node:24-alpine
 
 WORKDIR /app
 # GUIDE.md 는 /manual 이 읽어서 화면으로 만든다. 빠지면 배포판에서만 매뉴얼이 404 가 난다.
-COPY server.js home.html hack-on.html news.html qr.js sw.js manifest.webmanifest icon.svg logo.svg og.png hero.jpg package.json GUIDE.md ./
+COPY server.js home.html hack-on.html news.html qr.js sw.js manifest.webmanifest icon.svg logo.svg og.png hero.jpg package.json GUIDE.md start.sh ./
+
+# 백업 한 벌을 볼륨 밖으로 보내는 바이너리. 태그를 고정한다 — latest 로 두면
+# 다시 빌드할 때마다 다른 litestream 이 들어온다.
+COPY --from=litestream/litestream:0.5.17 /usr/local/bin/litestream /usr/local/bin/litestream
+# litestream 이 기본으로 읽는 자리. 버킷 이름·열쇠는 이 파일에 없다(환경변수).
+COPY litestream.yml /etc/litestream.yml
 
 # DB 와 백업은 볼륨에 둔다. 기계가 꺼졌다 켜져도 대회가 남아야 한다.
 ENV DB=/data/hackon.db
@@ -14,4 +20,6 @@ ENV PORT=8080
 ENV TZ=Asia/Seoul
 EXPOSE 8080
 
-CMD ["node", "server.js"]
+# LITESTREAM_BUCKET 이 없으면 start.sh 가 그대로 `exec node server.js` 를 한다.
+# 즉 버킷을 안 주면 지금까지와 같은 한 프로세스다.
+CMD ["sh", "start.sh"]
