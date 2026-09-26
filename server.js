@@ -371,7 +371,7 @@ function reallocate(db, event) {
   let made = 0;
   for (const r of a.rows) { if (manualKinds.has(r.kind)) continue; ins.run(event, r.kind, r.label, r.qty, r.note, r.amount); made++; }
   /* 0원이면 온라인판. 심사 카드가 없으니 관객 평가를 같이 켠다(운영 화면에서 끌 수 있다). */
-  if (a.tier === 'zero') db.prepare("UPDATE events SET mode='online', vmode=1 WHERE id=?").run(event);
+  if (a.tier === 'zero') db.prepare("UPDATE events SET mode='online', vmode=1, pmode=0, pall=0 WHERE id=?").run(event);
   /* 산식 출력만 보면 합이 예산 이하지만, 손고침으로 남은 줄까지 더하면 넘을 수 있다. 판 전체를 다시 센다. */
   const total = db.prepare('SELECT COALESCE(SUM(amount*qty),0) s FROM needs WHERE event=?').get(event).s;
   return { ...a, kept, made, skipped, total, over: total > a.budget };
@@ -1520,6 +1520,9 @@ function open(file) {
      pmode — 점수 슬라이더 대신 «두 팀 중 나은 쪽»만 고르게 한다. 처음 심사하는 사람은 60점과 70점을
      가를 근거가 없지만 «둘 중 어느 쪽»은 고를 수 있다. 순위는 승률로 매긴다. */
   try { db.exec('ALTER TABLE events ADD COLUMN pmode INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* pall — 제출 여부와 상관없이 모든 팀을 쌍에 올린다. 현장에서 발표만 하는 대회는 낼 링크가 없다.
+     기본은 0 이다 — 제출 대회에서 안 낸 팀을 올리면 나머지 팀이 공짜 승리를 얻는다. */
+  try { db.exec('ALTER TABLE events ADD COLUMN pall INTEGER NOT NULL DEFAULT 0'); } catch {}
   db.exec(`CREATE TABLE IF NOT EXISTS pairs(
       id     INTEGER PRIMARY KEY,
       event  TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -2351,6 +2354,47 @@ function savePair(db, event, b) {
               ON CONFLICT(event,judge,a,b) DO UPDATE SET winner=excluded.winner, at=datetime('now')`)
     .run(event, judge, lo, hi, w);
   return { ok: true, n: db.prepare('SELECT COUNT(*) c FROM pairs WHERE event=? AND judge=?').get(event, judge).c };
+}
+
+/* ── 심사 방식은 한 번에 하나만 ──
+   점수 · 관객 평가 · 참가팀 상호평가 · 짝 비교 넷 중 하나다. 둘을 같이 켜면 순위가 두 벌 나오고
+   화면마다 다른 1등이 뜬다. 그래서 하나를 켜면 나머지는 서버가 끈다 — 화면이 아니라 서버다.
+   무엇으로 바뀌었는지만 알리면 참가자는 무엇이 없어졌는지 모른다. 꺼진 것을 괄호에 같이 적는다.
+   마감 뒤에는 순위가 이미 공개됐다 — 그때는 둘 다 409 로 막는다. */
+function modeLock(db, event, what) {
+  if (closed(getEvent(db, event))) throw new HttpError(409, `제출 마감이 지나 순위가 공개됐습니다. ${what}은 더 못 바꿉니다`);
+  return db.prepare('SELECT vmode, vpeer, pmode, pall FROM events WHERE id=?').get(event);
+}
+function say(db, event, text) { db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(event, text); }
+
+/** 관객 평가·상호평가 켜고 끄기. 켜면 짝 비교가 꺼진다. */
+function setVmode(db, event, b) {
+  const was = modeLock(db, event, '평가 방식');
+  const on = b.on ? 1 : 0, peer = on && b.peer ? 1 : 0;
+  const offPair = !!(on && was.pmode);
+  db.prepare('UPDATE events SET vmode=?, vpeer=?, pmode=?, pall=? WHERE id=?')
+    .run(on, peer, on ? 0 : was.pmode, on ? 0 : was.pall, event);
+  if (was.vmode !== on || was.vpeer !== peer || offPair)
+    say(db, event, (!on ? '평가 방식을 심사위원 점수로 되돌렸습니다'
+                   : peer ? '평가 방식을 참가팀 상호평가로 바꿨습니다'
+                          : '평가 방식을 관객 평가로 바꿨습니다') + (offPair ? ' (짝 비교는 껐습니다)' : ''));
+  return { vmode: !!on, vpeer: !!peer, pmode: !!(on ? 0 : was.pmode), judges: board(db, event, true).judges.length };
+}
+
+/** 짝 비교 켜고 끄기. 켜면 관객 평가·상호평가가 꺼진다.
+    all 을 같이 주면 제출하지 않은 팀도 쌍에 올린다 — 현장 발표 대회는 낼 링크가 없다. */
+function setPmode(db, event, b) {
+  const was = modeLock(db, event, '심사 방식');
+  const on = b.on ? 1 : 0, all = on && b.all ? 1 : 0;
+  const offVote = on && was.vmode ? (was.vpeer ? '참가팀 상호평가' : '관객 평가') : '';
+  db.prepare('UPDATE events SET pmode=?, pall=?, vmode=?, vpeer=? WHERE id=?')
+    .run(on, all, on ? 0 : was.vmode, on ? 0 : was.vpeer, event);
+  if (was.pmode !== on || was.pall !== all || offVote)
+    say(db, event, (!on ? '심사를 점수 매기기로 되돌렸습니다'
+                   : '심사를 짝 비교로 바꿨습니다 — 두 팀 중 나은 쪽을 고릅니다'
+                     + (all ? ' (제출하지 않은 팀도 올립니다)' : ''))
+                   + (offVote ? ` (${offVote}는 껐습니다)` : ''));
+  return { pmode: !!on, pall: !!all, vmode: !!(on ? 0 : was.vmode) };
 }
 
 /** 순위 — 항목별 가중 평균. 심사위원 수가 달라도 평균이라 흔들리지 않는다. */
@@ -3461,13 +3505,7 @@ function routes(db) {
         /* 짝 비교 켜고 끄기 — 마감 뒤엔 vmode·ranked 와 같은 이유로 못 바꾼다 */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/pmode$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);
-          if (closed(getEvent(db, m[1]))) throw new HttpError(409, '제출 마감이 지나 순위가 공개됐습니다. 심사 방식은 더 못 바꿉니다');
-          const on = (await body(req)).on ? 1 : 0;
-          const was = db.prepare('SELECT pmode FROM events WHERE id=?').get(m[1]).pmode;
-          db.prepare('UPDATE events SET pmode=? WHERE id=?').run(on, m[1]);
-          if (was !== on) db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1],
-            on ? '심사를 짝 비교로 바꿨습니다 — 두 팀 중 나은 쪽을 고릅니다' : '심사를 점수 매기기로 되돌렸습니다');
-          return json(res, 200, { pmode: !!on });
+          return json(res, 200, setPmode(db, m[1], await body(req)));
         }
         /* 짝 비교 — 다음 두 팀을 받고, 고른 것을 보낸다. 점수 넣기와 같은 자격(심사 열쇠)이다. */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/pair$/))) {
@@ -3891,17 +3929,8 @@ function routes(db) {
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/vmode$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);   // 관객 평가 켜고 끄기 — 운영자만
-          /* 마감 뒤에는 순위가 이미 공개됐다. 기준을 바꾸면 발표된 순위가 바뀐다 — 막는다 */
-          if (closed(getEvent(db, m[1]))) throw new HttpError(409, '제출 마감이 지나 순위가 공개됐습니다. 평가 방식은 더 못 바꿉니다');
-          const bd = await body(req);
-          const on = bd.on ? 1 : 0, peer = on && bd.peer ? 1 : 0;
-          const was = db.prepare('SELECT vmode, vpeer FROM events WHERE id=?').get(m[1]);
-          db.prepare('UPDATE events SET vmode=?, vpeer=? WHERE id=?').run(on, peer, m[1]);
-          /* 평가 방식을 바꾼 것은 참가자가 알아야 한다 — 소식에 자동으로 남긴다(레드팀: 마감 직전 전환) */
-          if (was && (was.vmode !== on || was.vpeer !== peer))
-            db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1],
-              !on ? '평가 방식을 심사위원 점수로 되돌렸습니다' : peer ? '평가 방식을 참가팀 상호평가로 바꿨습니다' : '평가 방식을 관객 평가로 바꿨습니다');
-          return json(res, 200, { vmode: !!on, vpeer: !!peer, judges: board(db, m[1], true).judges.length });
+          /* 마감 뒤 409 와 «짝 비교는 껐습니다» 소식은 setVmode 안에 있다 — 두 길이 같은 규칙을 쓴다 */
+          return json(res, 200, setVmode(db, m[1], await body(req)));
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/vote$/)) && req.method === 'GET') {
           /* 투표 화면 데이터. 투표 열쇠나 운영자만. 팀 이름만 준다(마감 전 링크 보호는 board 몫). */
@@ -5585,6 +5614,34 @@ function selftest() {
     const back = restoreEvent(db, pd, pe.owner);
     ok(board(db, back.id, true).rows.map(r => `${r.name}:${r.pscore}`).join() === was,
        '되살린 대회의 승률 순위가 그대로다 (' + was + ')');
+  }
+  /* ── 2026-09-26 심사 방식은 한 번에 하나 — 켜면 나머지가 꺼진다(화면이 아니라 서버에서) ── */
+  {
+    const xe = createEvent(db, { title: '방식배타', starts: '2099-01-01', ends: '2099-01-01' });
+    const last = () => db.prepare('SELECT text FROM notices WHERE event=? ORDER BY id DESC').get(xe.id).text;
+    setPmode(db, xe.id, { on: 1 });
+    ok(getEvent(db, xe.id).pmode === 1 && getEvent(db, xe.id).vmode === 0, '짝 비교를 켜면 짝 비교만 켜진다');
+    setVmode(db, xe.id, { on: 1 });
+    let xg = getEvent(db, xe.id);
+    ok(xg.vmode === 1 && xg.pmode === 0, '관객 평가를 켜면 짝 비교가 꺼진다');
+    ok(last().includes('관객 평가로 바꿨습니다') && last().includes('짝 비교는 껐습니다'),
+       '소식에 무엇으로 바꿨는지와 무엇이 꺼졌는지가 같이 적힌다');
+    setPmode(db, xe.id, { on: 1, all: 1 });
+    xg = getEvent(db, xe.id);
+    ok(xg.pmode === 1 && xg.vmode === 0 && xg.pall === 1, '짝 비교를 켜면 관객 평가가 꺼진다');
+    ok(last().includes('관객 평가는 껐습니다'), '꺼진 것이 관객 평가라고 적는다');
+    setVmode(db, xe.id, { on: 1, peer: 1 });
+    ok(getEvent(db, xe.id).pall === 0, '관객 평가로 바꾸면 «제출 없이도»도 같이 내린다');
+    setPmode(db, xe.id, { on: 1 });
+    ok(last().includes('참가팀 상호평가는 껐습니다'), '상호평가에서 바꾸면 상호평가가 꺼졌다고 적는다');
+    ok(setPmode(db, xe.id, { on: 0 }).pmode === false && getEvent(db, xe.id).pall === 0,
+       '점수 매기기로 되돌리면 «제출 없이도»도 내려간다');
+    /* 마감 뒤 409 는 그대로 — 두 길 다 */
+    editEvent(db, xe.id, { due: '2020-01-01T00:00' });
+    let xc = 0; try { setPmode(db, xe.id, { on: 1 }); } catch (e) { xc = e.code; }
+    ok(xc === 409, '마감 뒤에는 짝 비교를 못 켠다');
+    xc = 0; try { setVmode(db, xe.id, { on: 1 }); } catch (e) { xc = e.code; }
+    ok(xc === 409, '마감 뒤에는 관객 평가도 못 켠다');
   }
   {
     /* 유입 — 화면만 센다. 그림·스크립트까지 세면 숫자가 의미를 잃는다 */
