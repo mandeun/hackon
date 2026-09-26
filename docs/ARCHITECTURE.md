@@ -154,3 +154,60 @@ API 는 전부 `/api/` 아래에 있습니다. 길 목록은 `server.js` 의 `ro
 
 대회를 지우면 지우기 직전 사본이 파일로 남습니다. 그 사본과 주최자 열쇠가 있으면
 `/api/events/restore` 로 되살릴 수 있습니다. 사본에 연락처가 들어 있어 운영자만 보관합니다.
+
+### 지금 백업이 있는 곳과 없는 곳
+
+10분마다 뜨는 사본 열두 벌은 `server.js` 의 `backup()` 이 만들고,
+DB 와 **같은 볼륨**의 `data/backup/` 에 앉습니다. 노트북이 죽거나 심사 도중에
+표를 잘못 지운 일은 이것으로 되돌립니다.
+
+되돌리지 못하는 것은 볼륨 자체가 사라지는 경우입니다. 사본이 원본과 같은 자리에
+있으니 함께 사라집니다. 그래서 볼륨 밖으로 한 벌 더 보내는 길을 붙여 두었습니다 —
+`litestream.yml` 과 `start.sh` 입니다.
+
+`LITESTREAM_BUCKET` 이 비어 있으면 `start.sh` 는 `exec node server.js` 만 합니다.
+즉 **버킷을 주기 전까지는 지금과 똑같이 돕니다.** 버킷을 주면 켜질 때 한 번
+`litestream restore -if-db-not-exists -if-replica-exists` 를 하고, 그다음
+`litestream replicate -exec "node server.js"` 로 node 를 안에 띄웁니다.
+버킷 이름과 열쇠는 어느 파일에도 적지 않습니다. `fly secrets set` 으로만 들어갑니다.
+
+### 운영자가 손으로 해야 하는 것
+
+1. S3 호환 버킷 하나를 만듭니다 (`fly storage create`).
+2. 그때 받은 값을 넣습니다 — `LITESTREAM_BUCKET`, `LITESTREAM_ENDPOINT`,
+   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`. 이름만 적습니다. 값은 적지 않습니다.
+3. 배포한 뒤 아래 복구 연습을 **한 번** 합니다.
+
+### 복구 연습 — 한 번 해 보기 전엔 백업이 있다고 말하지 않습니다
+
+「복제가 돌고 있다」는 로그는 백업이 아닙니다. 되살아난 DB 를 눈으로 본 것이 백업입니다.
+살아 있는 DB 는 건드리지 않고, 딴 자리에 되살려서 `/api/health` 가 200 을 내는 것까지가 한 번입니다.
+
+```bash
+# 1. 버킷에 무엇이 들어 있나. 아무것도 안 나오면 복제가 안 되고 있는 것입니다.
+fly ssh console -C "litestream ltx /data/hackon.db"
+
+# 2~4. 기계 안으로 들어가서 손으로 합니다.
+fly ssh console
+```
+
+```sh
+# 2. 딴 자리에 되살립니다. -o 를 주므로 /data/hackon.db 는 그대로 있습니다.
+litestream restore -o /tmp/drill.db /data/hackon.db
+
+# 3. 되살린 것이 진짜 DB 인지, 대회가 몇 개 들어 있는지 셉니다.
+#    이 이미지에는 sqlite3 명령이 없습니다. node:sqlite 로 셉니다.
+node -e "const{DatabaseSync}=require('node:sqlite');
+         const d=new DatabaseSync('/tmp/drill.db');
+         console.log(d.prepare('SELECT COUNT(*) c FROM events').get());"
+
+# 4. 그 DB 로 서버를 한 번 띄워 /api/health 를 봅니다. 8081 은 밖으로 열려 있지 않습니다.
+DB=/tmp/drill.db PORT=8081 node server.js &
+sleep 3 && wget -qO- http://127.0.0.1:8081/api/health
+kill %1 && rm -f /tmp/drill.db /tmp/drill.db-*
+```
+
+3번의 대회 수가 지금 열려 있는 대회 수와 같고 4번이 `"ok":true` 를 내면 백업이 있는 것입니다.
+둘 중 하나라도 어긋나면 **없는 것입니다.** 그때는 버킷 이름·끝점·열쇠를 다시 봅니다.
+
+연습을 한 날짜를 `PLAN.md` 에 한 줄 적습니다. 적히지 않은 연습은 안 한 것으로 봅니다.
