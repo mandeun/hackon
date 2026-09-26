@@ -1075,7 +1075,7 @@ const MCP_TOOLS = [
   { name: 'post_problem', description: 'Posts a new problem to the HACK:ON(해커온) problem bank. name = shop or nickname, pain = what is tedious, done = what counts as solved, contact = email or phone (shown only to builders). 문제 올리기', inputSchema: { type: 'object', properties: { name: { type: 'string' }, pain: { type: 'string' }, done: { type: 'string' }, contact: { type: 'string' } }, required: ['name', 'pain', 'contact'] }, annotations: ann('문제 올리기', false) },
   { name: 'news', description: 'Returns HACK:ON(해커온) news — recent AI models, papers, tools, articles and hackathon winners as Markdown; optional job filter: 마케팅, 기획, 디자인, 개발, 영업·CS, 데이터, 소상공인. 해커온뉴스', inputSchema: { type: 'object', properties: { job: { type: 'string' } } }, annotations: ann('해커온뉴스', true) },
 ];
-function mcpCall(db, msg) {
+function mcpCall(db, msg, ip = '') {
   const id = msg.id ?? null, m = msg.method || '';
   const ok = result => ({ jsonrpc: '2.0', id, result });
   const err = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -1095,7 +1095,13 @@ function mcpCall(db, msg) {
         const rows = openRequests(db);
         return text(rows.length ? rows.map(r => `- [${r.id}] ${r.name}: ${r.topic || r.pain}${r.done ? ' (됐다의 기준: ' + r.done + ')' : ''} · 풀이 ${r.solutions}`).join('\n') + `\n\n풀이는 ${mailSite()}/problems 에서` : '올라온 문제가 없습니다.');
       }
-      if (name === 'post_problem') { const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact }); return text(`올렸습니다. 받는 링크(열쇠 포함, 본인만): ${mailSite()}/r/${r.id}?k=${r.rkey}`); }
+      if (name === 'post_problem') {
+        /* 열쇠 없는 쓰기 길이다. /api/ 쪽 쓰기에 걸린 것과 같은 상한을 IP 로 건다(감사 d).
+           /mcp 는 /api/ 밖이라 위쪽 WRITE_LIMIT 문을 안 지나간다. */
+        if (tooMany('w:' + ip + ':/mcp/post_problem', WRITE_LIMIT)) return text('요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
+        const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact });
+        return text(`올렸습니다. 받는 링크(열쇠 포함, 본인만): ${mailSite()}/r/${r.id}?k=${r.rkey}`);
+      }
       if (name === 'news') return text(newsMd(db, JOBS.includes(a.job) ? a.job : ''));
     } catch (e) { return text('실패: ' + e.message); }
     return err(-32602, '없는 도구입니다');
@@ -3545,7 +3551,8 @@ function routes(db) {
       if (p === '/news.md' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' }); return res.end(newsMd(db, JOBS.includes(u.searchParams.get('job')) ? u.searchParams.get('job') : '')); }
       if (p === '/mcp' && req.method === 'POST') {
         const msg = await body(req);
-        const out = Array.isArray(msg) ? msg.map(x => mcpCall(db, x)).filter(Boolean) : mcpCall(db, msg);
+        const mip = req.socket.remoteAddress || '';
+        const out = Array.isArray(msg) ? msg.map(x => mcpCall(db, x, mip)).filter(Boolean) : mcpCall(db, msg, mip);
         if (out === null) { res.writeHead(202); return res.end(); }
         return json(res, 200, out);
       }
@@ -6102,6 +6109,22 @@ function selftest() {
     const m2 = mcpCall(db, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_problems' } }); ok(/문구점 박/.test(m2.result.content[0].text), 'MCP 문제 은행');
     const m3 = mcpCall(db, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'post_problem', arguments: { name: 'MCP 가게', pain: '장부', contact: 'm@x.test' } } }); ok(/\/r\/[a-z0-9]+\?k=/.test(m3.result.content[0].text), 'MCP 로 문제 올리기 → 받는 링크');
     ok(mcpCall(db, { jsonrpc: '2.0', id: 4, method: 'nope' }).error.code === -32601 && mcpCall(db, { method: 'notifications/initialized' }) === null, 'MCP 오류·알림');
+    {
+      /* 열쇠 없는 MCP 쓰기도 상한을 지난다 — /mcp 는 /api/ 밖이라 라우터의 WRITE_LIMIT 문을 안 밟는다(감사 d).
+         한 IP 가 문제 은행을 무한히 채우던 길이다. 읽기 도구(list_problems)는 안 센다. */
+      const bIp = '10.9.9.9';
+      const pp = () => mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call',
+        params: { name: 'post_problem', arguments: { name: '도배가게', pain: '장부', contact: 'flood@x.test' } } }, bIp).result.content[0].text;
+      let hit = '';
+      for (let i = 0; i <= WRITE_LIMIT; i++) hit = pp();
+      ok(/너무 많습니다/.test(hit), '열쇠 없이 MCP 로 문제를 무한히 올린다');
+      const rd = mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'list_problems' } }, bIp).result.content[0].text;
+      ok(/도배가게/.test(rd) && !/너무 많습니다/.test(rd), '상한에 걸린 IP 가 읽기도 못 한다');
+      ok(/\/r\/[a-z0-9]+\?k=/.test(mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call',
+        params: { name: 'post_problem', arguments: { name: '딴사람', pain: '장부', contact: 'other@x.test' } } }, '10.9.9.8').result.content[0].text),
+        '다른 IP 까지 같이 막힌다');
+      db.prepare("DELETE FROM requests WHERE contact IN ('flood@x.test','other@x.test')").run();   /* 도배 줄이 뒤 검사의 목록을 밀어내지 않게 치운다 */
+    }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
   }
   /* ── 개인정보 6개월 삭제 — 처리방침의 약속 ── */
