@@ -1868,13 +1868,6 @@ const SCREEN = {
       </div></div>`}
       <div style="height:22px"></div>` : '';
 
-    /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
-       그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
-    if (!list.length && my && my.events.length) return mineBox + `
-      <div class="card">
-        <h3>다음에 할 일</h3>
-        <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
-      </div>`;
     /* 열쇠를 잃은 운영자의 문. 전에는 열린 대회가 0건일 때만 그려져서, 대회가 하나라도 있으면 돌아올 길이 없었다(대역 ②) */
     const findBox = `${my ? '' : keyless() ? `<div class="card">
         <h3>전에 연 대회를 찾으시나요</h3>
@@ -1899,6 +1892,13 @@ const SCREEN = {
         <div class="meta" style="margin-top:8px">지울 때 받은 파일로 되살립니다.</div>
         <input type="file" id="rs-file" accept="application/json" style="margin-top:8px">
         <div style="height:8px"></div><button class="btn sec sm" id="rs-go">되살리기</button></details>`}`;
+    /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
+       그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
+    if (!list.length && my && my.events.length) return mineBox + `
+      <div class="card">
+        <h3>다음에 할 일</h3>
+        <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
+      </div>` + findBox;
     if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
     return mineBox + `<h2>열린 대회</h2>` +
