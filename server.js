@@ -2988,6 +2988,30 @@ function restoreEvent(db, d, owner) {
   return { id: e.id, okey, teams: Object.keys(tmap).length, needs: Object.keys(nmap).length };
 }
 
+/* ── 지운 대회 휴지통 — 파일 첨부 없이 한 번 누르면 되는 길 ──
+   목록에는 제목·지운 날·팀 수만 싣는다. 사본(json)은 절대 안 나간다 —
+   나가면 열쇠 없는 사본이라도 «누가 어디에 신청했나»가 통째로 흘러간다. */
+function eventTrash(db, owner) {
+  if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+  return db.prepare('SELECT id, event, title, json, at FROM event_trash WHERE owner=? ORDER BY id DESC').all(owner)
+    .map(r => {
+      let teams = 0;
+      try { teams = (JSON.parse(r.json).teams || []).length; } catch { teams = 0; }
+      return { id: r.id, event: r.event, title: r.title, at: r.at, teams };
+    });
+}
+/* 한 줄을 되살린다. 그 줄의 owner 와 누른 사람의 주최자 열쇠가 같아야 한다 —
+   사본을 들고 있는 것은 권한이 아니다(감사 4). 같은 id 가 살아 있으면 409. */
+function untrashEvent(db, trashId, owner) {
+  const row = db.prepare('SELECT * FROM event_trash WHERE id=?').get(trashId);
+  if (!row) throw new HttpError(404, '휴지통에 없습니다');
+  if (!owner || row.owner !== owner) throw new HttpError(403, '이 대회를 지운 주최자만 되살릴 수 있습니다');
+  if (db.prepare('SELECT 1 FROM events WHERE id=?').get(row.event)) throw new HttpError(409, '같은 id 의 대회가 살아 있습니다');
+  const r = restoreEvent(db, JSON.parse(row.json), owner);
+  db.prepare('DELETE FROM event_trash WHERE id=?').run(trashId);
+  return { ...r, title: row.title };
+}
+
 /** DB 파일을 통째로 복사해 둔다. 몇 벌만 남기고 오래된 것은 지운다.
     sqlite 는 WAL 을 쓰므로 복사 전에 체크포인트를 돌려 본체에 밀어 넣는다. */
 function backup(db, file, keep = 12) {
@@ -3724,6 +3748,15 @@ function routes(db) {
         if (p === '/api/mine' && req.method === 'GET') {
           if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
           return json(res, 200, mine(db, owner));
+        }
+        /* 지운 대회 목록 — 내 것만. 남의 휴지통은 한 줄도 안 보인다 */
+        if (p === '/api/mine/trash' && req.method === 'GET') {
+          if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+          return json(res, 200, eventTrash(db, owner));
+        }
+        /* 되살리기 — 파일 첨부 없이. 경로가 /api/trash/:id/restore 가 아닌 이유는 그쪽이 팀 휴지통 자리라서다 */
+        if ((m = p.match(/^\/api\/mine\/trash\/(\d+)\/restore$/)) && req.method === 'POST') {
+          return json(res, 200, untrashEvent(db, +m[1], owner));
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/record$/)) && req.method === 'GET')
           return json(res, 200, record(db, m[1]) || {});
