@@ -2,12 +2,20 @@ name: 검사
 on:
   push: { branches: [master, main] }
   pull_request:
+
+# 이 저장소의 검사는 코드를 읽기만 한다. 기본 권한은 이보다 넓다.
+permissions:
+  contents: read
+
 jobs:
   unit:
     name: 단위 검사 (node server.js --test)
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false — 토큰을 .git/config 에 남기지 않는다.
+      # 남기면 뒤 단계나 올린 파일에 딸려 나갈 수 있다.
       - uses: actions/checkout@v4
+        with: { persist-credentials: false }
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
       - run: node server.js --test
@@ -17,6 +25,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with: { persist-credentials: false }
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
       - uses: actions/setup-python@v5
@@ -26,3 +35,53 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@v4
         with: { name: e2e-shots, path: "shots/**", if-no-files-found: ignore }
+  scan:
+    name: 보안·링크 (gitleaks · zizmor · lychee)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # fetch-depth: 0 — 열쇠는 diff 가 아니라 역사에서 찾는다. 한 번 들어간 키는
+      # 다음 커밋에서 지워도 역사에 그대로 남아 있고, 그게 진짜 새는 자리다.
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, persist-credentials: false }
+
+      # gitleaks 는 공식 액션을 쓰지 않는다. 그 액션은 push·PR 에서 「그 푸시의
+      # 커밋 범위」만 본다(src/gitleaks.js 의 --log-opts). 우리가 보려는 건 역사
+      # 전체라서 바이너리를 직접 받아 `gitleaks git --log-opts=--all` 로 돌린다.
+      # 받은 파일은 같은 릴리스의 checksums.txt 로 대조한다.
+      - name: gitleaks — 저장소 전체 역사
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          set -eu
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "${base}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --ignore-missing --check "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
+          cd "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/gitleaks" git --no-banner --redact --log-opts=--all .
+
+      # 워크플로 자체를 감사한다. 규칙 완화는 .github/zizmor.yml 한 곳에 적는다.
+      # advanced-security 를 끄고 annotations 을 켠 이유: SARIF 업로드는
+      # security-events: write 를 요구하는데, 이 검사에 쓰기 권한을 주고 싶지 않다.
+      - name: zizmor — 워크플로 감사
+        uses: zizmorcore/zizmor-action@v0.6.4
+        with:
+          version: 1.30.1
+          advanced-security: false
+          annotations: true
+
+      # 문서의 죽은 링크. localhost 와 mailto 는 기계가 판정할 수 없어 뺀다.
+      # 403·429 를 통과로 세는 이유: 봇을 막는 사이트와 속도를 거는 사이트가
+      # 있고, 그건 링크가 죽은 것이 아니다(P3).
+      - name: lychee — 문서 링크
+        uses: lycheeverse/lychee-action@v2
+        with:
+          lycheeVersion: v0.24.2
+          fail: true
+          args: >-
+            --no-progress --exclude-loopback --include-mail=false
+            --accept 200,403,429 --max-retries 2 --timeout 20
+            README.md GUIDE.md 'docs/*.md'
