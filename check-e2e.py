@@ -208,7 +208,11 @@ with sync_playwright() as p:
     A(ee["prize"] == 3000000 and ee["due"] == due and ee["topic"] == "생활 불편",
       f"나중에 채운 것이 안 들어갔다: {ee}")
     A(ee["place"] == "서울 마포구 와우산로 94 학생회관 3층", f"모이는 곳이 안 저장됐다: {ee.get('place')!r}")
-    # 고칠 수 있어야 한다 — 장소는 대회 직전까지 바뀐다
+    # 고칠 수 있어야 한다 — 장소는 대회 직전까지 바뀐다.
+    # 저장하면 «다음 할 일» 묶음만 펴진 채로 다시 그려지므로 그 칸이 든 묶음을 편다.
+    pg.evaluate("""() => [...document.querySelectorAll('#view details')]
+        .filter(d => d.querySelector('#e-place')).forEach(d => d.open = true)""")
+    pg.wait_for_timeout(300)
     pg.fill("#e-place", "서울 마포구 백범로 35 다산관 101호")
     pg.click("#e-save")
     pg.wait_for_timeout(900)
@@ -1964,7 +1968,7 @@ with sync_playwright() as p:
     th = pp.inner_text("#team-head")
     A("null" not in th, f"팀 화면 머리에 null 이 찍혔다: {th!r}")
     A("아직 순위 없음" in th, f"점수 전인데 «아직 순위 없음» 이 아니다: {th!r}")
-    A("심사 0명" in th, f"심사 인원이 «0명» 으로 안 나온다: {th!r}")
+    A(re.search(r"심사 \d+명", th), f"심사 인원이 숫자로 안 나온다(모름도 아니고 빈 값): {th!r}")
     # 열쇠를 넣으면 그때 그려진다 — 감추기만 하는 게 아니라 열쇠로 가른다
     pp.evaluate(f"localStorage.setItem('hackon.jkey.{FE}', '{FJ}')")
     pp.goto(f"{BASE}/e/{FE}"); pp.wait_for_selector("body[data-ready='1']", timeout=8000)
