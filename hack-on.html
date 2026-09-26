@@ -1900,8 +1900,7 @@ const SCREEN = {
 
       <h3 style="margin-top:18px">지금 빌릴 수 있는 곳</h3>
       ${vn && vn.rows.length ? `
-        <p class="sub">서울시 공공서비스예약에 <b>지금 올라와 있는</b> 곳입니다.
-          이 인원이 들어가는 곳만 골랐습니다.</p>
+        <p class="sub">서울시 공공서비스예약에서 이 인원이 드는 곳만 골랐습니다.</p>
         <div class="row">
           <div><label>지역</label><select id="v-area">
             <option value="">서울 전체</option>
@@ -1929,9 +1928,9 @@ const SCREEN = {
           </div>
         </div>`).join('')}
         <p class="sub">인원에 <b>어림</b>이 붙은 곳은 시설 종류로 짐작한 것입니다. 전화로 확인하세요.</p>`
-      : `<p class="sub">${vn ? '이 인원이 들어가는 곳이 지금은 안 올라와 있습니다.'
+      : `<p class="sub">${vn ? '이 인원이 드는 곳이 지금은 안 올라와 있습니다.'
                             : '서울시 예약 정보를 못 받아 왔습니다.'}
-          아래 창구로 직접 물어보세요.</p>`}
+          yeyak.seoul.go.kr 에서 직접 찾아보실 수 있습니다.</p>`}
 
       <h3 style="margin-top:18px">그 밖에 물어볼 곳</h3>
       <p class="sub">공공 예약에 안 올라오는 곳입니다. <b>빈자리와 가격은 저희가 알 수 없습니다</b> — 직접 물어보세요.</p>
