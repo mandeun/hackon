@@ -1900,6 +1900,15 @@ function cookieOf(req, name) {
 
 /* 열쇠를 마구 넣어 보는 것을 막는다. 12자 열쇠라도 무한히 시도하면 언젠가 맞는다. */
 const tries = new Map();
+/* 부르는 쪽 주소. Fly 프록시 뒤에서는 socket 주소가 프록시(fdaa:…) 하나뿐이라
+   모든 방문자가 한 IP 로 보인다 — 상한이 «전체 방문자 합»에 걸려 대회 당일 4번째 신청부터 막힌다.
+   Fly 가 붙이는 fly-client-ip 는 밖에서 못 덮어쓴다(프록시가 다시 쓴다). Fly 밖(노트북)에서는 socket 을 믿는다. */
+function clientIp(req) {
+  const sock = (req.socket && req.socket.remoteAddress) || '';
+  if (!process.env.FLY_APP_NAME) return sock;
+  const h = req.headers['fly-client-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return h || sock;
+}
 function tooMany(ip, limit = 30) {
   const now = Date.now(), t = tries.get(ip) || { n: 0, at: now };
   if (now - t.at > 600000) { t.n = 0; t.at = now; }
@@ -3552,7 +3561,7 @@ function routes(db) {
       if (p === '/news.md' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' }); return res.end(newsMd(db, JOBS.includes(u.searchParams.get('job')) ? u.searchParams.get('job') : '')); }
       if (p === '/mcp' && req.method === 'POST') {
         const msg = await body(req);
-        const mip = req.socket.remoteAddress || '';
+        const mip = clientIp(req);
         const out = Array.isArray(msg) ? msg.map(x => mcpCall(db, x, mip)).filter(Boolean) : mcpCall(db, msg, mip);
         if (out === null) { res.writeHead(202); return res.end(); }
         return json(res, 200, out);
@@ -3602,13 +3611,13 @@ function routes(db) {
            평소에 쓰는 사람이 먼저 막힌다 — 실제로 그렇게 만들었다가 검사에서 잡혔다. */
         if (!cookieOwner && headOwner
             && !db.prepare('SELECT 1 FROM owners WHERE id=?').get(headOwner)
-            && tooMany(req.socket.remoteAddress || ''))
+            && tooMany(clientIp(req)))
           throw new HttpError(429, '열쇠를 너무 여러 번 틀렸습니다. 잠시 뒤에 다시 해 주세요');
         const owner = cookieOwner || headOwner;
         /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 받아 브라우저가 x-jkey 로 실어 보낸다. */
         const jkey = req.headers['x-jkey'] || '';
 
-        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + (req.socket.remoteAddress || '') + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
+        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + clientIp(req) + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
           throw new HttpError(429, '요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
 
         if (p === '/api/events' && req.method === 'POST') {
@@ -3888,7 +3897,7 @@ function routes(db) {
           /* 팀 열쇠는 여기서 딱 한 번 나간다. 신청한 브라우저가 받아서 들고 있는다. */
           const jb = await body(req);
           delete jb._promote;   /* 내부 표식 — 밖에서 보내면 정원 검사를 건너뛴다. 경계에서 지운다 */
-          applyGuard(req.socket.remoteAddress, m[1]);   /* 한 IP 가 한 대회를 가짜 팀으로 채우는 것을 막는다 */
+          applyGuard(clientIp(req), m[1]);   /* 한 IP 가 한 대회를 가짜 팀으로 채우는 것을 막는다 */
           const tid = joinTeam(db, m[1], jb);
           if (typeof tid === 'object') return json(res, 202, tid);   /* 정원이 차서 대기자로 — { waiting: 몇 번째 } */
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
@@ -5261,6 +5270,18 @@ function selftest() {
   ok(idA !== idB, '다른 연락처는 다른 사람이다');
   ok(pidOf(db, '') === '' && pidOf(db, 'a@b') === '', '너무 짧으면 열쇠를 안 만든다');
   {
+    /* clientIp — Fly 뒤에서는 헤더, 밖에서는 socket. 이걸 안 지키면 상한이 방문자 전체에 걸린다 */
+    {
+      const fake = (h, sock) => ({ headers: h, socket: { remoteAddress: sock } });
+      const had = process.env.FLY_APP_NAME;
+      delete process.env.FLY_APP_NAME;
+      ok(clientIp(fake({ 'fly-client-ip': '1.2.3.4' }, '::1')) === '::1', 'Fly 밖: 헤더는 무시하고 socket');
+      process.env.FLY_APP_NAME = 'hackon';
+      ok(clientIp(fake({ 'fly-client-ip': '1.2.3.4' }, 'fdaa::1')) === '1.2.3.4', 'Fly 안: fly-client-ip');
+      ok(clientIp(fake({ 'x-forwarded-for': '5.6.7.8, 9.9.9.9' }, 'fdaa::1')) === '5.6.7.8', 'Fly 안: x-forwarded-for 첫 값');
+      ok(clientIp(fake({}, 'fdaa::1')) === 'fdaa::1', 'Fly 안: 헤더 없으면 socket');
+      if (had === undefined) delete process.env.FLY_APP_NAME; else process.env.FLY_APP_NAME = had;
+    }
     /* 한 대회에 같은 IP 가 팀을 계속 만드는 것 — APPLY_LIMIT 개까지(감사 c).
        대회가 다르면 따로 센다. 현장에서 한 와이파이로 열 명이 신청하는 것을 막으면 안 되므로 상한은 env 로 뺀다. */
     const gIp = '10.0.0.7', gEv = 'apply1', gEv2 = 'apply2';
