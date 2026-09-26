@@ -693,12 +693,27 @@ async function fetchVenues() {
   return rows;
 }
 
-/** 인원과 지역으로 거른다. 접수 중인 곳이 먼저 온다. */
-function pickVenues(rows, size, area) {
+/** 대회 그 날에 이 곳을 신청할 수 있나. 답은 셋이다 —
+    'ok' 접수 기간 안이다(또는 기간을 안 알려 준 곳이라 막을 근거가 없다)
+    'no' 접수 기간이 그 날을 안 덮는다
+    'unknown' 대회 날짜를 모른다. «모름»을 «안 됨»으로 그리지 않는다. */
+function venueFit(v, day) {
+  const d = String(day || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return 'unknown';
+  const o = String(v.open || '').slice(0, 10), c = String(v.close || '').slice(0, 10);
+  if (!o && !c) return 'ok';
+  if (o && d < o) return 'no';
+  if (c && d > c) return 'no';
+  return 'ok';
+}
+
+/** 인원과 지역으로 거른다. 접수 중인 곳이 먼저 온다. day 를 주면 그 날 되는지(fit)를 붙인다. */
+function pickVenues(rows, size, area, day) {
   const n = Math.max(1, Math.min(2000, +size || 24));
   return rows
     .filter(r => r.cap >= n && r.lo <= n * 3)
     .filter(r => !area || r.area === area)
+    .map(r => ({ ...r, fit: venueFit(r, day) }))
     .sort((a, b) => (a.state === '접수중' ? 0 : 1) - (b.state === '접수중' ? 0 : 1)
                  || a.cap - b.cap)
     .slice(0, 40);
@@ -3604,7 +3619,9 @@ function routes(db) {
           return json(res, 200, {
             live: SEOUL_KEY !== 'sample',
             total: rows.length,
-            rows: pickVenues(rows, q.size, q.area),
+            /* 대회 날짜를 보내면 그 날 신청할 수 있는 곳을 가려 준다. 안 보내면 fit 이 전부 unknown 이다. */
+            day: String(q.day || '').slice(0, 10),
+            rows: pickVenues(rows, q.size, q.area, q.day),
             areas: [...new Set(rows.map(r => r.area))].filter(Boolean).sort(),
           });
         }
@@ -5248,6 +5265,28 @@ function selftest() {
   ok(pickVenues(fake, 24)[0].state === '접수중', '접수 중인 곳이 먼저 온다');
   ok(pickVenues(fake, 500).length === 0, '아무 데도 못 받으면 빈 목록을 준다');
 
+  // 날짜 맞춤 — 대회 날이 접수 기간 안인가. 모름을 «안 됨»으로 그리지 않는다
+  const hall = { open: '2026-09-01', close: '2026-10-15' };
+  ok(venueFit(hall, '2026-10-11') === 'ok', '대회 날이 접수 기간 안이면 된다');
+  ok(venueFit(hall, '2026-08-31') === 'no' && venueFit(hall, '2026-10-16') === 'no',
+     '접수 기간 앞뒤로 벗어나면 안 된다');
+  ok(venueFit(hall, '2026-09-01') === 'ok' && venueFit(hall, '2026-10-15') === 'ok',
+     '첫날·마지막날은 되는 날이다');
+  ok(venueFit({ open: '', close: '' }, '2026-10-11') === 'ok',
+     '접수 기간을 안 알려 준 곳은 막지 않는다');
+  ok(venueFit(hall, '') === 'unknown' && venueFit(hall, '아무말') === 'unknown',
+     '대회 날짜가 없으면 «모름»이다 («안 됨»이 아니다)');
+  ok(venueFit({ open: '2026-09-01', close: '' }, '2026-08-01') === 'no'
+     && venueFit({ open: '', close: '2026-10-15' }, '2026-11-01') === 'no',
+     '한쪽만 있는 기간도 본다');
+  const fitRows = [{ area: '종로구', cap: 400, lo: 80, state: '접수중', open: '2026-09-01', close: '2026-10-15' },
+                   { area: '종로구', cap: 400, lo: 80, state: '접수종료', open: '2026-06-01', close: '2026-07-15' }];
+  const fv = pickVenues(fitRows, 100, '', '2026-10-11');
+  ok(fv.filter(r => r.fit === 'ok').length === 1 && fv.filter(r => r.fit === 'no').length === 1,
+     '목록에 그 날 되는 곳·안 되는 곳이 갈려 붙는다');
+  ok(pickVenues(fitRows, 100).every(r => r.fit === 'unknown'),
+     '날짜를 안 주면 아무 곳도 «안 됨»으로 표시하지 않는다');
+
   // 구하기 — 규모를 넣으면 필요한 것이 나온다
   const f24 = findHelp(24), f200 = findHelp(200);
   ok(f24.teams === 6, '24명이면 6팀 (' + f24.teams + ')');
@@ -5890,7 +5929,7 @@ if (require.main === module) {
   });
 }
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, showConsent, score, board, outcomes, allocate, tierOf, reallocate, BUDGET_RULE,
-                   card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
+                   card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, venueFit, noticeOf, tv, crew, mine, record,
                    dump, backup, isAdmin,
                    visitPath, visitRef, countVisit, visitsOf,
                    addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary,
