@@ -274,6 +274,10 @@ a.btn{display:inline-flex;align-items:center;justify-content:center;text-decorat
 .stat b{display:block;font-size:22px;color:var(--navy);line-height:1.15;letter-spacing:-.03em;
         font-variant-numeric:tabular-nums}
 .stat span{font-size:11.5px;color:var(--ink3)}
+/* 깔때기 — 타일 사이의 꺾쇠와 타일 밑의 비율 */
+.stat i{flex:none;align-self:center;font-style:normal;font-size:18px;font-weight:800;color:var(--ink3)}
+.stat em{display:block;margin-top:3px;font-style:normal;font-size:11.5px;color:var(--ink3);
+         font-variant-numeric:tabular-nums}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{border-bottom:1px solid var(--rule);padding:8px 6px;text-align:left}
 th{color:var(--ink3);font-weight:700;font-size:12px}
@@ -1839,6 +1843,25 @@ async function render() {
   watchNews();
   tickDue();
   document.body.dataset.ready = '1';   // 완주 테스트가 이 표시를 기다린다
+}
+
+/* 신청 → 온 팀 → 완주를 한 줄로 잇는다.
+   따로 놓으면 «완주율 0%» 가 잘한 건지 못한 건지 안 보인다. 어디서 떨어졌는지가 보여야 한다.
+   «온 팀» 에는 모름이 있다 — 등록을 한 번도 안 찍은 대회의 0 은 «아무도 안 왔다» 가 아니다. */
+function funnel(o, ev) {
+  const t = +o.teams || 0;
+  const pct = n => t ? Math.round(n / t * 100) + '%' : '';
+  const before = ev && ev.starts && new Date(String(ev.starts).slice(0, 10) + 'T23:59:59') > new Date();
+  const came = before        ? ['아직', '대회 전입니다']
+             : +o.came       ? [o.came + '팀', pct(+o.came)]
+             :                 ['모름', '등록을 한 번도 안 찍었습니다'];
+  return `<div class="stat fun">
+    <div><b>${t}팀</b><span>신청</span></div>
+    <i aria-hidden="true">›</i>
+    <div><b>${esc(String(came[0]))}</b><span>온 팀</span><em>${esc(String(came[1]))}</em></div>
+    <i aria-hidden="true">›</i>
+    <div><b>${+o.finished || 0}팀</b><span>완주</span><em>${o.finishRate}%</em></div>
+  </div>`;
 }
 
 const SCREEN = {
@@ -3648,12 +3671,12 @@ const SCREEN = {
     const pk = LIVE ? await api(`/events/${cur}/pack`).catch(() => null) : null;
     const fw = LIVE ? await api(`/events/${cur}/follow`).catch(() => null) : null;
     const fs = LIVE ? await api(`/events/${cur}/followup-summary`).catch(() => ({ tools:[] })) : DEMO.followupSummary;
+    /* 이 화면은 둘로 갈린다. 운영자는 고치는 화면을, 나머지는 읽는 보고서를 본다.
+       전에는 안 갈려서 남의 대회를 연 사람에게 협찬사 추가 폼과 내보내기 단추가 그대로 보였다. */
+    const admin = !LIVE || !!ev.admin;
     return `<h2>협찬사에게 주는 숫자</h2>
       <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다.</p>
-      <div class="stat">
-        <div><b>${o.finishRate}%</b><span>완주율</span></div>
-        <div><b>${o.came ?? 0}/${o.teams}</b><span>온 팀</span></div>
-      </div>
+      ${funnel(o, ev)}
       <div class="stat">
         <div><b>${o.interview}</b><span>면접 연결</span></div>
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
@@ -3672,7 +3695,7 @@ const SCREEN = {
           : '<div class="meta" style="margin-top:8px">아직 응답이 없습니다.</div>'}
       </div>
 
-      ${(o.found || []).length ? `<div class="card">
+      ${admin && (o.found || []).length ? `<div class="card">
         <h3>어디서 왔나</h3>
         <div class="meta">2회차 홍보를 어디에 할지 이 표가 정합니다.
           혼자 온 사람 ${o.solo || 0}명.</div>
@@ -3680,7 +3703,7 @@ const SCREEN = {
         ${o.found.map(f => `<tr><td>${esc(f.k)}</td><td class="n">${f.c}팀</td></tr>`).join('')}</table>
       </div>` : ''}
 
-${pk ? `<details open><summary>협찬사에게 넘길 것
+${admin && pk ? `<details open><summary>협찬사에게 넘길 것
         <span class="when">${pk.sponsors.length ? pk.sponsors.reduce((a, x) => a + x.kept, 0)
           + '/' + pk.sponsors.reduce((a, x) => a + x.total, 0) + ' 약속 이행' : '협찬사 없음'}</span>
         </summary><div class="in">
@@ -3700,7 +3723,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
 
         <div class="shrow" style="margin-top:9px">
           <button class="btn sec sm" id="x-sum">협찬사용 집계 (CSV)</button>
-          <button class="btn sec sm" id="x-lead">동의자 연락처 (${pk.leads}팀)</button>
+          <button class="btn sec sm" id="x-lead">동의자 연락처 (${pk.leads ?? '—'}팀)</button>
         </div>
         <div class="meta" style="margin-top:8px">
           집계에 이름·연락처는 없습니다. ${pk.minCell}건 미만은 뭉쳐서 나갑니다.
@@ -3713,7 +3736,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
         ${ev.sponsors.length
           ? logoBand(ev.sponsors)
           : `<div class="meta" style="margin-top:8px">아직 없습니다.</div>`}
-        <label>회사 이름</label><input id="p-name" placeholder="예) 오픈에이아이">
+        ${admin ? `<label>회사 이름</label><input id="p-name" placeholder="예) 오픈에이아이">
         <div class="row">
           <div><label>무엇을 받았나</label>
             <select id="p-kind"><option>크레딧</option><option>상품</option><option>멘토</option><option>현금</option><option>현물</option></select></div>
@@ -3735,10 +3758,10 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
           <label>로고 이미지 주소</label><input id="p-logo" placeholder="찾기를 누르면 채워집니다">
           <label>눌렀을 때 갈 곳</label><input id="p-link" placeholder="https://회사홈페이지"></div></details>
         <div style="height:10px"></div>
-        <button class="btn sm" id="p-add">협찬사 추가</button>
+        <button class="btn sm" id="p-add">협찬사 추가</button>` : ''}
       </div></details>
 
-      ${fw ? `<details${fw.next.length ? ' open' : ''}><summary>2주 뒤 안부
+      ${admin && fw ? `<details${fw.next.length ? ' open' : ''}><summary>2주 뒤 안부
         <span class="when">${fw.next.length ? fw.next.length + '건 물어볼 때가 됐습니다'
           : fw.asked12 ? fw.aliveRate + '% 살아 있음' : '2 · 6 · 12주'}</span>
         </summary><div class="in">
@@ -3758,7 +3781,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
         <div class="meta">칸을 누르면 <b>안 물어봄 → 이어감 → 중단</b> 순으로 바뀝니다.</div>
       </div></details>` : ''}
 
-      ${LIVE ? `<details><summary>끝난 뒤 멘토 <span class="when">행사 전에 정해 둔다</span></summary>
+      ${admin && LIVE ? `<details><summary>끝난 뒤 멘토 <span class="when">행사 전에 정해 둔다</span></summary>
         <div class="in">
         <div class="meta">끝나고 팀을 봐 줄 사람을 <b>행사 전에</b> 정해 둡니다.
           끝나고 정하면 아무도 안 합니다.</div>
@@ -3800,14 +3823,20 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
           <button class="btn sm" id="a-add">짝지어 주기</button>` : ''}
       </div></details>` : ''}
 
-<details open><summary>성과 기록하기</summary><div class="in">
+${admin ? `<details open><summary>성과 기록하기</summary><div class="in">
         <div class="meta">행사 뒤 2주 동안 여기에 쌓습니다.</div>
         <label>무엇</label>
         <select id="o-kind"><option>면접</option><option>도입검토</option><option>채용</option><option>후속미팅</option></select>
         <label>어느 회사</label><input id="o-who" placeholder="회사 이름">
         <div style="height:10px"></div>
         <button class="btn sm" id="o-add">기록 추가</button>
-      </div></details>`;
+      </div></details>` : `<div class="card">
+        <h3>이 대회의 운영자이신가요</h3>
+        <div class="meta">여기 숫자는 누구나 봅니다. 고치는 것은 운영자만 합니다 —
+          <b>순위</b> 탭에서 운영자로 열면 약속 이행·협찬사·성과 기록이 나옵니다.</div>
+        <div style="height:8px"></div>
+        <button class="btn sec sm" data-go="board">순위 탭으로</button>
+      </div>`}`;
   },
 };
 
