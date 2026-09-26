@@ -1658,7 +1658,7 @@ with sync_playwright() as p:
     A(seen == 3 and pv["n"] == 3, f"세 팀이면 쌍이 셋이다: {seen}")
     prow = api(f"/api/events/{PE}/board", key=PK)["rows"]
     A([r["id"] for r in prow] == pids[::-1], f"승률 순위가 고른 대로가 아니다: {[(r['name'], r['pscore']) for r in prow]}")
-    A(prow[0]["pscore"] == 100 and prow[2]["pscore"] == 0 and prow[0]["pairs"] == 2, f"승률이 틀렸다: {prow[0]}")
+    A(prow[0]["pscore"] == 100 and prow[2]["pscore"] == 0 and prow[0]["pairs"] == 2, f"짝 비교 점수가 틀렸다: {prow[0]}")
     # 같은 쌍을 순서만 뒤집어 다시 고르면 덮어쓴다 — 비교 수는 안 늘고 이긴 쪽만 옮겨간다
     w0 = [r for r in prow if r["id"] == pids[0]][0]["wins"]
     st, r2 = post(f"/api/events/{PE}/pair", {"judge": "검사심사", "a": pids[1], "b": pids[0], "winner": pids[0]}, jkey=PJ)
@@ -1695,7 +1695,7 @@ with sync_playwright() as p:
     A(api(f"/api/events/{PE}/tv")["ranks"][0]["score"] == api(f"/api/events/{PE}/board", key=PK)["rows"][0]["pscore"],
       "큰 화면 순위가 승률을 안 쓴다")
     visit(f"/e/{PE}")
-    A("승률" in pg.inner_text("#view"), "공개 순위 표에 승률 열이 없다")
+    A("비교 점수" in pg.inner_text("#view"), "공개 순위 표에 비교 점수 열이 없다")
     ok("짝 비교 심사 — 소식·쌍 고르기·승률 순위·모름은 0 이 아님·마감 뒤 잠김")
 
     # ── 대역이 찾은 것 ④⑤ — 첫 화면 «대회 열기»는 만들기 화면으로, 대회 정보에 «여는 사람» 칸 ──

@@ -2394,10 +2394,10 @@ const SCREEN = {
       <details id="sec-apply"${mine ? ' open' : ''}><summary>참가 신청
         <span class="when">${mine ? '조금만 더' : d.rows.length ? '대신 넣어 줄 때' : '아직 아무도 없습니다'}</span>
         </summary><div class="in">${mine ? moreForm(mine) : applyForm()}</div></details>
-      <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객' : e.pmode ? '승률' : '점수'}</th><th class="n">${e.vmode ? '표' : e.pmode ? '비교' : '심사'}</th><th></th></tr>
+      <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객' : e.pmode ? '비교 점수' : '점수'}</th><th class="n">${e.vmode ? '표' : e.pmode ? '비교' : '심사'}</th><th></th></tr>
       ${d.rows.map(r => `<tr data-team="${r.id ?? ''}" style="cursor:pointer"><td>${r.rank}</td>
         <td>${r.featured ? '⭐ ' : ''}${esc(r.name)} ${r.done ? '<span class="pill ok">제출</span>' : '<span class="pill warn">미제출</span>'}</td>
-        <td class="n">${e.vmode ? (r.votes ? r.vote + '★' : '—') : e.pmode ? (r.pscore === null ? '—' : r.pscore + '%') : r.score}</td>
+        <td class="n">${e.vmode ? (r.votes ? r.vote + '★' : '—') : e.pmode ? (r.pscore === null ? '—' : r.pscore) : r.score}</td>
         <td class="n">${e.vmode ? (r.votes || 0) + '표' : e.pmode ? (r.pairs || 0) + '번' : r.judges + '명'}</td>
         <td><button class="btn sec sm" data-feature="${r.id}" data-on="${r.featured ? 0 : 1}"
           title="추천작으로 표시" style="padding:4px 8px">${r.featured ? '⭐' : '☆'}</button>
@@ -2587,11 +2587,11 @@ const SCREEN = {
         ? `<h3>순위</h3><p class="sub">심사 점수가 없어 순위를 매기지 않았습니다.</p>`
       : d.closed ? `<h3>순위${e.vmode ? ' <span class="pill">관객 평가</span>' : e.pmode ? ' <span class="pill">짝 비교</span>' : ''}</h3>
         ${e.vmode ? '<p class="sub">심사위원 대신 관객·참가자가 준 별점 평균으로 매겼습니다.</p>'
-          : e.pmode ? '<p class="sub">심사위원이 두 팀씩 견주어 고른 승률입니다.</p>' : ''}
-        <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객 평가' : e.pmode ? '승률' : '점수'}</th></tr>
+          : e.pmode ? '<p class="sub">심사위원이 두 팀씩 견주어 고른 것을 0~100 눈금으로 폈습니다. 상대가 강할수록 이긴 값이 큽니다.</p>' : ''}
+        <table><tr><th>순위</th><th>팀</th><th class="n">${e.vmode ? '관객 평가' : e.pmode ? '비교 점수' : '점수'}</th></tr>
         ${d.rows.map(r => `<tr><td>${r.rank}</td><td>${r.featured ? '⭐ ' : ''}${esc(r.name)}</td>
           <td class="n">${e.vmode ? (r.votes ? r.vote + '★ (' + r.votes + ')' : '—')
-            : e.pmode ? (r.pscore === null ? '—' : r.pscore + '% (' + r.pairs + '번)') : r.score}</td></tr>`).join('')}</table>`
+            : e.pmode ? (r.pscore === null ? '—' : r.pscore + ' (' + r.pairs + '번)') : r.score}</td></tr>`).join('')}</table>`
       : d.rows.length ? `<h3>참가한 팀 <span style="color:var(--ink3);font-weight:600">${d.rows.length}</span></h3>
         <p class="sub">순위와 점수는 <b>제출 마감 뒤</b>에 함께 공개됩니다.</p>
         <table><tr><th>팀</th><th class="n">제출</th></tr>
