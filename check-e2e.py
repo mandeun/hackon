@@ -881,6 +881,79 @@ with sync_playwright() as p:
     gctx.close()
     ok("줄 수 있는 것 — /give 세 화면(간식 → 대회 건너뜀 → 이름·연락처), 자리 카드는 이름·연락처만, 연락처는 운영자만")
 
+    # ── 탭 다섯 — 운영자가 아닌 사람이 열었을 때 ──────────────────────
+    # «순위» 탭에는 순위가 있어야 하고, «후원 보고» 탭에 남의 정산 폼이 있으면 안 된다.
+    # 둘 다 안 지켜지고 있었다: 순위 자리엔 «운영자로 열기» 안내만, 후원 보고엔 admin 검사가 0줄.
+    gctx2 = b.new_context(viewport={"width": 390, "height": 844})
+    gp2 = gctx2.new_page()
+    gp2.on("pageerror", lambda e: errs.append("손님탭:" + str(e)))
+    gp2.goto(f"{BASE}/app#{ev}")
+    gp2.wait_for_selector("body[data-ready='1']", timeout=8000)
+
+    # (1) 순위 — 마감 전이면 «나온 팀». 점수는 서버가 안 준다(Kaggle 식 private 리더보드).
+    gp2.click('nav button[data-t="board"]')
+    gp2.wait_for_timeout(1000)
+    btxt = gp2.inner_text("#view")
+    brows = api(f"/api/events/{ev}/board")["rows"]
+    A("나온 팀" in btxt or "순위" in btxt, f"순위 탭에 순위도 팀 목록도 없다: {btxt[:200]}")
+    A(brows and brows[0]["name"] in btxt,
+      f"순위 탭에 팀 이름이 한 줄도 없다 ({[r['name'] for r in brows[:3]]}): {btxt[:200]}")
+    A("운영자로 열기" in btxt, "운영자로 들어가는 문이 사라졌다")
+    ok(f"순위 — 운영자가 아니어도 나온 팀이 보인다 ({len(brows)}팀)")
+
+    # (2) 후원 보고 — 읽는 것만. 고치는 칸은 한 개도 없어야 한다.
+    gp2.click('nav button[data-t="spon"]')
+    gp2.wait_for_timeout(1400)
+    stxt = gp2.inner_text("#view")
+    A("undefined" not in stxt, f"후원 보고에 undefined 가 보인다: {stxt[:240]}")
+    for bad_id in ["#p-add", "#o-add", "#h-add", "#x-lead", "#x-sum"]:
+        A(gp2.query_selector(bad_id) is None, f"운영자가 아닌데 후원 보고에 {bad_id} 가 있다")
+    A("성과 기록하기" not in stxt, "운영자가 아닌데 성과 기록 폼이 보인다")
+    # 깔때기 — 신청·온 팀·완주가 한 줄. «온 팀» 은 서버가 손님에게 안 주니 «모름» 이어야 한다.
+    oc = api(f"/api/events/{ev}/outcomes")
+    A("came" not in oc, "손님에게 온 팀 수가 내려온다 (서버가 지우기로 되어 있다)")
+    for word in ["신청", "온 팀", "완주"]:
+        A(word in stxt, f"깔때기에 «{word}» 가 없다: {stxt[:240]}")
+    A("모름" in stxt, "서버가 안 준 «온 팀» 을 모름이 아닌 숫자로 그린다")
+    ok("후원 보고 — 손님은 읽는 보고서만 (고치는 칸 0개), 안 받은 숫자는 «모름»")
+
+    # (3) 대회 목록 — 카드에 D-day 와 참가 팀 수가 붙는다. 서버가 이미 세어 보내던 값이다.
+    gp2.click('nav button[data-t="home"]')
+    gp2.wait_for_timeout(900)
+    htxt2 = gp2.inner_text("#view")
+    evs = api("/api/events")
+
+    def want_dd(sdate):
+        try:
+            d0 = datetime.strptime(str(sdate)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+        n = (d0 - datetime.now().date()).days
+        return "오늘" if n == 0 else (f"D-{n}" if n > 0 else None)
+
+    marks = [m for m in (want_dd(e["starts"]) for e in evs) if m]
+    A(marks, "목록에 앞으로 열릴 대회가 하나도 없다 (검사 전제가 깨졌다)")
+    A(marks[0] in htxt2, f"목록 카드에 «{marks[0]}» 가 없다: {htxt2[:240]}")
+    withteams = [e for e in evs if e.get("teams")]
+    if withteams:
+        A(f"참가 {withteams[0]['teams']}팀" in htxt2,
+          f"카드에 참가 팀 수가 없다 ({withteams[0]['teams']}팀): {htxt2[:240]}")
+    ok(f"대회 목록 — 카드에 D-day({marks[0]})와 참가 팀 수가 붙는다")
+
+    # (4) 열기 — 이름을 넣으면 «대회» 탭에 올라갈 카드가 그 자리에서 그려진다
+    gp2.click('nav button[data-t="make"]')
+    gp2.wait_for_timeout(800)
+    if gp2.query_selector("#f-title"):
+        A(gp2.query_selector("#f-pv") is not None, "만들기 화면에 미리보기가 없다")
+        gp2.fill("#f-title", "미리보기시험 해커톤")
+        gp2.wait_for_timeout(350)
+        A("미리보기시험 해커톤" in gp2.inner_text("#f-pv"),
+          f"이름을 넣었는데 미리보기가 그대로다: {gp2.inner_text('#f-pv')[:120]}")
+        ok("열기 — 이름을 넣으면 올라갈 카드가 그 자리에서 그려진다")
+    else:
+        ok("열기 — 로그인 먼저 화면 (미리보기는 로그인 뒤)")
+    gctx2.close()
+
     # ── 협찬 안내 한 장 (/give/<대회id>) — 인스타 프로필에 거는 주소 ──
     # 「도와주세요」는 아무도 안 준다. 「이 자리는 얼마고 이름·로고가 어디에 붙는다」를 파는 화면이다.
     # 숫자는 하나도 안 박는다 — 서버가 준 price 를 그대로 화면에서 찾는다.

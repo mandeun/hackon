@@ -1891,9 +1891,12 @@ function funnel(o, ev) {
   const t = +o.teams || 0;
   const pct = n => t ? Math.round(n / t * 100) + '%' : '';
   const before = ev && ev.starts && new Date(String(ev.starts).slice(0, 10) + 'T23:59:59') > new Date();
-  const came = before        ? ['아직', '대회 전입니다']
-             : +o.came       ? [o.came + '팀', pct(+o.came)]
-             :                 ['모름', '등록을 한 번도 안 찍었습니다'];
+  /* 넷을 가른다. 서버는 운영자가 아니면 came 을 아예 안 내려보낸다(outcomes 의 delete o.came) —
+     그 «모름» 을 0 으로 그리면 손님 화면에 «온 팀 0» 이라는 거짓말이 뜬다. 실제로 그렇게 떠 있었다. */
+  const came = o.came === undefined || o.came === null ? ['모름', '운영자만 봅니다']
+             : before ? ['아직', '대회 전입니다']
+             : +o.came ? [o.came + '팀', pct(+o.came)]
+             : ['모름', '등록을 한 번도 안 찍었습니다'];
   return `<div class="stat fun">
     <div><b>${t}팀</b><span>신청</span></div>
     <i aria-hidden="true">›</i>
