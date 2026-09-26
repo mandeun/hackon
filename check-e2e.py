@@ -1395,7 +1395,59 @@ with sync_playwright() as p:
     try:
         urllib.request.urlopen(rreq); A(False, "살아 있는 대회 위에 또 살아났다")
     except urllib.error.HTTPError as e_: A(e_.code == 409, f"409 여야 하는데 {e_.code}")
-    ok("되살리기(사본+주최자 열쇠, 남의 열쇠 403, 중복 409) · 팀 링크(운영자만·되찾기·주소창 정리) · 받는 사람 열쇠 새로 · 전환 소식 자동")
+    # ── 지운 대회 휴지통 — 파일 첨부 없이 «대회» 탭에서 한 번 누른다 (2026-09-26) ──
+    # 위의 «사본 + 주최자 열쇠» 길도 그대로 살아 있어야 한다(노트북이 죽은 경우의 마지막 길).
+    def ownget(path, ow):
+        rq_ = urllib.request.Request(BASE + path, headers={"x-owner": ow})
+        with urllib.request.urlopen(rq_) as x_:
+            return json.load(x_)
+
+    def ownpost(path, ow):
+        rq_ = urllib.request.Request(BASE + path, method="POST", data=b"{}",
+                                     headers={"content-type": "application/json", "x-owner": ow})
+        try:
+            with urllib.request.urlopen(rq_) as x_:
+                return x_.status, json.load(x_)
+        except urllib.error.HTTPError as e_:
+            return e_.code, None
+
+    _, tev = post("/api/events", {"title": "휴지통e2e"}); TEV, TOK, TOW = tev["id"], tev["okey"], tev["owner"]
+    post(f"/api/events/{TEV}/needs", {"kind": "venue", "label": "장소"}, TOK)
+    post(f"/api/events/{TEV}/teams", {"name": "휴지통팀", "email": "trash@x.test", "agree": True})
+    A(delete(f"/api/events/{TEV}", {"confirm": "휴지통e2e"}, TOK)[0] == 200, "휴지통 준비 삭제가 안 됐다")
+    tl = ownget("/api/mine/trash", TOW)
+    A(len(tl) == 1 and tl[0]["event"] == TEV and tl[0]["title"] == "휴지통e2e" and tl[0]["teams"] == 1,
+      f"내 휴지통 목록이 이상하다: {tl}")
+    A("okey" not in json.dumps(tl) and "json" not in json.dumps(tl), f"휴지통 목록에 사본·열쇠가 실렸다: {tl}")
+    _, oev = post("/api/events", {"title": "남의주최자e2e"}); TOW2 = oev["owner"]
+    A(all(x["event"] != TEV for x in ownget("/api/mine/trash", TOW2)), "남의 휴지통이 내 목록에 보인다")
+    A(ownpost(f"/api/mine/trash/{tl[0]['id']}/restore", TOW2)[0] == 403, "남의 주최자 열쇠로 지운 대회가 되살아났다")
+    # 화면 — 주최자 열쇠만 든 브라우저의 «대회» 탭에서 목록을 보고 한 번 누른다
+    tctx = b.new_context(viewport={"width": 390, "height": 844}); tp = tctx.new_page()
+    tp.on("pageerror", lambda e_: errs.append("휴지통:" + str(e_)))
+    tp.goto(BASE + "/app"); tp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    tp.evaluate(f"localStorage.setItem('hackon.owner', '{TOW}')")
+    tp.goto(BASE + "/app"); tp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    A(tp.query_selector("#ev-trash") is not None, "주최자 열쇠가 있는데 «지운 대회» 목록이 없다")
+    A(tp.query_selector("#rs-file") is None, "주최자 열쇠가 있는데 사본 첨부 칸이 그대로 떠 있다")
+    tp.click("#ev-trash summary"); tp.wait_for_timeout(300)
+    ttxt = tp.inner_text("#ev-trash")
+    A("휴지통e2e" in ttxt and "팀 1" in ttxt, f"«지운 대회» 줄에 제목·팀 수가 없다: {ttxt}")
+    tp.once("dialog", lambda d_: d_.accept())
+    tp.click("[data-untrash-ev]")
+    # wait_for_function 은 안 쓴다 — /app 의 CSP 에 unsafe-eval 이 없어 페이지 안에서 eval 이 막힌다
+    tp.wait_for_url(lambda u_: u_.endswith("#" + TEV), timeout=10000)
+    tp.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A(tp.url.endswith(f"/app#{TEV}"), f"되살린 뒤 /app#<id> 로 안 갔다: {tp.url}")
+    A(tp.evaluate(f"localStorage.getItem('hackon.okey.{TEV}')"), "새 운영자 열쇠가 이 기기에 안 심겼다")
+    A(len(api(f"/api/events/{TEV}/needs")) == 1, "되살린 대회에 자리가 없다")
+    A(len(api(f"/api/events/{TEV}/board")["rows"]) == 1, "되살린 대회에 팀이 없다")
+    A(ownget("/api/mine/trash", TOW) == [], "되살렸는데 휴지통에 그대로 남아 있다")
+    tp.goto(BASE + "/app"); tp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    tp.click("#ev-trash summary"); tp.wait_for_timeout(300)
+    A("지운 대회가 없습니다" in tp.inner_text("#ev-trash"), "휴지통이 비었는데 «없습니다» 가 안 보인다")
+    tctx.close()
+    ok("되살리기 — «지운 대회» 목록에서 첨부 없이 한 번(남의 열쇠 403·남의 것 안 보임·30일) · 사본 파일 길도 그대로(주최자 열쇠, 남의 열쇠 403, 중복 409) · 팀 링크(운영자만·되찾기·주소창 정리) · 받는 사람 열쇠 새로 · 전환 소식 자동")
 
     # 참가자가 해야 하는 일은 열쇠 없이도 된다
     A(code_of(f"/api/events/{ev}") == 200, "대회 정보가 막혔다")

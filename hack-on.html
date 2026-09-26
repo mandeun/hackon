@@ -1836,8 +1836,10 @@ async function render() {
 const SCREEN = {
   async home() {
     const list = LIVE ? await api('/events') : DEMO.events;
-    let my = null;
+    let my = null, trash = null;
     if (LIVE && myKey()) { try { my = await api('/mine'); } catch { my = null; } }
+    /* 지운 대회. 주최자 열쇠가 있을 때만 묻는다 — 없으면 물어볼 것도 없다 */
+    if (LIVE && my) { try { trash = await api('/mine/trash'); } catch { trash = null; } }
     const mineBox = my && my.events.length ? `
       <h2>내가 연 대회</h2>
 
@@ -1885,10 +1887,18 @@ const SCREEN = {
         <div style="height:10px"></div>
         <button class="btn sm" id="ow-go">찾기</button>
       </div>`}
-      <details class="card" style="padding:14px 20px"><summary style="cursor:pointer;font-weight:700">지운 대회 되살리기</summary>
-        <div class="meta" style="margin-top:8px">사본 파일을 넣으면 돌아오고, 주최자 열쇠가 이 기기에 있어야 합니다.</div>
+      ${/* 되살리기는 두 길이다. 주최자 열쇠가 있으면 목록에서 한 번 누른다 — 첨부할 것이 없다.
+            열쇠가 없는 기기(노트북이 죽었거나 다른 폰)에만 사본 파일 칸을 접어 둔다. */''}
+      ${my ? `<details class="card" style="padding:14px 20px" id="ev-trash"><summary style="cursor:pointer;font-weight:700">지운 대회</summary>
+        <div class="meta" style="margin-top:8px">지운 대회는 30일 동안 남습니다.</div>
+        ${(trash && trash.length) ? trash.map(t => `<div class="card" style="padding:11px 13px">
+          <div class="meta"><b>${esc(t.title || '이름 없는 대회')}</b> · ${esc(String(t.at || '').slice(0, 10))} 지움 · 팀 ${+t.teams}</div>
+          <div style="height:8px"></div><button class="btn sec sm" data-untrash-ev="${+t.id}">되살리기</button></div>`).join('')
+          : `<div class="meta">지운 대회가 없습니다.</div>`}
+      </details>` : `<details class="card" style="padding:14px 20px"><summary style="cursor:pointer;font-weight:700">사본 파일이 있으면</summary>
+        <div class="meta" style="margin-top:8px">지울 때 받은 파일로 되살립니다.</div>
         <input type="file" id="rs-file" accept="application/json" style="margin-top:8px">
-        <div style="height:8px"></div><button class="btn sec sm" id="rs-go">되살리기</button></details>`;
+        <div style="height:8px"></div><button class="btn sec sm" id="rs-go">되살리기</button></details>`}`;
     if (!list.length) return mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
     return mineBox + `<h2>열린 대회</h2>` +
@@ -4380,6 +4390,16 @@ function wire() {
     const name = prompt('새 팀 이름'); if (!name) return;
     try { await api(`/teams/${b.dataset.rename}`, { method: 'PATCH', body: { name } }); flash('고쳤습니다'); render(); }
     catch (e) { flash(e.message, true); }
+  });
+  /* 지운 대회 되살리기 — 첨부 없이 한 번. 새 운영자 열쇠를 이 기기에 심고 그 대회 운영 화면으로 간다 */
+  document.querySelectorAll('[data-untrash-ev]').forEach(b => b.onclick = async () => {
+    if (!LIVE) return flash('데모에서는 안 됩니다', true);
+    if (!confirm('이 대회를 되살릴까요? 팀·제출·자리가 그대로 돌아옵니다.')) return;
+    try {
+      const r = await api(`/mine/trash/${b.dataset.untrashEv}/restore`, { method: 'POST' });
+      try { localStorage.setItem('hackon.okey.' + r.id, r.okey); localStorage.setItem('hackon.event', r.id); } catch (_) {}
+      location.href = '/app#' + r.id;
+    } catch (e) { flash(e.message, true); }
   });
   document.querySelectorAll('[data-untrash]').forEach(b => b.onclick = async () => {
     try { const r = await api(`/trash/${b.dataset.untrash}/restore`, { method: 'POST' }); flash(r.same ? '되살렸습니다. 팀 링크도 그대로입니다' : '되살렸습니다'); render(); }
