@@ -31,11 +31,16 @@ def _free_port():
         return s.getsockname()[1]
 
 
-def start(timeout=30):
-    """빈 DB 로 서버를 띄우고 base URL 을 돌려준다. 끝나면 알아서 정리한다."""
+def start(timeout=30, extra_env=None):
+    """빈 DB 로 서버를 띄우고 base URL 을 돌려준다. 끝나면 알아서 정리한다.
+
+    extra_env — 이 서버만 다르게 켤 때(예: 로그인 키를 넣어 둔 서버). 기본 서버는
+    키가 없는 상태를 봐야 하니 둘을 한 프로세스로 합칠 수 없다.
+    """
     port = _free_port()
     tmp = tempfile.mkdtemp(prefix="hackon-check-")
-    env = {**os.environ, "PORT": str(port), "DB": os.path.join(tmp, "check.db")}
+    env = {**os.environ, "PORT": str(port), "DB": os.path.join(tmp, "check.db"),
+           **(extra_env or {})}
     log = open(os.path.join(tmp, "server.log"), "w+", encoding="utf-8")
     proc = subprocess.Popen([shutil.which("node") or "node", "server.js"],
                             cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
