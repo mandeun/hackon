@@ -3301,8 +3301,12 @@ function purgeOld(db, force = false) {
     n += db.prepare("UPDATE requests SET contact='' WHERE event=? AND contact<>''").run(id).changes;
   }
   try { n += db.prepare("UPDATE feedback SET contact='' WHERE contact<>'' AND at < date('now','-180 days')").run().changes; } catch {}
+  /* 지운 대회 휴지통은 30일. 화면에서 «30일 뒤 지워집니다» 라고 약속한 그 30일이다.
+     팀·후원자 연락처가 사본 안에 그대로 들어 있으므로 기한이 지나면 줄째로 지운다. */
+  let trash = 0;
+  try { trash = db.prepare("DELETE FROM event_trash WHERE at < datetime('now','-30 days')").run().changes; } catch {}
   db.prepare("INSERT INTO meta(k,v) VALUES('purged_at',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(today);
-  return { events: old.length, cleared: n };
+  return { events: old.length, cleared: n, trash };
 }
 
 /* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
