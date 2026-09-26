@@ -1778,6 +1778,19 @@ with sync_playwright() as p:
     A("온 팀(기록 없음)" in pg.inner_text("#view") or "온 팀" in pg.inner_text("#view"), "보고서 온 팀 칸이 없다")
     ok("대역 ①②③④⑤ + 덤 — 결과물 내기 · 열쇠 찾기 상시 · /give 후원자도 함께한 곳 · 여는 사람 · 첫 화면에서 바로 만들기 · 관객 평가 뒤 점수 칸 없음 · 지우기 안내")
 
+    # ── 정적 화이트리스트 회귀 방지 — 화면 파일이 참조하는 로컬 자산은 전부 200 이어야 한다 (hero.jpg 가 404 로 나갔던 날) ──
+    import glob as _glob
+    assets = set()
+    for hf in ["home.html", "hack-on.html", "news.html"]:
+        if not os.path.exists(hf): continue
+        for mm in re.finditer(r'(?:src|href)="(/[^"$?#]+\.(?:png|jpg|jpeg|svg|webp|ico|js|css|webmanifest))"', open(hf, encoding="utf-8").read()):
+            assets.add(mm.group(1))
+        for mm in re.finditer(r'url\((/[^)$?#]+\.(?:png|jpg|jpeg|svg|webp))\)', open(hf, encoding="utf-8").read()):
+            assets.add(mm.group(1))
+    missing = [a for a in sorted(assets) if os.path.exists(a.lstrip("/")) and code_of(a) != 200]
+    A(not missing, f"화면이 참조하는 자산이 서버에서 안 나온다(화이트리스트 누락): {missing}")
+    ok(f"화면 자산 {len(assets)}개 전부 200 (화이트리스트)")
+
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")
@@ -2388,6 +2401,7 @@ with sync_playwright() as pw:
     ok("메일 초안 — 평문, 링크 없음, 불리한 것 먼저")
 
     # 연락한 곳 대장
+    pg.locator('[data-lead="장소"][data-src="창구"]').first.scroll_into_view_if_needed()   # 한 번 흔들렸다(클릭 시간 초과) — 화면 밖이면 먼저 끌어온다
     pg.locator('[data-lead="장소"][data-src="창구"]').first.click()
     pg.wait_for_timeout(900)
     leads = api(f"/api/events/{ev}/leads", key=OK)["rows"]
