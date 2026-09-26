@@ -183,6 +183,33 @@ details.more ul{margin:0;padding:0 0 12px 1.1em;color:var(--grey);font-size:15px
 details.more li{margin:6px 0}
 details.more li a{display:inline-flex;align-items:center;min-height:44px}
 
+/* 대회 열기 시트. 첫 화면을 안 떠난다 — /app 으로 넘기면 «여기 어디지» 에서 한 번 더 샌다.
+   폰에서는 아래에서 올라오는 판, 큰 화면에서는 가운데 카드. 카드 결·눈금은 절(section)과 같다. */
+.sheet{position:fixed;inset:0;z-index:30;display:flex;align-items:flex-end;justify-content:center}
+@media (min-width:640px){ .sheet{align-items:center;padding:var(--s5)} }
+.sheet .back{position:absolute;inset:0;background:rgba(11,16,32,.46)}
+.sheet .box{position:relative;z-index:1;width:100%;max-width:460px;background:var(--card);
+  border-radius:22px 22px 0 0;padding:var(--s5) var(--s5) calc(var(--s5) + env(safe-area-inset-bottom));
+  box-shadow:0 -10px 40px rgba(11,16,32,.22);animation:sup .22s ease-out}
+@media (min-width:640px){ .sheet .box{border-radius:22px;box-shadow:0 18px 60px rgba(11,16,32,.30)} }
+@keyframes sup{from{transform:translateY(18px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){ .sheet .box{animation:none} }
+.sheet h2{font-size:22px;padding-right:40px}
+.sheet .why{font-size:15px;color:var(--mute);margin-top:var(--s2);line-height:1.6;text-wrap:pretty}
+.sheet label.f{display:block;font-size:14px;font-weight:700;color:var(--grey);margin:var(--s5) 0 var(--s2)}
+.sheet input{width:100%;background:var(--soft)}
+.sheet .go{width:100%;margin-top:var(--s3)}
+.sheet .err{margin-top:var(--s2);font-size:14px;font-weight:700;color:#C4353A}
+.sheet .note{margin-top:var(--s4);font-size:13.5px;color:var(--mute);line-height:1.6;text-wrap:pretty}
+.sheet .link{margin-top:var(--s4);background:var(--soft);border-radius:12px;padding:12px 14px;
+  font:600 13.5px var(--mono);word-break:break-all}
+.sheet .rowb{display:flex;gap:var(--s2);margin-top:var(--s3);flex-wrap:wrap}
+.sheet .rowb > *{flex:1 1 11em}
+.sheet .x{position:absolute;top:var(--s2);right:var(--s2);width:44px;height:44px;border:0;border-radius:12px;
+  background:transparent;color:var(--grey);font-size:17px;line-height:1;cursor:pointer}
+.sheet .x:hover{background:var(--soft)}
+.btn[disabled]{opacity:.55;cursor:default}
+
 footer{padding:26px 0 40px;font-size:13px;color:var(--grey)}
 footer .wrap{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
 footer a{color:inherit;display:inline-flex;align-items:center;min-height:44px}
@@ -259,7 +286,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   <div id="empty" class="empty" hidden>
     <b>아직 열린 대회가 없습니다.</b>
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
-    <a class="btn s" href="/app?make=1">대회 열기</a>
+    <a class="btn s" id="empty-open" href="/app?make=1">대회 열기</a>
   </div>
   <!-- 같은 절 안에 둔다 — 첫 화면은 절 셋을 넘기지 않는다(검사가 잠근다). 의뢰가 없으면 통째로 숨는다 -->
   <div id="asks" hidden style="margin-top:22px">
@@ -300,6 +327,31 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   </ul>
 </details>
 </main>
+
+<!-- 대회 열기. 이름 한 칸만 여기서 받고, 열쇠는 운영 화면(/app)과 같은 자리에 심는다. -->
+<div class="sheet" id="open-sheet" hidden>
+  <div class="back" id="open-back"></div>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="open-h">
+    <button type="button" class="x" id="open-x" aria-label="닫기">✕</button>
+    <h2 id="open-h">대회 열기</h2>
+    <div id="open-1">
+      <p class="why">이름 하나면 열립니다. 날짜·상금·심사 기준은 연 다음에 채웁니다.</p>
+      <label class="f" for="open-title">대회 이름</label>
+      <input id="open-title" name="open-title" maxlength="80" autocomplete="off" placeholder="예) 우리 동네 생활 불편 해커톤">
+      <button type="button" class="btn go" id="open-go">대회 열기</button>
+      <p class="err" id="open-err" role="alert" hidden></p>
+    </div>
+    <div id="open-2" hidden>
+      <p class="why" id="open-done"></p>
+      <div class="link" id="open-link"></div>
+      <div class="rowb">
+        <a class="btn" id="open-admin" href="/app">운영 화면으로</a>
+        <a class="btn o" id="open-pub" href="/">공개 링크 열기</a>
+      </div>
+      <p class="note">이 브라우저에 열쇠를 넣어 뒀습니다. 다른 기기에서는 운영 화면 열쇠 찾기로 들어가세요.</p>
+    </div>
+  </div>
+</div>
 
 <footer>
   <div class="wrap">
@@ -459,6 +511,64 @@ fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list)
       'title="' + esc(w.name) + ' 결과물"></iframe>';
   });
 }).catch(function(){});
+
+/* ── 대회 열기. 첫 화면 안에서 끝난다. ─────────────────────────────
+   전에는 /app?make=1 로 보냈다. 처음 온 사람이 화면이 통째로 바뀐 뒤 «여기 어디지» 에서
+   한 번 더 샜다. 이름 한 칸을 이 자리에서 받아 바로 만든다.
+   만든 뒤 열쇠는 운영 화면(hack-on.html)과 **같은 이름**으로 심는다 —
+   hackon.event · hackon.okey.<id> · hackon.owner · hackon.jkey.<id> · hackon.vkey.<id>.
+   이름이 하나라도 어긋나면 «운영 화면으로» 를 눌렀을 때 남의 대회처럼 잠긴다.
+   자바스크립트가 죽어도 단추의 href(/app?make=1)가 그대로 살아 있다. */
+var 시트 = document.getElementById('open-sheet'), 시트연단추 = null;
+function 시트열기(from){
+  시트연단추 = from || null;
+  시트.hidden = false;
+  document.documentElement.style.overflow = 'hidden';
+  var t = document.getElementById('open-title'); t.focus(); t.select();
+}
+function 시트닫기(){
+  시트.hidden = true;
+  document.documentElement.style.overflow = '';
+  if (시트연단추) 시트연단추.focus();   /* 눌렀던 자리로 돌려 놓는다 — 키보드로 온 사람이 처음으로 튕기지 않게 */
+}
+['hero-open','nav-open','empty-open'].forEach(function(id){
+  var el = document.getElementById(id); if (!el) return;
+  el.addEventListener('click', function(ev){ ev.preventDefault(); 시트열기(el); });
+});
+document.getElementById('open-x').onclick = 시트닫기;
+document.getElementById('open-back').onclick = 시트닫기;
+document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape' && !시트.hidden) 시트닫기(); });
+document.getElementById('open-title').addEventListener('keydown', function(ev){
+  if (ev.key === 'Enter') { ev.preventDefault(); document.getElementById('open-go').click(); }
+});
+document.getElementById('open-go').addEventListener('click', function(){
+  var go = document.getElementById('open-go'), err = document.getElementById('open-err');
+  var 칸 = document.getElementById('open-title'), 이름 = 칸.value.trim();
+  err.hidden = true;
+  if (!이름) { err.textContent = '대회 이름을 넣어 주세요'; err.hidden = false; 칸.focus(); return; }
+  go.disabled = true; go.textContent = '여는 중…';
+  fetch('/api/events', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ title: 이름 }) })
+    .then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error || '열지 못했습니다'); return j; }); })
+    .then(function(r){
+      try {
+        localStorage.setItem('hackon.event', r.id);
+        localStorage.setItem('hackon.okey.' + r.id, r.okey);          /* 대회 열쇠 */
+        if (r.owner) localStorage.setItem('hackon.owner', r.owner);   /* 주최자 열쇠 */
+        if (r.jkey) localStorage.setItem('hackon.jkey.' + r.id, r.jkey);   /* 심사 열쇠 */
+        if (r.vkey) localStorage.setItem('hackon.vkey.' + r.id, r.vkey);   /* 관객 평가 열쇠 */
+      } catch (_) {}
+      document.getElementById('open-h').textContent = '열렸습니다';
+      document.getElementById('open-done').textContent = '«' + 이름 + '» 이 열렸습니다. 아래 주소를 보내면 그 자리에서 신청합니다.';
+      document.getElementById('open-link').textContent = location.origin + '/e/' + r.id;
+      document.getElementById('open-admin').href = '/app#' + r.id;
+      document.getElementById('open-pub').href = '/e/' + r.id;
+      document.getElementById('open-1').hidden = true;
+      document.getElementById('open-2').hidden = false;
+      document.getElementById('open-admin').focus();
+    })
+    .catch(function(e){ err.textContent = e.message || '열지 못했습니다. 잠시 뒤에 다시 해 보세요'; err.hidden = false; })
+    .then(function(){ go.disabled = false; go.textContent = '대회 열기'; });
+});
 
 /* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
