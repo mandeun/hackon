@@ -1586,6 +1586,12 @@ function open(file) {
      questions — 대회 안 묻고 답하기. 팀 열쇠로 묻고 운영자만 답한다. 익명 없음, 커뮤니티 아님 */
   try { db.exec("ALTER TABLE events ADD COLUMN safety TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN pay TEXT NOT NULL DEFAULT ''"); } catch {}      // 입금 안내 한 줄 — 맡기 확정된 사람에게만 보인다. 앱은 돈을 안 만진다
+  /* 2026-09-27 취소 규칙(스페이스클라우드·이벤터스: 규칙은 주최자가 정하고 상세 페이지에 박는다).
+     cancel_rule — 한 줄. 비면 빈 문자열 그대로 둔다. 기본 문장은 «보여 줄 때»만 쓴다(화면이 갖고 있다) —
+     기본값을 DB 에 써 두면 주최자가 안 정한 것과 «이 문장으로 정한 것» 을 나중에 가를 수 없다. */
+  try { db.exec("ALTER TABLE events ADD COLUMN cancel_rule TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* event_trash.notified — 지우기 직전에 알림이 닿은 팀 수. 지운 뒤에 세면 셀 곳이 없다 */
+  try { db.exec('ALTER TABLE event_trash ADD COLUMN notified INTEGER NOT NULL DEFAULT 0'); } catch {}
   /* teams.no — 자리 번호. 신청할 때 한 번 받고 그 뒤로는 안 바뀐다(팀이 빠져도 뒤가 안 당겨진다 — 인쇄한 자리표와 어긋나면 점수가 딴 팀에 붙는다).
      이미 있는 팀은 신청 순으로 한 번 매긴다 */
   try { db.exec('ALTER TABLE teams ADD COLUMN no INTEGER NOT NULL DEFAULT 0'); } catch {}
@@ -2013,6 +2019,8 @@ function editEvent(db, id, b) {
   /* «문제가 생기면 이 사람에게». 참가자 화면에 그대로 나가는 공개 연락 한 줄이다 — 운영자가 스스로 적는다 */
   if (b.safety !== undefined) { set.push('safety=?'); val.push(plain(b.safety, 120)); }
   if (b.pay !== undefined) { set.push('pay=?'); val.push(plain(b.pay, 120)); }
+  /* 취소 규칙 한 줄. 공개 페이지와 신청 뒤 카드에 접지 않고 그대로 나간다 */
+  if (b.cancel_rule !== undefined) { set.push('cancel_rule=?'); val.push(plain(b.cancel_rule, 120)); }
   if (b.mode !== undefined) {
     if (!['onsite', 'online'].includes(b.mode)) throw new HttpError(400, 'mode 는 onsite·online 중 하나입니다');
     set.push('mode=?'); val.push(b.mode);
@@ -2875,12 +2883,33 @@ function eventLoad(db, event) {
   };
 }
 const emptyEvent = load => Object.values(load).every(v => v === 0);
-function deleteEvent(db, event, b) {
+/* 신청자가 있는 대회를 접을 때는 «먼저 알리고 그 다음에 지운다».
+   소모임은 아예 막는다(「모임장은 멤버들이 있는 한 모임을 임의로 삭제할 수 없습니다」). hackon 은 막지 않고
+   순서를 고정한다 — 지운 뒤에 알리면 대회도 팀 링크도 이미 없어서 «무엇이 취소됐는지» 를 댈 데가 없다.
+   메일이 꺼져 있으면(RESEND_KEY 없음) 소식에 한 줄로 남긴다. 소식은 지우기 직전 사본에 같이 들어가
+   되살렸을 때 그대로 보인다. 돌려주는 값은 «알림이 닿은 팀 수» 다 — 메일이 나갔거나 소식에 남은 팀. */
+async function notifyDeleted(db, event, e) {
+  const teams = db.prepare('SELECT id, name, contact FROM teams WHERE event=?').all(event);
+  if (!teams.length) return 0;
+  let sent = 0;
+  for (const t of teams) {
+    if (!isEmail(t.contact)) continue;
+    if (await sendMail(db, { event, kind: 'gone', ref: t.id, to: t.contact,
+      subject: `[HACK:ON] ${e.title} — 대회가 접혔습니다`,
+      text: `${t.name} 팀, 신청하신 ${e.title} 이 주최자에 의해 접혔습니다.\n\n이 대회는 더 열리지 않습니다. 낸 결과물과 점수도 같이 내려갑니다.\n까닭은 주최자에게 물어보세요.\n\n답장은 hi@mandeun.com 으로.` })) sent++;
+  }
+  if (sent < teams.length) say(db, event, `대회를 접습니다 · 신청 ${teams.length}팀에 알립니다 (메일 ${sent}팀)`);
+  return teams.length;
+}
+async function deleteEvent(db, event, b, notify = notifyDeleted) {
   const e = db.prepare('SELECT id, title, owner FROM events WHERE id=?').get(event);
   if (!e) throw new HttpError(404, '없는 대회입니다');
   const load = eventLoad(db, event);
   if (!emptyEvent(load) && String((b && b.confirm) || '').trim() !== e.title)
     throw new HttpError(409, `신청·자리·제안이 있는 대회입니다. 지우려면 대회 이름을 그대로 적어 보내세요: ${e.title}`);
+  /* 알림이 먼저다. 여기서 터지면 지우지 않는다 — 안 나간 알림 뒤에 찍히는 «지웠습니다» 는 거짓이다.
+     사본은 알림 뒤에 뜬다. 그래야 소식에 남긴 줄이 사본에도 들어간다. */
+  const notified = await notify(db, event, e);
   const copy = dump(db, event);
   let saved = '';
   try {
@@ -2894,11 +2923,11 @@ function deleteEvent(db, event, b) {
      보통은 주최자가 «대회» 탭의 «지운 대회»에서 한 번 눌러 되살린다. 열쇠는 사본에 없고 owner 칸에 있다. */
   let trash = 0;
   try {
-    trash = Number(db.prepare('INSERT INTO event_trash(event,owner,title,json) VALUES(?,?,?,?)')
-      .run(event, e.owner || '', e.title, JSON.stringify(copy)).lastInsertRowid);
+    trash = Number(db.prepare('INSERT INTO event_trash(event,owner,title,json,notified) VALUES(?,?,?,?,?)')
+      .run(event, e.owner || '', e.title, JSON.stringify(copy), notified).lastInsertRowid);
   } catch { trash = 0; }
   db.prepare('DELETE FROM events WHERE id=?').run(event);
-  return { ok: true, saved: path.basename(saved), dump: copy, load, trash };
+  return { ok: true, saved: path.basename(saved), dump: copy, load, trash, notified };
 }
 
 /* ── «받는 사람» — 후원자·의뢰자 역할 하나 ──
@@ -3090,7 +3119,7 @@ function sponsorName(v) {
 function eventTrash(db, owner) {
   /* 열쇠 없이 물으면 403 이다 — 400 은 «보낸 것이 잘못됐다» 는 뜻이라 «권한이 없다» 를 가린다(감사 e) */
   if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');
-  return db.prepare('SELECT id, event, title, json, at FROM event_trash WHERE owner=? ORDER BY id DESC').all(owner)
+  return db.prepare('SELECT id, event, title, json, at, notified FROM event_trash WHERE owner=? ORDER BY id DESC').all(owner)
     .map(r => {
       let teams = 0;
       try { teams = (JSON.parse(r.json).teams || []).length; } catch { teams = 0; }
@@ -3365,9 +3394,12 @@ function csvOf(db, event, withContact = true) {
   const cell = v => { let s = String(v == null ? '' : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;   // 엑셀이 수식으로 읽는 첫 글자(감사 8)
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   /* 스태프 방에 올릴 판은 «연락 빼고»로 받는다 — 연락처 열 자체가 없다 */
-  const head = ['자리', '팀', ...(withContact ? ['연락처'] : []), '역할', '체크인', '제출 주소', '점수', '보정 점수', '순위'];
+  /* 확정 칸은 «온다 / 못 옴 / 모름» 셋이다. 아직 안 물은 팀을 «못 옴»이나 빈 칸으로 적으면
+     간식·자리를 그 숫자로 잡게 된다 — 모름은 모름으로 적는다. */
+  const conf = v => (v === 'no' ? '못 옴' : v ? '온다' : '모름');
+  const head = ['자리', '팀', ...(withContact ? ['연락처'] : []), '역할', '확정', '체크인', '제출 주소', '점수', '보정 점수', '순위'];
   const lines = [head.join(',')];
-  for (const r of b.rows) lines.push([r.no, r.name, ...(withContact ? [r.contact] : []), r.role, r.came, r.url || '', r.score, r.rscore, r.rank].map(cell).join(','));
+  for (const r of b.rows) lines.push([r.no, r.name, ...(withContact ? [r.contact] : []), r.role, conf(r.confirmed), r.came, r.url || '', r.score, r.rscore, r.rank].map(cell).join(','));
   lines.push('', ['자리 종류', '자리', '이름', '소속', '상태'].join(','));
   for (const x of pledgesOf(db, event).filter(x => x.status === 'ok' || x.status === 'done'))
     lines.push([x.kind, x.label, x.name, x.org, x.status].map(cell).join(','));
@@ -3896,7 +3928,7 @@ function routes(db) {
           }
           if (req.method === 'DELETE') {
             needAdmin(db, m[1], key, owner);
-            return json(res, 200, deleteEvent(db, m[1], await body(req)));
+            return json(res, 200, await deleteEvent(db, m[1], await body(req)));
           }
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/teams$/)) && req.method === 'POST') {
@@ -4636,7 +4668,7 @@ function routes(db) {
 /* #endregion reuse:router */
 
 /* ───────────────────── 자체 점검 ───────────────────── */
-function selftest() {
+async function selftest() {
   const tmp = path.join(ROOT, 'data', 'test.db');
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   const db = open(tmp);
@@ -5058,15 +5090,16 @@ function selftest() {
   ok(emptyEvent(eventLoad(db, dEv.id)), '이름만 넣은 대회는 빈 대회다');
   const dNeed = addNeed(db, dEv.id, { kind: 'judge', label: '심사위원' });
   ok(!emptyEvent(eventLoad(db, dEv.id)), '자리만 올려도 빈 대회가 아니다 (팀·제출만 보면 놓친다)');
-  let dThrew = 0; try { deleteEvent(db, dEv.id, {}); } catch (e) { dThrew = e.code; }
+  let dThrew = 0; try { await deleteEvent(db, dEv.id, {}); } catch (e) { dThrew = e.code; }
   ok(dThrew === 409 && db.prepare('SELECT 1 FROM events WHERE id=?').get(dEv.id), 'confirm 없이는 안 지워진다 (409)');
   const dOut = setPledge(db, addPledge(db, dNeed.id, dEv.id, { name: '밖에서온심사', org: '동네', note: '앱 밖에서 구함' }).id, { status: 'ok' });
   ok(dOut.status === 'ok' && needsOf(db, dEv.id)[0].filled === 1 && ledgerOf(db, dEv.id)[0].name === '밖에서온심사',
      '밖에서 구한 사람은 확인된 기여로 점판·장부에 바로 오른다');
-  const dRes = deleteEvent(db, dEv.id, { confirm: '지우기검사' });
+  const dRes = await deleteEvent(db, dEv.id, { confirm: '지우기검사' });
   ok(dRes.ok && dRes.dump && dRes.dump.event.id === dEv.id && !db.prepare('SELECT 1 FROM events WHERE id=?').get(dEv.id),
      '제목을 맞게 보내면 지워지고 응답에 사본이 실린다');
   ok(!('okey' in dRes.dump.event), '응답 사본에도 운영자 열쇠는 없다');
+  ok(dRes.notified === 0, '신청한 팀이 없으면 알릴 곳도 없다 (' + dRes.notified + ')');
   /* 상호평가 — 팀 열쇠로만, 자기 팀 제외 */
   const prEv = createEvent(db, { title: '상호평가검사' });
   const prA = joinTeam(db, prEv.id, { name: '피가', email: 'pa@x.test', agree: true });
@@ -5146,7 +5179,7 @@ function selftest() {
   db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(rsEv.id, '살아라');
   const rsDump = dump(db, rsEv.id);
   ok(rsDump.needs.length === 1 && rsDump.pledges.length === 1 && rsDump.notices.length === 1, '사본에 자리·신청·소식이 들어간다');
-  deleteEvent(db, rsEv.id, { confirm: '되살리기검사' });
+  await deleteEvent(db, rsEv.id, { confirm: '되살리기검사' });
   let rsBad = 0; try { restoreEvent(db, rsDump, 'wrong-owner'); } catch (e) { rsBad = e.code; }
   ok(rsBad === 403 && !db.prepare('SELECT 1 FROM events WHERE id=?').get(rsEv.id), '남의 주최자 열쇠로는 못 살린다');
   const rsRes = restoreEvent(db, rsDump, rsOwner);
@@ -5164,11 +5197,25 @@ function selftest() {
     addNeed(db, tEv.id, { kind: 'venue', label: '장소' });
     const other = createEvent(db, { title: '남의대회' });
     const otherOwner = db.prepare('SELECT owner FROM events WHERE id=?').get(other.id).owner;
-    const tDel = deleteEvent(db, tEv.id, { confirm: '휴지통검사' });
+    const tDel = await deleteEvent(db, tEv.id, { confirm: '휴지통검사' });
     ok(tDel.trash > 0 && db.prepare('SELECT COUNT(*) c FROM event_trash WHERE event=?').get(tEv.id).c === 1,
        '대회를 지우면 휴지통에 한 줄 남는다');
+    /* 신청자가 있으면 지우기 «전에» 알린다. 메일이 꺼져 있으면 소식에 남고, 그 줄이 사본에 들어간다 */
+    ok(tDel.notified === 1, '신청자 있는 대회를 지우면 알림이 닿은 팀 수가 응답에 실린다 (' + tDel.notified + ')');
+    ok((tDel.dump.notices || []).some(x => String(x.text).includes('대회를 접습니다')),
+       '메일이 꺼져 있으면 소식에 남고, 그 줄이 지우기 직전 사본에 들어간다');
     const tRow = db.prepare('SELECT * FROM event_trash WHERE id=?').get(tDel.trash);
     ok(tRow.owner === tOwner, '휴지통 줄에 주최자(owner)가 따로 저장된다 — 사본에는 열쇠가 없다');
+    ok(tRow.notified === 1, '휴지통 줄에 알림이 닿은 팀 수가 적힌다');
+    /* 알리다 터지면 지우지 않는다 — 안 나간 알림 뒤에 찍는 «지웠습니다» 는 거짓이다 */
+    const nEv = createEvent(db, { title: '알림실패' });
+    joinTeam(db, nEv.id, { name: '알림팀', email: 'nf@x.test', agree: true });
+    let nThrew = '';
+    try { await deleteEvent(db, nEv.id, { confirm: '알림실패' }, () => { throw new Error('메일 서버 죽음'); }); }
+    catch (e) { nThrew = e.message; }
+    ok(nThrew === '메일 서버 죽음' && db.prepare('SELECT 1 FROM events WHERE id=?').get(nEv.id)
+       && !db.prepare('SELECT 1 FROM event_trash WHERE event=?').get(nEv.id),
+       '알림이 터지면 대회는 안 지워지고 휴지통에도 안 들어간다');
     const tList = eventTrash(db, tOwner);
     ok(tList.length === 1 && tList[0].event === tEv.id && tList[0].title === '휴지통검사' && tList[0].teams === 1,
        '내 휴지통 목록에 제목·지운 날·팀 수가 실린다 (' + JSON.stringify(tList[0]) + ')');
@@ -5689,6 +5736,20 @@ function selftest() {
   ok(board(db, ev, true).rows.find(r => r.id === t1).confirmed === 'no', '«못 가요» 가 주최자 표에 실린다');
   db.prepare("UPDATE teams SET confirmed=? WHERE id=?").run(new Date().toISOString(), t1);
   ok(board(db, ev, true).rows.find(r => r.id === t1).confirmed.length > 4, '«올 거예요» 가 주최자 표에 실린다');
+  /* 내보내기에도 확정 칸이 있어야 준비 수량을 그 숫자로 잡는다. 안 물은 팀은 «모름» — 빈 칸이 아니다 */
+  const cvLines = csvOf(db, ev).split('\n');
+  ok(cvLines[0].split(',').includes('확정'), 'CSV 머리줄에 확정 칸이 있다');
+  ok(cvLines.slice(1, 4).some(l => l.split(',').includes('온다'))
+     && cvLines.slice(1, 4).some(l => l.split(',').includes('모름')), 'CSV 확정 칸은 온다·모름을 갈라 적는다');
+
+  /* 취소 규칙 — 주최자가 정하고 대회 페이지에 박는다. 안 정하면 빈 값 그대로다(기본 문장은 화면에만) */
+  ok(getEvent(db, ev).cancel_rule === '', '취소 규칙을 안 정하면 빈 값이다 — 기본 문장을 DB 에 써 두지 않는다');
+  editEvent(db, ev, { cancel_rule: '하루 전까지 팀 화면에서. 그 뒤는 주최자에게' });
+  ok(getEvent(db, ev).cancel_rule === '하루 전까지 팀 화면에서. 그 뒤는 주최자에게', '취소 규칙은 고쳐진다');
+  editEvent(db, ev, { cancel_rule: '가'.repeat(200) });
+  ok(getEvent(db, ev).cancel_rule.length === 120, '취소 규칙은 120자에서 끊긴다');
+  editEvent(db, ev, { cancel_rule: '' });
+  ok(getEvent(db, ev).cancel_rule === '', '취소 규칙은 지울 수 있다');
   db.prepare("UPDATE teams SET came=datetime('now') WHERE id=?").run(t1);
   ok(outcomes(db, ev).came === 1, '체크인이 세어진다');
   ok(outcomes(db, ev).photo === 1, '촬영 동의가 세어진다');
@@ -6190,7 +6251,12 @@ function selftest() {
 
 /* ───────────────────── 실행 ───────────────────── */
 if (require.main === module) {
-  if (process.argv.includes('--test')) { selftest(); process.exit(0); }
+  /* 자체 점검은 비동기다(대회 지우기가 알림을 기다린다). 그냥 부르면 아래 줄이 이어서 돌아
+     진짜 DB 를 열고 포트를 잡는다 — 그래서 서버 띄우기를 main() 으로 갈라 두고 둘 중 하나만 부른다. */
+  if (process.argv.includes('--test')) selftest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
+  else main();
+}
+function main() {
   const db = open(DBFILE);
 
   /* 10분마다 통째로 복사해 둔다. 심사 도중에 노트북이 죽는 일이 실제로 생긴다.
