@@ -835,6 +835,18 @@ async function sendMail(db, m) {
   } catch (e) { logMail(db, m, 'failed', e.message); return false; }
 }
 const mailSite = () => SITES[0] || `http://localhost:${PORT}`;
+/* 내 열쇠 찾기 — 있든 없든 같은 응답을 준다(감사 9). 참가한 연락처인지가 밖에서 안 읽혀야 한다.
+   참가 기록이 있을 때만 메일이 붙는다. 프로필 주소는 공개라(연락처가 안 담긴다) 메일로 보내도 된다. */
+function whoami(db, contact) {
+  const pid = pidOf(db, contact);
+  const has = !!(pid && db.prepare('SELECT 1 FROM people WHERE id=?').get(pid));
+  return {
+    body: { ok: true },
+    mail: has ? { kind: 'whoami', ref: pid, to: String(contact || '').trim(),
+      subject: '[HACK:ON] 참가 기록 주소입니다',
+      text: `이 연락처로 참가한 기록이 있습니다.\n\n내 기록: ${mailSite()}/p/${pid}\n\n이 주소에는 연락처가 담기지 않습니다. 찾지 않으셨다면 버리세요.\n\n답장은 hi@mandeun.com 으로.` } : null,
+  };
+}
 /* 신청 직후 — 팀 링크를 메일로도 남긴다(GUIDE §9 «확인 메일은 즉시 보냅니다»). 링크를 잃으면 재확인도 못 한다(이탈 감사 P6). */
 function joinMail(db, tid) {
   const t = db.prepare('SELECT t.id, t.name, t.contact, t.tkey, e.id AS event, e.title, e.starts FROM teams t JOIN events e ON e.id=t.event WHERE t.id=?').get(tid);
@@ -1063,7 +1075,7 @@ const MCP_TOOLS = [
   { name: 'post_problem', description: 'Posts a new problem to the HACK:ON(해커온) problem bank. name = shop or nickname, pain = what is tedious, done = what counts as solved, contact = email or phone (shown only to builders). 문제 올리기', inputSchema: { type: 'object', properties: { name: { type: 'string' }, pain: { type: 'string' }, done: { type: 'string' }, contact: { type: 'string' } }, required: ['name', 'pain', 'contact'] }, annotations: ann('문제 올리기', false) },
   { name: 'news', description: 'Returns HACK:ON(해커온) news — recent AI models, papers, tools, articles and hackathon winners as Markdown; optional job filter: 마케팅, 기획, 디자인, 개발, 영업·CS, 데이터, 소상공인. 해커온뉴스', inputSchema: { type: 'object', properties: { job: { type: 'string' } } }, annotations: ann('해커온뉴스', true) },
 ];
-function mcpCall(db, msg) {
+function mcpCall(db, msg, ip = '') {
   const id = msg.id ?? null, m = msg.method || '';
   const ok = result => ({ jsonrpc: '2.0', id, result });
   const err = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -1083,7 +1095,13 @@ function mcpCall(db, msg) {
         const rows = openRequests(db);
         return text(rows.length ? rows.map(r => `- [${r.id}] ${r.name}: ${r.topic || r.pain}${r.done ? ' (됐다의 기준: ' + r.done + ')' : ''} · 풀이 ${r.solutions}`).join('\n') + `\n\n풀이는 ${mailSite()}/problems 에서` : '올라온 문제가 없습니다.');
       }
-      if (name === 'post_problem') { const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact }); return text(`올렸습니다. 받는 링크(열쇠 포함, 본인만): ${mailSite()}/r/${r.id}?k=${r.rkey}`); }
+      if (name === 'post_problem') {
+        /* 열쇠 없는 쓰기 길이다. /api/ 쪽 쓰기에 걸린 것과 같은 상한을 IP 로 건다(감사 d).
+           /mcp 는 /api/ 밖이라 위쪽 WRITE_LIMIT 문을 안 지나간다. */
+        if (tooMany('w:' + ip + ':/mcp/post_problem', WRITE_LIMIT)) return text('요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
+        const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact });
+        return text(`올렸습니다. 받는 링크(열쇠 포함, 본인만): ${mailSite()}/r/${r.id}?k=${r.rkey}`);
+      }
       if (name === 'news') return text(newsMd(db, JOBS.includes(a.job) ? a.job : ''));
     } catch (e) { return text('실패: ' + e.message); }
     return err(-32602, '없는 도구입니다');
@@ -1882,6 +1900,15 @@ function cookieOf(req, name) {
 
 /* 열쇠를 마구 넣어 보는 것을 막는다. 12자 열쇠라도 무한히 시도하면 언젠가 맞는다. */
 const tries = new Map();
+/* 부르는 쪽 주소. Fly 프록시 뒤에서는 socket 주소가 프록시(fdaa:…) 하나뿐이라
+   모든 방문자가 한 IP 로 보인다 — 상한이 «전체 방문자 합»에 걸려 대회 당일 4번째 신청부터 막힌다.
+   Fly 가 붙이는 fly-client-ip 는 밖에서 못 덮어쓴다(프록시가 다시 쓴다). Fly 밖(노트북)에서는 socket 을 믿는다. */
+function clientIp(req) {
+  const sock = (req.socket && req.socket.remoteAddress) || '';
+  if (!process.env.FLY_APP_NAME) return sock;
+  const h = req.headers['fly-client-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return h || sock;
+}
 function tooMany(ip, limit = 30) {
   const now = Date.now(), t = tries.get(ip) || { n: 0, at: now };
   if (now - t.at > 600000) { t.n = 0; t.at = now; }
@@ -1890,6 +1917,13 @@ function tooMany(ip, limit = 30) {
 }
 /* 열쇠 없는 쓰기(신청·후원·질문·피드백·요청·whoami)는 IP+길로 10분에 WRITE_LIMIT 번(감사 7·9). 검사는 한 IP 라 넉넉히 둔다 */
 const WRITE_LIMIT = +(process.env.WRITE_LIMIT || 300);
+/* 한 대회에 같은 IP 가 팀을 계속 만드는 것은 따로 조인다. WRITE_LIMIT 은 길 단위라
+   «한 대회를 가짜 팀으로 채워 정원을 잠그는 것» 을 못 막는다. 10분에 APPLY_LIMIT 팀. */
+const APPLY_LIMIT = +(process.env.APPLY_LIMIT || 3);
+function applyGuard(ip, event) {
+  if (tooMany('apply:' + (ip || '') + ':' + event, APPLY_LIMIT))
+    throw new HttpError(429, '이 대회에 신청을 너무 많이 했습니다. 10분 뒤에 다시 됩니다');
+}
 
 /** 이 컴퓨터의 랜 주소. 참가자 폰은 localhost 로 못 온다.
     유선과 무선이 다를 수 있어서 찾은 것을 다 준다. */
@@ -3047,8 +3081,15 @@ function restoreEvent(db, d, owner) {
 /* ── 지운 대회 휴지통 — 파일 첨부 없이 한 번 누르면 되는 길 ──
    목록에는 제목·지운 날·팀 수만 싣는다. 사본(json)은 절대 안 나간다 —
    나가면 열쇠 없는 사본이라도 «누가 어디에 신청했나»가 통째로 흘러간다. */
+/* 후원사 이름 — 객체·빈 값이 오면 SQLite 가 500 을 낸다(감사 20). 경계에서 400 으로 */
+function sponsorName(v) {
+  const n = plain(v, 40);
+  if (!n) throw new HttpError(400, '후원사 이름이 필요합니다');
+  return n;
+}
 function eventTrash(db, owner) {
-  if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+  /* 열쇠 없이 물으면 403 이다 — 400 은 «보낸 것이 잘못됐다» 는 뜻이라 «권한이 없다» 를 가린다(감사 e) */
+  if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');
   return db.prepare('SELECT id, event, title, json, at FROM event_trash WHERE owner=? ORDER BY id DESC').all(owner)
     .map(r => {
       let teams = 0;
@@ -3526,7 +3567,8 @@ function routes(db) {
       if (p === '/news.md' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' }); return res.end(newsMd(db, JOBS.includes(u.searchParams.get('job')) ? u.searchParams.get('job') : '')); }
       if (p === '/mcp' && req.method === 'POST') {
         const msg = await body(req);
-        const out = Array.isArray(msg) ? msg.map(x => mcpCall(db, x)).filter(Boolean) : mcpCall(db, msg);
+        const mip = clientIp(req);
+        const out = Array.isArray(msg) ? msg.map(x => mcpCall(db, x, mip)).filter(Boolean) : mcpCall(db, msg, mip);
         if (out === null) { res.writeHead(202); return res.end(); }
         return json(res, 200, out);
       }
@@ -3575,13 +3617,13 @@ function routes(db) {
            평소에 쓰는 사람이 먼저 막힌다 — 실제로 그렇게 만들었다가 검사에서 잡혔다. */
         if (!cookieOwner && headOwner
             && !db.prepare('SELECT 1 FROM owners WHERE id=?').get(headOwner)
-            && tooMany(req.socket.remoteAddress || ''))
+            && tooMany(clientIp(req)))
           throw new HttpError(429, '열쇠를 너무 여러 번 틀렸습니다. 잠시 뒤에 다시 해 주세요');
         const owner = cookieOwner || headOwner;
         /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 받아 브라우저가 x-jkey 로 실어 보낸다. */
         const jkey = req.headers['x-jkey'] || '';
 
-        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + (req.socket.remoteAddress || '') + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
+        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + clientIp(req) + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
           throw new HttpError(429, '요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
 
         if (p === '/api/events' && req.method === 'POST') {
@@ -3759,13 +3801,11 @@ function routes(db) {
                  LEVELS.includes(b.level) ? b.level : '', m[1]);
           return json(res, 200, profile(db, m[1]));
         }
-        /* 내 열쇠 찾기. 연락처를 넣으면 그 사람의 프로필 주소가 나온다. */
+        /* 내 열쇠 찾기. 기록이 있으면 프로필 주소를 메일로 보낸다 — 응답만 봐서는 있는지 없는지 모른다(감사 9). */
         if (p === '/api/whoami' && req.method === 'POST') {
-          const b = await body(req);
-          const pid = pidOf(db, b.contact);
-          if (!pid || !db.prepare('SELECT 1 FROM people WHERE id=?').get(pid))
-            throw new HttpError(404, '그 연락처로 참가한 기록이 없습니다');
-          return json(res, 200, { id: pid });
+          const w = whoami(db, (await body(req)).contact);
+          if (w.mail) void sendMail(db, w.mail);
+          return json(res, 200, w.body);
         }
 
         if ((m = p.match(/^\/api\/teams\/(\d+)\/seats$/)) && req.method === 'POST') {
@@ -3825,14 +3865,12 @@ function routes(db) {
           return json(res, 200, visitsOf(db, q.days));
         }
         if (p === '/api/mine' && req.method === 'GET') {
-          if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+          if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');   /* 400 은 «보낸 것이 잘못됐다» — 권한 문제는 403(감사 e) */
           return json(res, 200, mine(db, owner));
         }
-        /* 지운 대회 목록 — 내 것만. 남의 휴지통은 한 줄도 안 보인다 */
-        if (p === '/api/mine/trash' && req.method === 'GET') {
-          if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+        /* 지운 대회 목록 — 내 것만. 남의 휴지통은 한 줄도 안 보인다. 열쇠 없으면 eventTrash 가 403 을 낸다 */
+        if (p === '/api/mine/trash' && req.method === 'GET')
           return json(res, 200, eventTrash(db, owner));
-        }
         /* 되살리기 — 파일 첨부 없이. 경로가 /api/trash/:id/restore 가 아닌 이유는 그쪽이 팀 휴지통 자리라서다 */
         if ((m = p.match(/^\/api\/mine\/trash\/(\d+)\/restore$/)) && req.method === 'POST') {
           return json(res, 200, untrashEvent(db, +m[1], owner));
@@ -3865,6 +3903,7 @@ function routes(db) {
           /* 팀 열쇠는 여기서 딱 한 번 나간다. 신청한 브라우저가 받아서 들고 있는다. */
           const jb = await body(req);
           delete jb._promote;   /* 내부 표식 — 밖에서 보내면 정원 검사를 건너뛴다. 경계에서 지운다 */
+          applyGuard(clientIp(req), m[1]);   /* 한 IP 가 한 대회를 가짜 팀으로 채우는 것을 막는다 */
           const tid = joinTeam(db, m[1], jb);
           if (typeof tid === 'object') return json(res, 202, tid);   /* 정원이 차서 대기자로 — { waiting: 몇 번째 } */
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
@@ -3891,7 +3930,7 @@ function routes(db) {
           if (!link && b.domain) { const lf = logoFor(b.domain); if (lf.ok) link = 'https://' + lf.domain; }
           if (!logo && link) { const lf = logoFor(link.replace(/^https?:\/\//, '').split('/')[0]); if (lf.ok) logo = lf.url; }
           const r = db.prepare('INSERT INTO sponsors(event,name,kind,amount,note,logo,link) VALUES(?,?,?,?,?,?,?)')
-            .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '', logo, link);
+            .run(m[1], sponsorName(b.name), plain(b.kind, 20) || '현금', +b.amount || 0, plain(b.note, 200), logo, link);
           const sid = Number(r.lastInsertRowid);
           /* 직접 올린 파일 — data: 주소로 온다. 종류·크기를 보고 그대로 저장, 로고 주소는 우리 경로로 */
           const dm = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.logoData || ''));
@@ -4631,6 +4670,10 @@ function selftest() {
     ok(db.prepare('SELECT COUNT(*) c FROM team_trash WHERE event=?').get(tv.id).c === 1, '휴지통에 한 줄 남는다');
     const back = untrashTeam(db, trId);
     ok(back.same && back.id === ta, '되살리면 같은 id 로 돌아온다 — 팀 링크가 산다');
+    /* 지운 대회 목록을 열쇠 없이 물으면 403 — 400 은 «보낸 것이 잘못됐다» 라 권한 없음을 가린다(감사 e) */
+    let trCode = 0;
+    try { eventTrash(db, ''); } catch (e) { trCode = e.code; }
+    ok(trCode === 403, '열쇠 없이 지운 대회 목록을 물으면 403 이 아니다');
     /* 메일 — 열쇠가 없으면 보내지 않고 장부에만 남는다. 리마인더는 D-3·D-1 한 번씩, 답한 팀·못 온다는 팀은 건너뛴다 */
     const jm = joinMail(db, ta);
     ok(jm && jm.to === 'trash@x.test' && jm.text.includes(`/e/${tv.id}?t=${tkeyA}`), '신청 메일에 팀 링크가 들어간다');
@@ -5232,6 +5275,48 @@ function selftest() {
   ok(idA === pidOf(db, ' A@X.test '), '대소문자와 공백은 같은 사람으로 본다');
   ok(idA !== idB, '다른 연락처는 다른 사람이다');
   ok(pidOf(db, '') === '' && pidOf(db, 'a@b') === '', '너무 짧으면 열쇠를 안 만든다');
+  {
+    /* 후원사 이름 — 객체·빈 값은 400, 문자열은 40자로 */
+    { let c = 0; try { sponsorName({ a: 1 }); } catch (e) { c = e.code; } ok(c === 400, '후원사 이름이 객체면 400');
+      c = 0; try { sponsorName(''); } catch (e) { c = e.code; } ok(c === 400, '후원사 이름이 비면 400');
+      ok(sponsorName(' <b>포도농장</b> ') === 'b포도농장/b', '후원사 이름은 태그 없이 다듬는다'); }
+    /* clientIp — Fly 뒤에서는 헤더, 밖에서는 socket. 이걸 안 지키면 상한이 방문자 전체에 걸린다 */
+    {
+      const fake = (h, sock) => ({ headers: h, socket: { remoteAddress: sock } });
+      const had = process.env.FLY_APP_NAME;
+      delete process.env.FLY_APP_NAME;
+      ok(clientIp(fake({ 'fly-client-ip': '1.2.3.4' }, '::1')) === '::1', 'Fly 밖: 헤더는 무시하고 socket');
+      process.env.FLY_APP_NAME = 'hackon';
+      ok(clientIp(fake({ 'fly-client-ip': '1.2.3.4' }, 'fdaa::1')) === '1.2.3.4', 'Fly 안: fly-client-ip');
+      ok(clientIp(fake({ 'x-forwarded-for': '5.6.7.8, 9.9.9.9' }, 'fdaa::1')) === '5.6.7.8', 'Fly 안: x-forwarded-for 첫 값');
+      ok(clientIp(fake({}, 'fdaa::1')) === 'fdaa::1', 'Fly 안: 헤더 없으면 socket');
+      if (had === undefined) delete process.env.FLY_APP_NAME; else process.env.FLY_APP_NAME = had;
+    }
+    /* 한 대회에 같은 IP 가 팀을 계속 만드는 것 — APPLY_LIMIT 개까지(감사 c).
+       대회가 다르면 따로 센다. 현장에서 한 와이파이로 열 명이 신청하는 것을 막으면 안 되므로 상한은 env 로 뺀다. */
+    const gIp = '10.0.0.7', gEv = 'apply1', gEv2 = 'apply2';
+    for (let i = 0; i < APPLY_LIMIT; i++) applyGuard(gIp, gEv);
+    let gCode = 0, gMsg = '';
+    try { applyGuard(gIp, gEv); } catch (e) { gCode = e.code; gMsg = e.message; }
+    ok(gCode === 429, '한 대회에 신청을 계속 해도 안 막힌다');
+    ok(/10분/.test(gMsg), '막는 말에 언제 다시 되는지가 없다');
+    let gOther = true;
+    try { applyGuard(gIp, gEv2); } catch (e) { gOther = false; }
+    ok(gOther, '다른 대회 신청까지 같이 막힌다');
+    let gOtherIp = true;
+    try { applyGuard('10.0.0.8', gEv); } catch (e) { gOtherIp = false; }
+    ok(gOtherIp, '다른 사람 신청까지 같이 막힌다');
+  }
+  {
+    /* 내 열쇠 찾기 — 있는 연락처와 없는 연락처의 응답이 한 글자도 달라선 안 된다(감사 9).
+       갈리는 것은 메일뿐이다. 응답이 갈리면 열쇠 없이 «이 사람 참가했나» 를 묻는 길이 된다. */
+    const wYes = whoami(db, 'a@x.test'), wNo = whoami(db, 'nosuch@nowhere.test');
+    ok(JSON.stringify(wYes.body) === JSON.stringify(wNo.body), '있는 연락처와 없는 연락처의 응답이 다르다');
+    ok(!JSON.stringify(wYes.body).includes(idA), '응답에 사람 열쇠가 실린다');
+    ok(wYes.mail && wYes.mail.text.includes('/p/' + idA), '기록이 있으면 메일에 내 기록 주소가 들어간다');
+    ok(wNo.mail === null, '기록이 없는 연락처에 메일을 보낸다');
+    ok(whoami(db, ' A@X.TEST ').mail !== null, '대소문자·공백이 다르면 못 찾는다');
+  }
   const prof = profile(db, idA);
   ok(prof.level === '해 봤음', '처음에 고른 실력이 남는다');
   ok(!JSON.stringify(prof).includes('x.test'), '프로필에 연락처가 안 나간다');
@@ -6058,6 +6143,22 @@ function selftest() {
     const m2 = mcpCall(db, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_problems' } }); ok(/문구점 박/.test(m2.result.content[0].text), 'MCP 문제 은행');
     const m3 = mcpCall(db, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'post_problem', arguments: { name: 'MCP 가게', pain: '장부', contact: 'm@x.test' } } }); ok(/\/r\/[a-z0-9]+\?k=/.test(m3.result.content[0].text), 'MCP 로 문제 올리기 → 받는 링크');
     ok(mcpCall(db, { jsonrpc: '2.0', id: 4, method: 'nope' }).error.code === -32601 && mcpCall(db, { method: 'notifications/initialized' }) === null, 'MCP 오류·알림');
+    {
+      /* 열쇠 없는 MCP 쓰기도 상한을 지난다 — /mcp 는 /api/ 밖이라 라우터의 WRITE_LIMIT 문을 안 밟는다(감사 d).
+         한 IP 가 문제 은행을 무한히 채우던 길이다. 읽기 도구(list_problems)는 안 센다. */
+      const bIp = '10.9.9.9';
+      const pp = () => mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call',
+        params: { name: 'post_problem', arguments: { name: '도배가게', pain: '장부', contact: 'flood@x.test' } } }, bIp).result.content[0].text;
+      let hit = '';
+      for (let i = 0; i <= WRITE_LIMIT; i++) hit = pp();
+      ok(/너무 많습니다/.test(hit), '열쇠 없이 MCP 로 문제를 무한히 올린다');
+      const rd = mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'list_problems' } }, bIp).result.content[0].text;
+      ok(/도배가게/.test(rd) && !/너무 많습니다/.test(rd), '상한에 걸린 IP 가 읽기도 못 한다');
+      ok(/\/r\/[a-z0-9]+\?k=/.test(mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call',
+        params: { name: 'post_problem', arguments: { name: '딴사람', pain: '장부', contact: 'other@x.test' } } }, '10.9.9.8').result.content[0].text),
+        '다른 IP 까지 같이 막힌다');
+      db.prepare("DELETE FROM requests WHERE contact IN ('flood@x.test','other@x.test')").run();   /* 도배 줄이 뒤 검사의 목록을 밀어내지 않게 치운다 */
+    }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
   }
   /* ── 개인정보 6개월 삭제 — 처리방침의 약속 ── */
