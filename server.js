@@ -935,7 +935,11 @@ async function ghProfile(db, login) {
 /* ── 해커온뉴스 — 제목·주소만 모은다(저작권: 본문 없음). 실패한 출처는 건너뛰고 나머지는 산다. ── */
 const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ds: '허깅페이스 데이터', gh: '깃허브 새 저장소', ai: 'AI타임스', geek: 'GeekNews', hn: 'Hacker News', show: 'Show HN(만든 것)', ph: 'Product Hunt', yozm: '요즘IT', aikr: 'AI코리아 뉴스레터', hackon: 'HACK:ON 우승작', tip: '제보',
   /* 2026-09-26 커뮤니티 — 해커톤 글(dev.to·Medium 태그), 로브스터(HN 보다 조용한 개발자 커뮤니티), dev.to 한국 태그, GitHub·YC 블로그, 스매싱(디자인). 09-26 에 실제로 항목이 오는 것만 */
-  devhack: 'dev.to #hackathon', medhack: 'Medium #hackathon', lob: 'Lobsters', devkr: 'dev.to #korea', ghblog: 'GitHub 블로그', yc: 'Y Combinator 블로그', smash: 'Smashing Magazine' };
+  devhack: 'dev.to #hackathon', medhack: 'Medium #hackathon', lob: 'Lobsters', devkr: 'dev.to #korea', ghblog: 'GitHub 블로그', yc: 'Y Combinator 블로그', smash: 'Smashing Magazine',
+  /* 2026-09-27 개발 아닌 직무 — 수집원 17곳이 전부 개발·AI업계 매체여서 마케팅·영업·CS 탭이 굶었다.
+     이 둘은 일반 비즈니스 매체라 AI 글만 걸러 담는다(AI_ONLY). 실측 AI 관련율: 모비인사이드 40%, 플래텀 30%.
+     매드타임스(12%)·더피알(0%)·아웃스탠딩(0%)은 재 보고 안 붙였다. */
+  mobi: '모비인사이드', platum: '플래텀' };
 /* RSS 도 Atom 도 같은 함수로 — GeekNews·Product Hunt 는 Atom(<entry>, <link href>)이라 RSS 정규식만 쓰면 조용히 0건이 된다(실제로 그랬다) */
 function parseFeed(x, max) {
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/<[^>]+>/g, '').trim();
@@ -975,6 +979,23 @@ function addTip(db, ownerId, ownerName, b) {
   if (!r.changes) throw new HttpError(409, '이미 올라온 주소입니다');
   return { id: Number(r.lastInsertRowid), job, title, url };
 }
+/* 일반 비즈니스 매체용 관문. 이 낱말이 제목에 없으면 안 담는다 —
+   없으면 광고업계·부동산 소식이 페이지를 덮는다(모비인사이드는 60%, 플래텀은 70%가 AI 무관이었다). */
+const AI_ONLY = /\bai\b|인공지능|gpt|claude|클로드|llm|생성형|챗지피티|제미나이|gemini|자동화|에이전트|agent|프롬프트|prompt|코파일럿|copilot/i;
+/* 수집원 표. 네 번째 값은 «AI 글만» — 일반 비즈니스 매체에만 켠다(AI 전문 매체는 그냥 담는다). */
+const NEWS_FEEDS = [['ai', 'https://www.aitimes.com/rss/allArticle.xml', 12, false], ['geek', 'https://news.hada.io/rss/news', 10, false], ['hn', 'https://hnrss.org/frontpage', 8, false],
+                                  ['ph', 'https://www.producthunt.com/feed', 8, false], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8, false],
+                                  ['show', 'https://hnrss.org/show', 6, false], ['aikr', 'https://news.aikoreacommunity.com/rss/', 6, false],
+                                  ['devhack', 'https://dev.to/feed/tag/hackathon', 5, false], ['medhack', 'https://medium.com/feed/tag/hackathon', 5, false], ['lob', 'https://lobste.rs/rss', 6, false],
+                                  ['devkr', 'https://dev.to/feed/tag/korea', 4, false], ['ghblog', 'https://github.blog/feed/', 4, false], ['yc', 'https://www.ycombinator.com/blog/rss', 4, false], ['smash', 'https://www.smashingmagazine.com/feed/', 4, false],
+                                  ['mobi', 'https://www.mobiinside.co.kr/feed/', 8, true], ['platum', 'https://platum.kr/feed', 6, true]];
+/* 한 피드에서 담을 것만 고른다. 관문은 여기 한 곳에만 있다 — 호출하는 쪽이 한 줄이라 조용히 빠지기 어렵다. */
+function pickFeed(src, items, aiOnly) {
+  /* 안 넘기면 관문이 «조용히» 꺼진다. 그 실패는 며칠 뒤 페이지가 광고로 덮인 뒤에나 보인다 —
+     그래서 그 자리에서 터뜨린다. 표의 모든 행이 네 번째 값을 갖는 것은 아래 점검이 지킨다. */
+  if (typeof aiOnly !== 'boolean') throw new Error('pickFeed: aiOnly 를 true/false 로 명시해야 한다');
+  return items.filter(it => !aiOnly || AI_ONLY.test(it.title)).map(it => ({ src, ...it, note: '' }));
+}
 async function newsTick(db) {
   const got = [];
   const j = async u => { const r = await fetch(u, { headers: { 'user-agent': 'hackon.kr', accept: 'application/json' }, signal: AbortSignal.timeout(8000) }); return r.ok ? r.json() : null; };
@@ -986,14 +1007,10 @@ async function newsTick(db) {
     got.push({ src: 'space', title: sp.id, url: 'https://huggingface.co/spaces/' + sp.id, note: `♥ ${sp.likes || 0}` }); } catch {}
   /* RSS 여럿 — 제목·주소만. 어느 하나가 죽어도 나머지는 산다. 레딧은 서버 fetch 가 UA 무관 403(09-25 실측), .rss 는 연속 호출 시 429 — 안 붙인다 */
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
-  for (const [src, feed, max] of [['ai', 'https://www.aitimes.com/rss/allArticle.xml', 12], ['geek', 'https://news.hada.io/rss/news', 10], ['hn', 'https://hnrss.org/frontpage', 8],
-                                  ['ph', 'https://www.producthunt.com/feed', 8], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8],
-                                  ['show', 'https://hnrss.org/show', 6], ['aikr', 'https://news.aikoreacommunity.com/rss/', 6],
-                                  ['devhack', 'https://dev.to/feed/tag/hackathon', 5], ['medhack', 'https://medium.com/feed/tag/hackathon', 5], ['lob', 'https://lobste.rs/rss', 6],
-                                  ['devkr', 'https://dev.to/feed/tag/korea', 4], ['ghblog', 'https://github.blog/feed/', 4], ['yc', 'https://www.ycombinator.com/blog/rss', 4], ['smash', 'https://www.smashingmagazine.com/feed/', 4]]) {
+  for (const [src, feed, max, aiOnly] of NEWS_FEEDS) {
     try {
       const x = await (await fetch(feed, { headers: { 'user-agent': 'hackon.kr' }, signal: AbortSignal.timeout(8000) })).text();
-      for (const it of parseFeed(x, max)) got.push({ src, ...it, note: '' });
+      got.push(...pickFeed(src, parseFeed(x, max), aiOnly));
     } catch {}
   }
   /* 깃허브 — 이번 주 생긴 저장소 중 별 많은 것(트렌딩 API 는 없다). 데이터셋은 허깅페이스 */
@@ -6198,6 +6215,22 @@ function selftest() {
      && jobOf('앤트로픽, IPO 앞두고 공동 창립자 7명에 의결권 부여 추진') === ''
      && jobOf('2026 차전자피 제품 추천 TOP5') === '',
      '직무 분류 — 새 낱말은 붙고, 업계 뉴스는 무태그로 남는다');
+  /* AI 관문 — 정규식만이 아니라 «실제로 걸러 내는가»를 본다. 아래 넷은 그 피드에 있던 제목 그대로다.
+     pickFeed 를 통과시켜 본다 — 관문을 무력화하면(if (true)) 이 줄이 빨개져야 한다. */
+  const _ad = { title: '[해외 크리에이티브] “혼자서는 날 수 없다” 에어인디아, 아시안게임 맞아', url: 'https://x/1' };
+  const _ai = { title: '전담 인력 없는 중소기업, 계약·급여·해외영업도 AI로', url: 'https://x/2' };
+  ok(pickFeed('mobi', [_ad, _ai], true).length === 1
+     && pickFeed('mobi', [_ad, _ai], true)[0].title === _ai.title
+     && pickFeed('lob', [_ad, _ai], false).length === 2,
+     'AI 관문 — 일반 매체는 AI 글만 담고, AI 전문 매체는 그냥 담는다');
+  /* 표에 관문이 실제로 켜져 있는가. 함수가 맞아도 표에서 빠지면 아무 일도 안 일어난다. */
+  ok(NEWS_FEEDS.filter(f => f[3]).map(f => f[0]).sort().join(',') === 'mobi,platum'
+     && NEWS_FEEDS.length === 16
+     && NEWS_FEEDS.every(f => typeof f[3] === 'boolean'),
+     '수집원 표 — 모든 행이 관문 값을 명시하고, 켜진 곳은 일반 매체 둘뿐 (전체 16곳)');
+  /* 관문 값을 안 넘기면 조용히 꺼지지 않고 터진다 */
+  ok((() => { try { pickFeed('x', [], undefined); return false; } catch { return true; } })(),
+     'AI 관문 — aiOnly 를 안 넘기면 그 자리에서 터진다');
   {
     const tip = addTip(db, 'own1', '제보 김', { job: '마케팅', title: '카피 초안 도구', url: 'https://t.example/1' });
     ok(tip.job === '마케팅' && newsList(db, 9, '마케팅').some(r => r.src === 'tip' && r.by === '제보 김'), '제보가 직무 태그로 실린다');
