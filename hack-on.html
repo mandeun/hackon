@@ -2199,7 +2199,9 @@ const SCREEN = {
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
           <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
-          ${e.mode === 'online' ? `<li><span class="ic" aria-hidden="true">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>` : ''}
+          ${e.mode === 'online' ? `<li><span class="ic" aria-hidden="true">💻</span><span><span class="k">어디서</span><span class="v">온라인 · 제출만 받습니다</span></span></li>`
+            : `<li><span class="ic" aria-hidden="true">📍</span><span><span class="k">어디</span><span class="v">${
+                e.place ? esc(e.place) : '<b class="late">아직 안 적었습니다</b> — 기본 탭 «모이는 곳»'}</span></span></li>`}
           <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청 · 제출</span><span class="v">참가 ${e.teams}팀 · 제출 ${doneN}팀${
             e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
@@ -2287,6 +2289,9 @@ const SCREEN = {
         </div>
         <label>여는 사람 <span class="pill">공개 페이지에 «○○ 주최»로</span></label><input id="e-host" value="${esc(e.host || '')}" maxlength="40" placeholder="이름 또는 모임 이름">
         <label>주제</label><input id="e-topic" value="${esc(e.topic)}" placeholder="예) 생활 불편">
+        <label>모이는 곳 <span class="pill">공개 페이지 «언제» 옆에 뜹니다</span></label>
+        <input id="e-place" value="${esc(e.place || '')}" maxlength="120" placeholder="예) 서울 마포구 와우산로 94 학생회관 3층 · 온라인이면 «온라인»">
+        <div class="meta">참가자가 «어디로 가면 되나» 를 여기서만 읽습니다. 건물·층·호수까지 적어 주세요.</div>
         <label>와이파이 <span class="pill">큰 화면에 뜹니다</span></label>
         <input id="e-wifi" value="${esc(e.wifi || '')}" placeholder="이름 / 비밀번호">
         <label>오픈 대화방 주소 <span class="pill">공개 페이지에 걸립니다</span></label>
@@ -2664,6 +2669,10 @@ const SCREEN = {
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
           <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
+          ${/* «언제» 옆에 «어디». 전에는 적을 칸이 아예 없어서 참가자가 갈 곳을 못 읽었다(대역시험 4).
+                안 적었으면 «없음»이 아니라 «아직 안 정해졌습니다» — 모름을 없음으로 그리지 않는다. */''}
+          <li><span class="ic" aria-hidden="true">📍</span><span><span class="k">어디</span><span class="v" id="place-line">${
+            e.place ? esc(e.place) : (e.mode === 'online' ? '온라인 · 제출만 받습니다' : '<span class="hint">아직 안 정해졌습니다 — 주최자에게 물어보세요</span>')}</span></span></li>
           ${e.topic ? `<li><span class="ic" aria-hidden="true">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span class="hint">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
@@ -4057,6 +4066,7 @@ function wire() {
         starts: $('#e-starts').value, ends: $('#e-ends').value,
         prize: $('#e-prize').value, cap: $('#e-cap').value,
         wifi: $('#e-wifi') ? $('#e-wifi').value.trim() : undefined,
+        place: $('#e-place') ? $('#e-place').value.trim() : undefined,
         chat: $('#e-chat') ? $('#e-chat').value.trim() : undefined,
         safety: $('#e-safety') ? $('#e-safety').value.trim() : undefined,
         pay: $('#e-pay') ? $('#e-pay').value.trim() : undefined,

@@ -198,12 +198,24 @@ with sync_playwright() as p:
     pg.fill("#e-ends", "2026-10-12")
     pg.fill("#e-prize", "3000000")
     pg.fill("#e-topic", "생활 불편")
+    # «어디로 가면 되나» — 대역 셋이 여기서 멈췄다. 기본 탭에 칸이 하나 있어야 한다.
+    A(pg.query_selector("#e-place") is not None, "기본 탭에 «모이는 곳» 칸이 없다")
+    pg.fill("#e-place", "서울 마포구 와우산로 94 학생회관 3층")
     pg.fill("#e-due", due)
     pg.click("#e-save")
     pg.wait_for_timeout(900)
     ee = api(f"/api/events/{ev}")
     A(ee["prize"] == 3000000 and ee["due"] == due and ee["topic"] == "생활 불편",
       f"나중에 채운 것이 안 들어갔다: {ee}")
+    A(ee["place"] == "서울 마포구 와우산로 94 학생회관 3층", f"모이는 곳이 안 저장됐다: {ee.get('place')!r}")
+    # 고칠 수 있어야 한다 — 장소는 대회 직전까지 바뀐다
+    pg.fill("#e-place", "서울 마포구 백범로 35 다산관 101호")
+    pg.click("#e-save")
+    pg.wait_for_timeout(900)
+    A(api(f"/api/events/{ev}")["place"] == "서울 마포구 백범로 35 다산관 101호", "모이는 곳을 고칠 수 없다")
+    ics = urllib.request.urlopen(BASE + f"/api/events/{ev}/ics").read().decode()
+    A("LOCATION:서울 마포구 백범로 35 다산관 101호" in ics, f"캘린더 파일에 장소가 없다: {ics}")
+    ok("모이는 곳 — 기본 탭에 적고, 고치고, 캘린더 파일에 실린다")
     A(pg.evaluate("cur") == ev, "만든 뒤 그 대회로 안 옮겨 갔다")
     A(len(api(f"/api/events/{ev}")["rubric"]) == 4, "심사 기본값이 안 깔렸다")
     ok(f"대회 개설 — {ev} · 심사 기준 기본값 4항목")
@@ -312,6 +324,7 @@ with sync_playwright() as p:
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
     A(pg.is_hidden("#empty"), "대회가 있는데 «아직 열린 대회가 없습니다» 가 그대로 보인다")
     A("우리 동네 문제 해결 해커톤" in pg.inner_text("#grid"), "올린 대회가 첫 화면 목록에 안 그려진다")
+    A("다산관 101호" in pg.inner_text("#grid"), f"첫 화면 카드에 모이는 곳이 없다: {pg.inner_text('#grid')[:300]}")
     ok("첫 화면 목록 — 이름만 넣은 대회는 안 뜬다. 올려야 뜨고, 뜨면 빈 안내는 사라진다")
 
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
@@ -2233,6 +2246,10 @@ with sync_playwright() as p:
         .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-')) || '?')""")
     A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i == "nt-bell" or i.startswith("fb-") for i in ids),
       f"공개 화면에 신청·줄 수 있는 것·소식 알림·피드백 말고 다른 칸이 있다: {ids}")
+    # 「언제」 옆에 「어디」. 대역 B·C 가 페이지 전체에서 갈 곳을 못 찾았다.
+    A(pub.is_visible("#place-line"), "공개 페이지에 «어디» 줄이 없다")
+    A("다산관 101호" in pub.inner_text("#place-line"),
+      f"공개 페이지 «어디» 가 비었다: {pub.inner_text('#place-line')!r}")
     txt = pub.inner_text("#view")
     for must in ["우리 동네 문제 해결 해커톤", "하나팀", "완주율", "심사 기준",
                  "함께한 곳", "오픈에이아이",

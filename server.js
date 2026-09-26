@@ -1495,6 +1495,8 @@ function open(file) {
   try { db.exec("UPDATE teams SET sponsor_ok=1 WHERE share<>'' AND sponsor_ok=0"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN tkey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN wifi TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 모이는 곳. «언제» 는 있는데 «어디» 를 적을 칸이 아예 없었다 — 대역 셋이 여기서 멈췄다(대역시험 4). */
+  try { db.exec("ALTER TABLE events ADD COLUMN place TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN person TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN notice TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN notice_at TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -1999,13 +2001,14 @@ const RUBRICS = {
 const DEFAULT_RUBRIC = RUBRICS['만들기'].rows;
 
 /** 대회를 만든 뒤 나머지를 채운다. 처음부터 다 물으면 만들다가 그만둔다. */
-const EDITABLE = ['title', 'host', 'topic', 'starts', 'ends', 'prize', 'cap', 'due', 'wifi'];
+const EDITABLE = ['title', 'host', 'topic', 'starts', 'ends', 'prize', 'cap', 'due', 'wifi', 'place'];
 function editEvent(db, id, b) {
   const set = [], val = [];
   for (const k of EDITABLE) {
     if (b[k] === undefined) continue;
     set.push(`${k}=?`);
-    val.push(k === 'prize' || k === 'cap' ? Math.max(0, +b[k] || 0) : plain(b[k], k === 'topic' ? 200 : k === 'wifi' ? 200 : 80));
+    val.push(k === 'prize' || k === 'cap' ? Math.max(0, +b[k] || 0)
+             : plain(b[k], k === 'topic' ? 200 : k === 'wifi' ? 200 : k === 'place' ? 120 : 80));
   }
   if (b.budget !== undefined) { set.push('budget=?'); val.push(Math.max(0, Math.floor(+b.budget || 0))); }
   /* 오픈 대화방 주소. http(s) 가 아니면 빈 값으로 — javascript: 같은 것이 공개 페이지에 걸리면 안 된다 */
@@ -3381,6 +3384,7 @@ function icsOf(e, base) {
     'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z',
     'DTSTART;VALUE=DATE:' + d(e.starts), 'DTEND;VALUE=DATE:' + next(e.ends || e.starts),
     'SUMMARY:' + esc(e.title), 'URL:' + base + '/e/' + e.id,
+    ...(e.place ? ['LOCATION:' + esc(e.place)] : []),
     'DESCRIPTION:' + esc((e.topic ? '주제 ' + e.topic + '. ' : '') + (e.due ? '제출 마감 ' + e.due.replace('T', ' ') + '. ' : '') + base + '/e/' + e.id),
     'END:VEVENT', 'END:VCALENDAR'].join('\r\n') + '\r\n';
 }
@@ -3608,7 +3612,7 @@ function routes(db) {
              들어온 사람이 "여긴 빈 곳이구나" 하고 나간다. */
         {
           const rows = db.prepare(
-            `SELECT id,title,host,starts,ends,prize,
+            `SELECT id,title,host,starts,ends,prize,place,
                     (julianday('now') - julianday(created)) AS ageDays,
                     (julianday(ends)  - julianday('now'))   AS dueDays
              FROM events WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all();
@@ -6188,6 +6192,23 @@ function selftest() {
     }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
   }
+  /* ── 대역시험 4 — «어디로 가면 되나». 모이는 곳을 적을 칸이 아예 없었다 ── */
+  {
+    const ep = createEvent(db, { title: '장소 검사', starts: '2026-02-10', ends: '2026-02-10' });
+    ok(getEvent(db, ep.id).place === '', '새 대회의 모이는 곳은 빈칸이다');
+    editEvent(db, ep.id, { place: '서울 마포구 와우산로 94 학생회관 3층 <b>' });
+    ok(getEvent(db, ep.id).place === '서울 마포구 와우산로 94 학생회관 3층 b', '모이는 곳을 적고 꺾쇠는 빠진다');
+    editEvent(db, ep.id, { place: '가'.repeat(200) });
+    ok(getEvent(db, ep.id).place.length === 120, '모이는 곳은 120자까지');
+    editEvent(db, ep.id, { place: '연세로 50' });
+    ok(getEvent(db, ep.id).place === '연세로 50', '적은 뒤에도 고칠 수 있다');
+    editEvent(db, ep.id, { prize: 1000 });
+    ok(getEvent(db, ep.id).place === '연세로 50', '다른 칸만 보내면 모이는 곳은 그대로');
+    ok(icsOf(getEvent(db, ep.id), 'https://x.test').includes('LOCATION:연세로 50'), '캘린더 파일에 장소가 실린다');
+    editEvent(db, ep.id, { place: '' });
+    ok(!icsOf(getEvent(db, ep.id), 'https://x.test').includes('LOCATION'), '안 적었으면 캘린더에 빈 장소를 안 넣는다');
+  }
+
   /* ── 대역시험 3 — 손 안 댄 심사 항목은 «모름» 이다. 50 도 0 도 아니다 ── */
   {
     const ej = createEvent(db, { title: '부분 심사 검사', starts: '2026-01-10', ends: '2026-01-10' });

@@ -421,7 +421,9 @@ function 그리기(){
       '<span class="st ' + s.c + '">' + s.k + (d ? ' ' + d : '') + '</span>' +
       '<span><div class="t">' + esc(e.title) + '</div><div class="m">' + esc(e.host) + ' · ' +
         (e.pastEvents ? '지난 대회 ' + e.pastEvents + '번 · 완주율 ' + e.pastFinish + '%' : '첫 대회') +
-        ((e.sponsors || []).length ? ' · 함께: ' + e.sponsors.map(esc).join(', ') : '') + '</div></span>' +
+        ((e.sponsors || []).length ? ' · 함께: ' + e.sponsors.map(esc).join(', ') : '') +
+        /* 어디서 하는지. 안 적혔으면 아무 말도 안 쓴다 — 모름을 «없음»으로 그리지 않는다 */
+        (e.place ? '</div><div class="m">📍 ' + esc(e.place) : '') + '</div></span>' +
       '<span class="n">' + esc(e.starts) + (e.ends !== e.starts ? '~' + esc(e.ends).slice(5) : '') +
         ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') + '</span>' +
       '</a>';
