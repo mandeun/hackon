@@ -950,15 +950,17 @@ function parseFeed(x, max) {
   return out;
 }
 /* 직무 태그 — 제목 낱말로 거칠게. 틀리면 «전체» 로 남는다. 제보는 제보자가 고른다 */
+/* 짧은 ASCII 낱말엔 반드시 \b 를 앞뒤로 둔다 — 없으면 Buil«ding»→ui, Mathemati«cs»→cs,
+   R«ead»s→ads, to«bi»/→bi, «npm»→pm 으로 엉뚱한 직무가 붙는다. 실측으로 디자인 14건 중 7건이 오탐이었다. */
 const JOBS = ['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'];
 const JOB_RE = {
-  '마케팅': /마케팅|광고|브랜드|카피|sns|인스타|유튜브|콘텐츠|캠페인|marketing|ads?\b|brand|creator|influenc|seo/i,
-  '디자인': /디자인|figma|ui|ux|이미지 생성|image|video|영상|일러스트|폰트|design|diffusion|flux|midjourney|canva/i,
-  '데이터': /데이터|분석|sql|dashboard|대시보드|통계|analytics|dataset|엑셀|spreadsheet|bi\b/i,
-  '영업·CS': /영업|세일즈|sales|crm|고객|cs\b|상담|챗봇|support|콜센터|리드/i,
-  '기획': /기획|pm\b|product|프로덕트|노션|notion|로드맵|스펙|요구사항|workflow|자동화|automation|n8n|agent|에이전트/i,
-  '소상공인': /가게|매장|자영업|소상공인|사장|카페|식당|배달|네이버 플레이스|예약|재고|pos\b/i,
-  '개발': /개발|코드|code|github|api|모델|llm|오픈소스|open.?source|파이썬|python|javascript|typescript|rust|sdk|cli|프레임워크|framework|repo/i,
+  '마케팅': /마케팅|광고|브랜드|카피|sns|인스타|유튜브|콘텐츠|캠페인|marketing|\bads?\b|brand|creator|influenc|seo/i,
+  '디자인': /디자인|figma|\bui\b|\bux\b|이미지 생성|image|video|영상|일러스트|폰트|design|diffusion|flux|midjourney|canva|interface|인터페이스|svg|diagram|다이어그램|타이포|typograph|레이아웃|layout|아이콘|\bicon|팔레트|palette|wallpaper|배경화면/i,
+  '데이터': /데이터|분석|sql|dashboard|대시보드|통계|analytics|dataset|엑셀|spreadsheet|\bbi\b/i,
+  '영업·CS': /영업|세일즈|sales|crm|고객|\bcs\b|상담|챗봇|chatbot|support|콜센터|리드/i,
+  '기획': /기획|\bpm\b|product|프로덕트|노션|notion|로드맵|스펙|요구사항|workflow|자동화|automation|n8n|agent|에이전트|\bax\b|\bdx\b|온보딩|onboarding|리텐션|retention|\bkpi\b/i,
+  '소상공인': /가게|매장|자영업|소상공인|사장|카페|식당|배달|네이버 플레이스|예약|재고|\bpos\b/i,
+  '개발': /개발|코드|code|github|api|모델|llm|오픈소스|open.?source|파이썬|python|javascript|typescript|rust|sdk|cli|프레임워크|framework|repo|\bcss\b|rails|컴파일|compiler|커널|kernel|리눅스|linux|docker|도커|쿠버|k8s|배포|deploy|리팩터|refactor|버그|\bbug\b|커밋|commit|브라우저|browser|\bweb\b|웹/i,
 };
 /* 좁은 것부터 본다 — «가게 예약 자동화» 는 기획(자동화)이 아니라 소상공인이다 */
 const JOB_ORDER = ['소상공인', '마케팅', '디자인', '데이터', '영업·CS', '기획', '개발'];
@@ -6179,6 +6181,23 @@ function selftest() {
   ok(parseFeed('<feed><entry><title>A</title><link rel="alternate" href="https://a.example/1"/></entry></feed>', 5)[0].url === 'https://a.example/1'
      && parseFeed('<rss><item><title><![CDATA[B]]></title><link>https://b.example/2</link></item></rss>', 5)[0].title === 'B', 'RSS 와 Atom 둘 다 읽는다');
   ok(jobOf('인스타 릴스 광고 카피를 AI 로') === '마케팅' && jobOf('Figma 에 이미지 생성 붙이기') === '디자인' && jobOf('가게 예약 문자 자동화') === '소상공인' && jobOf('오늘 날씨') === '', '직무 자동 분류');
+  /* 짧은 ASCII 낱말이 «낱말 안에서» 걸리지 않는가. 아래는 실제로 오탐했던 제목 그대로다 —
+     Buil«ding»·buil«t»·«UI»DCaption → 디자인, Mathemati«cs» → 영업·CS, R«ead»s → 마케팅, to«bi»/ → 데이터.
+     디자인 14건 중 7건이 이것 때문이었다. 규칙을 고칠 때 이 줄이 먼저 빨개져야 한다. */
+  ok(jobOf('Building KAANTHA: What a Shift Staffing App Taught Us') === ''
+     && jobOf('Learning to Discover Interesting Mathematics') === ''
+     && jobOf('The System Never Checked If You Slept. Ours Reads Your Pulse') === ''
+     && jobOf('UIDCaption') === '',
+     '직무 분류 — 짧은 낱말이 낱말 안에서 걸리지 않는다');
+  /* 새로 알아듣게 한 낱말. 무태그로 남아야 하는 것(업계 뉴스·잡글)도 같이 못박는다 */
+  ok(jobOf('Improving site performance by shipping more CSS') === '개발'
+     && jobOf('What About Rails?') === '개발'
+     && jobOf('npm i -g @anthropic-ai/claude-code') === '개발'
+     && jobOf('When chat is the wrong UI') === '디자인'
+     && jobOf('[AX일지]대표님이 곧 시스템인 회사의 AX는 어디서 시작할까') === '기획'
+     && jobOf('앤트로픽, IPO 앞두고 공동 창립자 7명에 의결권 부여 추진') === ''
+     && jobOf('2026 차전자피 제품 추천 TOP5') === '',
+     '직무 분류 — 새 낱말은 붙고, 업계 뉴스는 무태그로 남는다');
   {
     const tip = addTip(db, 'own1', '제보 김', { job: '마케팅', title: '카피 초안 도구', url: 'https://t.example/1' });
     ok(tip.job === '마케팅' && newsList(db, 9, '마케팅').some(r => r.src === 'tip' && r.by === '제보 김'), '제보가 직무 태그로 실린다');
