@@ -1310,6 +1310,13 @@ function rubricBars(rubric, hints) {
   </div>`).join('')}</div>`;
 }
 
+/* 취소 규칙 — 주최자가 정하고 대회 페이지에 박는다(스페이스클라우드는 환불률을 호스트가 정해 상세에 넣고,
+   이벤터스는 상세 목차에 «취소/환불» 탭을 고정으로 둔다). 안 정했으면 이 문장을 «보여 주기만» 한다 —
+   DB 에는 안 쓴다. 접지 않는다: 접힌 규칙은 신청한 뒤에 처음 읽게 된다. */
+const CANCEL_RULE = '대회 이틀 전까지 취소 자유. 그 뒤는 주최자에게';
+const cancelLine = e => `<div class="meta" id="cancel-rule" style="margin-top:6px"><b>취소 규칙</b> · ${
+  esc(e.cancel_rule || CANCEL_RULE)} · 취소는 팀 화면에서</div>`;
+
 const FOUND = ['캠퍼스픽', '위비티', '이벤터스', '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
 /* 처음에는 이름과 이메일만 받는다. 역할·유입 경로는 신청한 뒤에 묻는다.
    이메일은 확정 안내와 후원사 크레딧이 전부 그리로 가서 처음부터 받는다.
@@ -2295,6 +2302,9 @@ const SCREEN = {
         <input id="e-pay" value="${esc(e.pay || '')}" maxlength="120" placeholder="예) 카카오뱅크 3333-… 유재원 · 입금 뒤 카톡으로 알려 주세요">
         <div class="meta">앱은 돈을 만지지 않습니다. 자리 값은 주최자에게 직접 — 모인 돈이 상금·간식이 됩니다.</div>
         <div class="meta">개인 이름·번호보다 <b>운영진 공용 주소</b>와 <b>익명으로 알릴 길</b>을 적어 주세요.</div>
+        <label>취소 규칙 <span class="pill">공개 페이지와 신청 뒤 카드에 한 줄로</span></label>
+        <input id="e-cancel" value="${esc(e.cancel_rule || '')}" maxlength="120" placeholder="${esc(CANCEL_RULE)}">
+        <div class="meta">비워 두면 «${esc(CANCEL_RULE)}» 로 보입니다.</div>
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
         <label>진행 순서 <span class="pill">현장 화면과 공개 페이지가 같이 씁니다</span></label>
         <div class="plan" id="e-plan"></div>
@@ -2708,7 +2718,7 @@ const SCREEN = {
           ? (mine
               ? moreForm(mine)
               : `<div class="card" id="apply"><h3>참가 신청</h3>
-                   
+                   ${cancelLine(e)}
                    ${applyForm()}</div>`)
           : ''}
       ${(() => {
@@ -2745,6 +2755,7 @@ const SCREEN = {
             <div class="shrow" style="margin-top:6px"><button class="btn sm" id="cf-yes">올 거예요</button><button class="btn sec sm" id="cf-no">못 가요</button></div>`}</div>` : ''}
           <div class="meta">1. <b>내 팀 링크</b>를 나에게만 보내 두세요 — 폰을 바꿔도 이걸로 돌아옵니다.<br>
             2. ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : `당일(${esc(e.starts)}) 마감 전에`} 여기서 결과물 주소를 냅니다.</div>
+          ${cancelLine(e)}
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 내기</button><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
           <div style="margin-top:10px"><button class="btn sec sm" id="nx-rename">팀 이름 고치기</button> <button class="btn sec sm" id="nx-cancel">신청 취소</button></div>
@@ -4052,6 +4063,7 @@ function wire() {
         chat: $('#e-chat') ? $('#e-chat').value.trim() : undefined,
         safety: $('#e-safety') ? $('#e-safety').value.trim() : undefined,
         pay: $('#e-pay') ? $('#e-pay').value.trim() : undefined,
+        cancel_rule: $('#e-cancel') ? $('#e-cancel').value.trim() : undefined,
         host: $('#e-host') ? $('#e-host').value.trim() : undefined,
         topic: $('#e-topic').value, due: $('#e-due').value, plan } });
       flash('채웠습니다');

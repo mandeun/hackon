@@ -1586,6 +1586,10 @@ function open(file) {
      questions — 대회 안 묻고 답하기. 팀 열쇠로 묻고 운영자만 답한다. 익명 없음, 커뮤니티 아님 */
   try { db.exec("ALTER TABLE events ADD COLUMN safety TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN pay TEXT NOT NULL DEFAULT ''"); } catch {}      // 입금 안내 한 줄 — 맡기 확정된 사람에게만 보인다. 앱은 돈을 안 만진다
+  /* 2026-09-27 취소 규칙(스페이스클라우드·이벤터스: 규칙은 주최자가 정하고 상세 페이지에 박는다).
+     cancel_rule — 한 줄. 비면 빈 문자열 그대로 둔다. 기본 문장은 «보여 줄 때»만 쓴다(화면이 갖고 있다) —
+     기본값을 DB 에 써 두면 주최자가 안 정한 것과 «이 문장으로 정한 것» 을 나중에 가를 수 없다. */
+  try { db.exec("ALTER TABLE events ADD COLUMN cancel_rule TEXT NOT NULL DEFAULT ''"); } catch {}
   /* teams.no — 자리 번호. 신청할 때 한 번 받고 그 뒤로는 안 바뀐다(팀이 빠져도 뒤가 안 당겨진다 — 인쇄한 자리표와 어긋나면 점수가 딴 팀에 붙는다).
      이미 있는 팀은 신청 순으로 한 번 매긴다 */
   try { db.exec('ALTER TABLE teams ADD COLUMN no INTEGER NOT NULL DEFAULT 0'); } catch {}
@@ -2013,6 +2017,8 @@ function editEvent(db, id, b) {
   /* «문제가 생기면 이 사람에게». 참가자 화면에 그대로 나가는 공개 연락 한 줄이다 — 운영자가 스스로 적는다 */
   if (b.safety !== undefined) { set.push('safety=?'); val.push(plain(b.safety, 120)); }
   if (b.pay !== undefined) { set.push('pay=?'); val.push(plain(b.pay, 120)); }
+  /* 취소 규칙 한 줄. 공개 페이지와 신청 뒤 카드에 접지 않고 그대로 나간다 */
+  if (b.cancel_rule !== undefined) { set.push('cancel_rule=?'); val.push(plain(b.cancel_rule, 120)); }
   if (b.mode !== undefined) {
     if (!['onsite', 'online'].includes(b.mode)) throw new HttpError(400, 'mode 는 onsite·online 중 하나입니다');
     set.push('mode=?'); val.push(b.mode);
@@ -5697,6 +5703,15 @@ function selftest() {
   ok(cvLines[0].split(',').includes('확정'), 'CSV 머리줄에 확정 칸이 있다');
   ok(cvLines.slice(1, 4).some(l => l.split(',').includes('온다'))
      && cvLines.slice(1, 4).some(l => l.split(',').includes('모름')), 'CSV 확정 칸은 온다·모름을 갈라 적는다');
+
+  /* 취소 규칙 — 주최자가 정하고 대회 페이지에 박는다. 안 정하면 빈 값 그대로다(기본 문장은 화면에만) */
+  ok(getEvent(db, ev).cancel_rule === '', '취소 규칙을 안 정하면 빈 값이다 — 기본 문장을 DB 에 써 두지 않는다');
+  editEvent(db, ev, { cancel_rule: '하루 전까지 팀 화면에서. 그 뒤는 주최자에게' });
+  ok(getEvent(db, ev).cancel_rule === '하루 전까지 팀 화면에서. 그 뒤는 주최자에게', '취소 규칙은 고쳐진다');
+  editEvent(db, ev, { cancel_rule: '가'.repeat(200) });
+  ok(getEvent(db, ev).cancel_rule.length === 120, '취소 규칙은 120자에서 끊긴다');
+  editEvent(db, ev, { cancel_rule: '' });
+  ok(getEvent(db, ev).cancel_rule === '', '취소 규칙은 지울 수 있다');
   db.prepare("UPDATE teams SET came=datetime('now') WHERE id=?").run(t1);
   ok(outcomes(db, ev).came === 1, '체크인이 세어진다');
   ok(outcomes(db, ev).photo === 1, '촬영 동의가 세어진다');

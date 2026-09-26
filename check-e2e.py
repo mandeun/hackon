@@ -1492,10 +1492,20 @@ with sync_playwright() as p:
     post(f"/api/events/{FE}", {"safety": "운영진 help@x.io · 익명 폼 forms.gle/abc"}, FK, method="PATCH")
     visit(f"/e/{FE}")
     A("forms.gle/abc" in pg.inner_text("#safety-line"), "신고 창구가 공개 페이지에 안 보인다")
+    # (3b) 취소 규칙 — 안 정했으면 기본 문장이 보이고, 정하면 그 문장이 신청 칸에 접히지 않은 한 줄로 박힌다
+    A("대회 이틀 전까지" in pg.inner_text("#cancel-rule"), "취소 규칙을 안 정했을 때 기본 문장이 안 보인다")
+    post(f"/api/events/{FE}", {"cancel_rule": "하루 전까지 팀 화면에서. 그 뒤는 주최자에게"}, FK, method="PATCH")
+    visit(f"/e/{FE}")
+    cr = pg.inner_text("#cancel-rule")
+    A("하루 전까지 팀 화면에서" in cr and "취소는 팀 화면에서" in cr, f"주최자가 정한 취소 규칙이 공개 페이지에 안 박힌다: {cr!r}")
+    visit(f"/app#{FE}")
+    A(pg.input_value("#e-cancel").startswith("하루 전까지"), "운영 화면 «기본» 칸에 취소 규칙 칸이 없다")
     # (4) 신청한 브라우저 — 다음에 할 일·내 팀 링크·캘린더
     pg.evaluate(f"localStorage.setItem('hackon.team.{FE}', '{FT['id']}'); localStorage.setItem('hackon.tkey.{FT['id']}', '{FT['tkey']}')")
     visit(f"/e/{FE}")
     A(pg.query_selector("#next") is not None and "?t=" in pg.inner_text("#next-link"), "신청 뒤 «다음에 할 일» 카드나 내 팀 링크가 없다")
+    crn = pg.query_selector("#cancel-rule")
+    A(crn is not None and "하루 전까지 팀 화면에서" in crn.inner_text(), "신청한 사람 화면에 취소 규칙 한 줄이 없다")
     A(pg.get_attribute("#nx-ics", "href").endswith("/ics"), "캘린더 파일 링크가 없다")
     # (5) 참석 재확인 — 대회 3일 전부터 «올 거예요» 가 뜨고, 누르면 주최자 표에 남는다 (D-3 이중 확인 실측 근거)
     import datetime as _dt
@@ -1659,7 +1669,7 @@ with sync_playwright() as p:
     A(ce["prize"] == 0 and "forms.gle/abc" in ce["safety"] and len(api(f"/api/events/{cp2['id']}/needs")) == 1 and ce["rubric"][0]["key"] == "idea", "가져온 내용이 다르다(상금은 안 오고 나머지는 와야 한다)")
     visit("/app"); pg.click('nav button[data-t="make"]'); pg.wait_for_selector("#f-title")
     A(pg.query_selector("#f-fromwrap") is not None and pg.query_selector("#f-host") is None and pg.query_selector("#f-prize") is None, "가져오기 칸이 없거나 만들기 화면이 이름 말고 다른 것을 묻는다")
-    ok("퍼실리테이션 자료 반영 — 서술자·자리 번호·심사위원 수·신고 창구·다음 할 일·묻고 답하기·후원 화면·CSV·순위 보정·설문·가져오기")
+    ok("퍼실리테이션 자료 반영 — 서술자·자리 번호·심사위원 수·신고 창구·취소 규칙·다음 할 일·묻고 답하기·후원 화면·CSV·순위 보정·설문·가져오기")
 
     # ── 접근성(axe) — 첫 화면·대회 페이지·줄 수 있는 것·심사·운영 화면에 critical·serious 0 ──
     # 2026-09-24 처음 잰 값: 대회 페이지 serious 1(대비 22곳) · 심사 critical 1(라벨 4) · 운영 critical 2(라벨 17·select 1) serious 1(대비 29곳)
