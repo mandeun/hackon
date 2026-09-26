@@ -719,6 +719,14 @@ const view = $('#view');
 /* 구글 캘린더 종일 일정은 끝 날짜가 «다음 날»이다(배타). 하루 대회면 ends+1 */
 const gcalEnd = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10).replace(/-/g, ''); };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+/* 장소 제보 칩. 그릴 때와 제보를 넣은 뒤에 같은 함수를 쓴다 — 두 곳에 적으면 한쪽만 고치게 된다.
+   제보가 하나도 없으면 0 을 그리지 않는다. 없는 것과 «모르는 것» 은 다르다. */
+function vchip(t) {
+  if (!t || !t.n) return '<span class="pill">아직 제보 없음</span>';
+  const good = ['콘센트', '와이파이', '빌렸어요'].filter(k => t[k]).map(k => `${k} ${t[k]}`).join(' · ');
+  return (good ? `<span class="pill ok">${good}</span> ` : '')
+       + (t.안맞아요 ? `<span class="pill warn">안 맞아요 ${t.안맞아요}</span>` : '');
+}
 const won = n => (+n || 0).toLocaleString('ko-KR') + '원';
 const NEED_KIND = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
 /* ── «줄 수 있는 것을 주는» 흐름. 세 화면, 화면마다 판단 하나. ──
@@ -1884,9 +1892,11 @@ const SCREEN = {
     const vn = await api(`/venues?size=${f.size}&day=${encodeURIComponent(vday)}`
                        + `${vArea ? '&area=' + encodeURIComponent(vArea) : ''}`)
       .catch(() => null);
-    /* 그 날 되는 곳과 안 되는 곳. 날짜를 모르면(fit=unknown) 안 되는 곳으로 몰지 않는다. */
-    const vFit = vn ? vn.rows.filter(r => r.fit !== 'no') : [];
-    const vNo  = vn ? vn.rows.filter(r => r.fit === 'no') : [];
+    /* 목록 셋 — 그 날 되는 곳 · 접수 기간이 안 맞는 곳 · 제보가 나쁜 곳(dim).
+       날짜를 모르면(fit=unknown) 안 되는 곳으로 몰지 않는다. */
+    const vBad = vn ? vn.rows.filter(r => r.dim) : [];
+    const vFit = vn ? vn.rows.filter(r => !r.dim && r.fit !== 'no') : [];
+    const vNo  = vn ? vn.rows.filter(r => !r.dim && r.fit === 'no') : [];
     /* 장소 카드. 목록이 둘(그 날 되는 곳·접어 둔 곳)이라 함수로 뺀다. */
     const vcard = r => `<div class="card">
       <h3>${esc(r.name)}
@@ -1898,6 +1908,9 @@ const SCREEN = {
         ${r.hours ? ' · ' + esc(r.hours) : ''}<br>
         ${esc(r.pay)}${r.close ? ` · 접수 ${esc(r.close)}까지` : ''}
         ${r.tel ? '<br>' + esc(r.tel) : ''}</div>
+      <div style="margin-top:9px" data-chip="${esc(r.id)}">${vchip(r.tips)}</div>
+      ${r.tips.notes.length ? `<div class="meta" style="margin-top:6px">${
+        r.tips.notes.map(nt => '“' + esc(nt) + '”').join('<br>')}</div>` : ''}
       <div class="shrow" style="margin-top:9px">
         <a class="btn sec sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">예약 페이지</a>
         <button class="btn sec sm" data-vmail="${esc(r.name)}"
@@ -1905,6 +1918,13 @@ const SCREEN = {
         ${lead ? `<button class="btn sec sm" data-lead="장소" data-src="예약"
           data-name="${esc(r.name)}"
           data-how="${esc(r.tel || r.url)}">대장에 넣기</button>` : ''}
+      </div>
+      <div class="meta" style="margin-top:12px">다녀오셨으면 한 줄 남겨 주세요.</div>
+      <input id="vt-${esc(r.id)}" maxlength="120" aria-label="${esc(r.name)} 제보 메모"
+        placeholder="한 줄 메모 (안 써도 됩니다)">
+      <div class="shrow" style="margin-top:9px">
+        ${['콘센트', '와이파이', '빌렸어요', '안 맞아요'].map(k =>
+          `<button class="btn sec sm" data-tip="${esc(r.id)}" data-kind="${k}">${k}</button>`).join('')}
       </div>
     </div>`;
 
@@ -1943,6 +1963,11 @@ const SCREEN = {
           <div class="in">
             <p class="sub">대회 날에는 신청이 닫혀 있는 곳입니다.</p>
             ${vNo.slice(0, 12).map(vcard).join('')}
+          </div></details>` : ''}
+        ${vBad.length ? `<details><summary>«안 맞아요» 제보가 많은 곳 ${vBad.length}</summary>
+          <div class="in">
+            <p class="sub">다녀온 분들이 아니라고 한 곳입니다.</p>
+            ${vBad.slice(0, 12).map(vcard).join('')}
           </div></details>` : ''}
         <p class="sub">인원에 <b>어림</b>이 붙은 곳은 시설 종류로 짐작한 것입니다. 전화로 확인하세요.</p>`
       : `<p class="sub">${vn ? '이 인원이 드는 곳이 지금은 안 올라와 있습니다.'
@@ -4787,6 +4812,25 @@ function wire() {
         flash('복사했습니다');
       } catch { flash('복사가 안 됩니다. 직접 긁어서 복사해 주세요', true); }
     };
+  });
+
+  /* 장소 제보 — 콘센트·와이파이는 서울시 목록에 없다. 다녀온 사람만 안다.
+     메모는 있으면 같이 보낸다(선택). 저장이 끝난 뒤에 칩을 고친다. */
+  document.querySelectorAll('[data-tip]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.tip, box = $('#vt-' + id);
+    b.disabled = true;
+    try {
+      const r = await api(`/venues/${encodeURIComponent(id)}/tips`,
+        { method: 'POST', body: { kind: b.dataset.kind, note: box ? box.value.trim() : '' } });
+      if (box) box.value = '';
+      /* 저장이 끝난 뒤에 받은 값으로 칩을 고친다. 이 줄이 없으면 flash 의 다시 그리기가
+         실패했을 때(오프라인) 화면이 옛 숫자를 계속 들고 있다. 그 다음 flash 가
+         화면을 다시 그려서 순서(제보 많은 곳 먼저)까지 맞춰 준다. */
+      const chip = document.querySelector(`[data-chip="${id}"]`);
+      if (chip) chip.innerHTML = vchip(r.tips);
+      flash('제보 고맙습니다. 다음 분이 덜 헤맵니다');
+    } catch (e) { flash(e.message, true); }
+    b.disabled = false;
   });
 
   const varea = $('#v-area');
