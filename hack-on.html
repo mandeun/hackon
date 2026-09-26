@@ -775,6 +775,9 @@ const DEMO = {
 
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '', curReq = '', curGift = '', GKEY = '';
 let MAKE_REQ = '';   // «이 문제로 내 대회 열기»로 들어온 의뢰 id. 만들 때 첫 주제로 붙는다
+/* 맨 위 «참가자 주소 복사» 를 한 번 누르면 그 주소를 화면에도 한 줄 띄운다.
+   성공 알림(flash)이 화면을 다시 그리므로 상태로 들고 있어야 살아남는다. */
+let QURL_SHOWN = false;
 /* 열쇠 없는 모드(2026-09-25): 카카오 로그인이 켜져 있으면 운영자 열쇠를 화면에서 통째로 뺀다 — 로그인이 곧 열쇠.
    열쇠는 서버·비상용 주소(/app?k=…#대회)에만 남는다. 카카오가 없는 서버(로컬·파일 모드)는 예전 열쇠 화면 그대로. */
 const keyless = () => !!(LIVE && AUTH && AUTH.kakao);
@@ -2210,12 +2213,15 @@ const SCREEN = {
         ${LIVE ? `<span id="qurl" hidden>${esc(shareBase())}/e/${esc(e.id)}</span>
         <div class="quick">
           <a href="/e/${esc(e.id)}" target="_blank" rel="noopener"><span aria-hidden="true">👀</span>공개 페이지</a>
-          <button id="b-qcopy"><span aria-hidden="true">🔗</span>주소 복사</button>
+          <button id="b-qcopy"><span aria-hidden="true">🔗</span>참가자 주소 복사</button>
           <a href="/tv/${esc(e.id)}" target="_blank" rel="noopener"><span aria-hidden="true">📺</span>큰 화면</a>
           <button id="b-csv" title="참가팀·연락처·순위·장부를 CSV 로"><span aria-hidden="true">📄</span>내보내기</button>
           <button id="b-csv0" title="연락처 열이 없는 판 — 스태프 방에 올릴 때"><span aria-hidden="true">🧾</span>연락 빼고</button>
           ${d.closed ? `<button id="b-share-result" data-title="${esc(e.title)}"><span aria-hidden="true">📣</span>결과 공유 글</button>` : ''}
         </div>
+        ${/* 복사만 하고 화면에는 한 글자도 안 보여 줘서, 전화로 불러 줄 것도 손으로 적을 것도 없었다(대역시험 7) */''}
+        <div class="meta" id="qurl-line"${QURL_SHOWN ? '' : ' hidden'} style="margin-top:6px;word-break:break-all">${
+          QURL_SHOWN ? esc(shareBase() + '/e/' + e.id) : ''}</div>
         <div class="meta" style="margin-top:6px">참가자에게 QR 을 보여 줄 곳은 <b>큰 화면</b>입니다. 심사·투표 QR 은 아래 «보낼 주소»에 있습니다.</div>` : '<button class="btn sec sm" id="b-pub" style="margin-top:14px">공개 페이지 미리보기</button>'}
       </section>
 
@@ -4756,7 +4762,12 @@ function wire() {
     flash(msg);
   };
   const qc = $('#b-qcopy');
-  if (qc) qc.onclick = () => copyAny('#qurl', '공개 주소를 복사했습니다');
+  if (qc) qc.onclick = () => {
+    /* 누른 뒤에 주소를 한 줄 보여 준다 — 붙여 넣을 데가 없는 자리(전화로 불러 주기·칠판)가 있다.
+       먼저 켜 둔다. copyAny 의 성공 알림이 화면을 다시 그리면서 이 줄이 뜬다. */
+    QURL_SHOWN = true;
+    copyAny('#qurl', '참가자 주소를 복사했습니다');
+  };
   const copy = $('#b-copy');
   if (copy) copy.onclick = () => copyAny('.share', '공개 주소를 복사했습니다');
   const copyj = $('#b-copyj');

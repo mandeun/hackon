@@ -428,6 +428,20 @@ with sync_playwright() as p:
     A(order == "link-first", "«심사위원 화면 열기» 가 열쇠 든 심사 주소보다 위에 있다")
     ok("심사 주소 — 열쇠 든 주소가 먼저, «열기» 는 그 아래")
 
+    # ── 맨 위 «주소 복사» 는 무슨 주소인지 밝히고, 누르면 화면에 보여 준다 (대역시험 7) ──
+    # 전에는 이름이 탭 줄의 «주소» 와 같아서 어느 주소인지 알 수 없었고,
+    # 눌러도 클립보드에만 들어가 읽어 줄 것이 한 글자도 없었다.
+    visit(f"/app#{ev}")
+    A("참가자 주소 복사" in pg.inner_text("#b-qcopy"),
+      f"맨 위 복사 단추가 무슨 주소인지 안 밝힌다: {pg.inner_text('#b-qcopy')!r}")
+    A(pg.is_hidden("#qurl-line"), "누르지도 않았는데 주소 줄이 떠 있다")
+    pg.click("#b-qcopy")
+    pg.wait_for_timeout(500)
+    A(pg.is_visible("#qurl-line"), "«참가자 주소 복사» 를 눌렀는데 화면에 주소가 안 뜬다")
+    A(f"/e/{ev}" in pg.inner_text("#qurl-line"),
+      f"보여 주는 주소가 참가자용이 아니다: {pg.inner_text('#qurl-line')!r}")
+    ok("맨 위 «참가자 주소 복사» — 누르면 그 주소를 한 줄 보여 준다")
+
     # 로고를 누르면 처음으로 — 어디서 헤매도 여기로 돌아온다
     visit(f"/app#{ev}")
     pg.click('nav button[data-t="spon"]')
