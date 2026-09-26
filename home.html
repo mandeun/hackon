@@ -18,10 +18,27 @@
 <title>HACK:ON — 하루짜리 해커톤을 이름 하나로 엽니다</title>
 <meta name="description" content="동네에서 여는 하루짜리 해커톤. 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다. 장소·심사·간식은 한 자리씩 맡아 함께 엽니다.">
 <link rel="icon" href="/icon.svg">
+<!-- 검색·링크 미리보기. 대표 주소는 hackon.kr 하나 — mandeun 으로 들어와도 구글은 이쪽으로 모은다 -->
+<meta name="google-site-verification" content="wW1h6XCm05tNbZBJHKrLQFsb963fGp0JThpfigIlhVc">
+<link rel="canonical" href="https://hackon.kr/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HACK:ON">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:url" content="https://hackon.kr/">
+<meta property="og:title" content="HACK:ON — 하루짜리 해커톤을 이름 하나로 엽니다">
+<meta property="og:description" content="동네에서 여는 하루짜리 해커톤. 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다.">
+<meta property="og:image" content="https://hackon.kr/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","name":"HACK:ON","alternateName":["핵온","해크온","hackon"],"url":"https://hackon.kr/","inLanguage":"ko",
+ "description":"동네에서 여는 하루짜리 해커톤 플랫폼. 대회 열기·모집·제출·심사·시상까지 한 곳에서."}
+</script>
 
 <style>
 :root{
-  --pg:#EEF1F4; --card:#fff; --soft:#F4F6F8; --acc:#2350F5; --ink:#191F28; --grey:#5B6470; --hair:#EAECEF;
+  --pg:#EEF1F4; --card:#fff; --soft:#F4F6F8; --acc:#0B1020; --on:#C8F53B; --ink:#191F28; --grey:#5B6470; --hair:#EAECEF;
   --sans:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif;
   --mono:ui-monospace,Consolas,monospace;
 }
@@ -65,10 +82,13 @@ input::placeholder{color:#8a8a8a}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
 /* 표제. 한 문장과 단추 둘. 폰(390px)에서 접힘 위에 단추가 들어와야 한다. */
-.hero{padding:28px 0 10px}
-.hero .eyebrow{font-size:14px;font-weight:700;color:var(--acc);margin-bottom:10px}
+.hero{padding:34px 0 30px;background:var(--acc) url(/hero.jpg) center/cover no-repeat;color:#fff;position:relative}
+.hero::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,16,32,.92) 0%,rgba(11,16,32,.72) 55%,rgba(11,16,32,.35) 100%)}
+.hero .wrap{position:relative}
+.hero .btn{background:var(--on);color:var(--acc)} .hero .btn.o{background:transparent;color:#fff;border-color:rgba(255,255,255,.45)}
+.hero .eyebrow{font-size:14px;font-weight:700;color:var(--on);margin-bottom:10px}
 .hero h1{font-size:clamp(30px,7.2vw,46px);font-weight:850;letter-spacing:-.045em;line-height:1.12}
-.hero .lead{margin-top:14px;font-size:17px;color:var(--grey);line-height:1.6;text-wrap:pretty}
+.hero .lead{margin-top:14px;font-size:17px;color:#D5DAE6;line-height:1.6;text-wrap:pretty}
 .hero .cta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
 @media (max-width:640px){ .hero .cta{flex-direction:column;align-items:stretch} .hero .cta .btn{width:100%} }
 
@@ -110,7 +130,7 @@ section{background:var(--card);border-radius:22px;padding:28px 26px;margin:14px 
 
 /* 점 — 이 앱의 캐릭터. 점판의 동그라미 하나. 자리가 켜지면 파랗게 차고 살짝 튄다. */
 .hd{display:inline-block;width:14px;height:14px;border-radius:50%;border:2.5px solid #AEB6C8;box-sizing:border-box;vertical-align:-2px;margin-right:8px}
-.hd.on{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 4px rgba(35,80,245,.18);animation:hdpop .6s ease-out}
+.hd.on{background:var(--on);border-color:var(--on);box-shadow:0 0 0 4px rgba(200,245,59,.28);animation:hdpop .6s ease-out}
 @keyframes hdpop{0%{transform:scale(.6)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){ .hd.on{animation:none} }
 /* 앱 피드백 한 줄 */
@@ -144,7 +164,7 @@ footer a{color:inherit}
 <body>
 <script>
 /* ═══════════════ 고치는 곳 ═══════════════ */
-var 연락메일 = 'tree8727@gmail.com';
+var 연락메일 = 'hi@mandeun.com';
 /* 매뉴얼은 이 사이트 안에서 바로 열린다. 파일로 열었을 때만 저장소로 보낸다. */
 var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://github.com/mandeun/hackon';
 /* ═════════════ 고치는 곳 끝 ═════════════ */
@@ -157,6 +177,8 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <nav class="sec" aria-label="절">
       <a href="#list">대회 찾기</a>
       <a href="#give">협찬·돕기</a>
+      <a href="/problems">문제 은행</a>
+      <a href="/news">해커온뉴스</a>
       <a id="nav-manual" href="#">운영 매뉴얼</a>
     </nav>
     <nav class="tools" aria-label="도구">
@@ -170,11 +192,11 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <div class="hero">
   <div class="wrap">
     <p class="eyebrow"><i class="hd on" aria-hidden="true"></i>동네에서 여는 하루짜리 해커톤</p>
-    <h1>하루 모여 앱 하나를 만들고,<br>그 자리에서 뽑습니다.</h1>
-    <p class="lead">코딩을 안 해 봤어도 됩니다. 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다.</p>
+    <h1>번거로운 일 하나,<br>동네가 하루 만에 풉니다.</h1>
+    <p class="lead">이름 하나 적으면 대회가 열리고, 장소·심사·간식은 빈자리로 남겨 두면 됩니다. 코딩은 안 해 봤어도 됩니다.</p>
     <div class="cta">
       <a class="btn" id="hero-open" href="/app">대회 열기</a>
-      <a class="btn o" id="hero-go" href="#list">만들러 가기</a>
+      <a class="btn o" id="hero-go" href="#list">참가할 대회 보기</a>
     </div>
   </div>
 </div>
@@ -184,7 +206,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <section id="list">
   <div class="head">
     <h2>열린 대회 <span class="mono grey" id="count" style="font-size:14px;font-weight:400"></span></h2>
-    <p>마감이 가까운 순서입니다. 누르면 신청 칸이 바로 나옵니다.</p>
+    <p>사람이 모이고, 자리가 채워지고, 마감이 가까운 순서입니다. 누르면 신청 칸이 바로 나옵니다.</p>
   </div>
   <div class="tools" id="tools" hidden>
     <label class="sr" for="q">대회 검색</label>
@@ -204,6 +226,12 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <b>아직 열린 대회가 없습니다.</b>
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
     <a class="btn s" href="/app">대회 열기</a>
+  </div>
+  <!-- 같은 절 안에 둔다 — 첫 화면은 절 셋을 넘기지 않는다(검사가 잠근다). 의뢰가 없으면 통째로 숨는다 -->
+  <div id="asks" hidden style="margin-top:22px">
+    <h2 style="font-size:17px">풀어 달라는 문제 <span class="mono grey" id="asks-count" style="font-size:14px;font-weight:400"></span></h2>
+    <p class="grey" style="margin:4px 0 8px">누군가 올린 «번거로운 일»입니다. 아직 어느 대회에도 안 붙었습니다. 이름 하나 적으면 이 문제로 대회가 열립니다.</p>
+    <div id="asks-grid" class="evs"></div>
   </div>
 </section>
 
@@ -228,12 +256,6 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   <p class="mail">협찬 문의는 메일로도 받습니다. <a id="mail-link" href="#"></a></p>
 </section>
 
-<div class="fb" id="fb">
-  <p class="grey" style="font-size:14px;font-weight:700">이 앱, 뭐가 불편했나요</p>
-  <form id="fb-form"><input id="fb-text" maxlength="300" placeholder="한 줄이면 됩니다. 만든 사람이 읽습니다"><button class="btn s o" type="submit" id="fb-send">보내기</button></form>
-  <p class="grey" id="fb-done" style="font-size:13px;margin-top:6px" hidden>고맙습니다. 읽고 고치겠습니다.</p>
-</div>
-
 <details class="more" id="more">
   <summary>이 서비스가 어떻게 돌아가는지 더 보기</summary>
   <ul>
@@ -248,9 +270,10 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 <footer>
   <div class="wrap">
     <span translate="no" style="font-weight:700;color:var(--ink)">HACK<span class="stamp">:</span>ON</span>
-    <span>서강대 경영학과 학생 한 명이 만들고 굴립니다.</span>
-    <span id="foot-mail"></span>
+    <span>코드와 운영 방법이 전부 공개입니다.</span>
     <a id="foot-manual" href="#">운영 매뉴얼</a>
+    <a href="https://github.com/mandeun/hackon" rel="noopener">소스 보기</a>
+    <span id="foot-mail"></span>
     <span class="mono" id="foot-note" style="margin-left:auto"></span>
   </div>
 </footer>
@@ -321,6 +344,15 @@ function 그리기(){
 fetch('/api/events').then(function(r){ return r.json(); }).then(function(list){
   대회들 = list; 그리기();
 }).catch(function(){ 대회들 = 예시; 그리기(); });
+/* «참가할 대회 보기» — 목록이 바로 아래라 눌러도 아무 변화가 없었다. 부드럽게 내려가며 테두리를 한 번 켠다. 대회가 없으면 열기로 */
+document.getElementById('hero-go').addEventListener('click', function(ev){
+  ev.preventDefault();
+  var el = document.getElementById('list');
+  if (!대회들.length) { location.href = '/app'; return; }
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.style.transition = 'box-shadow .3s'; el.style.boxShadow = '0 0 0 3px #C8F53B';
+  setTimeout(function(){ el.style.boxShadow = ''; }, 1400);
+});
 document.getElementById('q').addEventListener('input', 그리기);
 document.getElementById('sort').addEventListener('change', 그리기);
 document.querySelectorAll('[data-filter]').forEach(function(b){
@@ -332,6 +364,20 @@ document.querySelectorAll('[data-filter]').forEach(function(b){
 });
 
 /* ── 지난 대회 우수작. 운영자 별표 + 본인 동의 + 마감 뒤인 팀만 서버가 준다. 없으면 통째로 감춘다. ── */
+fetch('/api/requests').then(function(r){ return r.json(); }).then(function(list){
+  list = (list || []).filter(function(q){ return q.kind !== 'sponsor'; });
+  if (!list.length) return;
+  document.getElementById('asks').hidden = false;
+  document.getElementById('asks-count').textContent = list.length + '건';
+  document.getElementById('asks-grid').innerHTML = list.slice(0, 6).map(function(q){
+    return '<a class="ev" href="/app?req=' + esc(q.id) + '">' +
+      '<span class="st open">의뢰</span>' +
+      '<span><div class="t">' + esc(q.topic || q.pain) + '</div><div class="m">' + esc(q.name) + (q.done ? ' · «됐다»의 기준: ' + esc(q.done) : '') + '</div></span>' +
+      '<span class="n">이 문제로 열기 →</span>' +
+    '</a>';
+  }).join('');
+}).catch(function(){});
+
 fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list){
   if (!list || !list.length) return;
   document.getElementById('showcase').hidden = false;
@@ -374,14 +420,6 @@ fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list)
   });
 }).catch(function(){});
 
-/* 앱 피드백 — 한 줄. 서버에 쌓이고 만든 사람이 읽는다. */
-document.getElementById('fb-form').addEventListener('submit', function(ev){
-  ev.preventDefault();
-  var t = document.getElementById('fb-text').value.trim(); if (!t) return;
-  fetch('/api/feedback', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ page:'첫 화면', text:t }) })
-    .then(function(r){ if (r.ok) { document.getElementById('fb-text').value = ''; document.getElementById('fb-done').hidden = false; } })
-    .catch(function(){});
-});
 /* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
   var el = document.getElementById('nav-login');

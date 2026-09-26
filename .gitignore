@@ -7,3 +7,8 @@ node_modules/
 __pycache__/
 .env
 .env.*
+backlog/.locks/
+.claude/worktrees/
+
+# 홍보 효과음 — 스크립트로 다시 만든다
+promo/sfx/

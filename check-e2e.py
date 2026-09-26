@@ -244,7 +244,14 @@ with sync_playwright() as p:
     pg.wait_for_selector("#s-url")
     pg.fill("#s-url", "https://example.com/walk")
     pg.fill("#s-note", "보행 장벽을 미리 알려 주는 지도")
-    pg.fill("#s-aiuse", "화면 만들 때 썼습니다")
+    # AI 기록은 글쓰기가 아니라 누르기다 — 지친 참가자에게 서술을 시키면 안 채운다
+    pg.click('#s-ai-picks .pick[data-ai="화면"]')
+    pg.click('#s-ai-picks .pick[data-ai="코드"]')
+    A(pg.input_value("#s-aiuse") == "화면 · 코드", f'칩이 숨은 칸에 안 모인다: {pg.input_value("#s-aiuse")!r}')
+    pg.click('#s-ai-picks .pick[data-ai="안 썼어요"]')
+    A(pg.input_value("#s-aiuse") == "안 썼어요", "«안 썼어요» 가 나머지를 안 끈다")
+    pg.click('#s-ai-picks .pick[data-ai="안 썼어요"]')
+    pg.click('#s-ai-picks .pick[data-ai="화면"]')
     pg.fill("#s-aidrop", "추천 로직은 우리 문제와 안 맞아 버렸습니다")
     pg.click("#s-save")
     pg.wait_for_timeout(700)
@@ -261,17 +268,17 @@ with sync_playwright() as p:
     # 95*.30 + 90*.30 + 85*.25 + 80*.15 = 88.75 → 88.8
     A(abs(top["score"] - 88.8) < 0.05, f"가중 평균이 틀렸다: {top['score']}")
     A(rows[1]["score"] == 0, "심사 안 한 팀이 점수를 받았다")
-    A(top["aiuse"] == "화면 만들 때 썼습니다" and "버렸습니다" in top["aidrop"],
+    A(top["aiuse"] == "화면" and "버렸습니다" in top["aidrop"],
       f"AI 사용 기록이 안 남았다: {top.get('aiuse')} / {top.get('aidrop')}")
     ok(f"제출 · 심사 저장 — 1등 {top['name']} {top['score']}점 · AI 사용 기록까지")
 
     # 목록 공개 — 이름만 넣은 대회는 첫 화면에 안 뜬다
-    A(len(api("/api/events")) == 0, "공개 안 한 대회가 첫 화면 목록에 떴다")
+    A(api("/api/events") == [], "공개 안 한 대회가 첫 화면 목록에 떴다")
     visit(f"/app#{ev}")
     vtxt = pg.inner_text("#view")
     A("아직 첫 화면 목록에 안 보입니다" in vtxt, f"공개 안내가 없다: {vtxt[:150]}")
     A(post(f"/api/events/{ev}/list", {"list": True}, OK)[0] == 200, "목록 공개 실패")
-    A(len(api("/api/events")) == 1, "공개했는데 목록에 안 뜬다")
+    A([e["id"] for e in api("/api/events")] == [ev], "공개했는데 목록에 안 뜬다")
     A(post(f"/api/events/{ev}/list", {"list": True})[0] == 403, "열쇠 없이 목록 공개가 됐다")
     # 첫 화면에서 실제로 그려지는가 — 대회가 있으면 «없습니다» 안내는 사라지고 제목이 보인다
     pg.goto(BASE + "/")
@@ -847,6 +854,153 @@ with sync_playwright() as p:
     gctx.close()
     ok("줄 수 있는 것 — /give 세 화면(간식 → 대회 건너뜀 → 이름·연락처), 자리 카드는 이름·연락처만, 연락처는 운영자만")
 
+    # ── 협찬 안내 한 장 (/give/<대회id>) — 인스타 프로필에 거는 주소 ──
+    # 「도와주세요」는 아무도 안 준다. 「이 자리는 얼마고 이름·로고가 어디에 붙는다」를 파는 화면이다.
+    # 숫자는 하나도 안 박는다 — 서버가 준 price 를 그대로 화면에서 찾는다.
+    soon = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    _, sev = post("/api/events", {"title": "협찬안내e2e", "host": "협찬주최",
+                                  "starts": soon, "ends": soon})
+    SID, SK = sev["id"], sev["okey"]
+    _, n_paid = post(f"/api/events/{SID}/needs",
+                     {"kind": "venue", "label": "토요일 6시간 장소", "qty": 2, "price": 150000}, SK)
+    _, n_free = post(f"/api/events/{SID}/needs", {"kind": "judge", "label": "심사위원", "qty": 1}, SK)
+    _, n_good = post(f"/api/events/{SID}/needs", {"kind": "snack", "label": "20명분 간식", "qty": 1}, SK)
+    A(n_paid["price"] == 150000 and n_free["price"] == 0 and n_good["price"] == 0,
+      f"자리를 올릴 때 희망가가 안 붙는다: {n_paid} {n_free} {n_good}")
+
+    def need_now(nid):
+        return next(n for n in api(f"/api/events/{SID}/needs") if n["id"] == nid)
+
+    spctx = b.new_context(viewport={"width": 460, "height": 900})
+    sp = spctx.new_page()
+    sp.on("pageerror", lambda e: errs.append("sponsor:" + str(e)))
+    sp.goto(BASE + f"/give/{SID}", wait_until="networkidle")
+    sp.wait_for_selector(f'[data-price="{n_paid["id"]}"]', timeout=8000)
+    # 서버가 준 금액이 그대로 뜬다. 값을 여기 적지 않고 API 에서 받아 와서 비교한다.
+    want = f"{need_now(n_paid['id'])['price']:,}원"
+    shown = sp.inner_text(f'[data-price="{n_paid["id"]}"]')
+    A(want in shown, f"희망가가 서버 값과 다르게 뜬다: 서버 {want} · 화면 {shown}")
+    A("희망가" in sp.inner_text("#view") and "확정 금액이 아니" in sp.inner_text("#view"),
+      "확정 금액인 척한다 — 「희망가」라는 말이 화면에 없다")
+    ok(f"협찬 안내 — 자리별 금액이 서버 값 그대로 뜬다 ({want}), 확정 금액이 아니라고 적혀 있다")
+
+    # 0원은 「금액 미정」. 단 물건으로도 되는 자리(간식·상품)는 「현물도 됩니다」여야 한다 —
+    # 간식에 「금액 미정」만 띄우면 과자 한 박스 줄 수 있는 사람이 그냥 돌아선다.
+    A("금액 미정" in sp.inner_text(f'[data-price="{n_free["id"]}"]'),
+      "희망가 0 인 자리가 「금액 미정」으로 안 보인다")
+    A("현물도 됩니다" in sp.inner_text(f'[data-price="{n_good["id"]}"]'),
+      "간식 자리에 「현물도 됩니다」가 없다")
+    ok("협찬 안내 — 0원은 「금액 미정」, 물건 협찬 자리는 「현물도 됩니다」")
+
+    # 로고가 어디에 뜨는지 말로 적혀 있어야 판다 — 공개 페이지·현장 큰 화면·결과 보고서 셋
+    body_txt = sp.inner_text("#view")
+    A("공개 페이지" in body_txt and "큰 화면" in body_txt and "결과 보고서" in body_txt,
+      f"이름·로고가 어디 붙는지가 안 적혀 있다: {body_txt[:200]}")
+    A(sp.query_selector(f'a[href="/tv/{SID}"]') is not None, "현장 큰 화면을 미리 볼 길이 없다")
+    ok("협찬 안내 — 이름·로고가 뜨는 세 곳(공개 페이지·현장 큰 화면·결과 보고서)이 적혀 있다")
+
+    # 폰으로 온다. 가로로 밀리면 가격이 화면 밖으로 나간다.
+    for w in (460, 390):
+        sp.set_viewport_size({"width": w, "height": 900})
+        sp.wait_for_timeout(250)
+        A(sp.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"),
+          f"{w}px 에서 가로로 밀린다")
+    sp.set_viewport_size({"width": 460, "height": 900})
+    ok("협찬 안내 — 폰 폭(460·390px)에서 가로로 안 밀린다")
+
+    # 「이 자리 맡기」는 새 길이 아니라 원래 pledge 흐름으로 간다
+    sp.click(f'[data-give-need="{n_paid["id"]}"]')
+    sp.wait_for_selector("#g-name", timeout=8000)
+    A(sp.query_selector("[data-give-event]") is None, "대회가 정해져 있는데 「어느 대회에」를 또 묻는다")
+    sp.fill("#g-name", "협찬사에이")
+    sp.fill("#g-contact", "sponsor-secret@example.com")
+    sp.click("#g-send")
+    sp.wait_for_timeout(900)
+    A("보냈습니다" in sp.inner_text("#give-wrap"), "맡기를 눌렀는데 안 들어갔다")
+    spl = api(f"/api/events/{SID}/pledges", key=SK)
+    mine_p = [p for p in spl if p["need"] == n_paid["id"] and p["name"] == "협찬사에이"]
+    A(mine_p and mine_p[0]["contact"] == "sponsor-secret@example.com",
+      f"협찬 안내에서 보낸 신청이 운영자 목록에 없다: {spl}")
+    A("sponsor-secret" not in json.dumps(api(f"/api/events/{SID}/needs"), ensure_ascii=False)
+      and "sponsor-secret" not in json.dumps(api(f"/api/events/{SID}/ledger"), ensure_ascii=False),
+      "협찬사 연락처가 공개 응답으로 샜다")
+    ok("협찬 안내 — 「이 자리 맡기」가 원래 pledge 흐름으로 들어간다 (연락처는 운영자만)")
+
+    # 운영자가 확인한 것만 「이미 맡아 주신 분」에 오른다. 남은 자리도 서버 값과 맞아야 한다.
+    before_left = need_now(n_paid["id"])["qty"] - need_now(n_paid["id"])["filled"]
+    post(f"/api/pledges/{mine_p[0]['id']}/status", {"status": "ok"}, SK)
+    sp.goto(BASE + f"/give/{SID}", wait_until="networkidle")
+    sp.wait_for_selector(f'[data-price="{n_paid["id"]}"]', timeout=8000)
+    after = need_now(n_paid["id"])
+    txt = sp.inner_text("#view")
+    A("협찬사에이" in txt, "확인했는데 공개 장부에 안 올랐다")
+    A("sponsor-secret" not in txt, "공개 장부에 연락처가 떴다")
+    A(f"{after['qty'] - after['filled']}자리 남음" in sp.inner_text(f'[data-need-card="{n_paid["id"]}"]'),
+      "남은 자리 수가 서버 값과 다르다")
+    A(after["qty"] - after["filled"] == before_left - 1, "확인했는데 남은 자리가 안 줄었다")
+    ok("협찬 안내 — 확인된 협찬사만 이름이 오르고, 남은 자리 수가 서버 값과 같다")
+
+    # 사람이 손으로 넣는 값이다. 화면을 안 거치고 API 를 직접 때려도 안 깨져야 한다.
+    for bad in (-1, "공짜", None, ""):
+        st, r = post(f"/api/needs/{n_free['id']}", {"price": bad}, SK, method="PATCH")
+        A(st == 200 and r["price"] == 0, f"이상한 희망가({bad!r})가 그대로 들어갔다: {st} {r}")
+    st, r = post(f"/api/needs/{n_free['id']}", {"price": 10 ** 30}, SK, method="PATCH")
+    A(st == 200 and r["price"] < 10 ** 30 and r["price"] == need_now(n_free["id"])["price"],
+      f"엄청 큰 희망가가 그대로 들어갔다: {r}")
+    A(post(f"/api/needs/{n_free['id']}", {"price": 90000}, method="PATCH")[0] == 403,
+      "열쇠 없이 희망가가 고쳐졌다")
+    ok("협찬 안내 — 음수·글자·빈값·엄청 큰 수를 막고, 열쇠 없이는 못 고친다")
+
+    # 운영자가 화면에서 희망가를 저장하면 협찬 안내에 바로 반영되고, 「다시 나누기」가 못 덮는다
+    sp.goto(BASE + "/app", wait_until="networkidle")
+    sp.evaluate("localStorage.setItem('hackon.okey.' + %r, %r)" % (SID, SK))
+    sp.goto("about:blank")
+    sp.goto(BASE + f"/app#{SID}", wait_until="networkidle")
+    sp.evaluate("() => document.querySelectorAll('#view details').forEach(d => d.open = true)")
+    sp.wait_for_selector(f'[data-need-price="{n_free["id"]}"]', timeout=8000)
+    sp.fill(f'[data-need-price="{n_free["id"]}"]', "80000")
+    sp.click(f'[data-need-price-save="{n_free["id"]}"]')
+    sp.wait_for_timeout(1000)
+    saved = need_now(n_free["id"])
+    A(saved["price"] == 80000 and saved["held"] is True,
+      f"화면에서 저장한 희망가가 안 들어갔다(혹은 손고침으로 안 잠겼다): {saved}")
+    sp.goto(BASE + f"/give/{SID}", wait_until="networkidle")
+    sp.wait_for_selector(f'[data-price="{n_free["id"]}"]', timeout=8000)
+    A(f"{saved['price']:,}원" in sp.inner_text(f'[data-price="{n_free["id"]}"]'),
+      "운영자가 저장한 희망가가 협찬 안내에 안 뜬다")
+    # 대회 없는 /give 는 예전 그대로다. cur 은 localStorage 에 남아 있으니 주소에 있는 것만 믿어야 한다 —
+    # 안 그러면 「줄 수 있는 것」을 누른 손님에게 지난번에 보던 남의 대회 협찬 안내가 뜬다.
+    sp.evaluate("localStorage.setItem('hackon.event', %r)" % SID)
+    sp.goto("about:blank")
+    sp.goto(BASE + "/give", wait_until="networkidle")
+    sp.wait_for_selector(".gchip[data-give-kind]", timeout=8000)
+    A(sp.query_selector("[data-price]") is None,
+      "대회 없는 /give 인데 지난번에 보던 대회의 협찬 안내가 떴다")
+    spctx.close()
+    ok(f"협찬 안내 — 운영 화면에서 저장한 희망가가 바로 붙는다 ({saved['price']:,}원, 손고침 잠김)")
+
+    # 자리를 올릴 때 «무엇을 얼마나» 가 미리 채워진다. 역할이 모호하면 맡겠다는 사람이 줄어든다.
+    visit(f"/app#{ev}")
+    pg.evaluate("() => document.querySelectorAll('#view details').forEach(d => d.open = true)")
+    pg.wait_for_selector("#n-kind", timeout=8000)
+    pg.select_option("#n-kind", "judge")
+    pg.dispatch_event("#n-kind", "change")
+    pg.wait_for_timeout(200)
+    judge_hint = pg.input_value("#n-note")
+    A(judge_hint.strip() != "", "심사 자리를 골랐는데 메모가 비어 있다")
+    pg.select_option("#n-kind", "venue")
+    pg.dispatch_event("#n-kind", "change")
+    pg.wait_for_timeout(200)
+    venue_hint = pg.input_value("#n-note")
+    A(venue_hint.strip() != "" and venue_hint != judge_hint,
+      f"종류를 바꿨는데 메모가 그대로다: {venue_hint!r}")
+    pg.fill("#n-note", "손으로 쓴 메모")
+    pg.select_option("#n-kind", "snack")
+    pg.dispatch_event("#n-kind", "change")
+    pg.wait_for_timeout(200)
+    A(pg.input_value("#n-note") == "손으로 쓴 메모", "사람이 쓴 메모를 기본값이 덮었다")
+    ok("자리 메모 — 종류를 고르면 «무엇을 얼마나» 가 채워지고, 사람이 쓴 건 안 덮는다")
+
     # ── 추천작 + 첫 화면 쇼케이스 (기능 3/3) ──
     _, cev = post("/api/events", {"title": "쇼케이스시험"})
     CID, CK = cev["id"], cev["okey"]
@@ -1246,6 +1400,71 @@ with sync_playwright() as p:
     visit(f"/e/{FE}")
     A(pg.query_selector("#next") is not None and "?t=" in pg.inner_text("#next-link"), "신청 뒤 «다음에 할 일» 카드나 내 팀 링크가 없다")
     A(pg.get_attribute("#nx-ics", "href").endswith("/ics"), "캘린더 파일 링크가 없다")
+    # (5) 참석 재확인 — 대회 3일 전부터 «올 거예요» 가 뜨고, 누르면 주최자 표에 남는다 (D-3 이중 확인 실측 근거)
+    import datetime as _dt
+    ev0 = api(f"/api/events/{FE}")
+    soon = (_dt.date.today() + _dt.timedelta(days=2)).isoformat()
+    post(f"/api/events/{FE}", {"starts": soon, "ends": soon}, FK, method="PATCH")
+    visit(f"/e/{FE}")
+    pg.wait_for_selector("#cf-yes", timeout=8000)
+    # 두 번째 칸의 다섯 항목이 이 카드에 접혀 있다 — 한 번의 방문으로 끝나야 한다 (B1)
+    A(pg.query_selector("#cf-role") is not None and pg.query_selector("#cf-size") is not None, "D-3 카드에 역할·인원 칸이 없다")
+    pg.select_option("#cf-role", "만들기"); pg.fill("#cf-size", "3")
+    pg.click("#cf-yes"); pg.wait_for_timeout(1600)
+    row = [r for r in api(f"/api/events/{FE}/board", key=FK)["rows"] if r["id"] == FT["id"]][0]
+    A(row.get("confirmed") not in ("", None, "no"), f"«올 거예요» 를 눌렀는데 재확인이 안 남았다: {row.get('confirmed')!r}")
+    A(row.get("role") == "만들기" and int(row.get("size") or 0) == 3, f"D-3 카드에서 채운 역할·인원이 안 남았다: {row.get('role')!r} {row.get('size')!r}")
+    post(f"/api/events/{FE}", {"starts": ev0["starts"], "ends": ev0["ends"]}, FK, method="PATCH")
+    ok("참석 재확인 — 3일 전부터 묻고, 답이 주최자 표에 남는다")
+    # (6) 팀 휴지통 — 지우면 빠지고, 되살리면 같은 id 로 돌아온다 (참가자 링크가 산다)
+    n0 = len(api(f"/api/events/{FE}/board", key=FK)["rows"])
+    st, tr = post(f"/api/teams/{FT['id']}", {}, FK, method="DELETE")
+    A(st == 200 and tr and tr.get("trash"), f"팀을 못 지웠다: {st} {tr}")
+    A(len(api(f"/api/events/{FE}/board", key=FK)["rows"]) == n0 - 1, "지웠는데 표에 남아 있다")
+    A(len(api(f"/api/events/{FE}/board", key=FK).get("trash") or []) >= 1, "운영자 표에 «지운 팀» 목록이 안 실린다")
+    mails = api(f"/api/events/{FE}/board", key=FK).get("mails") or []
+    A(any(x["status"] in ("skipped", "sent") and x["c"] >= 1 for x in mails), f"신청 메일이 장부에 안 남았다: {mails}")
+    st, rs = post(f"/api/trash/{tr['trash']}/restore", {}, FK)
+    A(st == 200 and rs and rs.get("id") == FT["id"], f"되살린 팀 id 가 다르다: {rs}")
+    A(len(api(f"/api/events/{FE}/board", key=FK)["rows"]) == n0, "되살렸는데 표 수가 안 돌아왔다")
+    ok("팀 휴지통 — 지우기·되살리기가 같은 id 로 왕복한다")
+    dmp = api(f"/api/events/{FE}/dump", key=FK)
+    A(isinstance(dmp, dict) and dmp.get("teams") is not None, "운영자 사본(dump)이 안 내려온다")
+    visit(f"/app#{FE}")
+    A(pg.query_selector("#gd-dump") is not None, "운영 화면에 «사본 내려받기» 단추가 없다")
+    ok("사본 내려받기 — 운영 화면 단추 + JSON 한 파일")
+    # (6b) «이 문제로 내 대회 열기» — 의뢰 올린 사람이 기다리지 않고 직접 연다
+    _, rq = post("/api/requests", {"kind": "requester", "name": "총무 최", "pain": "회비 낸 사람 세기", "done": "이름 누르면 냈다로", "contact": "choi@example.com"})
+    A(any(q["id"] == rq["id"] for q in api("/api/requests")), "올린 의뢰가 후보 목록에 없다")
+    visit(f"/app?req={rq['id']}")
+    A(pg.query_selector("#f-req") is not None and "회비" in pg.input_value("#f-title"), "의뢰가 열기 탭 제목에 안 채워진다")
+    pg.click("#f-save"); pg.wait_for_timeout(1500)
+    newev = pg.evaluate("localStorage.getItem('hackon.event')")
+    A(newev and newev != FE, "의뢰로 대회가 안 만들어졌다")
+    A(any(q["id"] == rq["id"] for q in api(f"/api/events/{newev}/requests")), "만든 대회에 그 의뢰가 주제로 안 붙었다")
+    A(not any(q["id"] == rq["id"] for q in api("/api/requests")), "붙은 의뢰가 후보 목록에 그대로 있다")
+    pg.evaluate(f"localStorage.setItem('hackon.event', '{FE}')")
+    ok("의뢰 → «이 문제로 내 대회 열기» — 이름 하나로 열리고 첫 주제로 붙는다")
+    # (6c) 열기 탭 유형 칩 — 누르면 이름·정원이 채워지고, 만든 대회에 그 값이 들어간다
+    visit("/app"); pg.click('nav button[data-t="make"]'); pg.wait_for_selector("[data-tpl]")
+    pg.click("[data-tpl='3']"); pg.wait_for_timeout(200)
+    A("가게" in pg.input_value("#f-title"), "유형 칩이 이름을 안 채운다")
+    pg.click("#f-save"); pg.wait_for_timeout(1500)
+    tev = pg.evaluate("localStorage.getItem('hackon.event')")
+    te = api(f"/api/events/{tev}")
+    A(te["cap"] == 10 and "가게" in (te.get("topic") or ""), f"유형 칩의 정원·주제가 대회에 안 들어갔다: {te['cap']} {te.get('topic')!r}")
+    pg.evaluate(f"localStorage.setItem('hackon.event', '{FE}')")
+    ok("열기 탭 유형 칩 — 누르면 이름·정원·주제가 채워진다 (입력 최소)")
+    # (7) 같은 것을 참가자가 화면에서 — «신청 취소» 뒤 «되돌리기». 열쇠는 위 (4)에서 넣어 둔 그 브라우저.
+    pg.once("dialog", lambda d: d.accept())
+    visit(f"/e/{FE}")
+    pg.click("#nx-cancel")
+    pg.wait_for_selector("#next-gone", timeout=8000)
+    A(len(api(f"/api/events/{FE}/board", key=FK)["rows"]) == n0 - 1, "참가자가 취소했는데 표에 남아 있다")
+    pg.click("#nx-undo")
+    pg.wait_for_selector("#next-link", timeout=8000)
+    A(len(api(f"/api/events/{FE}/board", key=FK)["rows"]) == n0, "참가자가 되돌렸는데 표 수가 안 돌아왔다")
+    ok("참가자 화면 — 신청 취소 → 되돌리기, 팀 링크 그대로")
     ics = urllib.request.urlopen(f"{BASE}/api/events/{FE}/ics").read().decode()
     A(f"DTSTART;VALUE=DATE:{d2.replace('-', '')}" in ics and "+09:00" not in ics and "TZID" not in ics, "종일 일정이 날짜만으로 안 나간다")
     # (5) 묻고 답하기 — 열쇠·상한·답은 소식·본인 닫기·끝난 대회 읽기 전용
@@ -1482,11 +1701,17 @@ with sync_playwright() as p:
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})
     A(code == 201, "정원 대회 생성 실패")
-    A(post(f"/api/events/{small['id']}/teams", {"name": "첫팀", "email": "t@example.com", "agree": True})[0] == 201,
-      "첫 팀이 못 들어갔다")
-    A(post(f"/api/events/{small['id']}/teams", {"name": "둘째팀", "email": "t@example.com", "agree": True})[0] == 409,
-      "정원 찬 대회에 들어가졌다")
-    ok("정원 초과 차단 (409)")
+    st1, t1 = post(f"/api/events/{small['id']}/teams", {"name": "첫팀", "email": "t@example.com", "agree": True})
+    A(st1 == 201, "첫 팀이 못 들어갔다")
+    st, w = post(f"/api/events/{small['id']}/teams", {"name": "둘째팀", "email": "t@example.com", "agree": True})
+    A(st == 202 and w and w.get("waiting") == 1, f"정원 찬 대회에서 대기자가 안 된다: {st} {w}")
+    st2, w2 = post(f"/api/events/{small['id']}/teams", {"name": "새치기", "email": "t@example.com", "agree": True, "_promote": True})
+    A(st2 == 202 and w2 and w2.get("waiting") == 2, f"몸통에 _promote 를 실어 정원을 건너뛴다: {st2} {w2}")
+    A(api(f"/api/events/{small['id']}").get("waiting") == 2 and api(f"/api/events/{small['id']}")["teams"] == 1, "대기자가 팀 수에 잡히거나 대기 수가 안 나온다")
+    post(f"/api/teams/{t1['id']}/confirm", {"going": False}, tkey=t1["tkey"])
+    rows = api(f"/api/events/{small['id']}/board", key=small["okey"])["rows"]
+    A(any(r["name"] == "둘째팀" for r in rows) and api(f"/api/events/{small['id']}").get("waiting") == 1, f"«못 가요» 뒤 첫 대기자만 올라와야 한다: {[r['name'] for r in rows]}")
+    ok("정원 초과 → 대기, «못 가요»로 자리가 나면 앞 대기자가 팀이 된다")
 
     # ── 6. 협찬사에게 줄 숫자가 쌓이는가 (이 서비스의 차별점) ──
     visit(f"/app#{ev}")
@@ -1507,6 +1732,7 @@ with sync_playwright() as p:
     # 협찬 로고 — 개인이 후원을 받았을 때 돌려줄 수 있는 실물
     LOGO = "https://example.test/logo.png"
     pg.fill("#p-name", "로고회사")
+    pg.evaluate("document.getElementById('p-adv').open = true")   # 로고·갈 곳 주소는 «직접 넣기»로 접혀 있다
     pg.fill("#p-logo", LOGO)
     pg.fill("#p-link", "https://example.test")
     # 로고를 넣으면 상표권 합의 확인을 받아야 저장된다
@@ -1542,6 +1768,8 @@ with sync_playwright() as p:
     # javascript: 주소는 저장도 안 되고 화면에도 안 나간다.
     # 열쇠가 한 번 새면 이 자리 한 줄로 공개 페이지를 보는 사람 전부가 당한다.
     pg.fill("#p-name", "나쁜회사")
+    pg.fill("#p-dom", "")   # 홈페이지 주소가 남아 있으면 서버가 거기서 로고·갈 곳을 정당하게 채운다 — 이 검사는 javascript: 만 본다
+    pg.evaluate("document.getElementById('p-adv').open = true")
     pg.fill("#p-logo", "javascript:alert(1)")
     pg.fill("#p-link", "javascript:alert(2)")
     if not pg.is_checked("#p-perm"):
@@ -1674,7 +1902,7 @@ with sync_playwright() as p:
     ok(f"성과 기록 — 완주율 {o['finishRate']}% · 면접 {o['interview']}건")
 
     # ── 사후 지원 — 이게 '보장' 이다. 기록만 하는 표로는 약속이 안 된다 ──
-    pg.click("summary:has-text('사후 지원')")
+    pg.click("summary:has-text('끝난 뒤 멘토')")
     pg.wait_for_timeout(300)
     pg.fill("#h-name", "박실무")
     pg.fill("#h-org", "어느회사")
@@ -1682,7 +1910,7 @@ with sync_playwright() as p:
     pg.click("#h-add")
     pg.wait_for_timeout(800)
     if not pg.is_visible("#a-add"):
-        pg.click("summary:has-text('사후 지원')")
+        pg.click("summary:has-text('끝난 뒤 멘토')")
         pg.wait_for_timeout(300)
     pg.wait_for_selector("#a-add")
     pg.click("#a-add")
@@ -1697,7 +1925,7 @@ with sync_playwright() as p:
 
     # 했음을 누르면 지킨 것으로 넘어간다
     if not pg.is_visible("[data-done]"):
-        pg.click("summary:has-text('사후 지원')")
+        pg.click("summary:has-text('끝난 뒤 멘토')")
         pg.wait_for_timeout(300)
     pg.click("[data-done]")
     pg.wait_for_timeout(800)
