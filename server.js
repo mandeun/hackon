@@ -34,11 +34,10 @@ const DBFILE = process.env.DB || path.join(ROOT, 'data', 'hackon.db');
    why 는 '왜 여기냐', check 는 '전화하기 전에 확인할 것'.
    빈자리나 가격을 우리가 알 수는 없다. 어디에 물어보면 되는지만 준다.
    2026-09 기준. 창구는 바뀔 수 있으니 안 열리면 이름으로 검색하면 된다. */
+/* 서울시 공공서비스예약은 여기 없다. 같은 창구가 위쪽 «지금 빌릴 수 있는 곳»에
+   실시간 목록으로 이미 나오는데, 이 표에도 있으면 한 화면에 같은 이름이 두 번 뜬다.
+   그 아래는 «공공 예약에 안 올라오는 곳» 이라고 적어 놓은 자리다. */
 const PLACES = [
-  { name: '서울시 공공서비스예약', where: '서울 전역', min: 15, max: 200,
-    cost: '무료~저렴', at: 'yeyak.seoul.go.kr',
-    why: '시·구 시설을 한 곳에서 예약한다. 개인도 신청할 수 있고 제일 싸다',
-    check: '주말·공휴일에 여는지, 전기 콘센트를 몇 개까지 쓸 수 있는지' },
   { name: '자치구 청년센터 · 무중력지대', where: '서울 자치구별', min: 15, max: 60,
     cost: '무료~저렴', at: '구청 청년정책과 또는 센터에 직접',
     why: '청년 대상 행사면 가장 잘 빌려준다. 우리 참가자 대부분이 해당된다',
@@ -694,13 +693,59 @@ async function fetchVenues() {
   return rows;
 }
 
-/** 인원과 지역으로 거른다. 접수 중인 곳이 먼저 온다. */
-function pickVenues(rows, size, area) {
+/* 제보 종류는 넷으로 닫는다. 라켓온에서 코트 정보를 제보로 채운 것과 같은 방식이다 —
+   외부 API 가 모르는 것만 사람에게 묻고, 쌓이는 만큼 맞는 곳만 앞으로 온다. */
+const TIP_KINDS = ['콘센트', '와이파이', '빌렸어요', '안 맞아요'];
+const TIP_GOOD = ['콘센트', '와이파이', '빌렸어요'];
+/* 응답 열쇠는 띄어쓰기 없이 쓴다(안맞아요) — 화면·검사에서 따옴표 없이 부르려고. */
+const tipKey = k => (k === '안 맞아요' ? '안맞아요' : k);
+const emptyTips = () => ({ n: 0, 콘센트: 0, 와이파이: 0, 빌렸어요: 0, 안맞아요: 0, notes: [] });
+
+/** 제보 줄을 장소별로 센다. DB 를 안 본다 — 검사에서 그냥 부를 수 있게 순수 함수로 둔다. */
+function tipRoll(rows) {
+  const out = {};
+  for (const r of rows || []) {
+    if (!TIP_KINDS.includes(r.kind)) continue;          // 목록에 없는 종류는 안 센다
+    const t = out[r.venue] || (out[r.venue] = emptyTips());
+    t.n++;
+    t[tipKey(r.kind)]++;
+    if (r.note) t.notes.push(r.note);
+  }
+  for (const t of Object.values(out)) t.notes = t.notes.slice(-3);   // 최근 세 줄만
+  return out;
+}
+const tipGood = t => (t ? TIP_GOOD.reduce((a, k) => a + (t[tipKey(k)] || 0), 0) : 0);
+/* «안 맞아요» 가 좋은 제보보다 많고 둘 이상이면 접는다. 한 사람 심통으로 곳이 사라지지 않게 둘부터다. */
+const tipBad = t => !!t && t.안맞아요 >= 2 && t.안맞아요 > tipGood(t);
+
+/** 대회 그 날에 이 곳을 신청할 수 있나. 답은 셋이다 —
+    'ok' 접수 기간 안이다(또는 기간을 안 알려 준 곳이라 막을 근거가 없다)
+    'no' 접수 기간이 그 날을 안 덮는다
+    'unknown' 대회 날짜를 모른다. «모름»을 «안 됨»으로 그리지 않는다. */
+function venueFit(v, day) {
+  const d = String(day || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return 'unknown';
+  const o = String(v.open || '').slice(0, 10), c = String(v.close || '').slice(0, 10);
+  if (!o && !c) return 'ok';
+  if (o && d < o) return 'no';
+  if (c && d > c) return 'no';
+  return 'ok';
+}
+
+/** 인원과 지역으로 거른다. day 를 주면 그 날 되는지(fit), tips 를 주면 제보(tips·dim)를 붙인다.
+    순서는 «좋은 제보가 많은 곳» → «접수 중» → «작은 곳». «안 맞아요» 가 많은 곳(dim)은 맨 뒤로 간다. */
+function pickVenues(rows, size, area, day, tips) {
   const n = Math.max(1, Math.min(2000, +size || 24));
   return rows
     .filter(r => r.cap >= n && r.lo <= n * 3)
     .filter(r => !area || r.area === area)
-    .sort((a, b) => (a.state === '접수중' ? 0 : 1) - (b.state === '접수중' ? 0 : 1)
+    .map(r => {
+      const t = (tips && tips[r.id]) || emptyTips();
+      return { ...r, fit: venueFit(r, day), tips: t, dim: tipBad(t) };
+    })
+    .sort((a, b) => (a.dim ? 1 : 0) - (b.dim ? 1 : 0)
+                 || tipGood(b.tips) - tipGood(a.tips)
+                 || (a.state === '접수중' ? 0 : 1) - (b.state === '접수중' ? 0 : 1)
                  || a.cap - b.cap)
     .slice(0, 40);
 }
@@ -857,6 +902,18 @@ async function sendMail(db, m) {
   } catch (e) { logMail(db, m, 'failed', e.message); return false; }
 }
 const mailSite = () => SITES[0] || `http://localhost:${PORT}`;
+/* 내 열쇠 찾기 — 있든 없든 같은 응답을 준다(감사 9). 참가한 연락처인지가 밖에서 안 읽혀야 한다.
+   참가 기록이 있을 때만 메일이 붙는다. 프로필 주소는 공개라(연락처가 안 담긴다) 메일로 보내도 된다. */
+function whoami(db, contact) {
+  const pid = pidOf(db, contact);
+  const has = !!(pid && db.prepare('SELECT 1 FROM people WHERE id=?').get(pid));
+  return {
+    body: { ok: true },
+    mail: has ? { kind: 'whoami', ref: pid, to: String(contact || '').trim(),
+      subject: '[HACK:ON] 참가 기록 주소입니다',
+      text: `이 연락처로 참가한 기록이 있습니다.\n\n내 기록: ${mailSite()}/p/${pid}\n\n이 주소에는 연락처가 담기지 않습니다. 찾지 않으셨다면 버리세요.\n\n답장은 hi@mandeun.com 으로.` } : null,
+  };
+}
 /* 신청 직후 — 팀 링크를 메일로도 남긴다(GUIDE §9 «확인 메일은 즉시 보냅니다»). 링크를 잃으면 재확인도 못 한다(이탈 감사 P6). */
 function joinMail(db, tid) {
   const t = db.prepare('SELECT t.id, t.name, t.contact, t.tkey, e.id AS event, e.title, e.starts FROM teams t JOIN events e ON e.id=t.event WHERE t.id=?').get(tid);
@@ -945,7 +1002,11 @@ async function ghProfile(db, login) {
 /* ── 해커온뉴스 — 제목·주소만 모은다(저작권: 본문 없음). 실패한 출처는 건너뛰고 나머지는 산다. ── */
 const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', space: '허깅페이스 앱', ds: '허깅페이스 데이터', gh: '깃허브 새 저장소', ai: 'AI타임스', geek: 'GeekNews', hn: 'Hacker News', show: 'Show HN(만든 것)', ph: 'Product Hunt', yozm: '요즘IT', aikr: 'AI코리아 뉴스레터', hackon: 'HACK:ON 우승작', tip: '제보',
   /* 2026-09-26 커뮤니티 — 해커톤 글(dev.to·Medium 태그), 로브스터(HN 보다 조용한 개발자 커뮤니티), dev.to 한국 태그, GitHub·YC 블로그, 스매싱(디자인). 09-26 에 실제로 항목이 오는 것만 */
-  devhack: 'dev.to #hackathon', medhack: 'Medium #hackathon', lob: 'Lobsters', devkr: 'dev.to #korea', ghblog: 'GitHub 블로그', yc: 'Y Combinator 블로그', smash: 'Smashing Magazine' };
+  devhack: 'dev.to #hackathon', medhack: 'Medium #hackathon', lob: 'Lobsters', devkr: 'dev.to #korea', ghblog: 'GitHub 블로그', yc: 'Y Combinator 블로그', smash: 'Smashing Magazine',
+  /* 2026-09-27 개발 아닌 직무 — 수집원 17곳이 전부 개발·AI업계 매체여서 마케팅·영업·CS 탭이 굶었다.
+     이 둘은 일반 비즈니스 매체라 AI 글만 걸러 담는다(AI_ONLY). 실측 AI 관련율: 모비인사이드 40%, 플래텀 30%.
+     매드타임스(12%)·더피알(0%)·아웃스탠딩(0%)은 재 보고 안 붙였다. */
+  mobi: '모비인사이드', platum: '플래텀' };
 /* RSS 도 Atom 도 같은 함수로 — GeekNews·Product Hunt 는 Atom(<entry>, <link href>)이라 RSS 정규식만 쓰면 조용히 0건이 된다(실제로 그랬다) */
 function parseFeed(x, max) {
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/<[^>]+>/g, '').trim();
@@ -960,15 +1021,17 @@ function parseFeed(x, max) {
   return out;
 }
 /* 직무 태그 — 제목 낱말로 거칠게. 틀리면 «전체» 로 남는다. 제보는 제보자가 고른다 */
+/* 짧은 ASCII 낱말엔 반드시 \b 를 앞뒤로 둔다 — 없으면 Buil«ding»→ui, Mathemati«cs»→cs,
+   R«ead»s→ads, to«bi»/→bi, «npm»→pm 으로 엉뚱한 직무가 붙는다. 실측으로 디자인 14건 중 7건이 오탐이었다. */
 const JOBS = ['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'];
 const JOB_RE = {
-  '마케팅': /마케팅|광고|브랜드|카피|sns|인스타|유튜브|콘텐츠|캠페인|marketing|ads?\b|brand|creator|influenc|seo/i,
-  '디자인': /디자인|figma|ui|ux|이미지 생성|image|video|영상|일러스트|폰트|design|diffusion|flux|midjourney|canva/i,
-  '데이터': /데이터|분석|sql|dashboard|대시보드|통계|analytics|dataset|엑셀|spreadsheet|bi\b/i,
-  '영업·CS': /영업|세일즈|sales|crm|고객|cs\b|상담|챗봇|support|콜센터|리드/i,
-  '기획': /기획|pm\b|product|프로덕트|노션|notion|로드맵|스펙|요구사항|workflow|자동화|automation|n8n|agent|에이전트/i,
-  '소상공인': /가게|매장|자영업|소상공인|사장|카페|식당|배달|네이버 플레이스|예약|재고|pos\b/i,
-  '개발': /개발|코드|code|github|api|모델|llm|오픈소스|open.?source|파이썬|python|javascript|typescript|rust|sdk|cli|프레임워크|framework|repo/i,
+  '마케팅': /마케팅|광고|브랜드|카피|sns|인스타|유튜브|콘텐츠|캠페인|marketing|\bads?\b|brand|creator|influenc|seo/i,
+  '디자인': /디자인|figma|\bui\b|\bux\b|이미지 생성|image|video|영상|일러스트|폰트|design|diffusion|flux|midjourney|canva|interface|인터페이스|svg|diagram|다이어그램|타이포|typograph|레이아웃|layout|아이콘|\bicon|팔레트|palette|wallpaper|배경화면/i,
+  '데이터': /데이터|분석|sql|dashboard|대시보드|통계|analytics|dataset|엑셀|spreadsheet|\bbi\b/i,
+  '영업·CS': /영업|세일즈|sales|crm|고객|\bcs\b|상담|챗봇|chatbot|support|콜센터|리드/i,
+  '기획': /기획|\bpm\b|product|프로덕트|노션|notion|로드맵|스펙|요구사항|workflow|자동화|automation|n8n|agent|에이전트|\bax\b|\bdx\b|온보딩|onboarding|리텐션|retention|\bkpi\b/i,
+  '소상공인': /가게|매장|자영업|소상공인|사장|카페|식당|배달|네이버 플레이스|예약|재고|\bpos\b/i,
+  '개발': /개발|코드|code|github|api|모델|llm|오픈소스|open.?source|파이썬|python|javascript|typescript|rust|sdk|cli|프레임워크|framework|repo|\bcss\b|rails|컴파일|compiler|커널|kernel|리눅스|linux|docker|도커|쿠버|k8s|배포|deploy|리팩터|refactor|버그|\bbug\b|커밋|commit|브라우저|browser|\bweb\b|웹/i,
 };
 /* 좁은 것부터 본다 — «가게 예약 자동화» 는 기획(자동화)이 아니라 소상공인이다 */
 const JOB_ORDER = ['소상공인', '마케팅', '디자인', '데이터', '영업·CS', '기획', '개발'];
@@ -983,6 +1046,23 @@ function addTip(db, ownerId, ownerName, b) {
   if (!r.changes) throw new HttpError(409, '이미 올라온 주소입니다');
   return { id: Number(r.lastInsertRowid), job, title, url };
 }
+/* 일반 비즈니스 매체용 관문. 이 낱말이 제목에 없으면 안 담는다 —
+   없으면 광고업계·부동산 소식이 페이지를 덮는다(모비인사이드는 60%, 플래텀은 70%가 AI 무관이었다). */
+const AI_ONLY = /\bai\b|인공지능|gpt|claude|클로드|llm|생성형|챗지피티|제미나이|gemini|자동화|에이전트|agent|프롬프트|prompt|코파일럿|copilot/i;
+/* 수집원 표. 네 번째 값은 «AI 글만» — 일반 비즈니스 매체에만 켠다(AI 전문 매체는 그냥 담는다). */
+const NEWS_FEEDS = [['ai', 'https://www.aitimes.com/rss/allArticle.xml', 12, false], ['geek', 'https://news.hada.io/rss/news', 10, false], ['hn', 'https://hnrss.org/frontpage', 8, false],
+                                  ['ph', 'https://www.producthunt.com/feed', 8, false], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8, false],
+                                  ['show', 'https://hnrss.org/show', 6, false], ['aikr', 'https://news.aikoreacommunity.com/rss/', 6, false],
+                                  ['devhack', 'https://dev.to/feed/tag/hackathon', 5, false], ['medhack', 'https://medium.com/feed/tag/hackathon', 5, false], ['lob', 'https://lobste.rs/rss', 6, false],
+                                  ['devkr', 'https://dev.to/feed/tag/korea', 4, false], ['ghblog', 'https://github.blog/feed/', 4, false], ['yc', 'https://www.ycombinator.com/blog/rss', 4, false], ['smash', 'https://www.smashingmagazine.com/feed/', 4, false],
+                                  ['mobi', 'https://www.mobiinside.co.kr/feed/', 8, true], ['platum', 'https://platum.kr/feed', 6, true]];
+/* 한 피드에서 담을 것만 고른다. 관문은 여기 한 곳에만 있다 — 호출하는 쪽이 한 줄이라 조용히 빠지기 어렵다. */
+function pickFeed(src, items, aiOnly) {
+  /* 안 넘기면 관문이 «조용히» 꺼진다. 그 실패는 며칠 뒤 페이지가 광고로 덮인 뒤에나 보인다 —
+     그래서 그 자리에서 터뜨린다. 표의 모든 행이 네 번째 값을 갖는 것은 아래 점검이 지킨다. */
+  if (typeof aiOnly !== 'boolean') throw new Error('pickFeed: aiOnly 를 true/false 로 명시해야 한다');
+  return items.filter(it => !aiOnly || AI_ONLY.test(it.title)).map(it => ({ src, ...it, note: '' }));
+}
 async function newsTick(db) {
   const got = [];
   const j = async u => { const r = await fetch(u, { headers: { 'user-agent': 'hackon.kr', accept: 'application/json' }, signal: AbortSignal.timeout(8000) }); return r.ok ? r.json() : null; };
@@ -994,14 +1074,10 @@ async function newsTick(db) {
     got.push({ src: 'space', title: sp.id, url: 'https://huggingface.co/spaces/' + sp.id, note: `♥ ${sp.likes || 0}` }); } catch {}
   /* RSS 여럿 — 제목·주소만. 어느 하나가 죽어도 나머지는 산다. 레딧은 서버 fetch 가 UA 무관 403(09-25 실측), .rss 는 연속 호출 시 429 — 안 붙인다 */
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
-  for (const [src, feed, max] of [['ai', 'https://www.aitimes.com/rss/allArticle.xml', 12], ['geek', 'https://news.hada.io/rss/news', 10], ['hn', 'https://hnrss.org/frontpage', 8],
-                                  ['ph', 'https://www.producthunt.com/feed', 8], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8],
-                                  ['show', 'https://hnrss.org/show', 6], ['aikr', 'https://news.aikoreacommunity.com/rss/', 6],
-                                  ['devhack', 'https://dev.to/feed/tag/hackathon', 5], ['medhack', 'https://medium.com/feed/tag/hackathon', 5], ['lob', 'https://lobste.rs/rss', 6],
-                                  ['devkr', 'https://dev.to/feed/tag/korea', 4], ['ghblog', 'https://github.blog/feed/', 4], ['yc', 'https://www.ycombinator.com/blog/rss', 4], ['smash', 'https://www.smashingmagazine.com/feed/', 4]]) {
+  for (const [src, feed, max, aiOnly] of NEWS_FEEDS) {
     try {
       const x = await (await fetch(feed, { headers: { 'user-agent': 'hackon.kr' }, signal: AbortSignal.timeout(8000) })).text();
-      for (const it of parseFeed(x, max)) got.push({ src, ...it, note: '' });
+      got.push(...pickFeed(src, parseFeed(x, max), aiOnly));
     } catch {}
   }
   /* 깃허브 — 이번 주 생긴 저장소 중 별 많은 것(트렌딩 API 는 없다). 데이터셋은 허깅페이스 */
@@ -1085,7 +1161,7 @@ const MCP_TOOLS = [
   { name: 'post_problem', description: 'Posts a new problem to the HACK:ON(해커온) problem bank. name = shop or nickname, pain = what is tedious, done = what counts as solved, contact = email or phone (shown only to builders). 문제 올리기', inputSchema: { type: 'object', properties: { name: { type: 'string' }, pain: { type: 'string' }, done: { type: 'string' }, contact: { type: 'string' } }, required: ['name', 'pain', 'contact'] }, annotations: ann('문제 올리기', false) },
   { name: 'news', description: 'Returns HACK:ON(해커온) news — recent AI models, papers, tools, articles and hackathon winners as Markdown; optional job filter: 마케팅, 기획, 디자인, 개발, 영업·CS, 데이터, 소상공인. 해커온뉴스', inputSchema: { type: 'object', properties: { job: { type: 'string' } } }, annotations: ann('해커온뉴스', true) },
 ];
-function mcpCall(db, msg) {
+function mcpCall(db, msg, ip = '') {
   const id = msg.id ?? null, m = msg.method || '';
   const ok = result => ({ jsonrpc: '2.0', id, result });
   const err = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -1105,7 +1181,13 @@ function mcpCall(db, msg) {
         const rows = openRequests(db);
         return text(rows.length ? rows.map(r => `- [${r.id}] ${r.name}: ${r.topic || r.pain}${r.done ? ' (됐다의 기준: ' + r.done + ')' : ''} · 풀이 ${r.solutions}`).join('\n') + `\n\n풀이는 ${mailSite()}/problems 에서` : '올라온 문제가 없습니다.');
       }
-      if (name === 'post_problem') { const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact }); return text(`올렸습니다. 받는 링크(열쇠 포함, 본인만): ${mailSite()}/r/${r.id}?k=${r.rkey}`); }
+      if (name === 'post_problem') {
+        /* 열쇠 없는 쓰기 길이다. /api/ 쪽 쓰기에 걸린 것과 같은 상한을 IP 로 건다(감사 d).
+           /mcp 는 /api/ 밖이라 위쪽 WRITE_LIMIT 문을 안 지나간다. */
+        if (tooMany('w:' + ip + ':/mcp/post_problem', WRITE_LIMIT)) return text('요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
+        const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact });
+        return text(`올렸습니다. 받는 링크(열쇠 포함, 본인만): ${mailSite()}/r/${r.id}?k=${r.rkey}`);
+      }
       if (name === 'news') return text(newsMd(db, JOBS.includes(a.job) ? a.job : ''));
     } catch (e) { return text('실패: ' + e.message); }
     return err(-32602, '없는 도구입니다');
@@ -1652,6 +1734,19 @@ function open(file) {
       hidden      INTEGER NOT NULL DEFAULT 0,      -- 운영자가 내린 것. 지우지 않고 감춘다
       at          TEXT NOT NULL DEFAULT (datetime('now')),
       answered_at TEXT NOT NULL DEFAULT '')`);
+  /* 신고 — 남이 쓴 것(질문·팀 이름·제출물·후원자 이름)이 불쾌할 때 누구나 넣는다.
+     앱스토어 심사 지침 1.2 가 «신고 수단»을 요구한다. 운영자가 보고, 질문이면 hidden 으로 내린다.
+     로그인이 없으므로 누가 넣었는지는 묻지 않는다 — 넣는 문턱을 낮게 둔다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS reports(
+      id      INTEGER PRIMARY KEY,
+      event   TEXT NOT NULL DEFAULT '',
+      kind    TEXT NOT NULL,                    -- question | team | submission | sponsor | other
+      ref     TEXT NOT NULL DEFAULT '',         -- 무엇에 대한 신고인가 (질문 번호 등)
+      reason  TEXT NOT NULL,
+      note    TEXT NOT NULL DEFAULT '',
+      done    INTEGER NOT NULL DEFAULT 0,       -- 운영자가 처리함
+      at      TEXT NOT NULL DEFAULT (datetime('now')))`);
+
   /* 공지는 한 줄(events.notice, 큰 화면 띠)로 남기되 지난 소식도 쌓아 둔다 —
      참가자가 «지금 뭐가 바뀌었나»를 공개 페이지에서 시각과 함께 본다. */
   db.exec(`CREATE TABLE IF NOT EXISTS notices(
@@ -1705,6 +1800,17 @@ function open(file) {
     )`);
   try { db.exec("ALTER TABLE votes ADD COLUMN note TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 문제 은행 — 대회 없이 «풀었습니다» 하고 보낸 결과. 연락처는 낸 사람(의뢰자)만 본다. */
+  /* 장소 제보 — 서울시 API 에 없는 것(콘센트·와이파이·실제로 빌렸는지)은 다녀온 사람만 안다.
+     한 줄은 «한 사람이 한 장소에 남긴 제보 하나»다. 자연키는 SVCID(venue) —
+     이름으로 묶으면 «야주개홀 (26. 10월)» 과 «(26. 12월)» 처럼 다른 예약 상품이 한 줄로 섞인다.
+     누가 썼는지는 안 담는다(연락처·계정 없음). 종류는 넷으로 닫혀 있다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS venue_tips(
+    id    INTEGER PRIMARY KEY,
+    venue TEXT NOT NULL,                                  -- 서울시 SVCID
+    kind  TEXT NOT NULL,                                   -- 콘센트 · 와이파이 · 빌렸어요 · 안 맞아요
+    note  TEXT NOT NULL DEFAULT '',                        -- 한 줄 메모(120자까지)
+    at    TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec('CREATE INDEX IF NOT EXISTS venue_tips_v ON venue_tips(venue)');
   db.exec(`CREATE TABLE IF NOT EXISTS solutions(
     id INTEGER PRIMARY KEY, request TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', contact TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')))`);
@@ -2000,6 +2106,15 @@ function loginAs(db, provider, prof, opt) {
 
 /* 열쇠를 마구 넣어 보는 것을 막는다. 12자 열쇠라도 무한히 시도하면 언젠가 맞는다. */
 const tries = new Map();
+/* 부르는 쪽 주소. Fly 프록시 뒤에서는 socket 주소가 프록시(fdaa:…) 하나뿐이라
+   모든 방문자가 한 IP 로 보인다 — 상한이 «전체 방문자 합»에 걸려 대회 당일 4번째 신청부터 막힌다.
+   Fly 가 붙이는 fly-client-ip 는 밖에서 못 덮어쓴다(프록시가 다시 쓴다). Fly 밖(노트북)에서는 socket 을 믿는다. */
+function clientIp(req) {
+  const sock = (req.socket && req.socket.remoteAddress) || '';
+  if (!process.env.FLY_APP_NAME) return sock;
+  const h = req.headers['fly-client-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return h || sock;
+}
 function tooMany(ip, limit = 30) {
   const now = Date.now(), t = tries.get(ip) || { n: 0, at: now };
   if (now - t.at > 600000) { t.n = 0; t.at = now; }
@@ -2008,6 +2123,13 @@ function tooMany(ip, limit = 30) {
 }
 /* 열쇠 없는 쓰기(신청·후원·질문·피드백·요청·whoami)는 IP+길로 10분에 WRITE_LIMIT 번(감사 7·9). 검사는 한 IP 라 넉넉히 둔다 */
 const WRITE_LIMIT = +(process.env.WRITE_LIMIT || 300);
+/* 한 대회에 같은 IP 가 팀을 계속 만드는 것은 따로 조인다. WRITE_LIMIT 은 길 단위라
+   «한 대회를 가짜 팀으로 채워 정원을 잠그는 것» 을 못 막는다. 10분에 APPLY_LIMIT 팀. */
+const APPLY_LIMIT = +(process.env.APPLY_LIMIT || 3);
+function applyGuard(ip, event) {
+  if (tooMany('apply:' + (ip || '') + ':' + event, APPLY_LIMIT))
+    throw new HttpError(429, '이 대회에 신청을 너무 많이 했습니다. 10분 뒤에 다시 됩니다');
+}
 
 /** 이 컴퓨터의 랜 주소. 참가자 폰은 localhost 로 못 온다.
     유선과 무선이 다를 수 있어서 찾은 것을 다 준다. */
@@ -3165,8 +3287,15 @@ function restoreEvent(db, d, owner) {
 /* ── 지운 대회 휴지통 — 파일 첨부 없이 한 번 누르면 되는 길 ──
    목록에는 제목·지운 날·팀 수만 싣는다. 사본(json)은 절대 안 나간다 —
    나가면 열쇠 없는 사본이라도 «누가 어디에 신청했나»가 통째로 흘러간다. */
+/* 후원사 이름 — 객체·빈 값이 오면 SQLite 가 500 을 낸다(감사 20). 경계에서 400 으로 */
+function sponsorName(v) {
+  const n = plain(v, 40);
+  if (!n) throw new HttpError(400, '후원사 이름이 필요합니다');
+  return n;
+}
 function eventTrash(db, owner) {
-  if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+  /* 열쇠 없이 물으면 403 이다 — 400 은 «보낸 것이 잘못됐다» 는 뜻이라 «권한이 없다» 를 가린다(감사 e) */
+  if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');
   return db.prepare('SELECT id, event, title, json, at FROM event_trash WHERE owner=? ORDER BY id DESC').all(owner)
     .map(r => {
       let teams = 0;
@@ -3552,6 +3681,22 @@ function needsSummary(db, event) {
            pending: kinds.reduce((s, k) => s + k.pending, 0), kinds };
 }
 
+/* 신고 넣기. 로그인이 없으니 누구인지 묻지 않는다 — 문턱을 낮게 둔다.
+   속도 제한은 위쪽 전역 규칙(WRITE_LIMIT)이 이미 건다. */
+const REPORT_KINDS = ['question', 'team', 'submission', 'sponsor', 'other'];
+function addReport(db, b) {
+  const kind = REPORT_KINDS.includes(String(b.kind)) ? String(b.kind) : 'other';
+  const reason = plain(b.reason, 60);
+  if (!reason) throw new HttpError(400, '무엇이 문제인지 골라 주세요');
+  const event = plain(b.event, 20);
+  /* 없는 대회 번호를 받아 두면 운영자가 못 보는 신고가 쌓인다. 있는 것만 붙인다. */
+  if (event && !db.prepare('SELECT 1 FROM events WHERE id=?').get(event))
+    throw new HttpError(404, '없는 대회입니다');
+  const r = db.prepare('INSERT INTO reports(event,kind,ref,reason,note) VALUES(?,?,?,?,?)')
+    .run(event, kind, plain(b.ref, 40), reason, plain(b.note, 300));
+  return { id: Number(r.lastInsertRowid) };
+}
+
 /* 팀 열쇠나 신청 때 적은 연락처로만 쓴다. 둘 다 없으면 누구 팀의 답인지 모른다 */
 function addFollowup(db, event, b, req) {
   let team = null;
@@ -3644,7 +3789,8 @@ function routes(db) {
       if (p === '/news.md' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' }); return res.end(newsMd(db, JOBS.includes(u.searchParams.get('job')) ? u.searchParams.get('job') : '')); }
       if (p === '/mcp' && req.method === 'POST') {
         const msg = await body(req);
-        const out = Array.isArray(msg) ? msg.map(x => mcpCall(db, x)).filter(Boolean) : mcpCall(db, msg);
+        const mip = clientIp(req);
+        const out = Array.isArray(msg) ? msg.map(x => mcpCall(db, x, mip)).filter(Boolean) : mcpCall(db, msg, mip);
         if (out === null) { res.writeHead(202); return res.end(); }
         return json(res, 200, out);
       }
@@ -3693,13 +3839,13 @@ function routes(db) {
            평소에 쓰는 사람이 먼저 막힌다 — 실제로 그렇게 만들었다가 검사에서 잡혔다. */
         if (!cookieOwner && headOwner
             && !db.prepare('SELECT 1 FROM owners WHERE id=?').get(headOwner)
-            && tooMany(req.socket.remoteAddress || ''))
+            && tooMany(clientIp(req)))
           throw new HttpError(429, '열쇠를 너무 여러 번 틀렸습니다. 잠시 뒤에 다시 해 주세요');
         const owner = cookieOwner || headOwner;
         /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 받아 브라우저가 x-jkey 로 실어 보낸다. */
         const jkey = req.headers['x-jkey'] || '';
 
-        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + (req.socket.remoteAddress || '') + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
+        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + clientIp(req) + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
           throw new HttpError(429, '요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
 
         if (p === '/api/events' && req.method === 'POST') {
@@ -3779,6 +3925,21 @@ function routes(db) {
           return json(res, 200, hideQuestion(db, m[1]));
         }
         /* 심사 진행 알림 — «심사 n/m 팀 봤습니다»를 소식에. 참가자가 기다리는 동안 어디까지 왔는지 안다(MLH) */
+        /* 신고 — 누구나 넣는다. 앱스토어 지침 1.2 의 «신고 수단». */
+        if (p === '/api/reports' && req.method === 'POST')
+          return json(res, 201, addReport(db, await body(req)));
+        /* 들어온 신고 보기·처리 — 그 대회의 운영자만. 연락처가 아니라 내용이 실린다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/reports$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner);
+          return json(res, 200, db.prepare('SELECT id,kind,ref,reason,note,done,at FROM reports WHERE event=? ORDER BY done, id DESC LIMIT 200').all(m[1]));
+        }
+        if ((m = p.match(/^\/api\/reports\/(\d+)\/done$/)) && req.method === 'POST') {
+          const rp = db.prepare('SELECT event FROM reports WHERE id=?').get(+m[1]);
+          if (!rp) throw new HttpError(404, '없는 신고입니다');
+          needAdmin(db, rp.event, key, owner);
+          db.prepare('UPDATE reports SET done=1 WHERE id=?').run(+m[1]);
+          return json(res, 200, { ok: true });
+        }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/progress$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);
           const bd = board(db, m[1], true);
@@ -3819,14 +3980,33 @@ function routes(db) {
         if (p === '/api/venues' && req.method === 'GET') {
           let rows = [];
           try { rows = await fetchVenues(); } catch { rows = []; }
+          /* 제보는 우리 표라 서울시 API 가 죽어도 산다. 한 번에 읽어 장소별로 센다 —
+             거르기 전에 세야 «제보 많은 곳» 이 40곳 안으로 올라온다. */
+          const tips = tipRoll(db.prepare('SELECT venue, kind, note FROM venue_tips ORDER BY id').all());
           return json(res, 200, {
             live: SEOUL_KEY !== 'sample',
             total: rows.length,
-            rows: pickVenues(rows, q.size, q.area),
+            /* 대회 날짜를 보내면 그 날 신청할 수 있는 곳을 가려 준다. 안 보내면 fit 이 전부 unknown 이다. */
+            day: String(q.day || '').slice(0, 10),
+            rows: pickVenues(rows, q.size, q.area, q.day, tips),
             areas: [...new Set(rows.map(r => r.area))].filter(Boolean).sort(),
           });
         }
 
+        /* 장소 제보 — 열쇠 없이 누구나 한 줄. 도배는 위쪽 IP+길 상한(WRITE_LIMIT)이 이미 막는다.
+           이 가드가 막는 것: 목록에 없는 종류와 120자 넘는 메모, 그리고 SVCID 꼴이 아닌 주소.
+           목록에 있는 장소인지까지는 안 따진다 — 서울시 API 가 죽은 동안 제보를 못 넣게 되면 안 된다. */
+        if ((m = p.match(/^\/api\/venues\/([A-Za-z0-9_-]{1,40})\/tips$/)) && req.method === 'POST') {
+          const b = await body(req);
+          const kind = plain(b.kind, 12);
+          if (!TIP_KINDS.includes(kind)) throw new HttpError(400, '제보 종류가 목록에 없습니다');
+          const note = plain(b.note, 120);
+          db.prepare('INSERT INTO venue_tips(venue,kind,note) VALUES(?,?,?)').run(m[1], kind, note);
+          /* 저장이 끝난 뒤에 세서 돌려준다. 화면은 이 값으로 칩을 바로 고친다. */
+          const t = tipRoll(db.prepare('SELECT venue, kind, note FROM venue_tips WHERE venue=? ORDER BY id')
+                              .all(m[1]))[m[1]] || emptyTips();
+          return json(res, 201, { ok: true, venue: m[1], tips: t });
+        }
         if (p === '/api/draft' && req.method === 'GET')
           return json(res, 200, draftPlan(q.start, q.end, q.teams, q.kind));
         if (p === '/api/kinds' && req.method === 'GET')
@@ -3858,13 +4038,11 @@ function routes(db) {
                  LEVELS.includes(b.level) ? b.level : '', m[1]);
           return json(res, 200, profile(db, m[1]));
         }
-        /* 내 열쇠 찾기. 연락처를 넣으면 그 사람의 프로필 주소가 나온다. */
+        /* 내 열쇠 찾기. 기록이 있으면 프로필 주소를 메일로 보낸다 — 응답만 봐서는 있는지 없는지 모른다(감사 9). */
         if (p === '/api/whoami' && req.method === 'POST') {
-          const b = await body(req);
-          const pid = pidOf(db, b.contact);
-          if (!pid || !db.prepare('SELECT 1 FROM people WHERE id=?').get(pid))
-            throw new HttpError(404, '그 연락처로 참가한 기록이 없습니다');
-          return json(res, 200, { id: pid });
+          const w = whoami(db, (await body(req)).contact);
+          if (w.mail) void sendMail(db, w.mail);
+          return json(res, 200, w.body);
         }
 
         if ((m = p.match(/^\/api\/teams\/(\d+)\/seats$/)) && req.method === 'POST') {
@@ -3927,14 +4105,12 @@ function routes(db) {
           return json(res, 200, visitsOf(db, q.days));
         }
         if (p === '/api/mine' && req.method === 'GET') {
-          if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+          if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');   /* 400 은 «보낸 것이 잘못됐다» — 권한 문제는 403(감사 e) */
           return json(res, 200, mine(db, owner));
         }
-        /* 지운 대회 목록 — 내 것만. 남의 휴지통은 한 줄도 안 보인다 */
-        if (p === '/api/mine/trash' && req.method === 'GET') {
-          if (!owner) throw new HttpError(400, '주최자 열쇠가 필요합니다');
+        /* 지운 대회 목록 — 내 것만. 남의 휴지통은 한 줄도 안 보인다. 열쇠 없으면 eventTrash 가 403 을 낸다 */
+        if (p === '/api/mine/trash' && req.method === 'GET')
           return json(res, 200, eventTrash(db, owner));
-        }
         /* 되살리기 — 파일 첨부 없이. 경로가 /api/trash/:id/restore 가 아닌 이유는 그쪽이 팀 휴지통 자리라서다 */
         if ((m = p.match(/^\/api\/mine\/trash\/(\d+)\/restore$/)) && req.method === 'POST') {
           return json(res, 200, untrashEvent(db, +m[1], owner));
@@ -3967,6 +4143,7 @@ function routes(db) {
           /* 팀 열쇠는 여기서 딱 한 번 나간다. 신청한 브라우저가 받아서 들고 있는다. */
           const jb = await body(req);
           delete jb._promote;   /* 내부 표식 — 밖에서 보내면 정원 검사를 건너뛴다. 경계에서 지운다 */
+          applyGuard(clientIp(req), m[1]);   /* 한 IP 가 한 대회를 가짜 팀으로 채우는 것을 막는다 */
           const tid = joinTeam(db, m[1], jb);
           if (typeof tid === 'object') return json(res, 202, tid);   /* 정원이 차서 대기자로 — { waiting: 몇 번째 } */
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
@@ -3993,7 +4170,7 @@ function routes(db) {
           if (!link && b.domain) { const lf = logoFor(b.domain); if (lf.ok) link = 'https://' + lf.domain; }
           if (!logo && link) { const lf = logoFor(link.replace(/^https?:\/\//, '').split('/')[0]); if (lf.ok) logo = lf.url; }
           const r = db.prepare('INSERT INTO sponsors(event,name,kind,amount,note,logo,link) VALUES(?,?,?,?,?,?,?)')
-            .run(m[1], b.name, b.kind || '현금', +b.amount || 0, b.note || '', logo, link);
+            .run(m[1], sponsorName(b.name), plain(b.kind, 20) || '현금', +b.amount || 0, plain(b.note, 200), logo, link);
           const sid = Number(r.lastInsertRowid);
           /* 직접 올린 파일 — data: 주소로 온다. 종류·크기를 보고 그대로 저장, 로고 주소는 우리 경로로 */
           const dm = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.logoData || ''));
@@ -4844,6 +5021,10 @@ function selftest() {
     ok(db.prepare('SELECT COUNT(*) c FROM team_trash WHERE event=?').get(tv.id).c === 1, '휴지통에 한 줄 남는다');
     const back = untrashTeam(db, trId);
     ok(back.same && back.id === ta, '되살리면 같은 id 로 돌아온다 — 팀 링크가 산다');
+    /* 지운 대회 목록을 열쇠 없이 물으면 403 — 400 은 «보낸 것이 잘못됐다» 라 권한 없음을 가린다(감사 e) */
+    let trCode = 0;
+    try { eventTrash(db, ''); } catch (e) { trCode = e.code; }
+    ok(trCode === 403, '열쇠 없이 지운 대회 목록을 물으면 403 이 아니다');
     /* 메일 — 열쇠가 없으면 보내지 않고 장부에만 남는다. 리마인더는 D-3·D-1 한 번씩, 답한 팀·못 온다는 팀은 건너뛴다 */
     const jm = joinMail(db, ta);
     ok(jm && jm.to === 'trash@x.test' && jm.text.includes(`/e/${tv.id}?t=${tkeyA}`), '신청 메일에 팀 링크가 들어간다');
@@ -5445,6 +5626,48 @@ function selftest() {
   ok(idA === pidOf(db, ' A@X.test '), '대소문자와 공백은 같은 사람으로 본다');
   ok(idA !== idB, '다른 연락처는 다른 사람이다');
   ok(pidOf(db, '') === '' && pidOf(db, 'a@b') === '', '너무 짧으면 열쇠를 안 만든다');
+  {
+    /* 후원사 이름 — 객체·빈 값은 400, 문자열은 40자로 */
+    { let c = 0; try { sponsorName({ a: 1 }); } catch (e) { c = e.code; } ok(c === 400, '후원사 이름이 객체면 400');
+      c = 0; try { sponsorName(''); } catch (e) { c = e.code; } ok(c === 400, '후원사 이름이 비면 400');
+      ok(sponsorName(' <b>포도농장</b> ') === 'b포도농장/b', '후원사 이름은 태그 없이 다듬는다'); }
+    /* clientIp — Fly 뒤에서는 헤더, 밖에서는 socket. 이걸 안 지키면 상한이 방문자 전체에 걸린다 */
+    {
+      const fake = (h, sock) => ({ headers: h, socket: { remoteAddress: sock } });
+      const had = process.env.FLY_APP_NAME;
+      delete process.env.FLY_APP_NAME;
+      ok(clientIp(fake({ 'fly-client-ip': '1.2.3.4' }, '::1')) === '::1', 'Fly 밖: 헤더는 무시하고 socket');
+      process.env.FLY_APP_NAME = 'hackon';
+      ok(clientIp(fake({ 'fly-client-ip': '1.2.3.4' }, 'fdaa::1')) === '1.2.3.4', 'Fly 안: fly-client-ip');
+      ok(clientIp(fake({ 'x-forwarded-for': '5.6.7.8, 9.9.9.9' }, 'fdaa::1')) === '5.6.7.8', 'Fly 안: x-forwarded-for 첫 값');
+      ok(clientIp(fake({}, 'fdaa::1')) === 'fdaa::1', 'Fly 안: 헤더 없으면 socket');
+      if (had === undefined) delete process.env.FLY_APP_NAME; else process.env.FLY_APP_NAME = had;
+    }
+    /* 한 대회에 같은 IP 가 팀을 계속 만드는 것 — APPLY_LIMIT 개까지(감사 c).
+       대회가 다르면 따로 센다. 현장에서 한 와이파이로 열 명이 신청하는 것을 막으면 안 되므로 상한은 env 로 뺀다. */
+    const gIp = '10.0.0.7', gEv = 'apply1', gEv2 = 'apply2';
+    for (let i = 0; i < APPLY_LIMIT; i++) applyGuard(gIp, gEv);
+    let gCode = 0, gMsg = '';
+    try { applyGuard(gIp, gEv); } catch (e) { gCode = e.code; gMsg = e.message; }
+    ok(gCode === 429, '한 대회에 신청을 계속 해도 안 막힌다');
+    ok(/10분/.test(gMsg), '막는 말에 언제 다시 되는지가 없다');
+    let gOther = true;
+    try { applyGuard(gIp, gEv2); } catch (e) { gOther = false; }
+    ok(gOther, '다른 대회 신청까지 같이 막힌다');
+    let gOtherIp = true;
+    try { applyGuard('10.0.0.8', gEv); } catch (e) { gOtherIp = false; }
+    ok(gOtherIp, '다른 사람 신청까지 같이 막힌다');
+  }
+  {
+    /* 내 열쇠 찾기 — 있는 연락처와 없는 연락처의 응답이 한 글자도 달라선 안 된다(감사 9).
+       갈리는 것은 메일뿐이다. 응답이 갈리면 열쇠 없이 «이 사람 참가했나» 를 묻는 길이 된다. */
+    const wYes = whoami(db, 'a@x.test'), wNo = whoami(db, 'nosuch@nowhere.test');
+    ok(JSON.stringify(wYes.body) === JSON.stringify(wNo.body), '있는 연락처와 없는 연락처의 응답이 다르다');
+    ok(!JSON.stringify(wYes.body).includes(idA), '응답에 사람 열쇠가 실린다');
+    ok(wYes.mail && wYes.mail.text.includes('/p/' + idA), '기록이 있으면 메일에 내 기록 주소가 들어간다');
+    ok(wNo.mail === null, '기록이 없는 연락처에 메일을 보낸다');
+    ok(whoami(db, ' A@X.TEST ').mail !== null, '대소문자·공백이 다르면 못 찾는다');
+  }
   const prof = profile(db, idA);
   ok(prof.level === '해 봤음', '처음에 고른 실력이 남는다');
   ok(!JSON.stringify(prof).includes('x.test'), '프로필에 연락처가 안 나간다');
@@ -5631,6 +5854,67 @@ function selftest() {
   ok(pickVenues(fake, 24, '마포구').every(r => r.area === '마포구'), '지역으로 거른다');
   ok(pickVenues(fake, 24)[0].state === '접수중', '접수 중인 곳이 먼저 온다');
   ok(pickVenues(fake, 500).length === 0, '아무 데도 못 받으면 빈 목록을 준다');
+
+  // 날짜 맞춤 — 대회 날이 접수 기간 안인가. 모름을 «안 됨»으로 그리지 않는다
+  const hall = { open: '2026-09-01', close: '2026-10-15' };
+  ok(venueFit(hall, '2026-10-11') === 'ok', '대회 날이 접수 기간 안이면 된다');
+  ok(venueFit(hall, '2026-08-31') === 'no' && venueFit(hall, '2026-10-16') === 'no',
+     '접수 기간 앞뒤로 벗어나면 안 된다');
+  ok(venueFit(hall, '2026-09-01') === 'ok' && venueFit(hall, '2026-10-15') === 'ok',
+     '첫날·마지막날은 되는 날이다');
+  ok(venueFit({ open: '', close: '' }, '2026-10-11') === 'ok',
+     '접수 기간을 안 알려 준 곳은 막지 않는다');
+  ok(venueFit(hall, '') === 'unknown' && venueFit(hall, '아무말') === 'unknown',
+     '대회 날짜가 없으면 «모름»이다 («안 됨»이 아니다)');
+  ok(venueFit({ open: '2026-09-01', close: '' }, '2026-08-01') === 'no'
+     && venueFit({ open: '', close: '2026-10-15' }, '2026-11-01') === 'no',
+     '한쪽만 있는 기간도 본다');
+  const fitRows = [{ area: '종로구', cap: 400, lo: 80, state: '접수중', open: '2026-09-01', close: '2026-10-15' },
+                   { area: '종로구', cap: 400, lo: 80, state: '접수종료', open: '2026-06-01', close: '2026-07-15' }];
+  const fv = pickVenues(fitRows, 100, '', '2026-10-11');
+  ok(fv.filter(r => r.fit === 'ok').length === 1 && fv.filter(r => r.fit === 'no').length === 1,
+     '목록에 그 날 되는 곳·안 되는 곳이 갈려 붙는다');
+  ok(pickVenues(fitRows, 100).every(r => r.fit === 'unknown'),
+     '날짜를 안 주면 아무 곳도 «안 됨»으로 표시하지 않는다');
+
+  // 제보 — 다녀온 사람이 남긴 것. 집계·순서·접기
+  const tipRows = [
+    { venue: 'A', kind: '콘센트', note: '벽마다 넉넉합니다' },
+    { venue: 'A', kind: '콘센트', note: '' },
+    { venue: 'A', kind: '와이파이', note: '' },
+    { venue: 'A', kind: '빌렸어요', note: '전화가 빠릅니다' },
+    { venue: 'B', kind: '안 맞아요', note: '주말에 안 엽니다' },
+    { venue: 'B', kind: '안 맞아요', note: '' },
+    { venue: 'C', kind: '없는종류', note: '세면 안 된다' },
+    { venue: 'D', kind: '콘센트', note: '하나' }, { venue: 'D', kind: '안 맞아요', note: '둘' },
+    { venue: 'D', kind: '안 맞아요', note: '셋' }, { venue: 'D', kind: '와이파이', note: '넷' },
+  ];
+  const roll = tipRoll(tipRows);
+  ok(roll.A.콘센트 === 2 && roll.A.와이파이 === 1 && roll.A.빌렸어요 === 1 && roll.A.안맞아요 === 0,
+     '제보를 종류별로 센다');
+  ok(roll.A.n === 4 && roll.A.notes.length === 2, '메모가 있는 것만 최근 세 줄까지 모은다');
+  ok(!roll.C, '목록에 없는 종류는 세지 않는다');
+  ok(tipRoll([]).D === undefined && Object.keys(tipRoll([])).length === 0,
+     '제보가 없으면 빈 집계다 (0 이 아니라 아무것도 없다)');
+  ok(roll.D.notes.length === 3 && roll.D.notes[0] === '둘', '메모는 최근 세 줄만 남는다');
+  ok(tipGood(roll.A) === 4 && tipGood(roll.B) === 0, '좋은 제보 셋을 합쳐 센다');
+  ok(!tipBad(roll.A) && tipBad(roll.B), '«안 맞아요» 가 좋은 제보보다 많고 둘 이상이면 접는다');
+  ok(!tipBad(roll.D), '좋은 제보와 같은 수면 접지 않는다 (' + roll.D.안맞아요 + ':' + tipGood(roll.D) + ')');
+  ok(!tipBad(tipRoll([{ venue: 'E', kind: '안 맞아요', note: '' }]).E),
+     '«안 맞아요» 한 건으로는 접지 않는다');
+  const tipCands = [
+    { id: 'A', area: '종로구', cap: 400, lo: 80, state: '접수중' },
+    { id: 'B', area: '종로구', cap: 100, lo: 80, state: '접수중' },
+    { id: 'Z', area: '종로구', cap: 120, lo: 80, state: '접수중' },
+  ];
+  const tv2 = pickVenues(tipCands, 100, '', '', roll);
+  ok(tv2[0].id === 'A', '좋은 제보가 많은 곳이 먼저 온다 (' + tv2.map(r => r.id).join('>') + ')');
+  ok(tv2[tv2.length - 1].id === 'B' && tv2[tv2.length - 1].dim === true,
+     '«안 맞아요» 가 많은 곳은 맨 뒤로 가고 접을 표시가 붙는다');
+  ok(tv2[1].id === 'Z' && tv2[1].tips.n === 0 && tv2[1].dim === false,
+     '제보가 없는 곳은 접지도 올리지도 않는다');
+  ok(pickVenues(tipCands, 100)[0].tips.n === 0,
+     '제보를 안 주면 모든 곳이 «아직 제보 없음»(n=0)이다');
 
   // 구하기 — 규모를 넣으면 필요한 것이 나온다
   const f24 = findHelp(24), f200 = findHelp(200);
@@ -6202,6 +6486,39 @@ function selftest() {
   ok(parseFeed('<feed><entry><title>A</title><link rel="alternate" href="https://a.example/1"/></entry></feed>', 5)[0].url === 'https://a.example/1'
      && parseFeed('<rss><item><title><![CDATA[B]]></title><link>https://b.example/2</link></item></rss>', 5)[0].title === 'B', 'RSS 와 Atom 둘 다 읽는다');
   ok(jobOf('인스타 릴스 광고 카피를 AI 로') === '마케팅' && jobOf('Figma 에 이미지 생성 붙이기') === '디자인' && jobOf('가게 예약 문자 자동화') === '소상공인' && jobOf('오늘 날씨') === '', '직무 자동 분류');
+  /* 짧은 ASCII 낱말이 «낱말 안에서» 걸리지 않는가. 아래는 실제로 오탐했던 제목 그대로다 —
+     Buil«ding»·buil«t»·«UI»DCaption → 디자인, Mathemati«cs» → 영업·CS, R«ead»s → 마케팅, to«bi»/ → 데이터.
+     디자인 14건 중 7건이 이것 때문이었다. 규칙을 고칠 때 이 줄이 먼저 빨개져야 한다. */
+  ok(jobOf('Building KAANTHA: What a Shift Staffing App Taught Us') === ''
+     && jobOf('Learning to Discover Interesting Mathematics') === ''
+     && jobOf('The System Never Checked If You Slept. Ours Reads Your Pulse') === ''
+     && jobOf('UIDCaption') === '',
+     '직무 분류 — 짧은 낱말이 낱말 안에서 걸리지 않는다');
+  /* 새로 알아듣게 한 낱말. 무태그로 남아야 하는 것(업계 뉴스·잡글)도 같이 못박는다 */
+  ok(jobOf('Improving site performance by shipping more CSS') === '개발'
+     && jobOf('What About Rails?') === '개발'
+     && jobOf('npm i -g @anthropic-ai/claude-code') === '개발'
+     && jobOf('When chat is the wrong UI') === '디자인'
+     && jobOf('[AX일지]대표님이 곧 시스템인 회사의 AX는 어디서 시작할까') === '기획'
+     && jobOf('앤트로픽, IPO 앞두고 공동 창립자 7명에 의결권 부여 추진') === ''
+     && jobOf('2026 차전자피 제품 추천 TOP5') === '',
+     '직무 분류 — 새 낱말은 붙고, 업계 뉴스는 무태그로 남는다');
+  /* AI 관문 — 정규식만이 아니라 «실제로 걸러 내는가»를 본다. 아래 넷은 그 피드에 있던 제목 그대로다.
+     pickFeed 를 통과시켜 본다 — 관문을 무력화하면(if (true)) 이 줄이 빨개져야 한다. */
+  const _ad = { title: '[해외 크리에이티브] “혼자서는 날 수 없다” 에어인디아, 아시안게임 맞아', url: 'https://x/1' };
+  const _ai = { title: '전담 인력 없는 중소기업, 계약·급여·해외영업도 AI로', url: 'https://x/2' };
+  ok(pickFeed('mobi', [_ad, _ai], true).length === 1
+     && pickFeed('mobi', [_ad, _ai], true)[0].title === _ai.title
+     && pickFeed('lob', [_ad, _ai], false).length === 2,
+     'AI 관문 — 일반 매체는 AI 글만 담고, AI 전문 매체는 그냥 담는다');
+  /* 표에 관문이 실제로 켜져 있는가. 함수가 맞아도 표에서 빠지면 아무 일도 안 일어난다. */
+  ok(NEWS_FEEDS.filter(f => f[3]).map(f => f[0]).sort().join(',') === 'mobi,platum'
+     && NEWS_FEEDS.length === 16
+     && NEWS_FEEDS.every(f => typeof f[3] === 'boolean'),
+     '수집원 표 — 모든 행이 관문 값을 명시하고, 켜진 곳은 일반 매체 둘뿐 (전체 16곳)');
+  /* 관문 값을 안 넘기면 조용히 꺼지지 않고 터진다 */
+  ok((() => { try { pickFeed('x', [], undefined); return false; } catch { return true; } })(),
+     'AI 관문 — aiOnly 를 안 넘기면 그 자리에서 터진다');
   {
     const tip = addTip(db, 'own1', '제보 김', { job: '마케팅', title: '카피 초안 도구', url: 'https://t.example/1' });
     ok(tip.job === '마케팅' && newsList(db, 9, '마케팅').some(r => r.src === 'tip' && r.by === '제보 김'), '제보가 직무 태그로 실린다');
@@ -6210,7 +6527,42 @@ function selftest() {
     const m2 = mcpCall(db, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_problems' } }); ok(/문구점 박/.test(m2.result.content[0].text), 'MCP 문제 은행');
     const m3 = mcpCall(db, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'post_problem', arguments: { name: 'MCP 가게', pain: '장부', contact: 'm@x.test' } } }); ok(/\/r\/[a-z0-9]+\?k=/.test(m3.result.content[0].text), 'MCP 로 문제 올리기 → 받는 링크');
     ok(mcpCall(db, { jsonrpc: '2.0', id: 4, method: 'nope' }).error.code === -32601 && mcpCall(db, { method: 'notifications/initialized' }) === null, 'MCP 오류·알림');
+    {
+      /* 열쇠 없는 MCP 쓰기도 상한을 지난다 — /mcp 는 /api/ 밖이라 라우터의 WRITE_LIMIT 문을 안 밟는다(감사 d).
+         한 IP 가 문제 은행을 무한히 채우던 길이다. 읽기 도구(list_problems)는 안 센다. */
+      const bIp = '10.9.9.9';
+      const pp = () => mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call',
+        params: { name: 'post_problem', arguments: { name: '도배가게', pain: '장부', contact: 'flood@x.test' } } }, bIp).result.content[0].text;
+      let hit = '';
+      for (let i = 0; i <= WRITE_LIMIT; i++) hit = pp();
+      ok(/너무 많습니다/.test(hit), '열쇠 없이 MCP 로 문제를 무한히 올린다');
+      const rd = mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'list_problems' } }, bIp).result.content[0].text;
+      ok(/도배가게/.test(rd) && !/너무 많습니다/.test(rd), '상한에 걸린 IP 가 읽기도 못 한다');
+      ok(/\/r\/[a-z0-9]+\?k=/.test(mcpCall(db, { jsonrpc: '2.0', id: 9, method: 'tools/call',
+        params: { name: 'post_problem', arguments: { name: '딴사람', pain: '장부', contact: 'other@x.test' } } }, '10.9.9.8').result.content[0].text),
+        '다른 IP 까지 같이 막힌다');
+      db.prepare("DELETE FROM requests WHERE contact IN ('flood@x.test','other@x.test')").run();   /* 도배 줄이 뒤 검사의 목록을 밀어내지 않게 치운다 */
+    }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
+  }
+  /* ── 신고 — 앱스토어 심사 지침 1.2 가 요구하는 «신고 수단» ── */
+  {
+    const ev = createEvent(db, { title: '신고 대회', starts: today(), ends: today() });
+    const r1 = addReport(db, { event: ev.id, kind: 'question', ref: '7', reason: '욕설·비방', note: '심한 말' });
+    ok(r1.id > 0, '신고가 들어간다');
+    let noReason = false;
+    try { addReport(db, { event: ev.id, kind: 'question' }); } catch { noReason = true; }
+    ok(noReason, '이유 없는 신고는 막힌다');
+    let ghost = false;
+    try { addReport(db, { event: 'zzzzzzzz', kind: 'other', reason: 'x' }); } catch { ghost = true; }
+    ok(ghost, '없는 대회로는 신고를 못 넣는다 — 운영자가 못 보는 신고가 쌓이면 안 된다');
+    ok(addReport(db, { event: ev.id, kind: '아무거나', reason: '기타' }) &&
+       db.prepare("SELECT kind FROM reports WHERE event=? ORDER BY id DESC").get(ev.id).kind === 'other',
+       '모르는 갈래는 other 로 떨어진다');
+    const rows = db.prepare('SELECT id,done FROM reports WHERE event=?').all(ev.id);
+    ok(rows.length === 2 && rows.every(x => x.done === 0), '운영자 목록에 처리 전으로 뜬다');
+    db.prepare('UPDATE reports SET done=1 WHERE id=?').run(r1.id);
+    ok(db.prepare('SELECT done FROM reports WHERE id=?').get(r1.id).done === 1, '처리 표시가 남는다');
   }
   /* ── 개인정보 6개월 삭제 — 처리방침의 약속 ── */
   {
@@ -6274,7 +6626,7 @@ if (require.main === module) {
   });
 }
 module.exports = { open, createEvent, editEvent, moreTeam, joinTeam, submit, showConsent, score, board, outcomes, allocate, tierOf, reallocate, BUDGET_RULE,
-                   card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, noticeOf, tv, crew, mine, record,
+                   card, support, assign, spread, judgeView, lanIPs, findHelp, webUrl, pack, safeCount, TIERS, draftPlan, planWarn, follow, closed, KINDS, RUBRICS, logoFor, pidOf, profile, hostRep, seats, setSeats, shrink, LEVELS, pickVenues, parseCap, venueFit, tipRoll, tipGood, tipBad, TIP_KINDS, noticeOf, tv, crew, mine, record,
                    dump, backup, isAdmin,
                    visitPath, visitRef, countVisit, visitsOf,
                    addNeed, addPledge, setPledge, needsOf, ledgerOf, addFollowup, followSummary,

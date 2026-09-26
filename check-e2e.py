@@ -1700,6 +1700,16 @@ with sync_playwright() as p:
     last = None
     for i in range(301): last = raw("/api/zz-rate-probe", {"x": i})[0]
     A(last == 429, f"301번째 쓰기가 429 가 아니다: {last}")
+    # c — 한 대회에 같은 IP 가 팀을 계속 만들면 429 (APPLY_LIMIT, 검사 서버는 20)
+    _, ae = post("/api/events", {"title": "신청상한검사"}); AE = ae["id"]
+    acodes = [post(f"/api/events/{AE}/teams", {"name": f"막기{i}", "email": f"cap{i}@x.io", "agree": True})[0]
+              for i in range(21)]
+    A(acodes[:20] == [201] * 20, f"상한 안쪽 신청이 막혔다: {acodes[:20]}")
+    A(acodes[20] == 429, f"21번째 신청이 429 가 아니다: {acodes[20]}")
+    A("10분" in raw(f"/api/events/{AE}/teams", {"name": "막기말", "email": "capz@x.io", "agree": True})[1],
+      "막는 말에 언제 다시 되는지가 없다")
+    # e — 열쇠 없이 지운 대회 목록은 403 (400 이 아니다)
+    A(code_of("/api/mine/trash") == 403, f"열쇠 없이 지운 대회 목록을 물었더니 403 이 아니다: {code_of('/api/mine/trash')}")
     # 8 — CSV 수식 주입
     post(f"/api/events/{SE}/teams", {"name": "=1+1", "email": "f@audit.test", "agree": True})
     csvt = raw(f"/api/events/{SE}/export.csv", headers={"x-okey": SK})[1]
@@ -1719,7 +1729,7 @@ with sync_playwright() as p:
     visit(f"/j/{SE}?k={SJ}")
     A(pg.evaluate("location.search") == "", "심사 링크를 열었는데 주소창에 열쇠가 남아 있다")
     A("allow-same-origin" not in pg.content(), "미리보기 iframe 이 같은 출처 권한을 가진다")
-    ok("보안 감사 반영 — 죽지 않음·사본에 열쇠 없음·소스 404·도배 429·CSV·헤더·길이·쿼리 열쇠 403·id·음수·주소창 열쇠")
+    ok("보안 감사 반영 — 죽지 않음·사본에 열쇠 없음·소스 404·도배 429·한 대회 신청 상한·CSV·헤더·길이·쿼리 열쇠 403·id·음수·주소창 열쇠")
     # ── 2026-09-26 짝 비교 심사 — 두 팀 중 나은 쪽만 고른다 ──
     _, pe = post("/api/events", {"title": "짝비교검사"}); PE, PK, PJ = pe["id"], pe["okey"], pe["jkey"]
     pteams = []
@@ -2321,14 +2331,15 @@ with sync_playwright() as p:
     withc = [r for r in api(f"/api/events/{ev}/board", key=OK)["rows"] if r.get("contact")]
     A(withc, "연락처를 넣은 팀이 하나도 없다")
     CONTACT = withc[0]["contact"]
+    # 열쇠 찾기는 있든 없든 같은 응답을 준다(감사 9). 찾으면 메일로만 알려 준다.
     who = post("/api/whoami", {"contact": CONTACT})
-    A(who[0] == 200, f"연락처로 사람을 못 찾는다: {who}")
-    pid = who[1]["id"]
+    non = post("/api/whoami", {"contact": "없는사람@example.test"})
+    A(who[0] == 200, f"연락처로 열쇠 찾기가 200 이 아니다: {who}")
+    A(who == non, f"있는 연락처와 없는 연락처의 응답이 다르다: {who} vs {non}")
+    A("@" not in json.dumps(who[1]) and "id" not in (who[1] or {}),
+      f"열쇠 찾기 응답에 사람 열쇠가 실렸다: {who[1]}")
+    pid = api(f"/api/teams/{withc[0]['id']}/card")["person"]
     A(len(pid) == 12, f"사람 열쇠 모양이 다르다: {pid}")
-    A(post("/api/whoami", {"contact": " " + CONTACT.upper() + " "})[1]["id"] == pid,
-      "대소문자·공백이 다른 사람으로 잡힌다")
-    A(post("/api/whoami", {"contact": "없는사람@example.test"})[0] == 404,
-      "없는 연락처인데 열쇠가 나온다")
 
     prof = api(f"/api/people/{pid}")
     blob = json.dumps(prof, ensure_ascii=False)
@@ -2506,6 +2517,91 @@ with sync_playwright() as pw:
     else:
         ok("빌릴 수 있는 곳 — 목록이 비었지만 화면은 살아 있다 (인터넷 없음)")
 
+    # ── 같은 창구가 한 화면에 두 번 나오지 않는다 ────────────────────
+    # 위쪽 «지금 빌릴 수 있는 곳» 이 이미 서울시 공공서비스예약 실시간 목록이다.
+    # 아래 창구 표에도 같은 이름이 있으면 한 화면에 같은 곳이 두 번 뜬다.
+    # 앞 단계가 300명으로 두고 갔다. 300명에는 창구가 0곳이라 그대로 보면 아무것도 안 본다.
+    pg.fill("#f-n", "24")
+    pg.dispatch_event("#f-n", "change")
+    pg.wait_for_timeout(900)
+    desks = pg.evaluate(
+        "[...document.querySelectorAll('[data-lead=\"장소\"][data-src=\"창구\"]')].map(b => b.dataset.name)")
+    A(len(desks) >= 3, f"창구가 {len(desks)}곳뿐이다 — 볼 것이 없는 화면에서 세고 있다")
+    A("서울시 공공서비스예약" not in desks, f"창구 표에 서울시 공공서비스예약이 또 있다: {desks}")
+    A(pg.inner_text("main").count("공공서비스예약") <= 1,
+      f"«공공서비스예약» 이 화면에 {pg.inner_text('main').count('공공서비스예약')}번 나온다")
+    ok(f"구하기 — 같은 창구가 두 번 안 나온다 (창구 {len(desks)}곳)")
+
+    # ── 장소: 대회 날짜 맞춤과 제보 ──────────────────────────────
+    # 24명으로는 표본(강당)이 안 걸린다. 100명으로 보면 네 건이 다 들어온다.
+    day = api(f"/api/events/{ev}")["starts"]
+    v100 = api(f"/api/venues?size=100&day={day}")
+    vids = [r["id"] for r in v100["rows"]]
+    if len(vids) >= 3:
+        A(v100["day"] == day, f"보낸 날짜가 응답에 없다: {v100['day']}")
+        A(all(r["fit"] in ("ok", "no") for r in v100["rows"]), "날짜를 보냈는데 fit 이 안 붙었다")
+        A(all(r["fit"] == "unknown" for r in api("/api/venues?size=100")["rows"]),
+          "날짜를 안 보냈는데 «안 됨»으로 갈렸다 (모름을 없음으로 그린다)")
+        pg.fill("#f-n", "100")
+        pg.dispatch_event("#f-n", "change")
+        pg.wait_for_timeout(1200)
+        nfit = sum(1 for r in v100["rows"] if r["fit"] == "ok")
+        nno = len(vids) - nfit
+        seen = pg.inner_text("main")
+        A(f"{day} 에 접수하는 곳을 먼저 보여 줍니다." in seen, "대회 날짜 안내가 화면에 없다")
+        if nfit:
+            A("이 날 접수 중" in seen, "그 날 되는 곳에 표가 안 붙었다")
+        if nno:
+            A(f"접수 기간이 맞지 않는 곳 {nno}" in seen, f"안 되는 곳 {nno}건이 안 접혔다")
+        ok(f"장소 날짜 맞춤 — {day} 에 되는 곳 {nfit}, 접은 곳 {nno}")
+
+        # 제보 — 화면에서 한 줄 넣으면 칩이 바뀐다
+        vid = pg.evaluate(
+            "[...document.querySelectorAll('[data-chip]')].find(e => !e.closest('details')).dataset.chip")
+        A(pg.inner_text(f'[data-chip="{vid}"]').strip() == "아직 제보 없음",
+          "제보가 0건인데 0 으로 그린다 (모름이어야 한다)")
+        pg.fill(f"#vt-{vid}", "콘센트가 무대 옆에 있습니다")
+        pg.click(f'[data-tip="{vid}"][data-kind="콘센트"]')
+        pg.wait_for_timeout(1400)
+        chip_now = pg.inner_text(f'[data-chip="{vid}"]')
+        A("콘센트 1" in chip_now, f"제보를 넣었는데 칩이 그대로다: {chip_now}")
+        A("콘센트가 무대 옆에 있습니다" in pg.inner_text("main"), "한 줄 메모가 카드에 안 보인다")
+        A(pg.input_value(f"#vt-{vid}") == "", "보낸 뒤에도 메모 칸이 안 비워졌다")
+
+        # 순서 — 좋은 제보가 많은 곳이 앞으로, «안 맞아요» 가 많은 곳은 뒤로
+        best, worst = vids[-1], vids[1]
+        for k in ("콘센트", "와이파이", "빌렸어요"):
+            A(post(f"/api/venues/{best}/tips", {"kind": k, "note": ""})[0] == 201, "제보가 저장이 안 된다")
+        for i in range(2):
+            post(f"/api/venues/{worst}/tips", {"kind": "안 맞아요", "note": ""})
+        after = api(f"/api/venues?size=100&day={day}")["rows"]
+        A(after[0]["id"] == best and after[0]["tips"]["n"] == 3,
+          f"제보 많은 곳이 맨 앞으로 안 왔다: {[r['id'][-4:] for r in after]}")
+        A(after[-1]["id"] == worst and after[-1]["dim"] is True,
+          f"«안 맞아요» 가 많은 곳이 맨 뒤·접기로 안 갔다: {after[-1]['id'][-4:]}")
+        A(next(r for r in after if r["id"] == vid)["tips"]["콘센트"] == 1,
+          "화면에서 넣은 제보가 서버에 안 남았다")
+        pg.dispatch_event("#f-n", "change")
+        pg.wait_for_timeout(1200)
+        A("«안 맞아요» 제보가 많은 곳 1" in pg.inner_text("main"), "나쁜 제보가 많은 곳이 안 접혔다")
+        ok(f"장소 제보 — 칩이 바뀌고 순서가 바뀐다 ({after[0]['id'][-4:]} 먼저, {worst[-4:]} 접힘)")
+    else:
+        ok("장소 날짜 맞춤·제보 — 목록이 비어 화면만 확인했다 (인터넷 없음)")
+
+    # ── 제보 도배 막기 — 목록에 없는 종류와 긴 메모 (인터넷 없이도 본다) ──
+    st_tip, tip1 = post("/api/venues/zzE2E/tips", {"kind": "콘센트", "note": "가" * 300})
+    A(st_tip == 201 and len(tip1["tips"]["notes"][0]) == 120,
+      f"120자 넘는 메모가 안 잘렸다: {st_tip} {len(tip1['tips']['notes'][0]) if tip1 else '?'}")
+    A(post("/api/venues/zzE2E/tips", {"kind": "몰라요", "note": ""})[0] == 400,
+      "목록에 없는 제보 종류가 들어갔다")
+    A(post("/api/venues/zzE2E/tips", {"kind": {"a": 1}, "note": ""})[0] == 400,
+      "종류가 객체인데 400 이 아니다")
+    ok("제보 — 120자에서 잘리고, 목록에 없는 종류는 막힌다")
+
+    pg.fill("#f-n", "24")
+    pg.dispatch_event("#f-n", "change")
+    pg.wait_for_timeout(900)
+
     # 보낼 메일 초안 — 마크다운이 들어가면 안 된다 (메일에서는 별표가 그냥 별표다)
     pg.fill("#f-n", "24")
     pg.dispatch_event("#f-n", "change")
@@ -2665,7 +2761,66 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 
-# ── 11. 로그인 셋(카카오·구글·네이버) ─────────────────────
+# ── 11. 직무 칩이 «누르기 전에» 빈 탭인지 알려주는가 ──────────
+# 칩 일곱이 다 살아 있는 것처럼 보이면, 눌러 본 사람만 그 탭이 빈 걸 안다.
+# 가장 중요한 단언은 «칩에 적힌 수 = 눌렀을 때 그려진 줄 수» 다. 어긋나면 빈 탭보다 나쁘다.
+# 건수 자체는 단언하지 않는다 — 소식은 남의 RSS 에서 오므로 실행마다 다르다.
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_context(viewport={"width": 412, "height": 900}).new_page()
+    pg.goto(f"{BASE}/news", wait_until="networkidle")
+    pg.wait_for_selector(".chip[data-k]")
+    chips = pg.evaluate(
+        "[...document.querySelectorAll('.chip[data-k]')]"
+        ".map(c => ({k: c.dataset.k, n: c.dataset.n,"
+        " txt: c.querySelector('.n') && c.querySelector('.n').textContent}))")
+    A(len(chips) >= 8, f"칩이 전체+직무7 이 아니다: {len(chips)}개")
+    A(all(c["n"] is not None for c in chips), f"칩에 건수(data-n)가 없다: {chips}")
+    A(all(c["txt"] == c["n"] for c in chips), f"칩에 보이는 수와 data-n 이 다르다: {chips}")
+    # 칩에 적힌 수가 눌렀을 때 실제로 그려지는 줄 수와 같은가. 이것이 이 구획의 핵심이다.
+    for c in chips:
+        pg.click(f'.chip[data-k="{c["k"]}"]')
+        pg.wait_for_timeout(120)
+        drawn = pg.evaluate("document.querySelectorAll('#list .it').length")
+        A(drawn == int(c["n"]),
+          f"칩 «{c['k']}» 은 {c['n']} 이라 적혀 있는데 눌러 보니 {drawn} 줄이다")
+    # 0건 칩은 점선으로 보인다. 진짜 0 건 직무가 있는지는 그날 소식에 달렸으니,
+    # 규칙 자체가 살아 있는지를 본다 — data-n=0 인 칩을 하나 꽂아 보고 계산된 모양을 읽는다.
+    style = pg.evaluate("""() => {
+        const el = document.createElement('button');
+        el.className = 'chip'; el.dataset.n = '0'; el.dataset.k = '__probe';
+        document.getElementById('jobs').appendChild(el);
+        const s = getComputedStyle(el).borderStyle;
+        el.remove();
+        return s;
+    }""")
+    A(style == "dashed", f"0건 칩이 점선으로 표시되지 않는다 (border-style: {style})")
+    # 소식이 0건인 직무에도 «지금 이렇게 쓴다» 레시피는 있어야 한다 — 그게 그 탭의 값이다.
+    # 소상공인은 수집원 열여덟 곳 어디에도 공급이 없어 늘 0 건이다(2026-09-27 실측).
+    for c in chips:
+        if c["k"] == "all":
+            continue
+        pg.click(f'.chip[data-k="{c["k"]}"]')
+        pg.wait_for_timeout(120)
+        A(pg.is_visible("#how") and pg.inner_text("#how-t").startswith(c["k"]),
+          f"«{c['k']}» 탭에 레시피가 안 보인다 (소식 {c['n']}건)")
+        A(len(pg.query_selector_all("#how-l li")) >= 1,
+          f"«{c['k']}» 레시피에 줄이 없다")
+    # 세는 규칙이 draw() 의 scope 와 같은가. scope 를 여기 따로 적는다 —
+    # 화면 코드를 그대로 베끼면 둘이 같이 틀려도 검사가 통과한다.
+    agree = pg.evaluate("""() => {
+        const rows = [{job:'개발',src:'lob'}, {job:'개발',src:'gh'},
+                      {job:'기획',src:'yozm'}, {job:'',src:'hackon'}];
+        const jobs = ['개발', '기획', '소상공인'];
+        const c = window.jobCounts(rows, jobs);
+        return c.all === rows.length &&
+               jobs.every(j => c[j] === rows.filter(r => r.job === j || r.src === 'hackon').length);
+    }""")
+    A(agree, "칩 건수가 draw() 의 scope 규칙과 어긋난다 — 칩엔 n 인데 눌러 보면 다른 수가 나온다")
+    ok(f"직무 칩 건수 = 눌렀을 때 줄 수 (칩 {len(chips)}개 전부), 0건은 점선")
+    b.close()
+
+# ── 12. 로그인 셋(카카오·구글·네이버) ─────────────────────
 # 키가 있는 서버는 따로 띄운다. 위 서버는 «키 없음» 을 보는 서버라 둘을 합칠 수 없다.
 # 진짜 로그인은 사람이 그 회사 화면에서 눌러야 끝난다 — 여기서 보는 것은
 # «내보내는 주소가 맞나» 와 «돌아오는 길이 남의 브라우저에 안 열리나» 둘이다.

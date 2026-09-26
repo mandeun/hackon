@@ -39,7 +39,11 @@ def start(timeout=30, extra_env=None):
     """
     port = _free_port()
     tmp = tempfile.mkdtemp(prefix="hackon-check-")
+    # 한 대회 신청 상한(APPLY_LIMIT)은 기본 3 이다. 검사는 한 IP 로 한 대회에 여러 팀을
+    # 만들어야 하니 넉넉히 올려 둔다 — 상한 자체는 감사 단계에서 21번째로 확인한다.
+    # extra_env 는 그 위에 덮는다 — 로그인 키를 넣은 서버를 따로 띄울 때 쓴다.
     env = {**os.environ, "PORT": str(port), "DB": os.path.join(tmp, "check.db"),
+           "APPLY_LIMIT": "20",
            **(extra_env or {})}
     log = open(os.path.join(tmp, "server.log"), "w+", encoding="utf-8")
     proc = subprocess.Popen([shutil.which("node") or "node", "server.js"],

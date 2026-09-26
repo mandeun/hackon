@@ -16,6 +16,18 @@ primary_region = "nrt"
   auto_start_machines = true
   min_machines_running = 0
 
+  # 죽은 기계를 죽은 줄 모르는 것이 제일 나쁘다. /api/health 는 DB 를 두 번 세기
+  # 때문에 200 이 나오면 「떴다」가 아니라 「DB 까지 열렸다」는 뜻이다.
+  # 시간을 넉넉히 잡는 이유: 기계가 평소에 꺼져 있어(min_machines_running = 0)
+  # 막 켜진 직후엔 첫 응답이 몇 초 걸린다. 짧게 잡으면 멀쩡한 기계를 계속 다시 띄운다.
+  # 이 검사는 기계가 켜져 있는 동안만 돈다 — 꺼진 기계를 깨우지 않으니 요금은 그대로 0 이다.
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "30s"
+
 # DB 와 백업이 사는 곳. 이게 없으면 기계가 꺼질 때 대회가 통째로 사라진다.
 [[mounts]]
   source = "hackon_data"
