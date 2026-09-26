@@ -2121,6 +2121,7 @@ const SCREEN = {
           <div><label>정원 (0=무제한)</label><input id="e-cap" type="number" value="${e.cap}">
             ${e.cap ? nudge(`실제로는 <b>${Math.round(e.cap / 2)}명</b>쯤 옵니다`) : ''}</div>
         </div>
+        <label>여는 사람 <span class="pill">공개 페이지에 «○○ 주최»로</span></label><input id="e-host" value="${esc(e.host || '')}" maxlength="40" placeholder="이름 또는 모임 이름">
         <label>주제</label><input id="e-topic" value="${esc(e.topic)}" placeholder="예) 생활 불편">
         <label>와이파이 <span class="pill">큰 화면에 뜹니다</span></label>
         <input id="e-wifi" value="${esc(e.wifi || '')}" placeholder="이름 / 비밀번호">
@@ -3871,6 +3872,7 @@ function wire() {
         chat: $('#e-chat') ? $('#e-chat').value.trim() : undefined,
         safety: $('#e-safety') ? $('#e-safety').value.trim() : undefined,
         pay: $('#e-pay') ? $('#e-pay').value.trim() : undefined,
+        host: $('#e-host') ? $('#e-host').value.trim() : undefined,
         topic: $('#e-topic').value, due: $('#e-due').value, plan } });
       flash('채웠습니다');
     } catch (e) { flash(e.message, true); }
@@ -4984,6 +4986,7 @@ else if (location.hash.length > 1 && new URLSearchParams(location.search).get('k
   cur = location.hash.slice(1); try { localStorage.setItem('hackon.okey.' + cur, new URLSearchParams(location.search).get('k')); } catch (_) {}
   history.replaceState(null, '', location.pathname + location.hash); tab = 'board';
 }
+else if (new URLSearchParams(location.search).get('make')) { tab = 'make'; history.replaceState(null, '', location.pathname); }   // 첫 화면 «대회 열기» → 바로 만들기
 else if (new URLSearchParams(location.search).get('req')) { MAKE_REQ = new URLSearchParams(location.search).get('req'); tab = 'make'; history.replaceState(null, '', location.pathname); }
 else if (location.hash.length > 1) { cur = location.hash.slice(1); tab = 'board'; }
 

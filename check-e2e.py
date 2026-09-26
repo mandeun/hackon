@@ -116,12 +116,12 @@ with sync_playwright() as p:
     htxt = pg.inner_text("body")
     for must in ["대회 찾기", "열린 대회", "대회 열기", "협찬"]:
         A(must in htxt, f"첫 화면에 '{must}' 가 없다")
-    for sel, href in (("#hero-open", "/app"), ("#hero-go", "#list")):
+    for sel, href in (("#hero-open", "/app?make=1"), ("#hero-go", "#list")):
         box = pg.locator(sel).bounding_box()
         A(box is not None and box["y"] + box["height"] <= 844,
           f"{sel} 가 폰 첫 화면 접힘 아래에 있다: {box}")
         A(pg.get_attribute(sel, "href") == href, f"{sel} 가 {href} 로 안 간다")
-    A(pg.get_attribute("#nav-open", "href") == "/app", "대회 열기가 앱으로 안 간다")
+    A(pg.get_attribute("#nav-open", "href").startswith("/app"), "대회 열기가 앱으로 안 간다")
     # 검색·필터·정렬은 있되, 대회가 셋 이하면 숨긴다 — 판단을 늘리지 않는다
     A(pg.query_selector("#q") is not None, "검색 칸이 없다")
     A(len(pg.query_selector_all("[data-filter]")) == 4, "필터가 4개가 아니다")
@@ -1697,6 +1697,16 @@ with sync_playwright() as p:
     visit(f"/e/{PE}")
     A("승률" in pg.inner_text("#view"), "공개 순위 표에 승률 열이 없다")
     ok("짝 비교 심사 — 소식·쌍 고르기·승률 순위·모름은 0 이 아님·마감 뒤 잠김")
+
+    # ── 대역이 찾은 것 ④⑤ — 첫 화면 «대회 열기»는 만들기 화면으로, 대회 정보에 «여는 사람» 칸 ──
+    pg.goto(BASE + "/app?make=1"); pg.wait_for_selector("body[data-ready='1']", timeout=8000)
+    A(pg.query_selector("#f-title") is not None and "make" not in pg.url, "첫 화면 «대회 열기»가 만들기 화면으로 안 가거나 주소가 안 지워진다")
+    _, he = post("/api/events", {"title": "여는사람검사"}); HE, HK = he["id"], he["okey"]
+    pg.evaluate(f"localStorage.setItem('hackon.okey.{HE}', '{HK}')"); visit(f"/app#{HE}")
+    A(pg.query_selector("#e-host") is not None, "대회 정보에 «여는 사람» 칸이 없다")
+    pg.fill("#e-host", "동네 모임"); pg.click("#e-save"); pg.wait_for_timeout(800)
+    A(api(f"/api/events/{HE}")["host"] == "동네 모임", "«여는 사람»이 저장되지 않는다")
+    ok("대역 ④⑤ — 첫 화면에서 바로 만들기 · 여는 사람 칸")
 
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})

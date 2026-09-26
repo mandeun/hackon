@@ -183,7 +183,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     </nav>
     <nav class="tools" aria-label="도구">
       <a id="nav-login" href="/auth/kakao" style="display:none">카카오 로그인</a>
-      <a id="nav-open" href="/app" class="btn s">대회 열기</a>
+      <a id="nav-open" href="/app?make=1" class="btn s">대회 열기</a>
     </nav>
   </div>
 </header>
@@ -195,7 +195,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <h1>번거로운 일 하나,<br>동네가 하루 만에 풉니다.</h1>
     <p class="lead">이름 하나 적으면 대회가 열리고, 장소·심사·간식은 빈자리로 남겨 두면 됩니다. 코딩은 안 해 봤어도 됩니다.</p>
     <div class="cta">
-      <a class="btn" id="hero-open" href="/app">대회 열기</a>
+      <a class="btn" id="hero-open" href="/app?make=1">대회 열기</a>
       <a class="btn o" id="hero-go" href="#list">참가할 대회 보기</a>
     </div>
   </div>
@@ -225,7 +225,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   <div id="empty" class="empty" hidden>
     <b>아직 열린 대회가 없습니다.</b>
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
-    <a class="btn s" href="/app">대회 열기</a>
+    <a class="btn s" href="/app?make=1">대회 열기</a>
   </div>
   <!-- 같은 절 안에 둔다 — 첫 화면은 절 셋을 넘기지 않는다(검사가 잠근다). 의뢰가 없으면 통째로 숨는다 -->
   <div id="asks" hidden style="margin-top:22px">
