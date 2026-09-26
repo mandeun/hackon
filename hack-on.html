@@ -2179,7 +2179,7 @@ const SCREEN = {
           <div style="height:8px"></div>${e.listed ? '<button class="btn sm" id="gd-unlist">목록에서 내리기</button>' : '<span class="pill">지금 목록에 없습니다</span>'}</div>
         <div class="card"><h3>완전히 지우기</h3>
           <div class="meta">팀·제출·점수·투표가 함께 지워지고 되돌릴 수 없습니다. 사본(연락처 포함)이 내려받아지니 운영자만 보관하세요.</div>
-          ${busyDel ? `<label>확인하려면 대회 이름을 그대로 적으세요</label><input id="gd-name" placeholder="${esc(e.title)}">`
+          ${busyDel ? `<label>확인하려면 대회 이름을 그대로 적으세요</label><input id="gd-name" placeholder="${esc(e.title)}"><div class="meta" id="gd-hint">이름이 똑같아지면 아래 단추가 켜집니다.</div>`
                     : '<div class="meta" style="margin-top:6px">신청·자리·제안이 없는 빈 대회라 바로 지울 수 있습니다.</div>'}
           <div style="height:8px"></div><button class="btn sm" id="gd-go" data-title="${esc(e.title)}" style="background:var(--bad)"${busyDel ? ' disabled' : ''}>완전히 지우기</button></div>
       </div></details>`; })()}
@@ -2566,7 +2566,7 @@ const SCREEN = {
               </div></div>` : ''}
             <div class="shrow" style="margin-top:6px"><button class="btn sm" id="cf-yes">올 거예요</button><button class="btn sec sm" id="cf-no">못 가요</button></div>`}</div>` : ''}
           <div class="meta">1. <b>내 팀 링크</b>를 나에게만 보내 두세요 — 폰을 바꿔도 이걸로 돌아옵니다.<br>
-            2. 당일 ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : '마감 전에'} 여기서 결과물 주소를 냅니다.</div>
+            2. ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : `당일(${esc(e.starts)}) 마감 전에`} 여기서 결과물 주소를 냅니다.</div>
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 내기</button><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
           <div style="margin-top:10px"><button class="btn sec sm" id="nx-rename">팀 이름 고치기</button> <button class="btn sec sm" id="nx-cancel">신청 취소</button></div>
@@ -3262,8 +3262,8 @@ const SCREEN = {
       <h3>${S()}. 무엇을 했나</h3>
       <div class="stat">
         <div><b>${e.teams}</b><span>신청</span></div>
-        <div><b>${o.came ?? 0}</b><span>온 팀</span></div>
-        <div><b>${o.finishRate}%</b><span>완주율</span></div>
+        <div><b>${o.came ? o.came : '—'}</b><span>${o.came ? '온 팀' : '온 팀(기록 없음)'}</span></div>
+        <div><b>${o.finishRate}%</b><span>완주율(신청 대비 제출)</span></div>
       </div>
       ${o.solo ? `<p class="sub">혼자 오신 분 ${o.solo}명은 현장에서 팀을 짰습니다.</p>` : ''}
 
@@ -3454,7 +3454,7 @@ const SCREEN = {
         <div style="height:9px"></div><button class="btn sm" id="fu-save">보내기</button>
       </div>
 
-      <div class="card">
+      ${(d.event.vmode || d.event.pmode) ? `<div class="card"><h3>심사</h3><div class="meta">${d.event.vmode ? '관객 평가로 돌린 대회라 점수 입력이 없습니다.' : '짝 비교로 돌린 대회라 점수 입력이 없습니다. 심사 링크에서 고릅니다.'}</div></div>` : `<div class="card">
         <h3>심사</h3>
         <div class="meta">심사위원이 씁니다. 이름이 같으면 이전 점수를 고칩니다.</div>
         <label>심사위원 이름</label>
@@ -3464,7 +3464,7 @@ const SCREEN = {
           <input class="j-v" data-key="${esc(r.key)}" type="number" min="0" max="100" value="" placeholder="점수">`).join('')}
         <div style="height:10px"></div>
         <button class="btn sm" id="j-save">점수 저장</button>
-      </div>`;
+      </div>`}`;
   },
 
   async spon() {

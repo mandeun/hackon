@@ -1727,7 +1727,15 @@ with sync_playwright() as p:
     tvs = api(f"/api/events/{FE}/tv")["sponsors"]; pks = api(f"/api/events/{FE}/pack")["sponsors"]
     A(any(sp["name"] == "포도가게" for sp in tvs) and any(sp["name"] == "포도가게" and sp["kind"] == "현물" for sp in pks), "확인된 /give 후원이 큰 화면·보고서 «함께한 곳»에 없다")
     A("010-1" not in json.dumps(tvs) + json.dumps(pks), "후원자 연락처가 큰 화면·보고서로 샜다")
-    ok("대역 ①②③④⑤ — 결과물 내기 · 열쇠 찾기 상시 · /give 후원자도 함께한 곳 · 여는 사람 · 첫 화면에서 바로 만들기")
+    # 덤 — 관객 평가로 돌린 대회의 팀 화면엔 점수 입력이 없다 · 지우기 잠금 안내 · 보고서 «온 팀» 기록 없으면 «—»
+    post(f"/api/events/{FE}/vmode", {"on": 1}, FK) if not api(f"/api/events/{FE}")["vmode"] else None
+    visit(f"/app#{FE}"); pg.click("tr[data-team]"); pg.wait_for_timeout(600)
+    A(pg.query_selector("#j-save") is None and "점수 입력이 없습니다" in pg.inner_text("#view"), "관객 평가로 돌렸는데 팀 화면에 점수 입력이 남아 있다")
+    visit(f"/app#{FE}")
+    A(pg.query_selector("#gd-hint") is not None, "지우기가 잠겨 있을 때 이유 한 줄이 없다")
+    visit(f"/e/{FE}/report")
+    A("온 팀(기록 없음)" in pg.inner_text("#view") or "온 팀" in pg.inner_text("#view"), "보고서 온 팀 칸이 없다")
+    ok("대역 ①②③④⑤ + 덤 — 결과물 내기 · 열쇠 찾기 상시 · /give 후원자도 함께한 곳 · 여는 사람 · 첫 화면에서 바로 만들기 · 관객 평가 뒤 점수 칸 없음 · 지우기 안내")
 
     # ── 5. 정원은 서버가 막는가 ─────────────────────────────
     code, small = post("/api/events", {"title": "정원1", "cap": 1, "starts": "2026-11-01"})

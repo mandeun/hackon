@@ -303,8 +303,9 @@ function 상태(e){
   return { k:'진행중', c:'live' };
 }
 function 남은날(e){
-  var d = Math.ceil((new Date(e.starts) - new Date()) / 86400000);
+  /* 날짜 글자끼리 센다. new Date('YYYY-MM-DD') 는 UTC 자정이라 한국 아침엔 하루가 어긋났다(대역 덤 2) */
   if (ymd() > e.ends) return '';
+  var d = Math.round((new Date(e.starts + 'T00:00:00') - new Date(ymd() + 'T00:00:00')) / 86400000);
   return d > 0 ? 'D-' + d : (d === 0 ? 'D-DAY' : '진행 중');
 }
 function 그리기(){
