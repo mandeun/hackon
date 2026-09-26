@@ -397,6 +397,24 @@ with sync_playwright() as p:
     jc2.close()
     ok("심사 눈높이가 심사위원에게는 안 보인다")
 
+    # ── 심사 주소는 열쇠를 품은 채로, 접지 않은 자리에, «열기» 보다 앞에 ──
+    # 대역시험 2: 눈에 띄는 «심사위원 화면 열기» 만 보고 주소창의 /j/<id> 를 복사해 보내면
+    # 받은 사람은 열쇠 칸 앞에서 멈춘다. 보낼 주소가 먼저 보여야 한다.
+    visit(f"/app#{ev}")
+    pg.click('[data-sec="sec-links"]')
+    pg.wait_for_timeout(400)
+    A(pg.is_visible("#jlink"), "«주소» 탭을 열었는데 심사 주소가 접힌 채다 (또 접기를 펴야 한다)")
+    jl = pg.inner_text("#jlink").strip()
+    A(f"/j/{ev}?k={JK}" in jl, f"눈에 보이는 심사 주소에 열쇠가 없다: {jl}")
+    A(pg.is_visible("#b-copyj"), "심사 주소 복사 단추가 안 보인다")
+    # 문서 순서 — 복사할 주소가 여는 단추보다 앞
+    order = pg.evaluate("""() => {
+        const a = document.getElementById('jlink'), b = document.getElementById('b-jopen');
+        return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? 'link-first' : 'open-first';
+    }""")
+    A(order == "link-first", "«심사위원 화면 열기» 가 열쇠 든 심사 주소보다 위에 있다")
+    ok("심사 주소 — 열쇠 든 주소가 먼저, «열기» 는 그 아래")
+
     # 로고를 누르면 처음으로 — 어디서 헤매도 여기로 돌아온다
     visit(f"/app#{ev}")
     pg.click('nav button[data-t="spon"]')

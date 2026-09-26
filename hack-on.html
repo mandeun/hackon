@@ -2543,19 +2543,27 @@ const SCREEN = {
               심사 주소는 심사 직전에 그 자리에서 보여 준다.
               셋을 나란히 늘어놓으면 주최자가 볼 때마다 '지금 뭘 복사하지'를 판단해야 한다.
               QR 은 접힌 채로도 그려져 있다 - 펴면 바로 찍을 수 있다. */''}
+        ${/* 심사 주소는 «열쇠가 든 주소» 가 주인공이다. 전에는 눈에 띄는 것이 «심사위원 화면 열기» 뿐이라,
+              주최자가 주소창의 열쇠 없는 /j/<id> 를 복사해 보냈고 심사위원은 열쇠 칸 앞에서 멈췄다(대역시험 2).
+              그래서 복사할 주소를 위로, 여는 단추를 아래로 놓았다. */''}
+        <div style="margin-top:16px">
+          ${linkBox(`${shareBase()}/j/${e.id}${e.jkey ? '?k=' + e.jkey : ''}`, 'jlink', 'b-copyj',
+            '<b>심사위원용.</b> 열쇠가 들어 있습니다. 이 주소를 그대로 보내세요.')}
+          <div class="meta" style="margin-top:6px"><b>심사위원에게만</b> 보내세요. 순위는 안 보입니다.
+            링크가 흘렀으면 열쇠를 새로 만드세요 — 옛 주소는 바로 죽습니다.
+            <button class="btn sec sm" data-rekey="jkey" style="margin-left:6px">심사 열쇠 새로</button></div>
+        </div>
+
         <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn sec sm" id="b-tv">행사장 큰 화면 띄우기</button>
           <button class="btn sec sm" id="b-jopen">심사위원 화면 열기</button>
         </div>
-        <div class="meta" style="margin-top:6px">당일 아침 이 노트북에서 큰 화면을 열고 F11. <b>심사 링크는 심사위원에게만</b> — 열쇠가 들어 있습니다.</div>
+        <div class="meta" style="margin-top:6px">당일 아침 이 노트북에서 큰 화면을 열고 F11. 심사 화면은 <b>내가 확인할 때</b> 여는 것입니다 — 보낼 주소는 위에 있습니다.</div>
 
         <details style="margin-top:12px"><summary>주소를 직접 복사해야 한다면</summary><div class="in">
           ${linkBox(`${shareBase()}/tv/${e.id}`, 'tvlink', 'b-copyt',
             '<b>행사장 큰 화면용.</b>')}
-          ${linkBox(`${shareBase()}/j/${e.id}${e.jkey ? '?k=' + e.jkey : ''}`, 'jlink', 'b-copyj',
-            '<b>심사위원용.</b> 심사 열쇠가 들어 있습니다. 순위는 안 보입니다.')}
-          <div class="meta" style="margin-top:8px">링크가 흘렀으면 열쇠를 새로 만드세요. 옛 링크는 바로 죽습니다.
-            <button class="btn sec sm" data-rekey="jkey" style="margin-left:6px">심사 열쇠 새로</button>
+          <div class="meta" style="margin-top:8px">관객 투표 링크가 흘렀으면 열쇠를 새로 만드세요.
             <button class="btn sec sm" data-rekey="vkey" style="margin-left:4px">투표 열쇠 새로</button></div>
         </div></details>
       </div></details>
