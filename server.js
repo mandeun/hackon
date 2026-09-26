@@ -5038,6 +5038,49 @@ function selftest() {
      && db.prepare('SELECT COUNT(*) c FROM notices WHERE event=?').get(rsEv.id).c === 1, '팀·제출·자리·신청·소식이 돌아온다');
   let rsDup = 0; try { restoreEvent(db, rsDump, rsOwner); } catch (e) { rsDup = e.code; }
   ok(rsDup === 409, '살아 있는 대회 위에 또 못 살린다');
+  /* ── 지운 대회 휴지통 — 파일 첨부 없이 한 번 누르는 길 (2026-09-26) ── */
+  {
+    const tEv = createEvent(db, { title: '휴지통검사' });
+    const tOwner = db.prepare('SELECT owner FROM events WHERE id=?').get(tEv.id).owner;
+    joinTeam(db, tEv.id, { name: '휴지통팀', email: 'tr@x.test', agree: true });
+    addNeed(db, tEv.id, { kind: 'venue', label: '장소' });
+    const other = createEvent(db, { title: '남의대회' });
+    const otherOwner = db.prepare('SELECT owner FROM events WHERE id=?').get(other.id).owner;
+    const tDel = deleteEvent(db, tEv.id, { confirm: '휴지통검사' });
+    ok(tDel.trash > 0 && db.prepare('SELECT COUNT(*) c FROM event_trash WHERE event=?').get(tEv.id).c === 1,
+       '대회를 지우면 휴지통에 한 줄 남는다');
+    const tRow = db.prepare('SELECT * FROM event_trash WHERE id=?').get(tDel.trash);
+    ok(tRow.owner === tOwner, '휴지통 줄에 주최자(owner)가 따로 저장된다 — 사본에는 열쇠가 없다');
+    const tList = eventTrash(db, tOwner);
+    ok(tList.length === 1 && tList[0].event === tEv.id && tList[0].title === '휴지통검사' && tList[0].teams === 1,
+       '내 휴지통 목록에 제목·지운 날·팀 수가 실린다 (' + JSON.stringify(tList[0]) + ')');
+    ok(!('json' in tList[0]) && !JSON.stringify(tList).includes('okey'), '휴지통 목록에 사본·열쇠는 안 실린다');
+    ok(eventTrash(db, otherOwner).every(x => x.event !== tEv.id), '남의 휴지통은 내 목록에 안 보인다');
+    let tBad = 0; try { untrashEvent(db, tDel.trash, otherOwner); } catch (e) { tBad = e.code; }
+    ok(tBad === 403 && db.prepare('SELECT 1 FROM event_trash WHERE id=?').get(tDel.trash),
+       '남의 주최자 열쇠로는 못 되살리고 휴지통 줄도 그대로다 (403)');
+    let tNone = 0; try { untrashEvent(db, tDel.trash, ''); } catch (e) { tNone = e.code; }
+    ok(tNone === 403, '열쇠 없이도 못 되살린다 (403)');
+    const tBack = untrashEvent(db, tDel.trash, tOwner);
+    ok(tBack.id === tEv.id && tBack.okey.length === 10 && tBack.teams === 1 && tBack.needs === 1,
+       '내 열쇠로 누르면 같은 id 로 살아나고 새 운영자 열쇠가 나온다');
+    ok(!db.prepare('SELECT 1 FROM event_trash WHERE id=?').get(tDel.trash), '되살린 줄은 휴지통에서 빠진다');
+    ok(board(db, tEv.id, true).rows.length === 1 && needsOf(db, tEv.id).length === 1, '팀과 자리가 그대로 돌아온다');
+    /* 살아 있는 대회 위로는 못 살린다 — 휴지통 줄을 손으로 하나 더 만들어 본다 */
+    const again = Number(db.prepare('INSERT INTO event_trash(event,owner,title,json) VALUES(?,?,?,?)')
+      .run(tEv.id, tOwner, '휴지통검사', tRow.json).lastInsertRowid);
+    let tDup = 0; try { untrashEvent(db, again, tOwner); } catch (e) { tDup = e.code; }
+    ok(tDup === 409, '같은 id 의 대회가 살아 있으면 409');
+    /* 30일 — 어제 지운 것은 남고, 31일 전에 지운 것은 purgeOld 가 지운다 */
+    db.prepare("UPDATE event_trash SET at = datetime('now','-31 days') WHERE id=?").run(again);
+    const keep = Number(db.prepare("INSERT INTO event_trash(event,owner,title,json,at) VALUES(?,?,?,?,datetime('now','-1 days'))")
+      .run('zz000001', tOwner, '어제지움', '{}').lastInsertRowid);
+    const pg2 = purgeOld(db, true);
+    ok(pg2.trash === 1 && !db.prepare('SELECT 1 FROM event_trash WHERE id=?').get(again)
+       && db.prepare('SELECT 1 FROM event_trash WHERE id=?').get(keep),
+       '30일 지난 휴지통 줄만 지워지고 어제 것은 남는다 (' + pg2.trash + '줄)');
+    db.prepare('DELETE FROM event_trash WHERE id=?').run(keep);
+  }
   ok(privacyPage().includes('개인정보 처리방침') && privacyPage().includes('6개월') && !privacyPage().includes('undefined'), '개인정보 처리방침 페이지가 있다');
   const dl = ledgerOf(db, dEv0 = createEvent(db, { title: '장부표시' }).id);
   ok(dl.length === 0, '빈 장부');
