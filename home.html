@@ -243,7 +243,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a id="nav-manual" href="#">운영 매뉴얼</a>
     </nav>
     <nav class="tools" aria-label="도구">
-      <a id="nav-login" href="/auth/kakao" style="display:none">카카오 로그인</a>
+      <a id="nav-login" href="#" style="display:none">로그인</a>
       <a id="nav-open" href="/app?make=1" class="btn s">대회 열기</a>
     </nav>
   </div>
@@ -570,11 +570,15 @@ document.getElementById('open-go').addEventListener('click', function(){
     .then(function(){ go.disabled = false; go.textContent = '대회 열기'; });
 });
 
-/* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. */
+/* 로그인이 켜져 있을 때만 단추를 보여 준다. 머리띠는 좁아서 첫 공급자 하나만 —
+   나머지는 /app 안의 카드에서 고른다. 목록은 서버가 준 것만 쓴다(여기 적으면 죽은 단추가 남는다). */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
   var el = document.getElementById('nav-login');
-  if (!a.kakao) return;
+  var ps = a.providers || [];
+  if (!ps.length) return;
   el.style.display = '';
+  el.textContent = ps[0].label + ' 로그인';
+  el.href = '/auth/' + ps[0].id;
   if (a.loggedIn) { el.textContent = (a.name || '내 대회') + ' 보기'; el.href = '/app'; }
 }).catch(function(){});
 </script>

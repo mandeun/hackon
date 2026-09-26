@@ -24,9 +24,9 @@ const ROOT = __dirname;
 const PORT = process.env.PORT || 8788;
 const DBFILE = process.env.DB || path.join(ROOT, 'data', 'hackon.db');
 
-/* 카카오 로그인. 키가 없으면 통째로 꺼지고 지금처럼 열쇠로만 돈다.
-   키를 넣는 순간 켜진다 — 있는 사람은 로그인하고, 없는 사람은 열쇠를 그대로 쓴다.
-   닉네임만 받는다. 이메일을 받으면 비즈 앱 심사가 붙어서 바로 못 쓴다. */
+/* 로그인(카카오·구글·네이버)은 아래 LOGINS 표 한 곳에 있다. 키가 없는 공급자는 통째로
+   꺼지고 열쇠로만 돈다. 키를 넣는 순간 켜진다 — 있는 사람은 로그인하고, 없는 사람은 열쇠를
+   그대로 쓴다. 별명만 받고, 이메일은 와도 «같은 사람인가»를 대조하는 값으로만 쓴다. */
 /* ─────────────────────────────────────────────────────────────
    구하기 표. 늘리거나 고칠 곳은 여기 하나다.
 
@@ -750,8 +750,75 @@ function pickVenues(rows, size, area, day, tips) {
     .slice(0, 40);
 }
 
-const KAKAO = process.env.KAKAO_KEY || '';
-const KAKAO_SECRET = process.env.KAKAO_SECRET || '';
+/* ── 로그인 공급자 ────────────────────────────────────
+   카카오·구글·네이버가 한 표에 들어 있다. OAuth 한 바퀴는 셋이 똑같고
+   주소와 응답 필드만 다르다 — 갈래를 세 벌 복사하면 state 검사도 세 벌이 되고,
+   한 벌을 고칠 때 두 벌이 남는다(감사 09-26 1번이 그 모양이었다).
+   키가 없는 공급자는 이 자리가 통째로 없는 것과 같다.
+
+   trust — 이 이메일을 «같은 사람»의 근거로 써도 되는가. 여기가 느슨하면
+   남의 메일 주소를 자기 계정에 적어 둔 사람이 그 계정을 가져간다.
+     · 구글 — email_verified 를 준다. 그 값이 참일 때만.
+     · 카카오 — is_email_valid && is_email_verified 일 때만(동의 항목이라 아예 안 올 수도 있다).
+     · 네이버 — 확인 여부를 안 준다. 그래서 @naver.com 만 믿는다 —
+       그 주소는 네이버가 가진 우편함이라 아이디가 곧 증명이다. 외부 메일로 바꿔 둔
+       사람은 «모름»으로 두고 자동으로 합치지 않는다. */
+const LOGINS = {
+  kakao: {
+    label: '카카오', brand: '#FEE500', ink: '#191600',
+    id: process.env.KAKAO_KEY || '', secret: process.env.KAKAO_SECRET || '',
+    authorize: 'https://kauth.kakao.com/oauth/authorize',
+    token: 'https://kauth.kakao.com/oauth/token',
+    profile: 'https://kapi.kakao.com/v2/user/me',
+    scope: 'profile_nickname',
+    read: (me) => {
+      const a = me.kakao_account || {};
+      return {
+        uid: String(me.id || ''),
+        nick: (me.properties && me.properties.nickname) || a.profile && a.profile.nickname || '',
+        email: a.email || '',
+        trust: !!(a.email && a.is_email_valid && a.is_email_verified),
+      };
+    },
+  },
+  google: {
+    label: '구글', brand: '#fff', ink: '#1A1E1D',
+    id: process.env.GOOGLE_KEY || '', secret: process.env.GOOGLE_SECRET || '',
+    authorize: 'https://accounts.google.com/o/oauth2/v2/auth',
+    token: 'https://oauth2.googleapis.com/token',
+    profile: 'https://openidconnect.googleapis.com/v1/userinfo',
+    scope: 'openid email profile',
+    read: (me) => ({
+      uid: String(me.sub || ''),
+      nick: me.name || me.given_name || '',
+      email: me.email || '',
+      trust: !!(me.email && me.email_verified),
+    }),
+  },
+  naver: {
+    label: '네이버', brand: '#03C75A', ink: '#fff',
+    id: process.env.NAVER_KEY || '', secret: process.env.NAVER_SECRET || '',
+    authorize: 'https://nid.naver.com/oauth2.0/authorize',
+    token: 'https://nid.naver.com/oauth2.0/token',
+    profile: 'https://openapi.naver.com/v1/nid/me',
+    scope: '',                 /* 제공 항목은 콘솔에서 고른다. 주소에 scope 를 실으면 무시된다 */
+    tokenGet: true,            /* 네이버 토큰 발급은 문서대로 GET + 쿼리. state 도 같이 보낸다 */
+    read: (me) => {
+      const r = me.response || {};
+      return {
+        uid: String(r.id || ''),
+        nick: r.nickname || r.name || '',
+        email: r.email || '',
+        trust: /@naver\.com$/i.test(String(r.email || '')),
+      };
+    },
+  },
+};
+/* 켜진 공급자만. 화면도 이 목록만 보고 단추를 그린다 — 목록이 두 곳에 적히면 어긋난다.
+   위에 적힌 순서가 곧 화면 순서다(첫 단추는 카카오 — 한국에서 가장 많이 누른다). */
+const loginsOn = () => Object.keys(LOGINS).filter((k) => !!LOGINS[k].id);
+/* 화면이 단추를 그릴 목록. 이름을 화면에 적지 않게 여기서 같이 보낸다 */
+const loginMenu = () => loginsOn().map((k) => ({ id: k, label: LOGINS[k].label }));
 const SITE = (process.env.SITE || '').replace(/\/$/, '');
 /* 주소가 여럿이다(hackon.kr · hackon.mandeun.com). 돌아갈 주소를 SITE 하나로
    박으면 hackon.kr 에서 로그인한 사람이 다른 도메인으로 튕긴다. 들어온 주소로
@@ -1211,9 +1278,26 @@ function open(file) {
     CREATE TABLE IF NOT EXISTS owners(
       id      TEXT PRIMARY KEY,
       name    TEXT NOT NULL DEFAULT '',
-      kakao   TEXT NOT NULL DEFAULT '',   -- 카카오 회원번호. 비면 열쇠만 쓰는 사람
+      kakao   TEXT NOT NULL DEFAULT '',   -- 옛 자리. 지금은 logins 표가 갖는다(아래 옮겨심기)
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    /* 로그인 한 줄 = 공급자 하나. 한 사람이 카카오로도 구글로도 들어오면 줄이 둘,
+       주인(owner)은 하나다. owners 에 칸을 하나씩 늘리는 쪽은 공급자가 늘 때마다
+       같은 일을 또 하게 된다.
+       ehash — 이메일을 그대로 두지 않는다. 서버 서명 열쇠로 HMAC 한 값만 남긴다.
+       «같은 사람인가»는 대조만 하면 되니 원문이 필요 없고, 새어도 주소가 안 나간다. */
+    CREATE TABLE IF NOT EXISTS logins(
+      provider TEXT NOT NULL,             -- kakao | google | naver
+      uid      TEXT NOT NULL,             -- 그 공급자가 준 회원번호(앱마다 다르다)
+      owner    TEXT NOT NULL,             -- 주최자 열쇠 = 계정
+      ehash    TEXT NOT NULL DEFAULT '',  -- 믿을 수 있는 이메일의 HMAC. 못 믿으면 빈 값
+      nick     TEXT NOT NULL DEFAULT '',
+      created  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY(provider, uid)
+    );
+    CREATE INDEX IF NOT EXISTS logins_owner ON logins(owner);
+    CREATE INDEX IF NOT EXISTS logins_ehash ON logins(ehash);
     CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
     /* 유입 기록. 어느 화면을 몇 번 봤는지, 어디서 왔는지만 하루 단위로 센다.
@@ -1466,6 +1550,7 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'"); } catch {}
   try { db.exec('ALTER TABLE events ADD COLUMN listed INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE owners ADD COLUMN kakao TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { moveKakaoToLogins(db); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN logo TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN link TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN proof TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -1684,7 +1769,7 @@ function open(file) {
     id INTEGER PRIMARY KEY, src TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);
   try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
-  try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(카카오 닉네임)
+  try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(로그인 별명)
   try { db.exec("ALTER TABLE news ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}    // 제보자 계정 — 하루 5건 상한      // 별점 옆 한 줄
   /* 이 표가 생기기 전에 띄운 공지(events.notice)를 한 번 옮겨 둔다 — 안 그러면 큰 화면엔 공지가 있는데
      공개 페이지 «소식»은 비어 «있는 것을 없음으로» 그린다. 시각은 notice_at 그대로 */
@@ -1766,7 +1851,7 @@ function privacyPage() {
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HACK:ON 개인정보 처리방침</title>
 <style>body{font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;max-width:680px;margin:0 auto;padding:24px 20px;line-height:1.7;color:#191F28}h1{font-size:24px}h2{font-size:17px;margin-top:26px}li{margin:4px 0}</style></head><body>
 <h1>HACK:ON 개인정보 처리방침</h1>
-<p>HACK:ON(hackon.mandeun.com 과 같은 이름의 아이폰 앱)은 로그인 없이 씁니다. 아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
+<p>HACK:ON(hackon.mandeun.com 과 같은 이름의 아이폰 앱)은 로그인을 안 해도 씁니다 — 열쇠 하나가 곧 계정입니다. 로그인은 여러 기기에서 같은 대회를 열기 위한 선택입니다. 아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
 <h2>1. 받는 것과 이유</h2>
 <ul>
 <li><b>참가 신청</b> — 이름(팀 이름), 이메일. 대회 운영·참가 확인·결과 안내·상금 지급. 협찬사 제공은 따로 동의한 사람만.</li>
@@ -1774,17 +1859,19 @@ function privacyPage() {
 <li><b>주제·문제 올리기(받는 사람)</b> — 공개될 이름, 연락처. 결과 안내에만 씁니다.</li>
 <li><b>앱 피드백</b> — 적은 글, 연락처(선택).</li>
 <li><b>푸시 알림</b> — 기기 토큰. 사람 정보가 아니며 «따라가기»를 끄면 지웁니다.</li>
+<li><b>로그인(선택)</b> — 카카오·구글·네이버 중 고른 곳에서 <b>회원번호와 별명</b>. 어느 기기에서든 내 대회를 열기 위해서. 회원번호는 HACK:ON 에만 발급되는 번호라 그 서비스의 아이디가 아니며, 비밀번호는 받지 않습니다.</li>
+<li><b>이메일(그 서비스가 주는 경우)</b> — <b>같은 사람인지 알아보는 데만</b> 씁니다. 구글로 들어온 분이 지난번 카카오로 들어온 분과 같은 사람이면 대회가 흩어지지 않아야 하기 때문입니다. 주소는 저장하지 않고 되돌릴 수 없게 바꾼 값만 둡니다. 이 주소로 메일을 보내지 않고, 광고에 쓰지 않습니다.</li>
 </ul>
 <h2>2. 보는 사람</h2>
 <p>연락처는 그 대회의 운영자만 봅니다. 공개 페이지·큰 화면·결과 보고서에는 연락처가 나가지 않습니다. 협찬사에는 «협찬사 제공 동의»를 한 참가자의 이메일만, 그 대회의 협찬사에만 갑니다.</p>
 <h2>3. 두는 기간</h2>
-<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다).</p>
+<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다). 로그인 정보(회원번호·별명·바꾼 이메일 값)는 계정을 지울 때까지 둡니다 — hi@mandeun.com 으로 말씀하시면 지웁니다.</p>
 <h2>4. 앱이 쓰는 기기 기능</h2>
 <ul><li>카메라 — 심사·투표 링크의 QR 을 찍을 때만. 사진은 저장하지 않습니다.</li><li>알림 — 대회 전날·마감 30분 전·새 소식. 켜고 끄는 것은 본인이 정합니다.</li><li>저장 공간 — 마지막으로 받은 대회 정보를 기기에 두어 인터넷이 끊겨도 진행표를 보여 줍니다.</li></ul>
 <h2>5. 하지 않는 것</h2>
 <p>광고 추적, 제3자 분석 도구, 위치 수집, 연락처 접근, 앱 안 결제를 하지 않습니다.</p>
 <h2>6. 묻는 곳</h2>
-<p>hi@mandeun.com · 개정 2026-09-24</p>
+<p>hi@mandeun.com · 개정 2026-09-26</p>
 </body></html>`;
 }
 
@@ -1878,6 +1965,93 @@ function cookieOf(req, name) {
     if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1));
   }
   return '';
+}
+
+/* ── 같은 사람 알아보기 ────────────────────────────────
+   로그인이 셋이 되면 «구글로 들어온 이 사람이 지난주 카카오로 들어온 그 사람인가»를
+   서버가 판단해야 한다. 아니라고 하면 계정이 둘로 갈리고 지난 대회가 안 보인다.
+   근거는 넷뿐이고, 센 것부터 쓴다.
+     ① 공급자+회원번호가 이미 있다 → 그 계정. 이건 증명이다.
+     ② 로그인한 채로 «다른 로그인도 붙이기»를 눌러 왔다 → 본인이 직접 붙였다.
+     ③ 믿을 수 있는 이메일이 기존 로그인과 같다 → 같은 사람으로 본다.
+     ④ 이 브라우저가 들고 있던 주최자 열쇠 → 로그인 전에 연 대회를 잃지 않게 붙인다.
+   그래도 없으면 새 계정.
+   ③④가 서로 다른 계정을 가리키면 둘을 합친다 — 한쪽을 버리면 방금 만든 대회나
+   지난 대회 한쪽이 사라진다. 사람은 하나다. 단, 열쇠 쪽에 이미 다른 로그인이 붙어 있으면
+   («열쇠만 쓰는 계정»이 아니라 남의 계정일 수 있다) 손대지 않는다. */
+/* 카카오만 있던 시절의 계정을 logins 표로 옮긴다. OR IGNORE 라 몇 번 켜도 같은 결과다.
+   owners.kakao 는 이제 읽지 않지만 지우지 않는다 — 옮겨심기가 틀렸을 때 돌아갈 자리다. */
+const moveKakaoToLogins = (db) => db.exec(
+  "INSERT OR IGNORE INTO logins(provider,uid,owner,nick) "
+  + "SELECT 'kakao', kakao, id, name FROM owners WHERE kakao<>''");
+function emailKey(db, email, trust) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!trust || e.indexOf('@') < 1) return '';
+  return crypto.createHmac('sha256', secretOf(db)).update('email:' + e).digest('hex');
+}
+/* 계정 합치기. owner 를 갖는 표(events·news·logins)의 주인을 옮기고 빈 계정을 지운다.
+   owner 칸이 늘면 여기도 늘어야 한다 — 검사가 그 누락을 잡는다. */
+function mergeOwners(db, from, into) {
+  if (!from || !into || from === into) return into;
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE events SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE event_trash SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE news SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE logins SET owner=? WHERE owner=?').run(into, from);
+    const keep = db.prepare('SELECT name FROM owners WHERE id=?').get(into);
+    const gone = db.prepare('SELECT name FROM owners WHERE id=?').get(from);
+    if (gone && gone.name && (!keep || !keep.name))
+      db.prepare('UPDATE owners SET name=? WHERE id=?').run(gone.name, into);
+    db.prepare('DELETE FROM owners WHERE id=?').run(from);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return into;
+}
+const linksOf = (db, owner) => (owner
+  ? db.prepare('SELECT provider FROM logins WHERE owner=? ORDER BY created, provider').all(owner).map((r) => r.provider)
+  : []);
+/* 로그인 한 번. 위 ①~④를 순서대로 본다. how 는 검사와 화면 문구가 읽는다. */
+function loginAs(db, provider, prof, opt) {
+  const { pre = '', link = '' } = opt || {};
+  const uid = String((prof && prof.uid) || '');
+  if (!uid) throw new HttpError(400, '사용자 정보를 못 받았습니다');
+  const nick = String((prof && prof.nick) || '').slice(0, 40);
+  const eh = emailKey(db, prof && prof.email, prof && prof.trust);
+  const alive = (id) => !!(id && db.prepare('SELECT 1 FROM owners WHERE id=?').get(id));
+  /* 열쇠만 쓰던 계정만 끌어온다. 이미 로그인이 붙은 계정은 남의 것일 수 있다 */
+  const absorb = (from, into) => {
+    if (alive(from) && from !== into && !linksOf(db, from).length) mergeOwners(db, from, into);
+  };
+
+  const had = db.prepare('SELECT owner FROM logins WHERE provider=? AND uid=?').get(provider, uid);
+  if (had && alive(had.owner)) {
+    /* 빈 값으로 덮지 않는다. 이메일 제공은 «동의 항목»이라 다음 로그인에 안 올 수 있는데,
+       그때 지워 버리면 어제 «같은 사람»이던 것이 오늘 남이 된다(검사가 여기서 한 번 터졌다). */
+    if (eh) db.prepare('UPDATE logins SET ehash=? WHERE provider=? AND uid=?').run(eh, provider, uid);
+    if (nick) db.prepare('UPDATE logins SET nick=? WHERE provider=? AND uid=?').run(nick, provider, uid);
+    if (nick) db.prepare("UPDATE owners SET name=COALESCE(NULLIF(name,''),?) WHERE id=?").run(nick, had.owner);
+    absorb(pre, had.owner);
+    return { owner: had.owner, how: 'known' };
+  }
+
+  let owner = '', how = '';
+  if (alive(link)) { owner = link; how = 'linked'; }
+  if (!owner && eh) {
+    const same = db.prepare("SELECT owner FROM logins WHERE ehash=? AND ehash<>'' LIMIT 1").get(eh);
+    if (same && alive(same.owner)) { owner = same.owner; how = 'email'; }
+  }
+  if (owner) absorb(pre, owner);
+  if (!owner && alive(pre)) { owner = pre; how = 'key'; }
+  if (!owner) {
+    owner = crypto.randomBytes(6).toString('hex');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(owner, nick);
+    how = 'new';
+  }
+  db.prepare('INSERT OR REPLACE INTO logins(provider,uid,owner,ehash,nick) VALUES(?,?,?,?,?)')
+    .run(provider, uid, owner, eh, nick);
+  if (nick) db.prepare("UPDATE owners SET name=COALESCE(NULLIF(name,''),?) WHERE id=?").run(nick, owner);
+  return { owner, how };
 }
 
 /* 열쇠를 마구 넣어 보는 것을 막는다. 12자 열쇠라도 무한히 시도하면 언젠가 맞는다. */
@@ -3808,13 +3982,16 @@ function routes(db) {
         }
 
         if (p === '/api/auth' && req.method === 'GET') {
-          const me2 = owner ? db.prepare('SELECT id,name,kakao FROM owners WHERE id=?').get(owner) : null;
+          const me2 = owner ? db.prepare('SELECT id,name FROM owners WHERE id=?').get(owner) : null;
           return json(res, 200, {
-            kakao: !!KAKAO,                 // 카카오 로그인을 쓸 수 있는가
+            /* 켜진 로그인 목록. 화면은 이것만 보고 단추를 그린다 — 화면에 또 적으면 어긋난다 */
+            providers: loginMenu(),
             loggedIn: !!cookieOwner,        // 지금 로그인 상태인가
             owner: me2 ? me2.id : '',
             name: me2 ? me2.name : '',
-            linked: !!(me2 && me2.kakao),   // 카카오에 묶인 계정인가
+            /* 이 계정에 붙은 로그인들. 비면 열쇠만 쓰는 사람.
+               이름도 서버가 붙여 보낸다 — 화면에 «kakao=카카오» 표를 또 두면 어긋난다 */
+            links: me2 ? linksOf(db, me2.id).map((id) => ({ id, label: (LOGINS[id] || {}).label || id })) : [],
           });
         }
         if (p === '/api/visits' && req.method === 'GET') {
@@ -4337,9 +4514,10 @@ function routes(db) {
         /* ── 받는 사람(후원자·의뢰자) ── */
         if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/solutions$/)) && req.method === 'POST')
           return json(res, 201, addSolution(db, m[1], await body(req)));   // 문제 은행 — 대회 없이 «풀었습니다»
-        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, rows: newsList(db, 9, JOBS.includes(q.job) ? q.job : ''), loggedIn: !!cookieOwner });
+        /* providers — 제보 칸의 로그인 단추를 그리는 데 쓴다. 소식 화면이 /api/auth 를 또 부르지 않게 같이 싣는다 */
+        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, rows: newsList(db, 9, JOBS.includes(q.job) ? q.job : ''), loggedIn: !!cookieOwner, providers: loginMenu() });
         if (p === '/api/news/tip' && req.method === 'POST') {
-          if (!cookieOwner) throw new HttpError(401, '제보는 카카오 로그인이 필요합니다');
+          if (!cookieOwner) throw new HttpError(401, '제보는 로그인이 필요합니다');
           const o = db.prepare('SELECT name FROM owners WHERE id=?').get(cookieOwner);
           return json(res, 201, addTip(db, cookieOwner, (o && o.name) || '', await body(req)));
         }
@@ -4467,64 +4645,73 @@ function routes(db) {
 
       /* 공개 링크. /e/<대회id> 는 화면 파일을 그대로 내려보내고, 화면이 주소를 보고
          읽기 전용으로 그린다. 서버에 화면을 하나 더 두지 않는 게 요점이다. */
-      /* ── 카카오 로그인 ────────────────────────────────
-         키가 없으면 이 자리는 통째로 없는 것과 같다. */
-      if (p === '/auth/kakao' && KAKAO) {
-        const back = siteOf(req);
+      /* ── 로그인 (카카오·구글·네이버) ──────────────────
+         갈래 하나로 셋을 받는다. 키가 없는 공급자의 주소는 없는 주소다.
+         «/auth/<이름>» 으로 나가고 «/auth/<이름>/done» 으로 돌아온다. */
+      const goAuth = p.match(/^\/auth\/([a-z]+)$/);
+      if (goAuth && LOGINS[goAuth[1]] && LOGINS[goAuth[1]].id) {
+        const P = LOGINS[goAuth[1]], back = siteOf(req);
         /* state — 이 브라우저가 시작한 로그인인지 돌아올 때 대조한다. 없으면 공격자가 자기 code 링크를 보내
-           피해자 브라우저를 공격자 카카오에 묶는다(레드팀 09-26 1번). 10분짜리 쿠키 */
+           피해자 브라우저를 공격자 계정에 묶는다(레드팀 09-26 1번). 10분짜리 쿠키 */
         const st = crypto.randomBytes(12).toString('hex');
-        const u = 'https://kauth.kakao.com/oauth/authorize'
-          + `?client_id=${encodeURIComponent(KAKAO)}`
-          + `&redirect_uri=${encodeURIComponent(back + '/auth/kakao/done')}`
-          + '&response_type=code&scope=profile_nickname' + `&state=${st}`;
-        res.writeHead(302, { location: u, 'set-cookie': `hackon_st=${st}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600` + (back.startsWith('https') ? '; Secure' : '') });
+        /* ?link=1 — 이미 로그인한 사람이 «다른 로그인도 붙이기»를 누른 것.
+           돌아왔을 때 새 계정을 만들지 않고 지금 계정에 붙인다. 쿠키로 들고 간다 */
+        const wantLink = u.searchParams.get('link') === '1'
+          && !!unsign(db, cookieOf(req, 'hackon_s'));
+        const url = P.authorize
+          + `?client_id=${encodeURIComponent(P.id)}`
+          + `&redirect_uri=${encodeURIComponent(back + '/auth/' + goAuth[1] + '/done')}`
+          + '&response_type=code'
+          + (P.scope ? `&scope=${encodeURIComponent(P.scope)}` : '')
+          + `&state=${st}`;
+        const sec = back.startsWith('https') ? '; Secure' : '';
+        res.writeHead(302, {
+          location: url,
+          'set-cookie': [
+            `hackon_st=${st}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600` + sec,
+            `hackon_lk=${wantLink ? '1' : ''}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=${wantLink ? 600 : 0}` + sec,
+          ],
+        });
         return res.end();
       }
-      if (p === '/auth/kakao/done' && KAKAO) {
-        const back = siteOf(req);
+      const backAuth = p.match(/^\/auth\/([a-z]+)\/done$/);
+      if (backAuth && LOGINS[backAuth[1]] && LOGINS[backAuth[1]].id) {
+        const prov = backAuth[1], P = LOGINS[prov], back = siteOf(req);
         const code = u.searchParams.get('code');
         if (!code) { res.writeHead(302, { location: '/app' }); return res.end(); }
         const stGot = u.searchParams.get('state') || '', stMine = cookieOf(req, 'hackon_st') || '';
         if (!stMine || stGot !== stMine) throw new HttpError(403, '로그인 요청이 이 브라우저에서 시작된 것이 아닙니다. 다시 눌러 주세요');
         const form = new URLSearchParams({
-          grant_type: 'authorization_code', client_id: KAKAO,
-          redirect_uri: back + '/auth/kakao/done', code,
+          grant_type: 'authorization_code', client_id: P.id,
+          redirect_uri: back + '/auth/' + prov + '/done', code, state: stGot,
         });
-        if (KAKAO_SECRET) form.set('client_secret', KAKAO_SECRET);
-        const tk = await (await fetch('https://kauth.kakao.com/oauth/token', {
-          method: 'POST',
-          headers: { 'content-type': 'application/x-www-form-urlencoded;charset=utf-8' },
-          body: form.toString(),
-        })).json();
+        if (P.secret) form.set('client_secret', P.secret);
+        /* 네이버는 문서가 GET + 쿼리다. 카카오·구글은 POST 폼이다 */
+        const tk = await (await (P.tokenGet
+          ? fetch(P.token + '?' + form.toString())
+          : fetch(P.token, {
+              method: 'POST',
+              headers: { 'content-type': 'application/x-www-form-urlencoded;charset=utf-8' },
+              body: form.toString(),
+            }))).json();
         if (!tk.access_token) {
-          /* 카카오가 준 코드(KOE010=비밀키 불일치, KOE303=redirect_uri 불일치, KOE320=코드 만료)를 같이 보여준다. 없으면 장님이다 */
-          console.error('kakao token', back, tk.error_code || tk.error, tk.error_description || '');
-          throw new HttpError(400, '카카오 로그인에 실패했습니다 (' + (tk.error_code || tk.error || '?') + ')');
+          /* 공급자가 준 코드를 같이 보여 준다. 없으면 장님이다
+             (카카오 KOE010=비밀키 불일치·KOE303=주소 불일치·KOE320=코드 만료,
+              구글 redirect_uri_mismatch·invalid_client, 네이버 invalid_request) */
+          console.error(prov + ' token', back, tk.error_code || tk.error, tk.error_description || '');
+          throw new HttpError(400, P.label + ' 로그인에 실패했습니다 (' + (tk.error_code || tk.error || '?') + ')');
         }
-        const me = await (await fetch('https://kapi.kakao.com/v2/user/me', {
+        const me = await (await fetch(P.profile, {
           headers: { authorization: 'Bearer ' + tk.access_token },
         })).json();
-        const kid = String(me.id || '');
-        if (!kid) throw new HttpError(400, '카카오 사용자 정보를 못 받았습니다');
-        const nick = (me.properties && me.properties.nickname) || '';
+        const prof = P.read(me || {});
+        if (!prof.uid) throw new HttpError(400, P.label + ' 사용자 정보를 못 받았습니다');
 
-        /* 이미 이 카카오로 만든 주최자가 있으면 그걸 쓰고,
-           없으면 지금 브라우저가 들고 있던 열쇠를 그 카카오에 붙인다.
-           그래야 로그인 전에 연 대회를 잃지 않는다. */
-        let o = db.prepare('SELECT id FROM owners WHERE kakao=?').get(kid);
-        let oid = o && o.id;
-        if (!oid) {
-          const had = unsign(db, cookieOf(req, 'hackon_pre'));
-          if (had && db.prepare('SELECT 1 FROM owners WHERE id=?').get(had)) {
-            db.prepare('UPDATE owners SET kakao=?, name=COALESCE(NULLIF(name,\'\'),?) WHERE id=?')
-              .run(kid, nick, had);
-            oid = had;
-          } else {
-            oid = crypto.randomBytes(6).toString('hex');
-            db.prepare('INSERT INTO owners(id,name,kakao) VALUES(?,?,?)').run(oid, nick, kid);
-          }
-        }
+        /* 누구인가 — ①공급자 회원번호 ②본인이 누른 붙이기 ③믿을 수 있는 이메일 ④이 브라우저 열쇠 */
+        const { owner: oid } = loginAs(db, prov, prof, {
+          pre: unsign(db, cookieOf(req, 'hackon_pre')),
+          link: cookieOf(req, 'hackon_lk') === '1' ? unsign(db, cookieOf(req, 'hackon_s')) : '',
+        });
         res.writeHead(302, {
           location: '/app',
           'set-cookie': [
@@ -4532,6 +4719,7 @@ function routes(db) {
             + (back.startsWith('https') ? '; Secure' : ''),
             'hackon_pre=; Path=/; Max-Age=0',
             'hackon_st=; Path=/auth; Max-Age=0',
+            'hackon_lk=; Path=/auth; Max-Age=0',
           ],
         });
         return res.end();
@@ -4619,6 +4807,106 @@ function selftest() {
   ok(secretOf(db) === secretOf(db), '서명 열쇠는 다시 만들지 않는다');
   const signed = sign(db, evR.owner);
   ok(unsign(db, signed) === evR.owner, '서명한 쿠키를 되읽는다');
+
+  /* ── 로그인 셋과 «같은 사람» 판정 (2026-09-26) ──────────
+     여기가 틀리면 둘 중 하나다. 계정이 갈려 지난 대회가 사라지거나,
+     남의 계정이 넘어간다. 뒤쪽이 훨씬 나쁘다. */
+  {
+    ok(Object.keys(LOGINS).join(',') === 'kakao,google,naver', '로그인은 셋 — 적힌 순서가 화면 순서다');
+    ok(Object.values(LOGINS).every((P) =>
+         /^https:\/\//.test(P.authorize) && /^https:\/\//.test(P.token) && /^https:\/\//.test(P.profile)
+         && typeof P.read === 'function' && P.label),
+       '공급자마다 주소 셋·읽는 법·한국어 이름이 있다');
+    /* 응답 모양이 셋 다 다르다. 읽는 법을 여기서 고정한다 */
+    const rk = LOGINS.kakao.read({ id: 77, properties: { nickname: '가가' },
+      kakao_account: { email: 'a@b.com', is_email_valid: true, is_email_verified: true } });
+    ok(rk.uid === '77' && rk.nick === '가가' && rk.trust === true, '카카오 응답을 읽는다');
+    ok(LOGINS.kakao.read({ id: 1, kakao_account: { email: 'a@b.com', is_email_valid: true } }).trust === false,
+       '카카오 — 확인 안 된 메일은 안 믿는다');
+    const rg = LOGINS.google.read({ sub: 'g1', name: '구구', email: 'A@B.com', email_verified: true });
+    ok(rg.uid === 'g1' && rg.nick === '구구' && rg.trust === true, '구글 응답을 읽는다');
+    ok(LOGINS.google.read({ sub: 'g2', email: 'x@y.com', email_verified: false }).trust === false,
+       '구글 — email_verified 가 거짓이면 안 믿는다');
+    const rn = LOGINS.naver.read({ response: { id: 'n1', nickname: '네네', email: 'me@naver.com' } });
+    ok(rn.uid === 'n1' && rn.nick === '네네' && rn.trust === true, '네이버 응답을 읽는다');
+    ok(LOGINS.naver.read({ response: { id: 'n2', email: 'me@gmail.com' } }).trust === false,
+       '네이버 — 외부 메일은 «모름». 남의 주소를 적어 둘 수 있다');
+
+    /* 이메일은 원문을 안 남긴다 */
+    const h1 = emailKey(db, 'Same@Example.com', true);
+    ok(h1 && h1 === emailKey(db, ' same@example.com ', true), '대소문자·공백이 달라도 같은 사람이다');
+    ok(/^[0-9a-f]{64}$/.test(h1), '이메일은 되돌릴 수 없는 값으로만 남는다');
+    ok(emailKey(db, 'same@example.com', false) === '' && emailKey(db, '홍길동', true) === '',
+       '못 믿는 메일·메일 아닌 값은 아예 값을 만들지 않는다');
+
+    /* ① 공급자+회원번호는 증명이다 */
+    const a1 = loginAs(db, 'google', { uid: 'u1', nick: '유', email: 'u1@example.com', trust: true });
+    ok(a1.how === 'new' && /^[0-9a-f]{12}$/.test(a1.owner), '처음 들어온 사람은 새 계정');
+    ok(loginAs(db, 'google', { uid: 'u1', nick: '유' }).owner === a1.owner, '같은 구글로 또 오면 같은 계정');
+    /* ③ 믿을 수 있는 이메일이 같으면 딴 공급자로 와도 같은 사람 */
+    const a2 = loginAs(db, 'naver', { uid: 'n-u1', nick: '유', email: 'U1@Example.com', trust: true });
+    ok(a2.owner === a1.owner && a2.how === 'email', '구글 다음 네이버로 와도 같은 사람이면 한 계정');
+    ok(linksOf(db, a1.owner).join(',') === 'google,naver', '두 로그인이 한 계정에 붙는다');
+    /* 못 믿는 메일로는 절대 합치지 않는다 — 계정 탈취가 여기서 난다 */
+    const a3 = loginAs(db, 'kakao', { uid: 'k-x', nick: '남', email: 'u1@example.com', trust: false });
+    ok(a3.owner !== a1.owner && a3.how === 'new', '확인 안 된 메일이 같다고 남의 계정을 주지 않는다');
+    /* ② 로그인한 채로 «다른 로그인도 붙이기» */
+    const a4 = loginAs(db, 'kakao', { uid: 'k-u1', nick: '유' }, { link: a1.owner });
+    ok(a4.owner === a1.owner && a4.how === 'linked', '직접 붙이면 메일 없이도 한 계정');
+    ok(loginAs(db, 'kakao', { uid: 'k-u2' }, { link: 'ffffffffffff' }).how === 'new',
+       '없는 계정에 붙이라고 하면 새 계정 — 없는 주인을 만들지 않는다');
+    /* ④ 로그인 전에 이 브라우저에서 연 대회는 따라온다 */
+    const pv = createEvent(db, { title: '로그인 전 대회', host: 'ㄱ' });
+    const a5 = loginAs(db, 'google', { uid: 'u2' }, { pre: pv.owner });
+    ok(a5.owner === pv.owner && a5.how === 'key', '로그인 전에 연 대회의 열쇠에 로그인이 붙는다');
+    /* ③과 ④가 다른 계정을 가리키면 합친다 — 한쪽을 버리면 대회가 사라진다 */
+    const pv2 = createEvent(db, { title: '합쳐질 대회', host: 'ㄴ' });
+    const a6 = loginAs(db, 'naver', { uid: 'n-u2', nick: '유', email: 'u1@example.com', trust: true }, { pre: pv2.owner });
+    ok(a6.owner === a1.owner && a6.how === 'email', '메일로 알아본 계정이 이긴다');
+    ok(db.prepare('SELECT owner FROM events WHERE id=?').get(pv2.id).owner === a1.owner,
+       '합칠 때 대회가 따라온다 — 방금 만든 대회를 잃지 않는다');
+    ok(!db.prepare('SELECT 1 FROM owners WHERE id=?').get(pv2.owner), '합친 뒤 빈 계정은 남지 않는다');
+    /* 이미 로그인이 붙은 계정은 «열쇠를 들고 왔다»고 삼키지 않는다 */
+    const c1 = loginAs(db, 'google', { uid: 'v1', nick: '다른이', email: 'v1@example.com', trust: true });
+    const c2 = loginAs(db, 'naver', { uid: 'v2', email: 'v1@example.com', trust: true }, { pre: a1.owner });
+    ok(c2.owner === c1.owner, '메일이 가리키는 계정으로 들어간다');
+    ok(db.prepare('SELECT 1 FROM owners WHERE id=?').get(a1.owner), '로그인이 붙은 계정은 남의 로그인에 안 먹힌다');
+    /* 열쇠 자체는 증명이다 — 그 계정으로 들어간다 */
+    const c3 = loginAs(db, 'kakao', { uid: 'k-y' }, { pre: a1.owner });
+    ok(c3.owner === a1.owner && c3.how === 'key', '주최자 열쇠를 든 브라우저는 그 계정이다');
+    let noUid = false;
+    try { loginAs(db, 'google', { uid: '' }, {}); } catch { noUid = true; }
+    ok(noUid, '회원번호 없이 로그인되면 안 된다');
+  }
+  /* owner 칸을 가진 표가 늘면 mergeOwners 도 늘어야 한다. 표를 세어 코드와 대조한다 */
+  {
+    const owned = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
+      .map((t) => t.name)
+      .filter((n) => db.prepare('SELECT COUNT(*) c FROM pragma_table_info(?) WHERE name=\'owner\'').get(n).c);
+    ok(owned.join(',') === 'event_trash,events,logins,news',
+       'owner 를 가진 표는 넷 — 늘었으면 mergeOwners 도 고쳐야 한다: ' + owned.join(','));
+    /* 소식(제보)도 따라간다 */
+    const o1 = crypto.randomBytes(6).toString('hex'), o2 = crypto.randomBytes(6).toString('hex');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o1, '갑');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o2, '');
+    db.prepare("INSERT INTO news(src,key,title,url,owner) VALUES('제보',?,'제보 한 줄','https://x.test',?)").run('k-' + o1, o1);
+    db.prepare("INSERT INTO event_trash(event,owner,title,json) VALUES('gone',?,'지운 대회','{}')").run(o1);
+    mergeOwners(db, o1, o2);
+    ok(db.prepare('SELECT owner FROM news WHERE key=?').get('k-' + o1).owner === o2, '합칠 때 제보도 따라온다');
+    ok(db.prepare("SELECT owner FROM event_trash WHERE event='gone'").get().owner === o2,
+       '합칠 때 휴지통의 지운 대회도 따라온다 — 되살릴 권리를 잃지 않는다');
+    ok(db.prepare('SELECT name FROM owners WHERE id=?').get(o2).name === '갑', '이름이 빈 쪽으로 이름을 옮긴다');
+  }
+  /* 옛 DB 옮겨심기 — owners.kakao 에만 있던 계정이 logins 로 온다. 몇 번 돌려도 같다(E19) */
+  {
+    const old = crypto.randomBytes(6).toString('hex');
+    db.prepare("INSERT INTO owners(id,name,kakao) VALUES(?,'옛사람','9001')").run(old);
+    moveKakaoToLogins(db); moveKakaoToLogins(db);
+    ok(db.prepare("SELECT COUNT(*) c FROM logins WHERE provider='kakao' AND uid='9001'").get().c === 1,
+       '카카오만 있던 계정이 한 줄로 옮겨진다 — 두 번 돌려도 한 줄');
+    ok(loginAs(db, 'kakao', { uid: '9001', nick: '옛사람' }).owner === old,
+       '옮긴 뒤에도 그 카카오로 들어오면 옛 계정이 열린다');
+  }
   {
     /* 팀 휴지통 — 지우면 빠지고, 되살리면 같은 id·같은 열쇠로 돌아온다 */
     const tv = createEvent(db, { title: '휴지통 검사', host: 'ㅎ' });

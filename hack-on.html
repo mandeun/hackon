@@ -299,10 +299,12 @@ nav .i{font-size:17px}
 .bar i{display:block;height:100%;background:var(--navy)}
 .rv{border-left:3px solid var(--rule);padding:2px 0 2px 10px;margin:8px 0}
 .shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
-/* 카카오 노란색은 그쪽 규정 색이라 그대로 쓴다 */
-.kko{background:#fff;color:var(--ink);font-weight:800;border-radius:10px;padding:11px 16px;border:1px solid var(--rule);   /* 첫 화면과 같이 조용한 칩 — 노랑은 화면에서 라임과 싸운다 */
+/* 로그인 단추. 공급자가 셋(카카오·구글·네이버)이라 색을 각각 쓰면 화면이 알록달록해진다 —
+   첫 화면과 같이 조용한 칩 하나로 통일하고, 이름만 바꿔 넣는다 */
+.kko{background:#fff;color:var(--ink);font-weight:800;border-radius:10px;padding:11px 16px;border:1px solid var(--rule);
      display:inline-block;text-decoration:none;font-size:14.5px}
 .kko:hover{filter:brightness(.96)}
+.kko.sm{padding:8px 13px;font-size:13.5px;font-weight:700}   /* 접힌 «다른 것으로» 안의 둘 */
 /* 열쇠는 가려 둔다. 어깨너머로 보이면 그걸로 끝이다 */
 .hid{filter:blur(5px);transition:filter .15s;cursor:pointer;user-select:none}
 .hid.on{filter:none;user-select:text}
@@ -590,7 +592,7 @@ a{color:var(--acc)}   /* 링크도 잉크. 파랑은 안 쓴다(BRAND) */
 #cta .btn{box-shadow:0 8px 24px rgba(11,16,32,.26)}   /* 그림자는 바탕 색을 따라간다 */
 .logo{align-items:center}
 .hrow{min-height:44px}
-body.guest #mode,body.guest #who{display:none}   /* 카카오 로그인도 주최자 것이다 */
+body.guest #mode,body.guest #who{display:none}   /* 로그인도 주최자 것이다 */
 .steps{list-style:none;counter-reset:st;display:flex;flex-direction:column;gap:12px;margin-top:10px}
 .steps li{counter-increment:st;display:flex;gap:12px;align-items:center;font-size:15px;color:var(--ink2)}
 .steps li::before{content:counter(st);flex:none;width:26px;height:26px;border-radius:50%;
@@ -773,9 +775,27 @@ const DEMO = {
 
 let tab = 'home', cur = localStorage.getItem('hackon.event') || '', curTeam = '', curReq = '', curGift = '', GKEY = '';
 let MAKE_REQ = '';   // «이 문제로 내 대회 열기»로 들어온 의뢰 id. 만들 때 첫 주제로 붙는다
-/* 열쇠 없는 모드(2026-09-25): 카카오 로그인이 켜져 있으면 운영자 열쇠를 화면에서 통째로 뺀다 — 로그인이 곧 열쇠.
-   열쇠는 서버·비상용 주소(/app?k=…#대회)에만 남는다. 카카오가 없는 서버(로컬·파일 모드)는 예전 열쇠 화면 그대로. */
-const keyless = () => !!(LIVE && AUTH && AUTH.kakao);
+/* 열쇠 없는 모드(2026-09-25): 로그인이 하나라도 켜져 있으면 운영자 열쇠를 화면에서 통째로 뺀다 — 로그인이 곧 열쇠.
+   열쇠는 서버·비상용 주소(/app?k=…#대회)에만 남는다. 로그인이 없는 서버(로컬·파일 모드)는 예전 열쇠 화면 그대로. */
+const loginOn = () => !!(AUTH && AUTH.providers && AUTH.providers.length);
+const keyless = () => !!(LIVE && loginOn());
+/* 로그인 단추 한 벌. 첫 단추만 크게, 나머지는 «다른 것으로» 아래에 접는다 —
+   셋을 나란히 늘어놓으면 «어느 걸 눌렀더라» 를 매번 판단해야 한다.
+   단추 목록은 화면에 안 적는다. 서버가 켜진 것만 내려보낸 AUTH.providers 를 그대로 그린다 —
+   적어 두면 키를 뺀 공급자가 죽은 단추로 남는다. */
+function loginBtns(tail, style) {
+  const ps = (AUTH && AUTH.providers) || [];
+  if (!ps.length) return '';
+  const end = tail || '로 로그인';
+  const one = (x, cls, st) => `<a class="kko${cls}" href="/auth/${esc(x.id)}"${st ? ` style="${st}"` : ''}>${esc(x.label)}${end}</a>`;
+  return one(ps[0], '', style) + (ps.length > 1
+    ? `<details class="more" style="margin-top:8px"><summary>다른 것으로 로그인</summary><div class="in">
+         ${ps.slice(1).map((x) => one(x, ' sm', 'margin:4px 6px 0 0')).join('')}</div></details>`
+    : '');
+}
+/* 이미 붙은 로그인 말고 더 붙일 수 있는 것들. 한 사람이 둘로 갈리는 것을 본인이 막는 길이다 */
+const loginRest = () => ((AUTH && AUTH.providers) || [])
+  .filter((x) => !((AUTH && AUTH.links) || []).some((l) => l.id === x.id));
 /* 대회 유형 — 이름 짓기가 막히는 사람을 위한 시작점. 누르면 이름·정원·유형·주제 힌트가 채워지고, 다 고칠 수 있다.
    «실질 유효한 대회»의 검증은 따로 안 만든다 — 날짜·여는 사람·주제가 비면 첫 화면 목록에 안 오르는 기존 규칙이 그 검증이다. */
 const TEMPLATES = [
@@ -788,7 +808,7 @@ const TEMPLATES = [
 ];
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
-let AUTH = null;   // 카카오 로그인을 쓸 수 있는지, 지금 로그인했는지
+let AUTH = null;   // 어떤 로그인을 쓸 수 있는지(providers), 지금 로그인했는지, 내 계정에 붙은 것(links)
 const $ = s => document.querySelector(s);
 const view = $('#view');
 /* 구글 캘린더 종일 일정은 끝 날짜가 «다음 날»이다(배타). 하루 대회면 ends+1 */
@@ -1810,8 +1830,8 @@ function paintCta() {
 
 async function render() {
   if (LIVE && !NET) { try { NET = await api('/health'); } catch { NET = { net: [] }; } }
-  if (LIVE && !AUTH) { try { AUTH = await api('/auth'); } catch { AUTH = { kakao: false }; } }
-  /* 로그인돼 있으면 주최자 열쇠가 응답에 실려 온다 — 이 기기에 심는다. 새 폰에서 카카오 로그인만 하면 내 대회가 다 따라온다 */
+  if (LIVE && !AUTH) { try { AUTH = await api('/auth'); } catch { AUTH = { providers: [], links: [] }; } }
+  /* 로그인돼 있으면 주최자 열쇠가 응답에 실려 온다 — 이 기기에 심는다. 새 폰에서 로그인만 하면 내 대회가 다 따라온다 */
   if (LIVE && AUTH && AUTH.loggedIn && AUTH.owner && myKey() !== AUTH.owner) { try { localStorage.setItem('hackon.owner', AUTH.owner); } catch (_) {} }
   document.body.classList.toggle('doc', tab === 'report');
   /* 「서버 연결됨」은 만든 사람 말이지 쓰는 사람 말이 아니다. 연결이 되는 것이 기본값이라
@@ -1821,10 +1841,11 @@ async function render() {
   $('#mode').hidden = LIVE;
   $('#mode').className = 'chip';
   const who = $('#who');
-  if (who) who.innerHTML = (AUTH && AUTH.kakao)
+  /* 머리띠는 좁다 — 여기만 첫 공급자 하나로 두고, 나머지는 본문 카드에서 고른다 */
+  if (who) who.innerHTML = loginOn()
     ? (AUTH.loggedIn
         ? `<a href="/auth/logout" class="chip" style="margin-left:6px">${esc(AUTH.name || '로그인됨')} · 나가기</a>`
-        : `<a href="/auth/kakao" class="chip" style="margin-left:6px;background:#FEE500;color:#191600;font-weight:800">카카오 로그인</a>`)
+        : `<a href="/auth/${esc(AUTH.providers[0].id)}" class="chip" style="margin-left:6px;background:#FEE500;color:#191600;font-weight:800">${esc(AUTH.providers[0].label)} 로그인</a>`)
     : '';
   // 팀 화면은 순위에서 들어가는 곳이라 아래 탭은 '순위'를 켜 둔다
   const navOn = tab === 'team' ? 'board' : tab;
@@ -1863,24 +1884,26 @@ const SCREEN = {
           ${+e.prize ? ' · 상금 ' + won(e.prize) : ''}
           · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
       </div>`).join('')}
-      ${AUTH && AUTH.linked ? `<div class="card" style="padding:11px 13px"><div class="meta">
-        <b>카카오로 로그인돼 있습니다.</b> 다른 기기에서도 그대로 보입니다.
+      ${AUTH && AUTH.links && AUTH.links.length ? `<div class="card" style="padding:11px 13px"><div class="meta">
+        <b>${AUTH.links.map(l => esc(l.label)).join('·')}로 로그인돼 있습니다.</b> 다른 기기에서도 그대로 보입니다.
+        ${loginRest().length ? `<br>다른 것으로도 들어오시려면 지금 붙여 두세요 — 안 붙이면 계정이 둘로 갈립니다.<br>
+          ${loginRest().map(x => `<a class="kko sm" href="/auth/${esc(x.id)}?link=1" style="margin:8px 6px 0 0">${esc(x.label)} 붙이기</a>`).join('')}` : ''}
       </div></div>` : keyless() ? `<div class="card" style="padding:11px 13px"><div class="meta">
-        <b>카카오로 로그인해 두세요.</b> 그래야 다른 폰·컴퓨터에서도 이 대회가 보입니다.<br>
-        <a class="kko" href="/auth/kakao" style="margin-top:8px">카카오로 로그인</a></div></div>` : `<div class="card" style="padding:11px 13px"><div class="meta">
+        <b>로그인해 두세요.</b> 그래야 다른 폰·컴퓨터에서도 이 대회가 보입니다.<br>
+        ${loginBtns('', 'margin-top:8px')}</div></div>` : `<div class="card" style="padding:11px 13px"><div class="meta">
         <b>주최자 열쇠</b> — 다른 기기에서 내 대회를 찾을 때 씁니다. 눌러서 보고 적어 두세요.<br>
         <code class="hid" data-reveal>${esc(myKey())}</code>
-        ${AUTH && AUTH.kakao ? `<br><br><b>잃어버릴 걱정을 없애려면</b> 카카오로 로그인해 두세요.
+        ${loginOn() ? `<br><br><b>잃어버릴 걱정을 없애려면</b> 로그인해 두세요.
           지금 열쇠가 그대로 그 계정에 묶입니다.<br>
-          <a class="kko" href="/auth/kakao" style="margin-top:8px">카카오로 로그인</a>` : ''}
+          ${loginBtns('', 'margin-top:8px')}` : ''}
       </div></div>`}
       <div style="height:22px"></div>` : '';
 
     /* 열쇠를 잃은 운영자의 문. 전에는 열린 대회가 0건일 때만 그려져서, 대회가 하나라도 있으면 돌아올 길이 없었다(대역 ②) */
     const findBox = `${my ? '' : keyless() ? `<div class="card">
         <h3>전에 연 대회를 찾으시나요</h3>
-        <div class="meta">대회를 만들 때 쓴 카카오로 로그인하면 다 나옵니다.</div>
-        <div style="height:8px"></div><a class="kko" href="/auth/kakao">카카오로 로그인</a>
+        <div class="meta">대회를 만들 때 쓴 것으로 로그인하면 다 나옵니다.</div>
+        <div style="height:8px"></div>${loginBtns()}
       </div>` : `<div class="card">
         <h3>전에 연 대회를 찾으시나요</h3>
         <div class="meta">주최자 열쇠를 넣으면 내가 연 대회가 다 나옵니다.</div>
@@ -1921,9 +1944,11 @@ const SCREEN = {
   async make() {
     /* 열쇠 없는 모드: 로그인 없이 만들면 그 대회를 다른 기기에서 못 찾는다 — 만들기 전에 로그인 */
     if (keyless() && !(AUTH && AUTH.loggedIn)) return `<h2>대회를 열려면<br>먼저 로그인</h2>
-      <p class="sub">카카오 한 번이면 됩니다. 그래야 어느 폰·컴퓨터에서든 내 대회가 열립니다. 열쇠나 비밀번호는 없습니다.</p>
-      <div class="card"><a class="kko" href="/auth/kakao" style="display:inline-block">카카오로 로그인하고 열기</a>
-      <div class="meta" style="margin-top:10px">닉네임만 받습니다. 이메일·전화는 안 받습니다.</div></div>`;
+      <p class="sub">한 번이면 됩니다. 그래야 어느 폰·컴퓨터에서든 내 대회가 열립니다. 열쇠나 비밀번호는 없습니다.</p>
+      <div class="card">${loginBtns('로 로그인하고 열기')}
+      <div class="meta" style="margin-top:10px">별명만 받습니다. 전화번호는 안 받습니다.
+        이메일은 그쪽에서 줄 때만, «구글로 들어온 분이 지난번 카카오로 들어온 그분인가»를 알아보는 데만 씁니다 —
+        주소는 저장하지 않습니다(<a href="/privacy" target="_blank" rel="noopener">처리방침</a>).</div></div>`;
     /* 의뢰에서 들어왔으면 그 문제를 제목 초안으로. 목록은 공개(연락처 없음)라 열쇠가 필요 없다 */
     let rq = null;
     if (MAKE_REQ && LIVE) rq = (await api('/requests').catch(() => [])).find(r => r.id === MAKE_REQ) || null;
@@ -2146,11 +2171,11 @@ const SCREEN = {
       <div class="card">
         <h3>운영자로 열기</h3>
         ${keyless() ? (AUTH.loggedIn
-          ? `<div class="meta">지금 로그인한 계정(${esc(AUTH.name || '카카오')})으로 만든 대회가 아닙니다. 만든 계정으로 로그인하세요. 그 계정을 모르면 hi@mandeun.com 으로.</div>
+          ? `<div class="meta">지금 로그인한 계정(${esc(AUTH.name || '지금 계정')})으로 만든 대회가 아닙니다. 만든 계정으로 로그인하세요. 그 계정을 모르면 hi@mandeun.com 으로.</div>
              <div class="meta" style="margin-top:6px">계정을 모르겠으면: <b>대회를 만든 폰·컴퓨터</b>에서 이 화면을 열고 로그인하세요. 그 기기에 남은 열쇠가 그 계정에 붙고, 그 뒤엔 어디서든 열립니다.</div>
              <a class="chip" href="/auth/logout" style="margin-top:8px">다른 계정으로 — 나가기</a>`
-          : `<div class="meta">대회를 만들 때 쓴 카카오로 <b>로그인</b>하면 열립니다. 열쇠는 없습니다.</div>
-             <a class="kko" href="/auth/kakao" style="display:inline-block;margin:8px 0">카카오로 로그인</a>
+          : `<div class="meta">대회를 만들 때 쓴 것으로 <b>로그인</b>하면 열립니다. 열쇠는 없습니다.</div>
+             ${loginBtns('', 'margin:8px 0')}
              <div class="meta">로그인 전에 만든 대회라면 <b>만든 폰·컴퓨터</b>에서 로그인하세요. 거기 남은 열쇠가 계정에 붙습니다.</div>`)
         : `<div class="meta">대회를 만든 기기의 운영 화면 «보낼 주소» 아래에 있습니다.</div>
         <label>열쇠</label><input id="ok-in" placeholder="영문과 숫자 10자">
@@ -2533,7 +2558,7 @@ const SCREEN = {
         ${linkBox(`${shareBase()}/give/${e.id}`, 'givelink', 'b-copyg',
           '<b>협찬사용.</b> 자리별 희망가와 이름이 어디 붙는지가 한 장에 있습니다.')}
         <div class="meta" style="margin-top:10px">
-          <b>다른 기기·폰에서 열려면</b> — 거기서 <b>카카오 로그인</b>하면 내가 연 대회가 그대로 따라옵니다.${keyless() ? '' : `
+          <b>다른 기기·폰에서 열려면</b> — 거기서 <b>로그인</b>하면 내가 연 대회가 그대로 따라옵니다.${keyless() ? '' : `
           <details class="more" style="margin-top:6px"><summary>열쇠를 직접 보기</summary><div class="in">
             <b>운영자 열쇠</b> <span class="pill warn">참가자에게 주지 마세요</span><br>
             <code class="hid" data-reveal>${esc(okeyOf(e.id) || '이 기기에 없음')}</code></div></details>`}

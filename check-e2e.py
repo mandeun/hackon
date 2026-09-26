@@ -720,11 +720,13 @@ with sync_playwright() as p:
         A(r.status == 200, "맞는 열쇠까지 같이 막혔다")
     ok("틀린 열쇠 반복은 막고 맞는 열쇠는 통과 (429)")
 
-    # 카카오 로그인은 키가 없으면 꺼져 있다
+    # 로그인은 키가 없으면 꺼져 있다 — 이 서버엔 키를 안 줬다
     au = api("/api/auth")
-    A(au["kakao"] is False and au["loggedIn"] is False,
-      f"카카오 키가 없는데 켜져 있다: {au}")
-    ok("카카오 로그인 — 키가 없으면 꺼지고 열쇠로만 돈다")
+    A(au["providers"] == [] and au["loggedIn"] is False,
+      f"로그인 키가 없는데 켜져 있다: {au}")
+    A(code_of("/auth/google") == 404 and code_of("/auth/kakao") == 404,
+      "키가 없는 로그인 주소가 열린다")
+    ok("로그인 — 키가 없으면 주소째로 없고 열쇠로만 돈다")
 
     # ── 운영자 열쇠 — 개발자 스물네 명에게 공개 링크를 뿌린다 ──
     # 열쇠 없이 되면 안 되는 것들
@@ -2748,5 +2750,109 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 
+# ── 11. 로그인 셋(카카오·구글·네이버) ─────────────────────
+# 키가 있는 서버는 따로 띄운다. 위 서버는 «키 없음» 을 보는 서버라 둘을 합칠 수 없다.
+# 진짜 로그인은 사람이 그 회사 화면에서 눌러야 끝난다 — 여기서 보는 것은
+# «내보내는 주소가 맞나» 와 «돌아오는 길이 남의 브라우저에 안 열리나» 둘이다.
+LOGIN_BASE = checklib.start(extra_env={
+    "KAKAO_KEY": "test-kakao", "GOOGLE_KEY": "test-google", "NAVER_KEY": "test-naver",
+    "NAVER_SECRET": "test-naver-secret",
+})
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None            # 302 를 따라가지 않는다. 따라가면 진짜 카카오로 나간다
+
+
+_noredir = urllib.request.build_opener(_NoRedirect)
+
+
+def hop(path, cookie=None):
+    """302 를 따라가지 않고 (코드, location, set-cookie 전부) 를 돌려준다."""
+    req = urllib.request.Request(LOGIN_BASE + path)
+    if cookie:
+        req.add_header("cookie", cookie)
+    try:
+        with _noredir.open(req) as r:
+            return r.status, r.headers.get("location", ""), r.headers.get_all("set-cookie") or []
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("location", ""), e.headers.get_all("set-cookie") or []
+
+
+au = json.load(urllib.request.urlopen(LOGIN_BASE + "/api/auth"))
+A([x["id"] for x in au["providers"]] == ["kakao", "google", "naver"],
+  f"켜진 로그인 목록·순서가 다르다: {au['providers']}")
+A([x["label"] for x in au["providers"]] == ["카카오", "구글", "네이버"],
+  f"로그인 이름이 한국어가 아니다: {au['providers']}")
+A(au["links"] == [], f"로그인도 안 했는데 붙은 것이 있다: {au}")
+ok("로그인 셋이 켜진다 — 화면은 서버가 준 목록만 그린다")
+
+# 내보내는 주소. 공급자마다 도메인이 다르고, state 가 반드시 실려야 한다
+for prov, host in [("kakao", "kauth.kakao.com"), ("google", "accounts.google.com"),
+                   ("naver", "nid.naver.com")]:
+    code, loc, cookies = hop(f"/auth/{prov}")
+    A(code == 302, f"/auth/{prov} 가 302 가 아니다: {code}")
+    A(loc.startswith(f"https://{host}/"), f"/auth/{prov} 가 엉뚱한 곳으로 보낸다: {loc}")
+    A("state=" in loc, f"/auth/{prov} 에 state 가 없다 — 남의 code 로 계정이 묶인다: {loc}")
+    A(f"redirect_uri=http%3A%2F%2F127.0.0.1" in loc.replace("%3a", "%3A"),
+      f"/auth/{prov} 의 돌아올 주소가 이 서버가 아니다: {loc}")
+    st = [c for c in cookies if c.startswith("hackon_st=")]
+    A(st and "HttpOnly" in st[0] and "SameSite=Lax" in st[0],
+      f"/auth/{prov} 의 state 쿠키가 없거나 무르다: {cookies}")
+    A(loc.split("state=")[1].split("&")[0] == st[0].split("hackon_st=")[1].split(";")[0],
+      f"/auth/{prov} — 보낸 state 와 쿠키에 심은 state 가 다르다")
+A(hop("/auth/apple")[0] == 404, "없는 공급자 주소가 열린다")   # 키가 있는 서버에서 봐야 뜻이 있다
+ok("내보내는 주소 — 공급자별 도메인·state·돌아올 주소가 맞다 (카카오·구글·네이버)")
+
+# 돌아오는 길. 여기가 무르면 공격자가 자기 code 링크를 보내 피해자 계정을 가져간다
+for prov in ["kakao", "google", "naver"]:
+    code, _, _ = hop(f"/auth/{prov}/done?code=stolen&state=zzz")
+    A(code == 403, f"/auth/{prov}/done — state 쿠키 없이 열렸다: {code}")
+    code, _, _ = hop(f"/auth/{prov}/done?code=stolen&state=zzz", cookie="hackon_st=different")
+    A(code == 403, f"/auth/{prov}/done — state 가 달라도 열렸다: {code}")
+    code, loc, _ = hop(f"/auth/{prov}/done")
+    A(code == 302 and loc == "/app", f"/auth/{prov}/done — code 없이 왔을 때 처리가 다르다: {code} {loc}")
+ok("돌아오는 길 — 이 브라우저가 시작한 로그인이 아니면 403 (셋 다)")
+
+# 처리방침이 실제로 받는 것을 적고 있나. 화면이 «이메일 안 받습니다» 라고 하던 자리다
+pv = urllib.request.urlopen(LOGIN_BASE + "/privacy").read().decode("utf-8")
+for must in ["카카오·구글·네이버", "회원번호", "같은 사람인지", "저장하지 않"]:
+    A(must in pv, f"처리방침에 «{must}» 이 없다 — 받는 것과 적힌 것이 다르다")
+# 적어 두고 안 보이게 하는 것은 안 적은 것이다 — 변이 시험에서 hidden 한 줄이 그대로 통과했다
+A("hidden" not in pv, "처리방침에 감춘 줄이 있다")
+ok("개인정보 처리방침이 로그인·이메일 씀씀이를 적고 있다")
+
+# 화면이 실제로 단추 셋을 그리는가. 서버가 목록을 준다고 화면이 그린다는 뜻은 아니다
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.goto(f"{LOGIN_BASE}/app?make=1", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    # 로그인이 켜진 서버에서는 로그인 없이 대회를 열 수 없다 — 먼저 로그인 문이 나온다
+    first = pg.locator("a.kko").first
+    A(first.is_visible(), "로그인 단추가 화면에 없다")
+    A(first.inner_text().startswith("카카오"), f"첫 단추가 카카오가 아니다: {first.inner_text()}")
+    A(pg.locator("a.kko:visible").count() == 1, "단추 셋을 한꺼번에 늘어놓았다 — 하나만 크게 보여야 한다")
+    fold = pg.locator("details.more summary").filter(has_text="다른 것으로 로그인")
+    A(fold.count() == 1, "«다른 것으로 로그인» 접힌 자리가 없다")
+    fold.click()
+    hrefs = pg.eval_on_selector_all("a.kko", "els => els.map(e => e.getAttribute('href'))")
+    A(sorted(hrefs) == ["/auth/google", "/auth/kakao", "/auth/naver"],
+      f"펴도 셋이 아니다: {hrefs}")
+    A(pg.locator("a.kko:visible").count() == 3, "펴도 단추가 다 안 보인다")
+    A("전화번호는 안 받습니다" in pg.inner_text("body") and "주소는 저장하지 않습니다" in pg.inner_text("body"),
+      "무엇을 받는지 화면이 말하지 않는다")
+    # 첫 화면 머리띠는 좁으니 하나만
+    pg.goto(f"{LOGIN_BASE}/", wait_until="networkidle")
+    pg.wait_for_timeout(800)
+    A(pg.locator("#nav-login").is_visible(), "첫 화면 로그인 단추가 안 보인다")
+    A(pg.get_attribute("#nav-login", "href") == "/auth/kakao",
+      "첫 화면 단추가 첫 공급자로 안 간다: " + str(pg.get_attribute("#nav-login", "href")))
+    A(pg.inner_text("#nav-login") == "카카오 로그인", "첫 화면 단추 이름이 다르다: " + pg.inner_text("#nav-login"))
+    ctx.close()
+    b.close()
+ok("화면이 단추를 그린다 — 하나만 크게, 나머지는 접어서 (첫 화면·만들기 화면)")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

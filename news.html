@@ -67,14 +67,14 @@ input,select{width:100%;min-height:44px;border:1.5px solid var(--hair);border-ra
   <div id="list"><div class="empty">모으는 중…</div></div>
   <div class="card" id="tip">
     <h2>제보 — 이 직무에서 이거 써 보니 좋더라</h2>
-    <div class="m">도구·깃허브·기사·내 결과물 무엇이든. 제목과 주소면 됩니다. 카카오 로그인한 사람만, 하루 다섯 건.</div>
+    <div class="m">도구·깃허브·기사·내 결과물 무엇이든. 제목과 주소면 됩니다. 로그인한 사람만, 하루 다섯 건.</div>
     <div id="tip-in" hidden>
       <div class="row"><div><label>직무</label><select id="t-job"></select></div><div><label>제목</label><input id="t-title" placeholder="예: 인스타 릴스 자막을 3분에 뽑는 도구"></div></div>
       <label>주소</label><input id="t-url" placeholder="https://...">
       <label>한 줄 (선택)</label><input id="t-note" placeholder="어떻게 쓰면 좋은지">
       <div style="margin-top:12px"><button class="btn s" id="t-go">올리기</button> <span class="m" id="t-msg"></span></div>
     </div>
-    <div id="tip-login" hidden style="margin-top:10px"><a class="kko" href="/auth/kakao">카카오로 로그인하고 제보</a></div>
+    <div id="tip-login" hidden style="margin-top:10px"></div>
   </div>
   <p class="foot">우승작은 끝난 대회의 1위 중 «쇼케이스 공개»에 동의한 팀만 실립니다. 기사·모델·논문은 제목과 주소만 가져오며 원문 저작권은 각 출처에 있습니다. 출처: Hugging Face(모델·논문·앱·데이터) · AI타임스 · GeekNews · Hacker News · Product Hunt · 요즘IT · 깃허브 · 제보. 문의 hi@mandeun.com</p>
 </main>
@@ -126,7 +126,16 @@ const HOW = {
   try { if (rows.length) localStorage.setItem('hackon.news.seen', String(Math.max(...rows.map(r => r.id || 0)))); } catch (_) {}
   /* 제보 — 로그인한 사람만 칸이 열린다 */
   const sel = document.getElementById('t-job'); sel.innerHTML = JOBS.map(j => `<option>${esc(j)}</option>`).join('');
-  if (d.loggedIn) document.getElementById('tip-in').hidden = false; else document.getElementById('tip-login').hidden = false;
+  if (d.loggedIn) { document.getElementById('tip-in').hidden = false; }
+  else {
+    /* 단추는 서버가 켜 둔 로그인만 그린다 — 여기에 목록을 적으면 키를 뺀 공급자가 죽은 단추로 남는다 */
+    const box = document.getElementById('tip-login');
+    const ps = (d.providers || []);
+    if (ps.length) {
+      box.innerHTML = ps.map((x, i) => `<a class="kko" href="/auth/${esc(x.id)}" style="margin:0 6px 6px 0${i ? ';background:#fff;color:#191919;border:1px solid #DDE1E6' : ''}">${esc(x.label)}로 로그인하고 제보</a>`).join('');
+      box.hidden = false;
+    }
+  }
   document.getElementById('t-go').onclick = async () => {
     const msg = document.getElementById('t-msg'); msg.textContent = '';
     const body = { job: sel.value, title: document.getElementById('t-title').value.trim(), url: document.getElementById('t-url').value.trim(), note: document.getElementById('t-note').value.trim() };
