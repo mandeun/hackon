@@ -353,6 +353,8 @@ nav .i{font-size:17px}
   --ink:#191F28; --ink2:#4E5968; --ink3:#5C6474; --rule:#E5E8EB;   /* 보조 글 대비 4.5:1 */
   --acc-l:#EDF1FE; --warn:#8A5A00; --warn-l:#FFF6E0; --bad:#C4353A; --bad-l:#FFEEEE;   /* 글자 대비 4.5:1 (axe) */
   --r:20px;
+  /* 간격 눈금. 첫 화면(home.html)과 같은 값 — 숫자를 눈대중으로 안 고른다 */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
 }
 body{background:#E9ECEF;font-size:16px;letter-spacing:-.01em}
 #app{background:var(--pg);box-shadow:0 0 0 1px rgba(0,0,0,.03)}
@@ -531,6 +533,8 @@ a{color:var(--acc)}   /* 링크도 잉크. 파랑은 안 쓴다(BRAND) */
 .facts .v a::after{content:'\203A';font-size:19px;line-height:1;margin-left:4px}
 .facts .k{display:block;font-size:13px;color:var(--ink3);font-weight:600;margin-bottom:1px}
 .facts .v{font-weight:700}
+/* 사실 줄에 붙는 덧말. 칸 안에서 박아 두면(inline style) 잉크 면에서 색을 못 고친다 */
+.facts .hint{color:var(--ink3);font-weight:500}
 .hero .due{background:var(--soft);margin:18px 0 0}
 .hero .due.hot{background:#FFF1EC}
 .quick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
@@ -591,6 +595,75 @@ body.guest #mode,body.guest #who{display:none}   /* 카카오 로그인도 주�
 .steps li{counter-increment:st;display:flex;gap:12px;align-items:center;font-size:15px;color:var(--ink2)}
 .steps li::before{content:counter(st);flex:none;width:26px;height:26px;border-radius:50%;
   background:var(--acc-l);color:var(--acc);font-weight:800;font-size:13px;display:grid;place-items:center}
+
+/* ══ 손님 화면(공개 페이지) 겉모양 — 첫 화면(home.html) 과 같은 결 ══════════════
+   같은 서비스인데 첫 화면과 대회 페이지가 다른 앱처럼 보였다. 눈금(--s1~--s6)·
+   모서리(22px)·주 단추(라임 위 잉크)·흐린 글자를 첫 화면 값으로 맞춘다.
+   운영 화면(로그인 쪽)과 행사장 큰 화면(body.tv)은 건드리지 않는다.
+   소스 순서로 앞의 규칙을 덮는다 — 아래 규칙은 이 파일 맨 끝에 있어야 한다. */
+body.guest:not(.tv){--ink3:#646E7C;background:#EEF1F4}   /* 첫 화면 --mute 와 같은 회색(흰 바탕 5.2:1) */
+body.guest:not(.tv) #app{max-width:720px;background:#EEF1F4;box-shadow:none}
+/* 손님에게는 단 나누기를 안 쓴다 — 내용 길이가 제각각이라 왼쪽 단에 구멍이 크게 남았다 */
+body.guest:not(.tv) main{columns:auto!important;padding:var(--s2) var(--s5) var(--s6)}
+body.guest:not(.tv) #b-wide{display:none!important}   /* PC/폰 전환은 운영자 것이다 */
+
+/* 머리글 — 첫 화면 .top 과 같이. 워드마크 하나, 오른쪽에 «대회 열기» 잉크 필 */
+body.guest:not(.tv) header{background:rgba(238,241,244,.88);padding:8px 20px}
+body.guest:not(.tv) .hrow{min-height:60px;padding-bottom:0}
+body.guest:not(.tv) #g-open{display:inline-flex;align-items:center;margin-left:auto;
+  min-height:42px;padding:10px 16px;border-radius:11px;background:var(--acc);color:#fff;
+  font:700 14px var(--kr);text-decoration:none;white-space:nowrap;transition:background-color .1s}
+body.guest:not(.tv) #g-open:hover{background:#1C2438}   /* 잉크를 한 칸 밝힌 것. 흰 글자 15.4:1 */
+#g-open{display:none}
+
+/* 카드 — 첫 화면 절(section)과 같은 면. 22px 모서리, 24px 안쪽 */
+body.guest:not(.tv) .card{border-radius:22px;padding:var(--s5);margin-bottom:var(--s3)}
+body.guest:not(.tv) .card .card,
+body.guest:not(.tv) details .card{border-radius:14px;padding:var(--s4)}
+body.guest:not(.tv) .sub{font-size:16px;line-height:1.65}
+body.guest:not(.tv) .btn{border-radius:14px}
+body.guest:not(.tv) .btn.sm{border-radius:11px}
+body.guest:not(.tv) .btn.sec{background:var(--soft);color:var(--ink)}
+body.guest:not(.tv) .btn.sec:hover{background:#E1E5EA}
+body.guest:not(.tv) input,body.guest:not(.tv) select,body.guest:not(.tv) textarea{border-radius:14px}
+@media (max-width:640px){
+  body.guest:not(.tv) main{padding:var(--s1) var(--s3) var(--s6)}
+  body.guest:not(.tv) .card{border-radius:18px;padding:var(--s5) var(--s4)}
+  body.guest:not(.tv) header{padding:8px 16px}
+}
+
+/* 대회 표제 — 첫 화면 표제와 같은 결. 잉크 면, 라임 한 점, 큰 제목.
+   흰 카드 하나로 두면 «어느 대회에 왔는지» 가 목록의 한 줄처럼 읽혔다.
+   손님 표제 가운데 공개 대회 페이지(.hero.pub) 하나만 이렇게 된다. */
+body.guest:not(.tv) .hero.pub{background:var(--acc);color:#fff;border-radius:22px;
+  padding:var(--s5);margin:var(--s2) 0 var(--s3);position:relative;overflow:hidden}
+/* 종이 결. 완전히 평평한 면은 화면이 아니라 렌더처럼 보인다 (첫 화면과 같은 무늬) */
+body.guest:not(.tv) .hero.pub::after{content:'';position:absolute;inset:0;pointer-events:none;
+  opacity:.055;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E")}
+body.guest:not(.tv) .hero.pub > *{position:relative;z-index:1}
+body.guest:not(.tv) .hero.pub h2{color:#fff;font-size:clamp(26px,6.6vw,34px);font-weight:850;
+  letter-spacing:-.045em;line-height:1.14;margin:var(--s3) 0 var(--s5)}
+body.guest:not(.tv) .hero.pub .top{color:#C5CCDC}
+body.guest:not(.tv) .hero.pub .facts li{color:#E6EAF2}
+body.guest:not(.tv) .hero.pub .facts .k{color:#AEB8CC}
+body.guest:not(.tv) .hero.pub .facts .v{color:#fff}
+body.guest:not(.tv) .hero.pub .facts .hint{color:#AEB8CC}
+body.guest:not(.tv) .hero.pub .facts .ic{background:rgba(255,255,255,.09)}
+body.guest:not(.tv) .hero.pub .facts li:not(:has(a)) .ic{background:none}
+body.guest:not(.tv) .hero.pub .facts li:has(a) .ic{background:rgba(200,245,59,.16)}
+body.guest:not(.tv) .hero.pub a{color:var(--on)}   /* 라임 위 잉크의 반대. 잉크 면에서 링크는 라임이다 */
+body.guest:not(.tv) .hero.pub .due{background:rgba(255,255,255,.09);color:#fff}
+body.guest:not(.tv) .hero.pub .due.hot,
+body.guest:not(.tv) .hero.pub .due.over{background:rgba(214,69,61,.28);color:#FFD9D3}
+body.guest:not(.tv) .hero.pub .meta{color:#C5CCDC}
+body.guest:not(.tv) .hero.pub .meta b{color:#fff}
+body.guest:not(.tv) .hero.pub .gsteps{color:#AEB8CC}
+body.guest:not(.tv) .hero.pub .gsteps .on{color:var(--on)}
+body.guest:not(.tv) .hero.pub .gsteps .sep{color:#8F99AE}
+/* 바닥 단추가 앉는 바탕도 같은 회색이라야 그림자가 뜨지 않는다 */
+body.guest:not(.tv) #cta{background:linear-gradient(rgba(238,241,244,0),#EEF1F4 30%)}
+
 body.tv #cta{display:none}
 @media print{#cta{display:none!important}}
 </style>
@@ -611,6 +684,8 @@ body.tv #cta{display:none}
       <span class="chip" id="mode">데모</span>
       <button class="chip" id="b-wide" style="display:none;cursor:pointer"></button>
       <span id="who"></span>
+      <!-- 손님 머리글의 오른쪽 자리. 첫 화면 .top 과 같은 모양이다. 운영 화면·큰 화면에는 안 나온다 -->
+      <a id="g-open" href="/app?make=1">대회 열기</a>
     </div>
   </header>
   <main id="view"></main>
@@ -2523,16 +2598,16 @@ const SCREEN = {
     /* «줄 수 있는 것» 은 이 대회로 정해져 있다. 다른 대회에서 오던 단계는 버린다. */
     if (G.event !== cur) giveReset(false);
     G.event = cur; G.fixed = true; G.events = [e];
-    return `<section class="hero">
+    return `<section class="hero pub">
         <div class="top">${badge(e)}<span>${esc(e.host)} 주최</span></div>
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
           <li><span class="ic" aria-hidden="true">📅</span><span><span class="k">언제</span><span class="v">${esc(whenText(e))}</span></span></li>
           ${e.topic ? `<li><span class="ic" aria-hidden="true">💡</span><span><span class="k">주제</span><span class="v">${esc(e.topic)}</span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
-            e.cap ? ` <span style="color:var(--ink3);font-weight:500">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
+            e.cap ? ` <span class="hint">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
           ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
-          <li><span class="ic" aria-hidden="true">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span style="color:var(--ink3);font-weight:500">· 카톡 방에 한 번</span></span></span></li>
+          <li><span class="ic" aria-hidden="true">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span class="hint">· 카톡 방에 한 번</span></span></span></li>
           <li><span class="ic" aria-hidden="true">🗓️</span><span><span class="k">내 달력에</span><span class="v"><a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 캘린더에 넣기</a></span></span></li>
           ${e.chat ? `<li><span class="ic" aria-hidden="true">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
           ${e.safety ? `<li><span class="ic" aria-hidden="true">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}

@@ -116,12 +116,14 @@ with sync_playwright() as p:
     htxt = pg.inner_text("body")
     for must in ["대회 찾기", "열린 대회", "대회 열기", "협찬"]:
         A(must in htxt, f"첫 화면에 '{must}' 가 없다")
-    for sel, href in (("#hero-open", "/app?make=1"), ("#hero-go", "#list")):
+    for sel in ("#hero-open", "#hero-go"):
         box = pg.locator(sel).bounding_box()
         A(box is not None and box["y"] + box["height"] <= 844,
           f"{sel} 가 폰 첫 화면 접힘 아래에 있다: {box}")
-        A(pg.get_attribute(sel, "href") == href, f"{sel} 가 {href} 로 안 간다")
-    A(pg.get_attribute("#nav-open", "href").startswith("/app"), "대회 열기가 앱으로 안 간다")
+    A(pg.get_attribute("#hero-go", "href") == "#list", "«참가할 대회 보기» 가 #list 로 안 간다")
+    # 자바스크립트가 죽어도 되게 href 는 남겨 둔다 — 누르는 길은 아래 시트다
+    A(pg.get_attribute("#hero-open", "href") == "/app?make=1", "«대회 열기» 의 손 떨어진 길(href)이 없다")
+    A(pg.get_attribute("#nav-open", "href").startswith("/app"), "머리글 «대회 열기» 의 손 떨어진 길(href)이 없다")
     # 검색·필터·정렬은 있되, 대회가 셋 이하면 숨긴다 — 판단을 늘리지 않는다
     A(pg.query_selector("#q") is not None, "검색 칸이 없다")
     A(len(pg.query_selector_all("[data-filter]")) == 4, "필터가 4개가 아니다")
@@ -132,6 +134,31 @@ with sync_playwright() as p:
     # 설명 절이 다시 늘어나면 여기서 빨갛다. 남긴 절: 열린 대회 · 우수작 · 줄 수 있는 것
     nsec = pg.evaluate("document.querySelectorAll('main > section').length")
     A(nsec <= 3, f"첫 화면 절이 {nsec}개다. 셋을 넘기면 다시 주저리주저리다")
+
+    # ── 0-2. 첫 화면에서 바로 연다 — /app 으로 안 넘어간다 ──
+    # 누르면 이름 한 칸짜리 시트가 그 자리에서 열리고, 만들면 열쇠가 운영 화면과 같은 이름으로 심긴다.
+    pg.click("#hero-open")
+    pg.wait_for_selector("#open-sheet:not([hidden])", timeout=3000)
+    A(pg.is_visible("#open-title"), "«대회 열기» 를 눌렀는데 이름 칸이 안 나온다")
+    A(pg.url.rstrip("/") == BASE.rstrip("/"), f"첫 화면을 떠났다: {pg.url}")
+    pg.fill("#open-title", "첫 화면에서 연 대회")
+    pg.click("#open-go")
+    pg.wait_for_selector("#open-2:not([hidden])", timeout=6000)
+    HE = pg.evaluate("localStorage.getItem('hackon.event')")
+    HK = pg.evaluate("localStorage.getItem('hackon.okey.' + localStorage.getItem('hackon.event'))")
+    A(HE and len(HE) == 8 and HK and len(HK) == 10, f"첫 화면에서 연 대회의 운영 열쇠가 없다: {HE} / {HK}")
+    A(len(pg.evaluate("localStorage.getItem('hackon.owner')") or "") == 12, "주최자 열쇠가 안 심겼다")
+    A(len(pg.evaluate("localStorage.getItem('hackon.jkey.' + localStorage.getItem('hackon.event'))") or "") == 10, "심사 열쇠가 안 심겼다")
+    A(len(pg.evaluate("localStorage.getItem('hackon.vkey.' + localStorage.getItem('hackon.event'))") or "") == 10, "관객 평가 열쇠가 안 심겼다")
+    A(pg.get_attribute("#open-admin", "href") == "/app#" + HE,
+      f"«운영 화면으로» 가 /app#{HE} 로 안 간다: {pg.get_attribute('#open-admin', 'href')}")
+    A("/e/" + HE in pg.inner_text("#open-link"), f"공개 링크가 안 나온다: {pg.inner_text('#open-link')}")
+    A("열쇠" in pg.inner_text("#open-2"), "열쇠가 이 브라우저에만 있다는 안내가 없다")
+    A(api(f"/api/events/{HE}")["title"] == "첫 화면에서 연 대회", "화면이 보낸 이름이 안 들어갔다")
+    ok(f"첫 화면 시트로 대회 개설 — {HE} · 열쇠 넷이 운영 화면과 같은 자리에")
+    # 치운다. 뒤 단계는 «빈 서버» 에서 시작한다
+    A(post(f"/api/events/{HE}", {}, HK, method="DELETE")[0] == 200, "연습으로 연 대회가 안 지워진다")
+    pg.evaluate("localStorage.clear()")
     pg.set_viewport_size({"width": 460, "height": 900})
     ok("첫 화면 — 폰 폭에서 단추 둘이 접힘 위 · 열린 대회 · 줄 수 있는 것 입구 · 절 3개 이하")
 
