@@ -1,0 +1,28 @@
+name: 검사
+on:
+  push: { branches: [master, main] }
+  pull_request:
+jobs:
+  unit:
+    name: 단위 검사 (node server.js --test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node server.js --test
+  e2e:
+    name: 완주 검사 (Playwright + axe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install playwright axe-playwright-python && python -m playwright install --with-deps chromium
+      - run: python check-e2e.py
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: e2e-shots, path: "shots/**", if-no-files-found: ignore }
