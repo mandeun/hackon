@@ -3658,6 +3658,51 @@ function needsOf(db, event) {
     }));
 }
 
+/* 대회를 가로질러 «아직 비어 있는 자리» 를 모은다.
+   지금까지 자리는 대회 안에만 있었다 — 대회를 이미 아는 사람만 «맡기» 를 누를 수 있었다.
+   기여형 설계 §2-1(빈자리 판)이 말하는 것은 그 반대다: 무엇을 줄 수 있는지만 아는 사람이
+   자기 것으로 대회를 찾아 들어온다. 그래서 세로(대회별)를 가로(자리별)로 뒤집는다.
+
+   공개 길이다 — 신청자 이름·연락처는 한 줄도 싣지 않는다. 남은 수만 센다. */
+function openings(db, kind) {
+  const today = ymd();
+  /* 남은 날. 하루를 밀리초로 나누지 않고 날짜 문자열끼리 뺀다 — 시간대 때문에 하루가 밀린다 */
+  const dleftOf = (d) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))) return null;
+    const a = new Date(today + 'T00:00:00'), b = new Date(d + 'T00:00:00');
+    return Math.round((b - a) / 86400000);
+  };
+  const rows = db.prepare(`
+    SELECT n.id, n.event, n.kind, n.label, n.qty, n.note, n.price,
+           e.title, e.starts, e.ends, e.host
+    FROM needs n JOIN events e ON e.id = n.event
+    WHERE e.listed = 1 AND e.ends >= ?
+    ORDER BY e.starts, n.id`).all(today);
+  const filled = new Map();
+  for (const r of db.prepare(
+    "SELECT need, COUNT(*) c FROM pledges WHERE status IN ('ok','done') GROUP BY need").all())
+    filled.set(r.need, r.c);
+
+  const out = [];
+  for (const n of rows) {
+    if (kind && n.kind !== kind) continue;
+    const left = Math.max(0, (+n.qty || 1) - (filled.get(n.id) || 0));
+    if (left <= 0) continue;                 // 다 찬 자리는 «비어 있는 자리» 가 아니다
+    out.push({
+      need: n.id, event: n.event, kind: n.kind,
+      label: plain(n.label, 60), note: plain(n.note, 80),
+      left, price: +n.price || 0,
+      title: n.title, starts: n.starts, ends: n.ends, host: n.host,
+      dleft: dleftOf(n.starts),
+    });
+  }
+  /* 급한 것 먼저 — 날짜가 가까운 자리부터. 같은 날이면 남은 수가 적은 것부터(거의 다 찬 자리). */
+  /* 급한 것 먼저 — 날짜가 가까운 자리부터. 날짜를 모르는 것(dleft null)은 뒤로 민다.
+     같은 날이면 남은 수가 적은 것부터: 거의 다 찬 자리는 한 사람이면 완성된다. */
+  out.sort((a, b) => ((a.dleft ?? 9999) - (b.dleft ?? 9999)) || (a.left - b.left));
+  return { kinds: OFFER_KIND_LABEL, rows: out.slice(0, 60), total: out.length };
+}
+
 /* 첫 화면 '지난 대회 우수작'. 운영자가 별표한 팀만. 목록에 올린 대회에서, 링크는 마감 뒤에만.
    메일·연락처 같은 개인정보는 절대 안 싣는다 — 팀 이름·대회 제목·설명·제출 링크뿐. */
 function showcase(db) {
@@ -4769,6 +4814,11 @@ function routes(db) {
 
         if (p === '/api/showcase' && req.method === 'GET')
           return json(res, 200, showcase(db));
+        /* 공개 — 대회를 안 고르고도 «지금 비어 있는 자리» 를 본다. 연락처는 안 싣는다 */
+        if (p === '/api/openings' && req.method === 'GET') {
+          const k = String(u.searchParams.get('kind') || '');
+          return json(res, 200, openings(db, NEED_KINDS.includes(k) ? k : ''));
+        }
         if (p === '/api/health') return json(res, 200, {
           ok: true, events: db.prepare('SELECT COUNT(*) c FROM events').get().c,
           teams: db.prepare('SELECT COUNT(*) c FROM teams').get().c,
@@ -5104,6 +5154,31 @@ async function selftest() {
     ok(!doneDue(db).some(x => x.ref === rqd.id), '한 번 보낸 의뢰엔 다시 안 간다');
     /* 크레딧 종류 */
     ok(NEED_KINDS.includes('credit') && OFFER_KIND_LABEL.credit === '크레딧', '자리 종류에 크레딧이 있다');
+    /* 비어 있는 자리 — 대회를 가로지른다. 기여형 설계 §2-1(빈자리 판).
+       세 가지를 본다: 다 찬 자리는 빠지는가 · 안 올린 대회는 안 보이는가 · 연락처가 새지 않는가. */
+    {
+      const eo1 = createEvent(db, { title: '자리검사 올림', starts: '2099-03-01', ends: '2099-03-01' });
+      const eo2 = createEvent(db, { title: '자리검사 초안', starts: '2099-03-02', ends: '2099-03-02' });
+      db.prepare('UPDATE events SET listed=1 WHERE id=?').run(eo1.id);   // eo2 는 초안으로 둔다
+      const nOpen = addNeed(db, eo1.id, { kind: 'judge', label: '심사위원', qty: 2 });
+      const nFull = addNeed(db, eo1.id, { kind: 'snack', label: '간식', qty: 1 });
+      addNeed(db, eo2.id, { kind: 'venue', label: '장소', qty: 1 });
+      addPledge(db, nFull.id, eo1.id, { name: '김간식', contact: 'snack@x.test' });
+      const pf = db.prepare('SELECT id FROM pledges WHERE need=?').get(nFull.id);
+      setPledge(db, pf.id, { status: 'ok' });
+
+      const op = openings(db, '');
+      const mine = op.rows.filter(r => r.event === eo1.id);
+      ok(mine.length === 1 && mine[0].kind === 'judge' && mine[0].left === 2,
+         '비어 있는 자리 — 다 찬 자리는 빠지고 남은 수가 맞는다');
+      ok(!op.rows.some(r => r.event === eo2.id), '목록에 안 올린 대회의 자리는 안 보인다');
+      ok(!JSON.stringify(op).includes('snack@x.test') && !JSON.stringify(op).includes('김간식'),
+         '비어 있는 자리 응답에 신청자 이름·연락처가 샌다');
+      ok(openings(db, 'judge').rows.every(r => r.kind === 'judge'), '종류로 거를 수 있다');
+      ok(op.rows.every(r => r.dleft === null || r.dleft >= 0), '이미 지난 대회의 자리는 안 섞인다');
+      /* 이 검사가 만든 것은 이 검사가 치운다 — 뒤에 오는 «공개한 것만 목록에 든다» 가 같은 db 를 센다 */
+      for (const id of [eo1.id, eo2.id]) db.prepare('DELETE FROM events WHERE id=?').run(id);
+    }
     /* 결과물 «넘길 수 있어요» — 마감 뒤 받는 화면에만 보인다. 만든 것 링크 — 주소 꼴만 남는다 */
     {
       const es = createEvent(db, { title: '판매 검사', starts: '2026-01-10', ends: '2026-01-10', topic: '동아리 회비' });
