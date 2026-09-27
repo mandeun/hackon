@@ -5166,14 +5166,19 @@ async function selftest() {
       addPledge(db, nFull.id, eo1.id, { name: '김간식', contact: 'snack@x.test' });
       const pf = db.prepare('SELECT id FROM pledges WHERE need=?').get(nFull.id);
       setPledge(db, pf.id, { status: 'ok' });
+      /* «아직 확인 전» 신청 하나를 남아 있는 자리에 붙인다 — 이 줄은 응답에 실제로 실리므로
+         연락처 검사가 여기서 진짜로 물린다. 다 찬 자리에만 신청을 두면 검사가 헛돈다. */
+      addPledge(db, nOpen.id, eo1.id, { name: '박심사', contact: 'judge@x.test' });
 
       const op = openings(db, '');
       const mine = op.rows.filter(r => r.event === eo1.id);
       ok(mine.length === 1 && mine[0].kind === 'judge' && mine[0].left === 2,
          '비어 있는 자리 — 다 찬 자리는 빠지고 남은 수가 맞는다');
       ok(!op.rows.some(r => r.event === eo2.id), '목록에 안 올린 대회의 자리는 안 보인다');
-      ok(!JSON.stringify(op).includes('snack@x.test') && !JSON.stringify(op).includes('김간식'),
-         '비어 있는 자리 응답에 신청자 이름·연락처가 샌다');
+      for (const secret of ['snack@x.test', '김간식', 'judge@x.test', '박심사'])
+        ok(!JSON.stringify(op).includes(secret),
+           `비어 있는 자리 응답에 «${secret}» 이 샌다`);
+      ok(mine[0].left === 2, '«확인 전» 신청은 자리를 채우지 않는다 (운영자가 확인해야 찬다)');
       ok(openings(db, 'judge').rows.every(r => r.kind === 'judge'), '종류로 거를 수 있다');
       ok(op.rows.every(r => r.dleft === null || r.dleft >= 0), '이미 지난 대회의 자리는 안 섞인다');
       /* 이 검사가 만든 것은 이 검사가 치운다 — 뒤에 오는 «공개한 것만 목록에 든다» 가 같은 db 를 센다 */
