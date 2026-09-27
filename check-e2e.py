@@ -7,6 +7,7 @@
 
 마지막에 file:// 데모 모드가 안 깨졌는지도 본다 — 캡처와 발표가 그걸로 돈다.
 """
+import base64
 import json
 import re
 import os
@@ -53,6 +54,33 @@ def api(path, key=None, jkey=None):
 
 def codepost(path, payload, key=None, vkey=None):
     return post(path, payload, key=key, vkey=vkey)[0]
+
+
+def delete_of(path, tkey=None, key=None):
+    """DELETE 를 해 보고 상태 코드만 돌려준다."""
+    req = urllib.request.Request(BASE + path, method="DELETE")
+    if tkey:
+        req.add_header("x-tkey", tkey)
+    if key:
+        req.add_header("x-okey", key)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def raw_post(path, data, ctype, tkey=None):
+    """날바이트를 보낸다 (기록증 카드는 base64 로 감싸면 본문 상한에 걸린다). 상태 코드만."""
+    req = urllib.request.Request(BASE + path, data=data, method="POST")
+    req.add_header("content-type", ctype)
+    if tkey:
+        req.add_header("x-tkey", tkey)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
 
 
 def code_of(path, key=None, jkey=None):
@@ -690,6 +718,48 @@ with sync_playwright() as p:
       "전체 비교에서 그 팀으로 못 돌아간다")
     ok("전체 비교 — 앞 팀으로 돌아가 점수를 고칠 수 있다")
     jctx.close()
+
+    # ── 증서 ─────────────────────────────────────────────
+    # 위촉장 명단을 따로 안 적는다. 실제로 심사한 사람이 곧 심사위원이다
+    A(code_of(f"/api/events/{ev}/credits") == 403, "열쇠 없이 증서 명단이 나온다")
+    cr = api(f"/api/events/{ev}/credits", key=OK)
+    A(any(j["name"] == "박심사" for j in cr["judges"]),
+      f"심사한 사람이 위촉장 명단에 없다: {cr['judges']}")
+    A(cr["event"]["title"], "증서에 박을 대회 이름이 없다")
+    A("@" not in json.dumps(cr, ensure_ascii=False), "증서 명단에 연락처가 샜다")
+    ok("증서 — 심사한 사람이 곧 위촉장 명단, 연락처 0건")
+
+    # ── 짝 신청 · 그날의 조건 ─────────────────────────────
+    # 따로 연 대회에서 본다 — 위 대회의 팀 수를 세는 검사가 흔들린다
+    pev = post("/api/events", {"title": "짝e2e", "starts": "2099-03-20", "ends": "2099-03-20"})[1]
+    pok = pev["okey"]
+    pt = post(f"/api/events/{pev['id']}/teams",
+              {"name": "짝주인", "email": "pw1@x.test", "agree": True})[1]
+    A(codepost(f"/api/teams/{pt['id']}/invite", {}) == 403, "팀 열쇠 없이 초대 링크가 나온다")
+    inv = post(f"/api/teams/{pt['id']}/invite", {}, tkey=pt["tkey"])[1]
+    A(inv["code"] != pt["tkey"], "초대 코드가 팀 열쇠와 같다")
+    n0 = len(api(f"/api/events/{pev['id']}/board", key=pok)["rows"])
+    mate = post(f"/api/events/{pev['id']}/teams",
+                {"name": "짝꿍e2e", "email": "pw2@x.test", "agree": True, "pair": inv["code"]})[1]
+    n1 = len(api(f"/api/events/{pev['id']}/board", key=pok)["rows"])
+    A(n1 == n0, f"짝으로 왔는데 팀이 늘었다: {n0} → {n1}")
+    A(mate["tkey"] != pt["tkey"], "짝에게 주인 열쇠가 갔다")
+    A(codepost(f"/api/events/{pev['id']}/teams",
+               {"name": "셋째e2e", "email": "pw3@x.test", "agree": True, "pair": inv["code"]}) in (404, 409),
+      "초대 링크를 두 번 써서 셋이 된다")
+    # 짝이 빠져도 신청은 안 깨진다
+    A(delete_of(f"/api/teams/{pt['id']}/mate", tkey=mate["tkey"]) == 200, "짝이 못 빠진다")
+    A(len(api(f"/api/events/{pev['id']}/board", key=pok)["rows"]) == n0, "짝이 빠지자 신청이 사라졌다")
+    ok("짝 신청 — 둘이 한 팀, 링크를 두 번 써도 셋이 안 된다")
+
+    # 그날의 조건은 끝나기 전에 안 샌다
+    A(post(f"/api/events/{pev['id']}", {"twist": "단추를 하나만 쓴다"}, key=pok, method="PATCH")[0] == 200,
+      "그날의 조건이 저장이 안 된다")
+    A("twist" not in api(f"/api/events/{pev['id']}"), "안 끝난 대회의 조건이 공개 응답에 실린다")
+    cnd = api("/api/conditions")
+    A(cnd["enough"] is False, "조건이 둘도 안 됐는데 아카이브를 낸다")
+    A(json.dumps(cnd, ensure_ascii=False).find("단추를 하나만") < 0, "안 끝난 대회의 조건이 아카이브에 샜다")
+    ok("그날의 조건 — 끝나기 전엔 안 새고, 둘부터 아카이브")
 
     # ── 주최자 열쇠 — 로그인 없이 내 대회를 따라오게 한다 ──
     def api_owner(path):
@@ -2547,6 +2617,57 @@ with sync_playwright() as p:
     A(rp.evaluate("document.querySelector('nav').style.display") == "none",
       "프로필 화면에 아래 탭이 보인다")
     ok("프로필 화면 /p/<열쇠> — 본인만 고칠 수 있다")
+
+    # ── 뱃지·기록증 카드 ──────────────────────────────────
+    # 깃허브 README 에 거는 조각. 이름을 정한 사람만 쓸 수 있다
+    with urllib.request.urlopen(f"{BASE}/badge/{pid}.svg") as r:
+        bsvg, bct = r.read().decode(), r.headers.get("content-type")
+    A("image/svg+xml" in bct, f"뱃지가 SVG 로 안 나간다: {bct}")
+    A(bsvg.startswith("<svg") and "산책러" in bsvg, f"뱃지에 이름이 없다: {bsvg[:120]}")
+    A("@" not in bsvg, "뱃지에 연락처가 샜다")
+    A(code_of(f"/badge/{'0' * 12}.svg") == 404, "없는 사람의 뱃지가 나온다")
+
+    # 카드를 안 만든 사람은 기본 그림이 붙는다 — 빈 카드를 그리지 않는다
+    with urllib.request.urlopen(f"{BASE}/p/{pid}") as r:
+        phtml = r.read().decode()
+    A('property="og:image"' in phtml, "사람 화면에 미리보기 딱지가 없다")
+    A("/og.png" in re.search(r'og:image" content="([^"]+)"', phtml).group(1),
+      "카드도 없는데 기본 그림이 아니다")
+    A("산책러" in re.search(r'og:title" content="([^"]+)"', phtml).group(1),
+      "미리보기 제목에 이름이 없다")
+    A(code_of(f"/og/p/{pid}.png") == 404, "안 만든 카드가 나온다")
+
+    # 카드 올리기 — 본인 확인은 팀 열쇠, 그림은 앞 여덟 자로 가린다
+    PNG1 = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    A(raw_post(f"/api/people/{pid}/card", PNG1, "image/png", tkey="notmykey00") == 403,
+      "남의 열쇠로 카드가 올라간다")
+    A(raw_post(f"/api/people/{pid}/card", b"GIF89a-------", "image/png", tkey=MYTK) == 400,
+      "PNG 가 아닌 것이 카드로 올라간다")
+    A(raw_post(f"/api/people/{pid}/card", PNG1, "image/png", tkey=MYTK) == 200, "본인이 카드를 못 올린다")
+    A(code_of(f"/og/p/{pid}.png") == 200, "올린 카드가 안 나온다")
+    with urllib.request.urlopen(f"{BASE}/p/{pid}") as r:
+        phtml2 = r.read().decode()
+    A(f"/og/p/{pid}.png" in re.search(r'og:image" content="([^"]+)"', phtml2).group(1),
+      "카드를 만들었는데 미리보기 그림이 안 바뀐다")
+    ok("뱃지·기록증 — README 조각과 사람마다 다른 미리보기 그림")
+
+    # 화면에서 — 카드가 실제로 그려지고, 이름 고치기가 팀 열쇠를 들고 나간다
+    rp.goto(f"{BASE}/p/{pid}")
+    rp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    rp.evaluate("([k, v]) => localStorage.setItem('hackon.tkey.' + k, v)", [str(withc[0]["id"]), MYTK])
+    rp.reload()
+    rp.wait_for_selector("#rec-cv", timeout=8000)
+    A(rp.evaluate("document.querySelector('#rec-cv').toDataURL().length > 5000"),
+      "기록증 캔버스가 비어 있다")
+    A(rp.query_selector("#bdg img") is not None, "README 뱃지 그림이 화면에 없다")
+    rp.fill("#pf-c", CONTACT)
+    rp.fill("#pf-h", "산책러2")
+    rp.click("#pf-save")
+    rp.wait_for_timeout(700)
+    A(api(f"/api/people/{pid}")["handle"] == "산책러2",
+      "화면에서 «고치기» 를 눌러도 이름이 안 바뀐다 (팀 열쇠를 안 보낸다)")
+    ok("프로필 화면 — 카드가 그려지고, 고치기가 실제로 먹는다")
 
     # ── 팀 빈자리 ────────────────────────────────────────
     tid2 = api(f"/api/events/{ev}/board", key=OK)["rows"][0]["id"]
