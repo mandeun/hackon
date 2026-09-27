@@ -4354,7 +4354,7 @@ function routes(db) {
              들어온 사람이 "여긴 빈 곳이구나" 하고 나간다. */
         {
           const rows = db.prepare(
-            `SELECT id,title,host,starts,ends,prize,
+            `SELECT id,title,host,starts,ends,prize,chat,
                     (julianday('now') - julianday(created)) AS ageDays,
                     (julianday(ends)  - julianday('now'))   AS dueDays
              FROM events WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all();
