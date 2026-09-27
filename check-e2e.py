@@ -949,7 +949,16 @@ with sync_playwright() as p:
         gp2.wait_for_timeout(350)
         A("미리보기시험 해커톤" in gp2.inner_text("#f-pv"),
           f"이름을 넣었는데 미리보기가 그대로다: {gp2.inner_text('#f-pv')[:120]}")
-        ok("열기 — 이름을 넣으면 올라갈 카드가 그 자리에서 그려진다")
+        # 유형마다 시간이 다르다. «반나절 3시간» 을 눌러도 «6시간» 이 떠 있었다 —
+        # 미리보기가 카드에 같이 찍으면서 드러났다.
+        half = gp2.evaluate("TEMPLATES.findIndex(t => t.hours === '3시간')")
+        A(half >= 0, "세 시간짜리 유형이 사라졌다")
+        gp2.click(f'[data-tpl="{half}"]')
+        gp2.wait_for_timeout(350)
+        A(gp2.input_value("#f-hourshow") == "3시간",
+          f"«반나절» 유형인데 기본 시간이 {gp2.input_value('#f-hourshow')} 이다")
+        A("3시간" in gp2.inner_text("#f-pv"), "미리보기 카드가 유형의 시간을 안 따라간다")
+        ok("열기 — 이름·유형을 바꾸면 올라갈 카드가 그 자리에서 따라 그려진다")
     else:
         ok("열기 — 로그인 먼저 화면 (미리보기는 로그인 뒤)")
     gctx2.close()

@@ -783,12 +783,12 @@ const keyless = () => !!(LIVE && AUTH && AUTH.kakao);
 /* 대회 유형 — 이름 짓기가 막히는 사람을 위한 시작점. 누르면 이름·정원·유형·주제 힌트가 채워지고, 다 고칠 수 있다.
    «실질 유효한 대회»의 검증은 따로 안 만든다 — 날짜·여는 사람·주제가 비면 첫 화면 목록에 안 오르는 기존 규칙이 그 검증이다. */
 const TEMPLATES = [
-  { chip: '동아리 안에서',  title: '우리 동아리 만들기 대회',       cap: 12, kind: '당일',    topic: '동아리 운영에서 번거로운 일 하나', note: '12명 · 하루. 회비·출석·공지 같은 우리 일을 고른다' },
-  { chip: '학교끼리',       title: '우리 학교 대 옆 학교 해커톤',    cap: 40, kind: '당일',    topic: '학교 생활에서 매번 손이 가는 일',  note: '40명 · 하루. 학교별 팀으로 붙는다. 장소는 한쪽 학교' },
-  { chip: '회사·일터',      title: '우리 팀 업무 자동화 해커톤',     cap: 15, kind: '당일',    topic: '내 일에서 매주 반복하는 작업 하나', note: '15명 · 하루. 코딩 경험 없어도 된다 — 만드는 건 AI, 고르는 건 사람' },
-  { chip: '우리 가게',      title: '우리 가게 문제 풀기 대회',       cap: 10, kind: '당일',    topic: '가게에서 사장님이 매일 손으로 하는 일', note: '10명 · 하루. 사장님이 문제를 올리고 결과물을 받는다' },
-  { chip: '반나절 3시간',   title: '점심 뒤 세 시간 만들기',          cap: 10, kind: '당일',    topic: '', note: '10명 · 13~16시. 여섯 시간이 부담이면 이걸로. 발표 없이 주소 제출로 끝' },
-  { chip: '온라인 1주',     title: '일주일 만들기 온라인 대회',      cap: 30, kind: '온라인 1주', topic: '', note: '모이지 않는다. 각자 만들고 마지막 날 발표' },
+  { chip: '동아리 안에서',  title: '우리 동아리 만들기 대회',       cap: 12, hours: '6시간', kind: '당일',    topic: '동아리 운영에서 번거로운 일 하나', note: '12명 · 하루. 회비·출석·공지 같은 우리 일을 고른다' },
+  { chip: '학교끼리',       title: '우리 학교 대 옆 학교 해커톤',    cap: 40, hours: '6시간', kind: '당일',    topic: '학교 생활에서 매번 손이 가는 일',  note: '40명 · 하루. 학교별 팀으로 붙는다. 장소는 한쪽 학교' },
+  { chip: '회사·일터',      title: '우리 팀 업무 자동화 해커톤',     cap: 15, hours: '6시간', kind: '당일',    topic: '내 일에서 매주 반복하는 작업 하나', note: '15명 · 하루. 코딩 경험 없어도 된다 — 만드는 건 AI, 고르는 건 사람' },
+  { chip: '우리 가게',      title: '우리 가게 문제 풀기 대회',       cap: 10, hours: '6시간', kind: '당일',    topic: '가게에서 사장님이 매일 손으로 하는 일', note: '10명 · 하루. 사장님이 문제를 올리고 결과물을 받는다' },
+  { chip: '반나절 3시간',   title: '점심 뒤 세 시간 만들기',          cap: 10, hours: '3시간', kind: '당일',    topic: '', note: '10명 · 13~16시. 여섯 시간이 부담이면 이걸로. 발표 없이 주소 제출로 끝' },
+  { chip: '온라인 1주',     title: '일주일 만들기 온라인 대회',      cap: 30, hours: '7일', kind: '온라인 1주', topic: '', note: '모이지 않는다. 각자 만들고 마지막 날 발표' },
 ];
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
@@ -4233,7 +4233,7 @@ function wire() {
     const ft = $('#f-title'); if (ft && (!ft.value.trim() || ft.dataset.auto === '1')) { ft.value = TPL.title; ft.dataset.auto = '1'; }
     if ($('#f-kind')) $('#f-kind').value = TPL.kind;
     if ($('#f-capshow')) $('#f-capshow').value = TPL.cap + '명';
-    if ($('#f-hourshow')) $('#f-hourshow').value = TPL.kind === '온라인 1주' ? '7일' : '6시간';
+    if ($('#f-hourshow')) $('#f-hourshow').value = TPL.hours || (TPL.kind === '온라인 1주' ? '7일' : '6시간');
     if ($('#f-tplnote')) $('#f-tplnote').textContent = TPL.note + ' — 이름은 고쳐도 됩니다.';
     mkPreview();
   });
