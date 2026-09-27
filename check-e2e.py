@@ -7,6 +7,7 @@
 
 마지막에 file:// 데모 모드가 안 깨졌는지도 본다 — 캡처와 발표가 그걸로 돈다.
 """
+import base64
 import json
 import re
 import os
@@ -53,6 +54,19 @@ def api(path, key=None, jkey=None):
 
 def codepost(path, payload, key=None, vkey=None):
     return post(path, payload, key=key, vkey=vkey)[0]
+
+
+def raw_post(path, data, ctype, tkey=None):
+    """날바이트를 보낸다 (기록증 카드는 base64 로 감싸면 본문 상한에 걸린다). 상태 코드만."""
+    req = urllib.request.Request(BASE + path, data=data, method="POST")
+    req.add_header("content-type", ctype)
+    if tkey:
+        req.add_header("x-tkey", tkey)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
 
 
 def code_of(path, key=None, jkey=None):
@@ -2533,6 +2547,57 @@ with sync_playwright() as p:
     A(rp.evaluate("document.querySelector('nav').style.display") == "none",
       "프로필 화면에 아래 탭이 보인다")
     ok("프로필 화면 /p/<열쇠> — 본인만 고칠 수 있다")
+
+    # ── 뱃지·기록증 카드 ──────────────────────────────────
+    # 깃허브 README 에 거는 조각. 이름을 정한 사람만 쓸 수 있다
+    with urllib.request.urlopen(f"{BASE}/badge/{pid}.svg") as r:
+        bsvg, bct = r.read().decode(), r.headers.get("content-type")
+    A("image/svg+xml" in bct, f"뱃지가 SVG 로 안 나간다: {bct}")
+    A(bsvg.startswith("<svg") and "산책러" in bsvg, f"뱃지에 이름이 없다: {bsvg[:120]}")
+    A("@" not in bsvg, "뱃지에 연락처가 샜다")
+    A(code_of(f"/badge/{'0' * 12}.svg") == 404, "없는 사람의 뱃지가 나온다")
+
+    # 카드를 안 만든 사람은 기본 그림이 붙는다 — 빈 카드를 그리지 않는다
+    with urllib.request.urlopen(f"{BASE}/p/{pid}") as r:
+        phtml = r.read().decode()
+    A('property="og:image"' in phtml, "사람 화면에 미리보기 딱지가 없다")
+    A("/og.png" in re.search(r'og:image" content="([^"]+)"', phtml).group(1),
+      "카드도 없는데 기본 그림이 아니다")
+    A("산책러" in re.search(r'og:title" content="([^"]+)"', phtml).group(1),
+      "미리보기 제목에 이름이 없다")
+    A(code_of(f"/og/p/{pid}.png") == 404, "안 만든 카드가 나온다")
+
+    # 카드 올리기 — 본인 확인은 팀 열쇠, 그림은 앞 여덟 자로 가린다
+    PNG1 = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    A(raw_post(f"/api/people/{pid}/card", PNG1, "image/png", tkey="notmykey00") == 403,
+      "남의 열쇠로 카드가 올라간다")
+    A(raw_post(f"/api/people/{pid}/card", b"GIF89a-------", "image/png", tkey=MYTK) == 400,
+      "PNG 가 아닌 것이 카드로 올라간다")
+    A(raw_post(f"/api/people/{pid}/card", PNG1, "image/png", tkey=MYTK) == 200, "본인이 카드를 못 올린다")
+    A(code_of(f"/og/p/{pid}.png") == 200, "올린 카드가 안 나온다")
+    with urllib.request.urlopen(f"{BASE}/p/{pid}") as r:
+        phtml2 = r.read().decode()
+    A(f"/og/p/{pid}.png" in re.search(r'og:image" content="([^"]+)"', phtml2).group(1),
+      "카드를 만들었는데 미리보기 그림이 안 바뀐다")
+    ok("뱃지·기록증 — README 조각과 사람마다 다른 미리보기 그림")
+
+    # 화면에서 — 카드가 실제로 그려지고, 이름 고치기가 팀 열쇠를 들고 나간다
+    rp.goto(f"{BASE}/p/{pid}")
+    rp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    rp.evaluate("([k, v]) => localStorage.setItem('hackon.tkey.' + k, v)", [str(withc[0]["id"]), MYTK])
+    rp.reload()
+    rp.wait_for_selector("#rec-cv", timeout=8000)
+    A(rp.evaluate("document.querySelector('#rec-cv').toDataURL().length > 5000"),
+      "기록증 캔버스가 비어 있다")
+    A(rp.query_selector("#bdg img") is not None, "README 뱃지 그림이 화면에 없다")
+    rp.fill("#pf-c", CONTACT)
+    rp.fill("#pf-h", "산책러2")
+    rp.click("#pf-save")
+    rp.wait_for_timeout(700)
+    A(api(f"/api/people/{pid}")["handle"] == "산책러2",
+      "화면에서 «고치기» 를 눌러도 이름이 안 바뀐다 (팀 열쇠를 안 보낸다)")
+    ok("프로필 화면 — 카드가 그려지고, 고치기가 실제로 먹는다")
 
     # ── 팀 빈자리 ────────────────────────────────────────
     tid2 = api(f"/api/events/{ev}/board", key=OK)["rows"][0]["id"]
