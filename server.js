@@ -1051,12 +1051,26 @@ const NEWS_KINDS = [['pick', '오늘 꼭 볼 것', '이 몇 개만 보고 닫아
                     ['read', '읽을거리', '흐름만 아는 데 3분'],
                     ['ours', '우리 대회에서 나온 것', '해커온 우승작과 같은 일 하는 사람의 제보']];
 const NEWS_PICK_N = 5, NEWS_PICK_MIN = 4;   /* 4줄도 안 되면 «꼭 볼 것» 을 따로 세우지 않는다 */
+/* 한 출처가 «꼭 볼 것» 을 다 먹지 않게. 2026-09-27 실측: 이 상한이 없으면 다섯 줄이 전부 «깃허브 새 저장소» 였다
+   (별 수가 로그로 눌려도 깃허브만 네 자리를 달고 온다). 다섯 줄이 한 곳이면 «골랐다» 가 아니라 «한 피드를 베꼈다» 다. */
+const NEWS_PICK_PER_SRC = 2;
+/* 묶음 상한도 둔다. 깃허브·허깅페이스는 별·하트 네 자리를 달고 오지만 기사 RSS 에는 숫자가 아예 없다 —
+   그래서 점수만으로 뽑으면 «오늘 꼭 볼 것» 다섯 줄이 전부 도구가 된다(2026-09-27 실측, 읽을거리 0줄).
+   숫자가 없는 쪽을 벌주지 않으려면 묶음별로 자리를 떼어 놓는 수밖에 없다. */
+const NEWS_PICK_PER_KIND = 2;
+/* 한 통(오늘·어제…)에서 «그래서 뭘 하나» 까지 다 붙여 그리는 줄 수. 그 뒤는 제목만 한 줄로 —
+   읽을거리 79줄을 전부 세 줄씩 그리면 묶어 놓고도 결국 벽이다. 위는 두껍게, 꼬리는 얇게. */
+const NEWS_FULL = 10;
+function newsSplit(g) { return [g.slice(0, NEWS_FULL), g.slice(NEWS_FULL)]; }
 const NEWS_KIND_OF = { hackon: 'ours', tip: 'ours', hf: 'tool', space: 'tool', ds: 'tool', gh: 'tool', ph: 'tool', show: 'tool' };
 const newsKind = src => NEWS_KIND_OF[src] || 'read';
-/* 출처 무게 — «읽고 나서 할 일이 생기는 정도» 로 매겼다. 제보·우승작이 가장 높다(우리 사람이 써 본 것).
-   숫자를 고칠 때는 아래 점검(«출처 표와 무게 표가 어긋난다»)이 먼저 빨개진다. */
-const NEWS_W = { tip: 60, hackon: 55, show: 30, gh: 26, ph: 24, geek: 22, space: 22, hf: 20, hn: 20, yozm: 18,
-  ai: 16, ds: 16, aikr: 14, lob: 14, paper: 12, ghblog: 12, yc: 12, smash: 12, devhack: 10, mobi: 10, platum: 10, medhack: 8, devkr: 8 };
+/* 출처 무게 — «읽고 나서 오늘 할 일이 생기는 정도». 보는 사람이 한국에서 일하는 사람이라
+   한국어로 읽히고 바로 손에 잡히는 곳이 높다. 제보·우승작이 가장 높다(우리 사람이 써 본 것).
+   2026-09-27 실측으로 한 번 고쳤다: 논문(paper)이 12 였을 때 ▲수가 붙어 «오늘 꼭 볼 것» 다섯 자리 중
+   둘을 arXiv 초록이 먹고 GeekNews 는 한 줄도 못 들어갔다. 이 화면을 여는 사람이 오늘 할 일은 초록 읽기가 아니다.
+   숫자를 고칠 때는 아래 점검(«출처 표와 무게·할 일 표가 어긋난다»)이 먼저 빨개진다. */
+const NEWS_W = { tip: 60, hackon: 55, geek: 30, show: 28, yozm: 26, gh: 24, ph: 22, space: 22, ai: 20, hf: 18, hn: 18, aikr: 18,
+  ds: 14, lob: 12, mobi: 12, platum: 12, ghblog: 12, smash: 12, devkr: 10, yc: 10, devhack: 10, paper: 8, medhack: 8 };
 /* 출처가 무엇인지에서 나오는 «할 일». 제목에서 더 구체적인 신호가 잡히면 아래 표가 이깁니다. */
 const NEWS_DO = {
   hf: '허깅페이스에서 받아 코랩이나 내 컴퓨터에서 한 번 돌려 본다',
@@ -1161,7 +1175,21 @@ function newsEnrich(rows, now = today()) {
    화면도 같은 수를 써야 하므로 /api/news 가 이 규칙의 숫자를 함께 내려보낸다. */
 function newsPickN(n) { return n < NEWS_PICK_MIN ? 0 : Math.min(NEWS_PICK_N, Math.max(3, Math.ceil(n / 8))); }
 function newsPicks(list) {
-  return list.slice().sort((a, b) => b.score - a.score || b.id - a.id).slice(0, newsPickN(list.length));
+  const want = newsPickN(list.length), sorted = list.slice().sort((a, b) => b.score - a.score || b.id - a.id);
+  const per = {}, kper = {}, out = [], seen = new Set();
+  const take = r => { per[r.src] = (per[r.src] || 0) + 1; kper[r.kind] = (kper[r.kind] || 0) + 1; seen.add(r.id); out.push(r); };
+  for (const r of sorted) {
+    if (out.length >= want) break;
+    if ((per[r.src] || 0) >= NEWS_PICK_PER_SRC || (kper[r.kind] || 0) >= NEWS_PICK_PER_KIND) continue;
+    take(r);
+  }
+  /* 묶음 상한 때문에 자리가 남으면 출처 상한만 지키며 채운다 — 빈 자리를 남기지는 않는다 */
+  for (const r of sorted) {
+    if (out.length >= want) break;
+    if (seen.has(r.id) || (per[r.src] || 0) >= NEWS_PICK_PER_SRC) continue;
+    take(r);
+  }
+  return out;
 }
 /* 직무로 거르는 규칙은 한 줄짜리지만 화면·마크다운·MCP 세 곳이 같이 쓴다 — 여기 한 곳에만 적는다.
    우승작(hackon)은 어느 직무에서나 보인다. */
@@ -1169,7 +1197,10 @@ const newsInJob = (r, job) => !job || r.job === job || r.src === 'hackon';
 /* 화면과 마크다운이 같은 줄을 보게 하는 입구. 합치기는 «전체» 에서 한 번 하고 그 뒤에 직무로 거른다 —
    직무별로 따로 합치면 «전체엔 3곳이라 적혔는데 마케팅 탭에선 1곳» 이 된다. */
 function newsFeed(db, job = '', days = 9) {
-  return newsEnrich(newsList(db, days, '')).filter(r => newsInJob(r, job));
+  /* 통(오늘·어제·이번 주·그전) 차례로, 통 안에서는 점수 높은 것부터. 화면·마크다운이 이 차례를 그대로 쓴다 —
+     들어온 순서대로 두면 통 안의 첫 줄이 «마지막에 긁힌 피드» 가 된다(뜻이 없다). */
+  return newsEnrich(newsList(db, days, '')).filter(r => newsInJob(r, job))
+    .sort((a, b) => NEWS_BUCKETS.indexOf(a.bucket) - NEWS_BUCKETS.indexOf(b.bucket) || b.score - a.score || b.id - a.id);
 }
 /* 직무별 세팅 레시피 — 복붙하면 그대로 돌아가는 명령·설정. 편집자가 고른다(숫자·순위 없음). 제보·대회 결과로 갱신 */
 const SETUP = {
@@ -1209,10 +1240,10 @@ function newsMd(db, job = '') {
   const picks = newsPicks(rows), pickIds = new Set(picks.map(r => r.id));
   const setup = SETUP[job] || SETUP[''];
   /* 화면과 같은 차례로 적는다 — 붙여넣은 사람이 «화면엔 있었는데 여기 없네» 를 겪지 않게 */
-  const line = r => `- [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}`
+  const line = (r, tight) => `- [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}`
     + (r.also.length ? ` +${r.also.map(s2 => NEWS_SRC[s2] || s2).join('·')}` : '')
     + (r.job ? ' · ' + r.job : '') + (r.by ? ' · 제보 ' + r.by : '') + (r.note ? ' · ' + r.note : '')
-    + `\n  - 그래서 뭘 하나: ${r.do}\n`;
+    + (tight || r.bucket === '그전' ? '\n' : `\n  - 그래서 뭘 하나: ${r.do}\n`);
   let out = `# 해커온뉴스${job ? ' · ' + job : ''} — hackon.kr/news (${today()})\n\n` +
     `> **AI 에게 주는 지시.** 이 문서를 받은 AI 는 요약하지 말고 **지금 바로 내 작업 환경을 세팅**한다.\n` +
     `> 1) 내 직무(${job || '아래 목록 중 하나를 물어본다'})에 맞는 «세팅 레시피» 를 아래에서 골라, 설치 명령·설정 파일·첫 작업을 **실제로 실행하거나 복붙 가능한 명령 블록으로** 준다.\n` +
@@ -1234,8 +1265,10 @@ function newsMd(db, job = '') {
     for (const b of NEWS_BUCKETS) {
       const g = mine.filter(r => r.bucket === b);
       if (!g.length) continue;
+      const [full, tail] = newsSplit(g);
       out += `### ${b}\n`;
-      for (const r of g) out += line(r);
+      for (const r of full) out += line(r);
+      if (tail.length) { out += `\n**${b} 나머지 ${tail.length}줄 (제목만)**\n`; for (const r of tail) out += line(r, true); }
     }
     out += '\n';
   }
@@ -4599,7 +4632,7 @@ function routes(db) {
           return json(res, 201, addSolution(db, m[1], await body(req)));   // 문제 은행 — 대회 없이 «풀었습니다»
         /* 줄은 이미 «합쳐지고 점수 매겨지고 종류가 붙은» 채로 나간다 — 화면은 그리기만 한다(server.js 의 newsEnrich).
            kinds·pick 도 함께 내려보낸다. 묶음 이름과 «꼭 볼 것» 개수 규칙이 화면에 또 적히면 둘이 어긋난다. */
-        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, kinds: NEWS_KINDS, buckets: NEWS_BUCKETS, pick: { n: NEWS_PICK_N, min: NEWS_PICK_MIN }, rows: newsFeed(db, JOBS.includes(q.job) ? q.job : ''), loggedIn: !!cookieOwner });
+        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, kinds: NEWS_KINDS, buckets: NEWS_BUCKETS, pick: { n: NEWS_PICK_N, min: NEWS_PICK_MIN, per: NEWS_PICK_PER_SRC, perKind: NEWS_PICK_PER_KIND }, full: NEWS_FULL, rows: newsFeed(db, JOBS.includes(q.job) ? q.job : ''), loggedIn: !!cookieOwner });
         if (p === '/api/news/tip' && req.method === 'POST') {
           if (!cookieOwner) throw new HttpError(401, '제보는 카카오 로그인이 필요합니다');
           const o = db.prepare('SELECT name FROM owners WHERE id=?').get(cookieOwner);
@@ -6396,8 +6429,27 @@ function selftest() {
      && newsDo({ src: 'lob', title: '조용한 아무 제목' }) === NEWS_DO.lob,
      '«그래서 뭘 하나» — 제목 신호가 먼저, 도구엔 «새로 나왔다» 를 안 붙인다');
   /* 줄이 적으면 «꼭 볼 것» 을 세우지 않는다 — 네 줄짜리 화면에 «꼭 볼 것» 이 따로 있으면 우습다 */
+  ok(newsSplit(Array.from({ length: 12 }, (_, i) => i))[0].length === NEWS_FULL
+     && newsSplit(Array.from({ length: 12 }, (_, i) => i))[1].length === 2
+     && newsSplit([1, 2, 3])[1].length === 0,
+     '한 통이 길면 꼬리는 제목만 한 줄로 — 위는 두껍게, 아래는 얇게');
   ok(newsPickN(0) === 0 && newsPickN(3) === 0 && newsPickN(4) === 3 && newsPickN(12) === 3 && newsPickN(60) === 5,
      '«꼭 볼 것» 개수 규칙');
+  {
+    /* 한 출처가 «꼭 볼 것» 을 다 먹으면 고른 게 아니라 한 피드를 베낀 것이다.
+       아래는 깃허브만 점수가 높은 실제 모양 그대로 — 상한이 없으면 다섯 줄이 전부 gh 가 된다. */
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: 100 - i, src: i < 8 ? 'gh' : 'yozm', score: 100 - i, title: 't' + i, url: 'https://z.example/' + i, also: [], bucket: '오늘' }));
+    const pk = newsPicks(many);
+    ok(pk.length === 3 && pk.filter(r => r.src === 'gh').length === NEWS_PICK_PER_SRC,
+       `«꼭 볼 것» 이 한 출처로 쏠린다: ${pk.map(r => r.src)}`);
+    /* 점수만 보면 도구가 다 먹는다 — 별·하트가 붙는 쪽과 숫자가 아예 없는 쪽을 같은 자로 재기 때문이다.
+       2026-09-27 실측 그대로: 도구 여섯은 90점대, 읽을거리 여섯은 50점대. 묶음 상한이 없으면 셋 다 도구다. */
+    const mix = [...['gh', 'hf', 'space', 'ph', 'ds', 'show'].map((sr, i) => ({ id: 200 - i, src: sr, kind: 'tool', score: 90 - i, title: 'T' + i, url: 'https://t.example/' + i, also: [], bucket: '오늘' })),
+                 ...['geek', 'hn', 'ai', 'yozm', 'lob', 'smash'].map((sr, i) => ({ id: 100 - i, src: sr, kind: 'read', score: 50 - i, title: 'R' + i, url: 'https://r.example/' + i, also: [], bucket: '오늘' }))];
+    const pk2 = newsPicks(mix);
+    ok(pk2.length === 3 && pk2.filter(r => r.kind === 'read').length >= 1,
+       `«꼭 볼 것» 이 도구로만 찬다 — 숫자 없는 읽을거리가 한 줄도 못 든다: ${pk2.map(r => r.src)}`);
+  }
   ok(parseFeed('<feed><entry><title>A</title><link rel="alternate" href="https://a.example/1"/></entry></feed>', 5)[0].url === 'https://a.example/1'
      && parseFeed('<rss><item><title><![CDATA[B]]></title><link>https://b.example/2</link></item></rss>', 5)[0].title === 'B', 'RSS 와 Atom 둘 다 읽는다');
   ok(jobOf('인스타 릴스 광고 카피를 AI 로') === '마케팅' && jobOf('Figma 에 이미지 생성 붙이기') === '디자인' && jobOf('가게 예약 문자 자동화') === '소상공인' && jobOf('오늘 날씨') === '', '직무 자동 분류');
@@ -6460,9 +6512,16 @@ function selftest() {
       ok(!md.includes('https://md.example/a?utm_source=rss'), '합쳐진 줄의 사본이 마크다운에 따로 또 실린다');
       /* 합쳐진 줄은 «겹쳤다» 는 사실을 반드시 드러낸다 — 꼭 볼 것에 뽑히면 «2곳에서», 목록 줄이면 «+출처» */
       ok(/같은 글이 두 곳에 실렸다[^\n]*(\+Lobsters|2곳에서 같이 다뤘다)/.test(md), '겹친 곳이 마크다운에 안 적힌다');
-      ok(/오래된 글인데 두 곳에 실렸다[^\n]*\+dev\.to #korea/.test(md), '목록 줄에 «+겹친 곳» 이 안 붙는다');
+      /* 대표는 무게가 큰 devkr(10), 겹친 곳은 medhack(8) 이라 «+Medium #hackathon» 이 붙는다 */
+      ok(/오래된 글인데 두 곳에 실렸다[^\n]*\+Medium #hackathon/.test(md), '목록 줄에 «+겹친 곳» 이 안 붙는다');
       ok(md.includes('### 그전') && (md.includes('https://old1.example/x') !== md.includes('https://old2.example/y')),
          '주소가 다르고 제목만 같은 짝이 마크다운에서 두 줄로 남거나 «그전» 통이 없다');
+      /* 통 차례(오늘→그전)로, 통 안에서는 점수 높은 것부터. 들어온 순서대로 두면
+         통의 첫 줄이 «마지막에 긁힌 피드» 가 된다 — 사람이 위부터 읽을 이유가 사라진다. */
+      const feed = newsFeed(db);
+      ok(feed.every((r, i) => i === 0 || NEWS_BUCKETS.indexOf(feed[i - 1].bucket) < NEWS_BUCKETS.indexOf(r.bucket)
+                    || (feed[i - 1].bucket === r.bucket && feed[i - 1].score >= r.score)),
+         '통 차례·통 안 점수 차례가 아니다');
       /* 우승작은 어느 직무에서나 보인다 — 직무로 거르는 규칙이 화면·마크다운에 똑같이 걸려 있는가 */
       ok(newsFeed(db, '개발').some(r => r.url === 'https://github.com/acme/tool')
          && !newsFeed(db, '개발').some(r => r.url === 'https://yozm.example/1'),
