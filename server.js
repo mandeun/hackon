@@ -536,10 +536,11 @@ function shrink(vals) {
 function profile(db, pid) {
   const me = db.prepare('SELECT * FROM people WHERE id=?').get(pid);
   if (!me) throw new HttpError(404, '없는 사람입니다');
-  const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends,
-                                  s.url IS NOT NULL AS made
+  const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends, e.due,
+                                  s.url IS NOT NULL AS made, s.url, s.show AS shown, lv.state AS open
                            FROM teams t JOIN events e ON e.id = t.event
                            LEFT JOIN submissions s ON s.team = t.id
+                           LEFT JOIN liveness lv ON lv.team = t.id
                            WHERE t.person = ? ORDER BY e.ends DESC`).all(pid);
   const past = rows.filter(r => r.ends < today());
   const came = past.filter(r => r.came).length;
@@ -565,8 +566,19 @@ function profile(db, pid) {
     manner: shrink(rt.map(r => r.manner)),
     /* 배치 중 - 몇 번 안 나온 사람은 등급을 안 붙인다. */
     placed: past.length >= 2,
-    history: rows.map(r => ({ title: r.title, ends: r.ends, team: r.name,
-                              role: r.role, came: !!r.came, made: !!r.made })),
+    /* 만든 것. 주소가 «공개» 로 나가는 문 셋은 쇼케이스와 똑같다 —
+       본인 동의(show) · 마감 지남 · 주소 검사. 셋 중 하나라도 안 맞으면 주소를 안 싣는다.
+       프로필은 아무나 열 수 있는 주소라 여기가 새면 쇼케이스 동의가 뜻을 잃는다. */
+    history: rows.map(r => {
+      const open = closed({ due: r.due, ends: r.ends });
+      const pub  = !!(r.url && r.shown && open && webUrl(r.url));
+      const st   = pub && (r.open === 1 || r.open === 0) ? r.open : null;
+      return { title: r.title, ends: r.ends, team: r.name,
+               role: r.role, came: !!r.came, made: !!r.made,
+               url: pub ? webUrl(r.url) : '', shown: !!r.shown,
+               /* 주소를 못 싣는 줄은 상태도 안 판다 - «모름» 이라고 말할 근거가 없다 */
+               open: pub ? openLabel(st) : '', age: pub ? ageOf(r.ends, st) : null };
+    }),
   };
 }
 
@@ -614,6 +626,198 @@ function rankOf(made, wins, skill, n) {
   for (let k = 0; k < RANKS.length; k++) if (RANKS[k].need(made, wins, skill, n)) i = k;
   return { name: RANKS[i].name, level: i, next: TIER_NEXT[i] };
 }
+
+/* ── 만든 것 ──────────────────────────────────────────
+   결과물에는 «등급» 을 안 붙인다. 대회마다 심사위원이 다르고, board() 의 등수 보정은
+   한 대회 «안에서만» 성립한다 - 서로 다른 대회의 점수를 같은 티어로 부르면 그건 거짓말이다.
+   붙이는 것은 사실 둘뿐이다. 지금 열리는가, 그리고 며칠째 살아 있는가. */
+const AGE_TIERS = [
+  { key: 'seed', name: '새싹', mark: '\u{1F331}', from: 0 },
+  { key: 'herb', name: '풀',   mark: '\u{1F33F}', from: 30 },
+  { key: 'tree', name: '나무', mark: '\u{1F333}', from: 365 },
+];
+/** 나이는 «열려 있을 때만» 센다. 죽은 주소에 나이를 붙이면 자랑이 아니라 묘비다. */
+function ageOf(ends, state, now) {
+  if (state !== 1) return null;
+  const d0 = Date.parse(String(ends || '').slice(0, 10) + 'T00:00:00Z');
+  const d1 = Date.parse(String(now || today()).slice(0, 10) + 'T00:00:00Z');
+  if (!Number.isFinite(d0) || !Number.isFinite(d1) || d1 < d0) return null;
+  const days = Math.floor((d1 - d0) / 86400000);
+  let t = AGE_TIERS[0];
+  for (const x of AGE_TIERS) if (days >= x.from) t = x;
+  return { days, key: t.key, name: t.name, mark: t.mark };
+}
+/** 상태 셋 - 열림·안 열림·모름. NULL 을 «안 열림» 으로 그리지 않는다(오답노트 E22). */
+const openLabel = st => st === 1 ? '열림' : st === 0 ? '안 열림' : '모름';
+
+/** 한 판 돌린 결과를 표에 쓸지 말지. 망이 막혀 한꺼번에 실패하면 살아 있는 것까지
+    전부 «안 열림» 으로 덮어쓴다 - 그건 지난 사실을 지우는 것이다(오답노트 E3).
+    확인된 비율이 기준에 못 미치면 한 줄도 안 쓰고 지난 상태를 그대로 둔다. */
+const LIVE_MIN_RATE = 0.5;
+function livenessPlan(results) {
+  const n = results.length;
+  if (!n) return { write: false, rows: [], rate: 0, why: '볼 것이 없습니다' };
+  const done = results.filter(r => r.ok === true || r.ok === false);
+  const rate = done.length / n;
+  if (rate < LIVE_MIN_RATE)
+    return { write: false, rows: [], rate,
+             why: `확인된 것이 ${Math.round(rate * 100)}% 뿐입니다 — 지난 상태를 그대로 둡니다` };
+  return { write: true, rows: done.map(r => ({ team: r.team, state: r.ok ? 1 : 0 })), rate, why: '' };
+}
+
+/** 우리 서버가 «남이 적어 준 주소» 를 직접 여는 길이다. 집 안으로는 못 가게 막는다 —
+    막지 않으면 제출 칸에 http://127.0.0.1:8788/... 을 적어 우리 자신을 부르게 할 수 있다. */
+function outboundOk(u) {
+  let h; try { h = new URL(String(u || '')); } catch { return false; }
+  if (h.protocol !== 'http:' && h.protocol !== 'https:') return false;
+  const n = h.hostname.toLowerCase();
+  if (n.startsWith('[')) return false;                       // IPv6 리터럴은 통째로 막는다
+  if (n === 'localhost' || n === '0.0.0.0' || n === '::1') return false;
+  if (/(^|\.)(localhost|local|internal|home|lan)$/.test(n)) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(n)) {
+    const [a, b] = n.split('.').map(Number);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 169 && b === 254) return false;
+  }
+  return true;
+}
+
+/** 한 주소를 열어 본다. 셋을 돌려준다 — true 열림 · false 안 열림 · null 못 봤음.
+    못 본 것을 false 로 바꾸지 않는다. 그 한 줄이 «모름» 을 «죽음» 으로 만든다. */
+async function livenessCheck(url) {
+  const go = m => fetch(url, { method: m, redirect: 'manual',
+    headers: { 'user-agent': 'hackon.kr' }, signal: AbortSignal.timeout(8000) });
+  try {
+    const r = await go('HEAD');
+    /* HEAD 를 안 받는 곳이 제법 있다. 405·501 이면 GET 으로 한 번 더 본다 */
+    const s2 = (r.status === 405 || r.status === 501) ? (await go('GET')).status : r.status;
+    return s2 < 400;
+  } catch { return null; }
+}
+
+/** 하루 한 번. 쇼케이스에 동의했고 마감이 지난 것만 본다 — 화면에 나가는 것과 같은 범위다. */
+async function livenessTick(db) {
+  const rows = db.prepare(`SELECT t.id, s.url, e.due, e.ends
+                           FROM teams t JOIN submissions s ON s.team = t.id
+                           JOIN events e ON e.id = t.event
+                           WHERE s.show = 1 AND s.url <> ''`).all()
+    .filter(r => closed({ due: r.due, ends: r.ends }) && outboundOk(webUrl(r.url)));
+  const results = [];
+  for (const r of rows) results.push({ team: r.id, ok: await livenessCheck(webUrl(r.url)) });
+  const plan = livenessPlan(results);
+  if (plan.write) {
+    const up = db.prepare(`INSERT INTO liveness(team,state,checked) VALUES(?,?,datetime('now'))
+                           ON CONFLICT(team) DO UPDATE SET state=excluded.state, checked=excluded.checked`);
+    db.exec('BEGIN');
+    try { for (const x of plan.rows) up.run(x.team, x.state); db.exec('COMMIT'); }
+    catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
+  return plan;
+}
+
+/* ── 뱃지 ────────────────────────────────────────────
+   깃허브 README·노션·이력서에 거는 한 조각. solved.ac 가 이렇게 퍼졌다.
+   카톡에서 도는 물건이 아니라 «코드 있는 곳» 에서 도는 물건이라, 개발자 쪽 확산은 이게 1순위다.
+   SVG 라 서버가 문자열만 만들면 된다 — 설치할 것이 없다. */
+const TIER_COLOR = ['#5C6474', '#A2734C', '#7E8A97', '#C9A227', '#2E9E8F'];   // 새싹·브론즈·실버·골드·플래티넘
+const xmlEsc = s => String(s == null ? '' : s)
+  .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
+/** 글자 폭을 눈대중한다. 한글은 영문 두 배로 본다 — 안 재면 긴 이름이 테두리를 넘는다 */
+const textW = (s, px) => [...String(s || '')].reduce((a, c) => a + (c.charCodeAt(0) < 128 ? 0.56 : 1) * px, 0);
+
+/** 사람 하나를 뱃지 한 장으로. 연락처는 한 칸도 안 들어간다(프로필과 같은 규칙). */
+function badgeSvg(prof) {
+  const left  = 'HACK:ON';
+  /* 이름을 안 정한 사람은 해시를 안 적는다. 해시는 아무 뜻이 없고, 뜻 없는 것을 자랑거리로 주지 않는다 */
+  const right = [prof.handle ? prof.handle : null, prof.tier.name,
+                 `완주 ${prof.finished}`, prof.wins ? `수상 ${prof.wins}` : null]
+                .filter(Boolean).join(' · ');
+  const pad = 9, fs = 11;
+  const lw = Math.round(textW(left, fs) + pad * 2), rw = Math.round(textW(right, fs) + pad * 2);
+  const w = lw + rw, h = 20;
+  const col = TIER_COLOR[prof.tier.level] || TIER_COLOR[0];
+  /* 글씨는 시스템 글꼴로 둔다. 웹폰트를 걸면 깃허브가 그림을 프록시로 받아 가면서 글자가 깨진다 */
+  const font = "-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" role="img" `
+    + `aria-label="${xmlEsc(left + ': ' + right)}">`
+    + `<title>${xmlEsc(left + ': ' + right)}</title>`
+    + `<rect width="${w}" height="${h}" rx="3" fill="#141824"/>`
+    + `<rect x="${lw}" width="${rw}" height="${h}" rx="3" fill="${col}"/>`
+    + `<rect x="${lw}" width="6" height="${h}" fill="${col}"/>`
+    + `<g font-family="${font}" font-size="${fs}" font-weight="700">`
+    + `<text x="${pad}" y="14" fill="#C8F53B">${xmlEsc(left)}</text>`
+    + `<text x="${lw + pad}" y="14" fill="#FFFFFF">${xmlEsc(right)}</text>`
+    + `</g></svg>`;
+}
+
+/* ── 위촉장·감사장·확인증 ─────────────────────────────
+   4050 이 가장 크게 받는 것은 상금이 아니라 «이름이 박힌 종이» 다. 카톡 프사와 밴드에 올라간다.
+   명단을 따로 적지 않는다 — 한 일이 곧 명단이다. 심사한 사람이 심사위원이고, 낸 사람이 출제자다. */
+function creditsOf(db, event) {
+  const e = getEvent(db, event);
+  const j = new Map();
+  const bump = (name, n) => { const k = String(name || '').trim(); if (!k) return;
+                              j.set(k, (j.get(k) || 0) + n); };
+  for (const r of db.prepare(`SELECT s.judge AS name, COUNT(DISTINCT s.team) AS n
+                              FROM scores s JOIN teams t ON t.id = s.team
+                              WHERE t.event = ? GROUP BY s.judge`).all(event)) bump(r.name, r.n);
+  for (const r of db.prepare(`SELECT judge AS name, COUNT(*) AS n FROM pairs
+                              WHERE event = ? GROUP BY judge`).all(event)) bump(r.name, r.n);
+  return {
+    event: { id: e.id, title: e.title, ends: e.ends, host: e.host },
+    /* 심사위원 — «위촉했다» 가 아니라 «실제로 봤다» 를 센다 */
+    judges: [...j].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n),
+    /* 문제를 낸 사람. 연락처는 안 싣는다 — 종이에 적히는 것은 이름뿐이다 */
+    askers: db.prepare(`SELECT name, topic, pain FROM requests
+                        WHERE event = ? AND name <> '' ORDER BY id`).all(event)
+              .map(r => ({ name: r.name, topic: r.topic || r.pain || '' })),
+    /* 자리를 맡아 준 사람. 확인된 줄만(ledgerOf 와 같은 기준) */
+    givers: ledgerOf(db, event).map(r => ({ name: r.name, org: r.org || '',
+                                            kind: r.kind, label: r.label })),
+  };
+}
+
+/* ── 기록증 카드 ──────────────────────────────────────
+   화면이 canvas 로 그린 PNG 를 그대로 받는다. base64 로 감싸면 본문이 1.3 배가 되고
+   JSON 상한(100KB)에 걸린다 — 날바이트로 받고 앞 여덟 자를 직접 본다. */
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+const isPng = buf => Buffer.isBuffer(buf) && buf.length > 8 && buf.subarray(0, 8).equals(PNG_MAGIC);
+function rawBody(req, max) {
+  return new Promise((res, rej) => {
+    const cs = []; let n = 0;
+    req.on('data', c => { n += c.length; if (n > max) return rej(new HttpError(413, '너무 큽니다')); cs.push(c); });
+    req.on('end', () => res(Buffer.concat(cs)));
+    req.on('error', () => rej(new HttpError(400, '받다가 끊겼습니다')));
+  });
+}
+
+/** 링크 미리보기 딱지. 사람마다 다른 그림이 붙어야 두 번째 링크도 눌린다. */
+function ogTags({ title, desc, url, image }) {
+  const t = xmlEsc(title), d = xmlEsc(desc), u = xmlEsc(url), i = xmlEsc(image);
+  return `<meta property="og:type" content="profile">`
+    + `<meta property="og:site_name" content="HACK:ON">`
+    + `<meta property="og:locale" content="ko_KR">`
+    + `<meta property="og:title" content="${t}">`
+    + `<meta property="og:description" content="${d}">`
+    + `<meta property="og:url" content="${u}">`
+    + `<meta property="og:image" content="${i}">`
+    + `<meta name="twitter:card" content="summary_large_image">`
+    + `<meta name="description" content="${d}">`;
+}
+
+/** 화면 파일은 한 번만 읽어 둔다. 고치면 mtime 이 달라지니 그때 다시 읽는다. */
+let APP_HTML = '', APP_AT = 0;
+function appHtml() {
+  const f = path.join(ROOT, 'hack-on.html');
+  const at = +fs.statSync(f).mtimeMs;
+  if (!APP_HTML || APP_AT !== at) { APP_HTML = fs.readFileSync(f, 'utf8'); APP_AT = at; }
+  return APP_HTML;
+}
+const OG_ANCHOR = '<link rel="manifest" href="/manifest.webmanifest">';
+/** 머리에 딱지를 끼워 넣는다. 자리를 못 찾으면 원본 그대로 돌려준다 — 화면이 먼저다. */
+const withOg = (html, tags) => html.includes(OG_ANCHOR) ? html.replace(OG_ANCHOR, OG_ANCHOR + tags) : html;
 
 /** 이 대회(주최자)의 평판. 참가자가 남긴 평가에서 나온다. */
 function hostRep(db, event) {
@@ -1829,6 +2033,21 @@ function open(file) {
   try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
   try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(로그인 별명)
   try { db.exec("ALTER TABLE news ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}    // 제보자 계정 — 하루 5건 상한      // 별점 옆 한 줄
+  /* 만든 것이 «지금도 열리는가». 상태는 셋이다 - 1 열림 · 0 안 열림 · NULL 모름.
+     한 번도 못 열어 본 것과 «열어 봤는데 죽었다» 를 같은 화면으로 그리지 않는다(오답노트 E22). */
+  db.exec(`CREATE TABLE IF NOT EXISTS liveness(
+    team    INTEGER PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    state   INTEGER,
+    checked TEXT NOT NULL DEFAULT (datetime('now')))`);
+
+  /* 기록증 카드. 본인이 «만들기» 를 누른 순간 생기고, 그때부터 그 사람 프로필 링크의
+     미리보기 그림이 된다. 안 만든 사람은 기본 og.png 다 - 빈 카드를 그리지 않는다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS cards(
+    person  TEXT PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE,
+    mime    TEXT NOT NULL,
+    data    BLOB NOT NULL,
+    created TEXT NOT NULL DEFAULT (datetime('now')))`);
+
   /* 이 표가 생기기 전에 띄운 공지(events.notice)를 한 번 옮겨 둔다 — 안 그러면 큰 화면엔 공지가 있는데
      공개 페이지 «소식»은 비어 «있는 것을 없음으로» 그린다. 시각은 notice_at 그대로 */
   for (const r of db.prepare("SELECT id, notice, notice_at FROM events WHERE notice<>'' AND id NOT IN (SELECT event FROM notices)").all())
@@ -4065,6 +4284,11 @@ function routes(db) {
           if (req.method === 'POST')
             return json(res, 200, savePair(db, m[1], await body(req)));
         }
+        /* 위촉장·감사장·확인증에 들어갈 이름. 연락처는 한 칸도 안 나간다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/credits$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner);
+          return json(res, 200, creditsOf(db, m[1]));
+        }
         if (p === '/api/find' && req.method === 'GET')
           return json(res, 200, findHelp(q.size));
 
@@ -4130,6 +4354,20 @@ function routes(db) {
             .run(String(b.handle || '').slice(0, 20),
                  LEVELS.includes(b.level) ? b.level : '', m[1]);
           return json(res, 200, profile(db, m[1]));
+        }
+        /* 기록증 카드. 화면이 그린 PNG 를 날바이트로 받는다. 본인 확인은 프로필 고치기와 같은
+           길 — 팀 열쇠다(이메일은 남이 알 수 있다). 사람당 한 장이라 표가 안 불어난다. */
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/card$/)) && req.method === 'POST') {
+          const tk = req.headers['x-tkey'] || '';
+          if (!tk || !db.prepare('SELECT 1 FROM teams WHERE tkey=? AND person=?').get(tk, m[1]))
+            throw new HttpError(403, '본인 확인이 안 됩니다 — 신청한 브라우저에서 만들어 주세요');
+          const buf = await rawBody(req, 600 * 1024);
+          /* content-type 을 믿지 않는다. 앞 여덟 자를 직접 본다 */
+          if (!isPng(buf)) throw new HttpError(400, 'PNG 가 아닙니다');
+          db.prepare(`INSERT INTO cards(person,mime,data,created) VALUES(?,?,?,datetime('now'))
+                      ON CONFLICT(person) DO UPDATE SET data=excluded.data, created=excluded.created`)
+            .run(m[1], 'image/png', buf);
+          return json(res, 200, { ok: true, url: `${mailSite()}/og/p/${m[1]}.png` });
         }
         /* 내 열쇠 찾기. 기록이 있으면 프로필 주소를 메일로 보낸다 — 응답만 봐서는 있는지 없는지 모른다(감사 9). */
         if (p === '/api/whoami' && req.method === 'POST') {
@@ -4932,6 +5170,43 @@ function routes(db) {
       /* 운영 매뉴얼. 전에는 깃허브로 내보냈는데, 매뉴얼을 보려고 사이트를 떠나야 했다.
          읽을 것을 읽으러 밖으로 내보내면 대부분 안 돌아온다.
          GUIDE.md 를 그대로 읽어 만든다 - 문서가 두 벌이 되면 반드시 어긋난다. */
+      /* 뱃지. 깃허브 README 에 <img> 로 거는 한 조각이다 — 여기가 개발자 쪽 확산의 입구다.
+         이름을 안 정한 사람은 순위에도 안 오르므로 뱃지도 안 준다(뜻 없는 해시를 자랑거리로 주지 않는다). */
+      if ((m = p.match(/^\/badge\/([0-9a-f]{12})\.svg$/)) && req.method === 'GET') {
+        let pr = null;
+        try { pr = profile(db, m[1]); } catch { throw new HttpError(404, '없습니다'); }
+        res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8',
+          'cache-control': 'public, max-age=3600', ...SEC_HEADERS });
+        return res.end(badgeSvg(pr));
+      }
+      /* 기록증 카드 그림. 만든 사람만 있다 — 없으면 404 고, 그때는 링크에 기본 og.png 가 붙는다 */
+      if ((m = p.match(/^\/og\/p\/([0-9a-f]{12})\.png$/)) && req.method === 'GET') {
+        const c = db.prepare('SELECT mime, data FROM cards WHERE person=?').get(m[1]);
+        if (!c) throw new HttpError(404, '없습니다');
+        res.writeHead(200, { 'content-type': c.mime,
+          'cache-control': 'public, max-age=600', ...SEC_HEADERS });
+        return res.end(c.data);
+      }
+      /* 사람 화면은 머리띠를 갈아 끼워 내보낸다. 링크 미리보기가 늘 같은 그림이면
+         카톡에서 두 번째부터 아무도 안 누른다 — 그 한 장이 공유의 전부다. */
+      if ((m = p.match(/^\/p\/([0-9a-f]{12})$/)) && req.method === 'GET') {
+        let pr = null; try { pr = profile(db, m[1]); } catch {}
+        if (pr) {
+          const has  = !!db.prepare('SELECT 1 FROM cards WHERE person=?').get(m[1]);
+          const who  = pr.handle || '한 참가자';
+          const live = pr.history.filter(h => h.open === '열림').length;
+          const desc = [`${pr.tier.name} · 완주 ${pr.finished}`,
+                        pr.wins ? `수상 ${pr.wins}` : '',
+                        live ? `지금 열리는 것 ${live}` : ''].filter(Boolean).join(' · ');
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-cache', ...SEC_HEADERS });
+          return res.end(withOg(appHtml(), ogTags({
+            title: `${who} — HACK:ON 기록`, desc,
+            url: `${mailSite()}/p/${m[1]}`,
+            image: has ? `${mailSite()}/og/p/${m[1]}.png` : `${mailSite()}/og.png`,
+          })));
+        }
+      }
       /* 개인정보 처리방침 — 앱스토어가 요구한다. 앱과 웹이 같은 것을 받는다 */
       if (p === '/privacy') {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
@@ -5488,6 +5763,85 @@ async function selftest() {
      '마감이 지나고 운영자가 별표해도, 본인 동의가 없으면 쇼케이스에 안 실린다');
   showConsent(db, scT, true);
   const shown = showcase(db).find(w => w.url === 'https://shown.test/a');
+  /* 프로필의 «만든 것» 도 같은 문 셋을 지난다. 프로필은 아무나 여는 주소라
+     여기가 새면 쇼케이스 동의가 뜻을 잃는다. */
+  const pfT  = joinTeam(db, scEv.id, { name: '프로필팀', contact: 'prof@x.test', agree: true });
+  editEvent(db, scEv.id, { due: '2099-01-01T00:00' });          // 내고
+  submit(db, pfT, { url: 'https://prof.test/a', note: '만든 것' });
+  editEvent(db, scEv.id, { due: '2000-01-01T00:00' });          // 마감을 지나게 한다
+  const pfId = pidOf(db, 'prof@x.test');
+  const pfOf = () => profile(db, pfId).history.find(h => h.team === '프로필팀');
+  ok(pfOf() && pfOf().url === '', '동의 안 한 주소가 프로필에 실린다');
+  showConsent(db, pfT, true);
+  ok(pfOf().url === 'https://prof.test/a', '동의해도 프로필에 만든 것이 안 실린다');
+  ok(pfOf().open === '모름' && pfOf().age === null, '한 번도 안 열어 본 것을 «모름» 이라 안 한다');
+  db.prepare('INSERT INTO liveness(team,state) VALUES(?,1)').run(pfT);
+  ok(pfOf().open === '열림' && pfOf().age && pfOf().age.key === 'seed', '열려 있는데 나이가 안 붙는다');
+  db.prepare('UPDATE liveness SET state=0 WHERE team=?').run(pfT);
+  ok(pfOf().open === '안 열림' && pfOf().age === null, '죽은 주소에 나이가 붙는다');
+
+  // 만든 것 — 등급이 아니라 나이. 열려 있을 때만 센다
+  ok(ageOf('2026-01-01', 1, '2026-01-29').key === 'seed', '한 달 전은 새싹이다');
+  ok(ageOf('2026-01-01', 1, '2026-01-31').key === 'herb', '서른 날이면 풀이다');
+  ok(ageOf('2026-01-01', 1, '2027-01-01').key === 'tree', '일 년이면 나무다');
+  ok(ageOf('2026-01-01', 0, '2027-01-01') === null, '안 열리는 것에 나이가 붙는다');
+  ok(ageOf('2026-01-01', 1, '2025-06-01') === null, '대회보다 앞선 날짜로 나이가 나온다');
+  ok(openLabel(1) === '열림' && openLabel(0) === '안 열림', '열림·안 열림 표기가 다르다');
+  ok(openLabel(null) === '모름' && openLabel(undefined) === '모름', '모름을 «안 열림» 으로 그린다');
+
+  // 뱃지 — 깃허브 README 에 거는 한 조각
+  const bsv = badgeSvg({ handle: '<script>a', tier: { name: '골드', level: 3 }, finished: 5, wins: 2 });
+  ok(bsv.startsWith('<svg') && bsv.endsWith('</svg>'), 'SVG 꼴로 안 나온다');
+  ok(!bsv.includes('<script>') && bsv.includes('&lt;script&gt;a'), '이름에 넣은 태그가 그대로 나간다');
+  ok(bsv.includes('골드') && bsv.includes('완주 5') && bsv.includes('수상 2'), '티어·완주·수상이 안 적힌다');
+  ok(!badgeSvg({ handle: '', tier: { name: '새싹', level: 0 }, finished: 0, wins: 0 }).includes('수상'),
+     '수상이 0 인데 «수상» 을 적는다');
+  const wOf = h => +/width="(\d+)"/.exec(badgeSvg({ handle: h, tier: { name: '골드', level: 3 }, finished: 5, wins: 2 }))[1];
+  ok(wOf('가나다라마바사아자차') > wOf('a'), '이름이 길어져도 뱃지 폭이 그대로다');
+
+  // 링크 미리보기 딱지
+  const ogt = ogTags({ title: '큰"따옴표', desc: 'ㄷ', url: 'https://h.test/p/1', image: 'https://h.test/og.png' });
+  ok(ogt.includes('og:image') && ogt.includes('twitter:card'), '미리보기 딱지가 빠졌다');
+  ok(!ogt.includes('큰"따옴표') && ogt.includes('&quot;'), '따옴표가 안 막혀 머리띠가 깨진다');
+  ok(withOg('<x>' + OG_ANCHOR + '</x>', '<b>').includes('<b>'), '딱지가 안 끼워진다');
+  ok(withOg('<x></x>', '<b>') === '<x></x>', '자리를 못 찾았는데 화면을 망친다');
+
+  // 카드는 PNG 만 받는다. content-type 을 안 믿고 앞 여덟 자를 본다
+  ok(isPng(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1])), 'PNG 를 PNG 로 안 본다');
+  ok(!isPng(Buffer.from('GIF89a-----')), 'GIF 를 PNG 로 받는다');
+  ok(!isPng(Buffer.from('<svg onload=alert(1)>')), 'SVG 를 PNG 로 받는다');
+  ok(!isPng(Buffer.alloc(0)) && !isPng('문자열'), '빈 것·문자열을 PNG 로 본다');
+
+  // 위촉장·감사장 명단 — 한 일이 곧 명단이다
+  {
+    const cEv = createEvent(db, { title: '증서시험', starts: today(), ends: today() });
+    const cT  = joinTeam(db, cEv.id, { name: '증서팀', agree: true });
+    db.prepare('INSERT INTO scores(team,judge,key,value) VALUES(?,?,?,?)').run(cT, '심사김', 'done', 80);
+    db.prepare("INSERT INTO requests(id,name,topic,contact,event) VALUES('rqcert','가게사장','간판 정리','who@x.test',?)").run(cEv.id);
+    const cr = creditsOf(db, cEv.id);
+    ok(cr.judges.length === 1 && cr.judges[0].name === '심사김', '심사한 사람이 명단에 안 오른다');
+    ok(cr.askers.length === 1 && cr.askers[0].name === '가게사장', '문제 낸 사람이 명단에 안 오른다');
+    ok(!JSON.stringify(cr).includes('who@x.test'), '증서 명단에 연락처가 실린다');
+  }
+
+  // 우리 서버가 열어 볼 주소 — 집 안으로는 못 간다
+  ok(outboundOk('https://example.com/x'), '바깥 주소를 막는다');
+  ok(!outboundOk('http://127.0.0.1:8788/api/events'), '우리 자신을 부를 수 있다');
+  ok(!outboundOk('http://localhost:3000'), 'localhost 로 나간다');
+  ok(!outboundOk('http://10.0.0.5/') && !outboundOk('http://192.168.0.1/') &&
+     !outboundOk('http://172.16.0.1/') && !outboundOk('http://169.254.169.254/'),
+     '사설망·메타데이터 주소로 나간다');
+  ok(!outboundOk('http://[::1]/') && !outboundOk('file:///etc/passwd'), 'IPv6 안쪽과 file: 이 통과한다');
+  ok(outboundOk('http://172.32.0.1/'), '사설 대역이 아닌 172.32 까지 막는다');
+
+  /* 한 판 결과를 표에 쓸지. 망이 막혀 한꺼번에 실패하면 살아 있는 것까지 죽었다고 덮어쓴다(E3) */
+  const lp1 = livenessPlan([{ team: 1, ok: true }, { team: 2, ok: false }, { team: 3, ok: null }]);
+  ok(lp1.write && lp1.rows.length === 2, '확인된 것만 쓰지 않는다');
+  ok(lp1.rows.every(r => r.team !== 3), '못 본 것을 «안 열림» 으로 쓴다');
+  ok(!livenessPlan([{ team: 1, ok: true }, { team: 2, ok: null }, { team: 3, ok: null }]).write,
+     '절반도 확인이 안 됐는데 표를 덮어쓴다');
+  ok(!livenessPlan([]).write, '볼 것이 없는데 쓴다');
+
   ok(!!shown, '본인이 동의하면 그때 실린다');
   ok(shown.name === '동의안한팀' && shown.note === '만든 것', '이름과 설명이 같이 간다');
   const at1 = db.prepare('SELECT show_at FROM submissions WHERE team=?').get(scT).show_at;
@@ -6788,6 +7142,11 @@ function main() {
   /* 해커온뉴스 — 켜지고 15초 뒤 한 번, 그 뒤 6시간마다. 밖이 죽어도 앱은 산다. */
   setTimeout(() => newsTick(db).catch(() => {}), 15000).unref();
   setInterval(() => newsTick(db).catch(() => {}), 3 * 60 * 60 * 1000).unref();
+
+  /* 만든 것이 지금도 열리는가. 하루 한 번이면 충분하다 — 더 자주 두드리면 남의 서버를 괴롭힌다.
+     망이 막힌 판은 livenessPlan 이 알아서 «안 씀» 으로 끝낸다(E3). */
+  setTimeout(() => livenessTick(db).catch(e => console.error('liveness', e.message)), 40000).unref();
+  setInterval(() => livenessTick(db).catch(e => console.error('liveness', e.message)), 24 * 60 * 60 * 1000).unref();
   /* 한 시간마다 D-3·D-1 리마인더. 발송 열쇠가 없으면 아예 안 돈다 — 장부에 «건너뜀»이 매시간 쌓이지 않게. */
   if (RESEND_KEY) {
     const mailTick = () => { try { for (const mm of [...remindDue(db), ...doneDue(db)]) void sendMail(db, mm); } catch (e) { console.error('리마인더 실패', e.message); } };
