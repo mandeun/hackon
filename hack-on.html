@@ -2291,8 +2291,11 @@ const SCREEN = {
         </div>`).join('')}
         <div style="margin-top:9px"><a class="lnk" href="/e/${esc(g.event)}">이 대회 보기</a></div>
       </div>`).join('')
-      + giveBox()
-      + `<div class="card" style="padding:11px 13px"><div class="meta">
+      + `${/* 위 카드에 없는 것을 주고 싶을 때만 편다. 펴 두면 «맡기» 와 두 갈래가 되어
+             무엇을 눌러야 하는지가 흐려진다. */''}
+        <details class="more" id="give-else"><summary>목록에 없는 것을 주고 싶으신가요
+          <span class="when">직접 고르기</span></summary><div class="in">${giveBox()}</div></details>
+        <div class="card" style="padding:11px 13px"><div class="meta">
         맡은 것은 <b>내 대회</b> 탭에 남습니다. 대회가 끝나면 공개 장부와 결과 보고서에 이름이 오릅니다.</div></div>`;
   },
 
