@@ -2635,6 +2635,19 @@ with sync_playwright() as pw:
     pg.goto(f"{BASE}/app#{ev}", wait_until="networkidle")
     pg.click('nav button[data-t="find"]')
     pg.wait_for_selector("#f-n")
+    # 구하기의 기본 갈래는 «사람» 이다. 장소는 하루면 잡지만 심사위원은 3주 전에 움직여야 한다.
+    segs = pg.eval_on_selector_all('#find-segs button', 'bs => bs.map(b => b.dataset.seg)')
+    A(segs[0] == "people", f"구하기 첫 갈래가 «사람» 이 아니다: {segs}")
+    A(pg.query_selector('#find-segs button.on').get_attribute("data-seg") == "people",
+      "구하기가 «사람» 갈래로 안 열린다")
+    A("심사위원" in pg.eval_on_selector('#view .card h3', 'h => h.textContent'),
+      "«사람» 갈래 맨 위 카드가 심사위원이 아니다")
+    A(pg.query_selector('#jd-open') is not None, "심사위원 카드에 모집 페이지 입구가 없다")
+    ok("구하기 — 기본은 «사람», 맨 위는 심사위원, 모집 페이지 입구가 붙는다")
+
+    # 장소 갈래로 옮겨 앉는다 (아래 숫자·목록 검사는 전부 장소 쪽이다)
+    pg.click('#find-segs button[data-seg="venue"]')
+    pg.wait_for_selector(".stat")
     small = api("/api/find?size=24")
     A(f"{small['teams']}" in pg.locator(".stat").first.inner_text(), "팀 수가 서버 값과 다르다")
     small_places = pg.evaluate(
@@ -2768,6 +2781,8 @@ with sync_playwright() as pw:
     pg.fill("#f-n", "24")
     pg.dispatch_event("#f-n", "change")
     pg.wait_for_timeout(900)
+    pg.click('#find-segs button[data-seg="people"]')
+    pg.wait_for_selector('[data-mail="심사위원"]')
     pg.click('[data-mail="심사위원"]')
     pg.wait_for_selector("#f-mailtx")
     mail = pg.input_value("#f-mailtx")
@@ -2779,11 +2794,15 @@ with sync_playwright() as pw:
     ok("메일 초안 — 평문, 링크 없음, 불리한 것 먼저")
 
     # 연락한 곳 대장
+    pg.click('#find-segs button[data-seg="venue"]')
+    pg.wait_for_selector('[data-lead="장소"][data-src="창구"]')
     pg.locator('[data-lead="장소"][data-src="창구"]').first.scroll_into_view_if_needed()   # 한 번 흔들렸다(클릭 시간 초과) — 화면 밖이면 먼저 끌어온다
     pg.locator('[data-lead="장소"][data-src="창구"]').first.click()
     pg.wait_for_timeout(900)
     leads = api(f"/api/events/{ev}/leads", key=OK)["rows"]
     A(len(leads) == 1 and leads[0]["state"] == "보냄", f"대장에 안 들어갔다: {leads}")
+    pg.click('#find-segs button[data-seg="leads"]')
+    pg.wait_for_selector(f'[data-state="{leads[0]["id"]}"]')
     pg.click(f'[data-state="{leads[0]["id"]}"]')
     pg.wait_for_timeout(800)
     A(api(f"/api/events/{ev}/leads", key=OK)["rows"][0]["state"] == "답장",

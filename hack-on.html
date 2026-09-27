@@ -860,6 +860,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .htabs::-webkit-scrollbar{display:none}
 .htabs button{flex:0 0 auto;scroll-snap-align:start;border:1px solid var(--rule,#DDE1E6);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink,#1A1E1D);cursor:pointer;touch-action:manipulation}
 .htabs button:active{background:#E9EEFF}
+.htabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
 </style>`);
 const GIVE_KINDS = [['venue','장소'], ['cash','돈'], ['judge','심사'], ['mentor','멘토'], ['snack','간식'], ['other','기타']];   // 칩은 여섯 — 화면마다 판단 하나(검사가 잠근다). 크레딧은 운영자가 올린 자리로만 받는다
 /* 주면 받는 것 — 종류마다 다르다. 이 문장이 없으면 «장부에 이름» 한 줄뿐이라 왜 주는지 화면이 말하지 않는다(데시: 예고된 대가는 안에서 나온 마음을 밀어내지만, 받는 것을 감추는 건 다른 문제다) */
@@ -1460,6 +1461,7 @@ document.addEventListener('keydown', e => { if (TVM && (e.key === 'l' || e.key =
 /* 지금 화면에 그릴 진행표. 카드로 그리기 때문에 문자열이 아니라 그대로 들고 있는다. */
 let PLAN_NOW = [];
 let vArea = '';   // 구하기 화면에서 고른 자치구
+let findSeg = 'people';   // 구하기 화면의 갈래 — 사람 | 장소 | 연락한 곳. 기본은 사람이다
 /* 처음에 본인이 고르는 실력. 서버의 LEVELS 와 같아야 한다. */
 const LEVELS = ['처음', '해 봤음', '만들 줄 앎', '가르칠 수 있음'];
 let toastTimer = null;
@@ -2239,20 +2241,39 @@ const SCREEN = {
       </div></details>
     </div>`;
 
-    return `<h2>구하기</h2>
-      <p class="sub">장소·심사위원·강사·스태프. 인원만 넣으면 <b>몇이 필요하고 어디서 구하는지</b>가 나옵니다.</p>
-      ${/* 장소 목록이 길어서 그 아래 «사람»·«연락한 곳» 까지 내려가는 사람이 없었다.
-             운영 화면에 이미 있는 줄(.htabs · data-sec)을 그대로 쓴다. */''}
-      <div class="htabs">${[['sec-venue', '장소'], ['sec-people', '사람']]
-        .concat(lead ? [['sec-leads', '연락한 곳']] : [])
-        .map(([id, t]) => `<button type="button" data-sec="${id}">${t}</button>`).join('')}</div>
+    /* 갈래를 진짜로 나눈다. 전에는 셋이 세로로 이어져 있었고, 장소 목록이 길어서
+       그 아래 «사람»까지 내려가는 사람이 없었다(이 파일의 지난 주석이 그렇게 적고 있었다).
+       기본은 «사람» 이다 — 장소는 하루면 잡지만 심사위원은 3주 전에 움직여야 한다
+       (서버 need 표의 when). 먼저 막히는 쪽을 먼저 보여 준다. */
+    const segs = [['people', '사람'], ['venue', '장소']].concat(lead ? [['leads', '연락한 곳']] : []);
+    if (!segs.some(([k]) => k === findSeg)) findSeg = 'people';
+    const seg = findSeg;
 
-      <div class="card">
-        <label>참가 인원 (몇 명 올 예정인가요)</label>
-        <input id="f-n" type="number" value="${f.size}" min="1">
-        <div class="meta" style="margin-top:8px">신청자의 절반쯤 오니, 스물넷을 채우려면 마흔여덟까지 받으세요.</div>
-      </div>
+    /* 심사위원을 맨 위로. 이 줄이 가장 늦게 움직이고 가장 자주 비어 있다. */
+    const needSorted = [...f.need.filter(r => r.role === '심사위원'),
+                        ...f.need.filter(r => r.role !== '심사위원')];
 
+    const peopleHtml = () => `
+      <p class="sub">명부를 파는 곳은 없습니다. <b>어디에 있는 사람인지와 뭐라고 써서 보낼지</b>를 드립니다.</p>
+      <div id="sec-people"></div>
+      ${needSorted.map(r => `<div class="card">
+        <h3>${esc(r.role)} ${r.count ? `<span class="pill ok">${r.count}명</span>`
+                                     : '<span class="pill">이 규모엔 필요 없음</span>'}</h3>
+        <div class="meta">${esc(r.why)}<br>
+          <b>어디에</b> ${esc(r.who)}<br>
+          <b>언제까지</b> ${esc(r.when)}</div>
+        ${r.count ? `<div style="height:9px"></div>
+          <button class="btn sec sm" data-mail="${esc(r.role)}" data-cnt="${r.count}">보낼 메일 써 주기</button>
+          ${lead ? `<button class="btn sec sm" data-lead="${esc(r.role)}" data-name=""
+            data-how="">대장에 넣기</button>` : ''}` : ''}
+        ${r.role === '심사위원' ? `<div style="height:9px"></div>
+          <div class="meta" style="margin-bottom:7px">아는 사람이 없으면 여기로 보내세요 —
+            심사위원으로 들어오는 공개 입구입니다.</div>
+          <a class="btn sec sm" id="jd-open" href="/judge" style="text-decoration:none">심사위원 모집 페이지 열기</a>` : ''}
+      </div>`).join('')}
+      <div id="f-mail"></div>`;
+
+    const venueHtml = () => `
       <div class="stat">
         <div><b>${f.teams}</b><span>팀</span></div>
         <div><b>${f.room.area}㎡</b><span>필요한 자리</span></div>
@@ -2306,24 +2327,9 @@ const SCREEN = {
           <button class="btn sec sm" data-lead="장소" data-src="창구"
             data-name="${esc(pl.name)}"
             data-how="${esc(pl.at)}">연락처 대장에 넣기</button>` : ''}
-      </div>`).join('')}
+      </div>`).join('')}`;
 
-      <h3 id="sec-people" style="margin-top:18px">사람은 몇 명이 필요한가</h3>
-      <p class="sub">명부를 파는 곳은 없습니다. <b>어디에 있는 사람인지와 뭐라고 써서 보낼지</b>를 드립니다.</p>
-      ${f.need.map(r => `<div class="card">
-        <h3>${esc(r.role)} ${r.count ? `<span class="pill ok">${r.count}명</span>`
-                                     : '<span class="pill">이 규모엔 필요 없음</span>'}</h3>
-        <div class="meta">${esc(r.why)}<br>
-          <b>어디에</b> ${esc(r.who)}<br>
-          <b>언제까지</b> ${esc(r.when)}</div>
-        ${r.count ? `<div style="height:9px"></div>
-          <button class="btn sec sm" data-mail="${esc(r.role)}" data-cnt="${r.count}">보낼 메일 써 주기</button>
-          ${lead ? `<button class="btn sec sm" data-lead="${esc(r.role)}" data-name=""
-            data-how="">대장에 넣기</button>` : ''}` : ''}
-      </div>`).join('')}
-      <div id="f-mail"></div>
-
-      ${lead ? `<h3 id="sec-leads" style="margin-top:18px">연락한 곳</h3>
+    const leadsHtml = () => lead ? `<h3 id="sec-leads" style="margin-top:18px">연락한 곳</h3>
         <p class="sub">혼자 열면 어디에 보냈는지를 잊습니다.</p>
         ${lead.rows.length ? `<table><tr><th>무엇</th><th>어디</th><th>상태</th><th></th></tr>
           ${lead.rows.map(r => `<tr>
@@ -2348,7 +2354,21 @@ const SCREEN = {
         </div>`
       : `<div class="card"><div class="meta">
           <b>연락한 곳을 기록하려면</b> ‘대회’ 탭에서 대회를 하나 고르세요.
-          대회마다 따로 관리합니다.</div></div>`}`;
+          대회마다 따로 관리합니다.</div></div>`;
+
+    return `<h2>구하기</h2>
+      <p class="sub">인원만 넣으면 <b>몇이 필요하고 어디서 구하는지</b>가 나옵니다.</p>
+
+      <div class="card">
+        <label>참가 인원 (몇 명 올 예정인가요)</label>
+        <input id="f-n" type="number" value="${f.size}" min="1">
+        <div class="meta" style="margin-top:8px">신청자의 절반쯤 오니, 스물넷을 채우려면 마흔여덟까지 받으세요.</div>
+      </div>
+
+      <div class="htabs" id="find-segs">${segs.map(([k, t]) =>
+        `<button type="button" data-seg="${k}"${k === seg ? ' class="on"' : ''}>${t}</button>`).join('')}</div>
+
+      ${seg === 'people' ? peopleHtml() : seg === 'venue' ? venueHtml() : leadsHtml()}`;
   },
 
   async board() {
@@ -4730,6 +4750,10 @@ function wire() {
   document.querySelectorAll('[data-untrash]').forEach(b => b.onclick = async () => {
     try { const r = await api(`/trash/${b.dataset.untrash}/restore`, { method: 'POST' }); flash(r.same ? '되살렸습니다. 팀 링크도 그대로입니다' : '되살렸습니다'); render(); }
     catch (e) { flash(e.message, true); }
+  });
+  /* 구하기 화면의 갈래 — 누르면 그 갈래만 그린다(앵커 이동이 아니다) */
+  document.querySelectorAll('[data-seg]').forEach(b => b.onclick = () => {
+    findSeg = b.dataset.seg; render();
   });
   document.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => {
     if (b.dataset.sec === 'spon') { tab = 'spon'; render(); return; }
