@@ -314,6 +314,20 @@ with sync_playwright() as p:
     A("우리 동네 문제 해결 해커톤" in pg.inner_text("#grid"), "올린 대회가 첫 화면 목록에 안 그려진다")
     ok("첫 화면 목록 — 이름만 넣은 대회는 안 뜬다. 올려야 뜨고, 뜨면 빈 안내는 사라진다")
 
+    # ── 모여 있는 곳 — 밖에서는 사이트만 가리키고 대화방은 들어온 사람에게 보여 준다 ──
+    # 주소를 안 적었으면 «없음» 이 아니라 아예 안 그려야 한다. 빈 칸을 내비에 거는 것이 제일 나쁘다.
+    A(pg.is_hidden("#room"), "대화방 주소를 안 적었는데 «모여 있는 곳» 이 떴다")
+    A(post(f"/api/events/{ev}", {"chat": "https://open.kakao.com/o/gTestRoom"}, OK, method="PATCH")[0] == 200,
+      "대화방 주소 저장 실패")
+    A(api("/api/events")[0].get("chat") == "https://open.kakao.com/o/gTestRoom",
+      f"첫 화면 목록이 대화방 주소를 못 받는다: {api('/api/events')[0]}")
+    pg.goto(BASE + "/")
+    pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
+    A(pg.is_visible("#room"), "대화방 주소를 적었는데 «모여 있는 곳» 이 안 뜬다")
+    A(pg.get_attribute("#room-l a", "href") == "https://open.kakao.com/o/gTestRoom",
+      "«모여 있는 곳» 이 대화방으로 안 보낸다")
+    ok("모여 있는 곳 — 주소를 적은 대회만 첫 화면에 걸린다")
+
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
     visit(f"/app#{ev}")
     txt = pg.inner_text("#view")
@@ -2831,6 +2845,40 @@ with sync_playwright() as pw:
       f"/j/<id> 가 심사 화면이 아니다: {ktxt[:200]}")
     A("먼저 봅니다" not in ktxt, "/j/<id> 에 모집 화면이 떴다")
     ok("심사위원 — /judge 는 모집 입구, /j/<id> 는 심사 열쇠. 서로 안 덮는다")
+
+    # ── 초대 링크 — 한 사람씩 데려온 것을 센다 ──
+    # 앞 단계의 팀 수를 건드리지 않게 대회를 따로 하나 연다.
+    st, iv = post("/api/events", {"title": "초대 링크 시험", "host": "초대"})
+    A(st == 201, f"시험용 대회 개설 실패: {st}")
+    ivid, ivkey = iv["id"], iv["okey"]
+
+    # 목록에 있는 라벨이면 신청과 함께 그대로 저장된다
+    pg.goto(f"{BASE}/e/{ivid}?f=당근", wait_until="networkidle")
+    pg.wait_for_selector("#t-name", timeout=8000)
+    pg.fill("#t-name", "당근팀"); pg.fill("#t-email", "carrot@example.com")
+    pg.check("#t-agree"); pg.click("#t-join")
+    pg.wait_for_selector("#m-save", timeout=8000)
+    rows = api(f"/api/events/{ivid}/board", ivkey)["rows"]
+    A(rows[0]["found"] == "당근", f"초대 링크의 유입 경로가 안 저장됐다: {rows[0]}")
+    # 두 번째 칸은 그래도 한 번 더 묻는다 — 참가자 본인에게는 found 를 안 내려주기 때문이다(운영자 것).
+    # 다시 답해도 덮이지 않으니(«이미 적힌 것은 안 건드린다») 집계는 안 흔들린다. 고르기만 미리 맞춰 둔다.
+    A(pg.eval_on_selector("#m-found", "el => el.value") == "당근",
+      "초대 링크로 왔는데 «어디서 보셨나요» 가 미리 골라져 있지 않다")
+
+    # 목록에 없는 값은 버린다 — 지나가던 사람이 집계에 줄을 만들면 그 표를 못 믿는다.
+    # 이 브라우저는 위 대회에 이미 신청했으니(내 팀 화면이 뜬다) 대회를 하나 더 연다.
+    st2, iv2 = post("/api/events", {"title": "가짜 라벨 시험", "host": "초대"})
+    A(st2 == 201, f"둘째 시험용 대회 개설 실패: {st2}")
+    pg.goto(f"{BASE}/e/{iv2['id']}?f=내가만든라벨", wait_until="networkidle")
+    pg.wait_for_selector("#t-name", timeout=8000)
+    pg.fill("#t-name", "가짜라벨팀"); pg.fill("#t-email", "fake@example.com")
+    pg.check("#t-agree"); pg.click("#t-join")
+    pg.wait_for_selector("#m-found", timeout=8000)
+    bad = api(f"/api/events/{iv2['id']}/board", iv2["okey"])["rows"][0]
+    A(bad["found"] == "", f"목록에 없는 라벨이 그대로 들어갔다: {bad}")
+    A(pg.eval_on_selector("#m-found", "el => el.value") == "",
+      "목록에 없는 라벨이 고르기에 미리 박혔다")
+    ok("초대 링크 — ?f= 로 유입 경로가 저절로 세어지고, 목록에 없는 값은 버린다")
 
     b.close()
 
