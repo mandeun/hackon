@@ -1593,6 +1593,8 @@ function open(file) {
   try { db.exec("ALTER TABLE sponsors ADD COLUMN proof TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN done TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN sponsor_ok INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* 기여 선언 — «가져올 것». 기여형 설계 §2-2. 비면 «시간»(그냥 참가)이다 */
+  try { db.exec("ALTER TABLE teams ADD COLUMN bring TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 협찬사 제공 동의를 한 시각. 동의 여부(sponsor_ok)와 함께 남겨 언제 동의했는지 보인다. 예전 배포판에 이미 있던 칸이다. */
   try { db.exec("ALTER TABLE teams ADD COLUMN share TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 예전 배포판에서 share 로만 동의를 남긴 참가자도 크레딧 명단(sponsor_ok)에 들어가게 옮긴다. */
@@ -2292,6 +2294,15 @@ function moreTeam(db, id, b, can) {
     if (!owns) throw new HttpError(403, '협찬사 제공 동의는 본인만 바꿀 수 있습니다');
     set.push('sponsor_ok=?'); val.push(b.sponsor_ok ? 1 : 0);
   }
+  /* 기여 선언 — 바꿀 수 있는 값이다. «못 가져오게 됐다» 를 고칠 수 없으면 선언이 거짓말이 된다.
+     본인만 바꾼다: 남이 대신 선언하면 안 지켜졌을 때 그 사람 이름이 남는다. */
+  if (b.bring !== undefined) {
+    const next = bringList(b.bring).join(',');
+    if (next !== String(t.bring || '')) {
+      if (!owns) throw new HttpError(403, '가져올 것은 신청한 분만 고칠 수 있습니다');
+      set.push('bring=?'); val.push(next);
+    }
+  }
   /* 인원은 바뀌는 값이라 덮어쓰기를 허용한다. 한 명 들어오면 고쳐야 한다.
      주인 확인은 setSeats 와 같아야 한다 - 안 그러면 거기서 막은 정원 변경이 이 길로 그냥 된다. */
   if (b.size !== undefined) {
@@ -2781,7 +2792,7 @@ function board(db, event, admin = false) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
-           t.agreed, t.photo, t.came, t.size, t.want, t.no,
+           t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring,
            s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
@@ -3437,6 +3448,11 @@ function setPledge(db, id, b) {
 
 /* ── 자리 밖 제안(offer) — 메일 대신 앱에서 바로 ── */
 const OFFER_STATUS = ['pending', 'ok', 'no'];
+/* 기여 일곱 종류(인액터스 강연: 정보·전문성·시간·노동력·도메인 지식·문화적 배경·성분).
+   해커톤 말로 옮긴 것이다. 기본값은 «시간» — 그냥 참가하는 것도 기여다. */
+const BRING_KINDS = { time: '시간', venue: '장소', thing: '물건', cash: '돈', link: '연결', record: '기록', skill: '전문성' };
+const bringList = (v) => String(v || '').split(',').map(x => x.trim()).filter(x => BRING_KINDS[x]);
+
 const OFFER_KIND_LABEL = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
 function addOffer(db, event, b) {
   if (!db.prepare('SELECT 1 FROM events WHERE id=?').get(event)) throw new HttpError(404, '없는 대회입니다');
@@ -5183,6 +5199,25 @@ async function selftest() {
       ok(op.rows.every(r => r.dleft === null || r.dleft >= 0), '이미 지난 대회의 자리는 안 섞인다');
       /* 이 검사가 만든 것은 이 검사가 치운다 — 뒤에 오는 «공개한 것만 목록에 든다» 가 같은 db 를 센다 */
       for (const id of [eo1.id, eo2.id]) db.prepare('DELETE FROM events WHERE id=?').run(id);
+    }
+    /* 기여 선언 — «가져올 것». 기여형 설계 §2-2 */
+    {
+      const eb = createEvent(db, { title: '선언검사', starts: '2099-04-01', ends: '2099-04-01' });
+      const tb = joinTeam(db, eb.id, { name: '선언팀', agree: true, email: 'bring@x.test' });
+      const tk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tb).tkey;
+      moreTeam(db, tb, { bring: 'venue,skill' }, { tkey: tk });
+      ok(db.prepare('SELECT bring FROM teams WHERE id=?').get(tb).bring === 'venue,skill', '가져올 것이 저장된다');
+      moreTeam(db, tb, { bring: 'venue,없는것,skill,cash' }, { tkey: tk });
+      ok(db.prepare('SELECT bring FROM teams WHERE id=?').get(tb).bring === 'venue,skill,cash',
+         '목록에 없는 종류는 버린다');
+      let denied = 0;
+      try { moreTeam(db, tb, { bring: 'cash' }, {}); } catch (e) { denied = e.code; }
+      ok(denied === 403, '남이 대신 선언을 바꾸지 못한다');
+      moreTeam(db, tb, { bring: '' }, { tkey: tk });
+      ok(db.prepare('SELECT bring FROM teams WHERE id=?').get(tb).bring === '', '선언은 되돌릴 수 있다 (못 가져오게 될 수 있다)');
+      moreTeam(db, tb, { bring: 'record' }, { tkey: tk });
+      ok(board(db, eb.id).rows[0].bring === 'record', '선언은 공개된다 (손님에게도 보인다)');
+      db.prepare('DELETE FROM events WHERE id=?').run(eb.id);
     }
     /* 결과물 «넘길 수 있어요» — 마감 뒤 받는 화면에만 보인다. 만든 것 링크 — 주소 꼴만 남는다 */
     {
