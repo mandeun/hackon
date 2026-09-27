@@ -1455,6 +1455,52 @@ with sync_playwright() as p:
     cp.goto(BASE + rl["link"]); cp.wait_for_timeout(1200)
     A(cp.evaluate(f"localStorage.getItem('hackon.team.{RE}')") == str(rt["id"]), "팀 링크로 들어왔는데 내 팀이 안 잡혔다")
     A("?t=" not in cp.url, "팀 열쇠가 주소창에 남아 있다")
+    # ── «내 대회» 탭 — 주최자 말고 다섯 역할에도 돌아올 길을 준다 (2026-09-27) ──
+    # 전에는 주최자만 첫 화면에 목록이 있었다. 참가자·심사위원·관객·후원자·의뢰자는
+    # 받은 링크를 잃으면 자기 자리를 영영 못 찾았다. 열쇠는 이미 이 기기에 있으니
+    # 서버에 새 갈래를 만들지 않고 모아 그린다.
+    # 이 브라우저는 팀 링크로 들어온 진짜 참가자다. 여기에 심사·후원·의뢰 열쇠를 더 심는다.
+    cp.on("pageerror", lambda e_: errs.append("내대회:" + str(e_)))
+    _, mn = post(f"/api/events/{RE}/needs", {"kind": "snack", "label": "내대회간식"}, REK)
+    _, mpl = post(f"/api/needs/{mn['id']}/pledge", {"name": "내대회카페", "contact": "m@x.test"})
+    cp.evaluate(
+        """(a) => {
+            localStorage.setItem('hackon.jkey.' + a.EV, a.JK);
+            localStorage.setItem('hackon.pkey.' + a.REF, a.PK);
+            localStorage.setItem('hackon.rkey.' + a.RQ, a.RK);
+            localStorage.setItem('hackon.jkey.zzznothere', '0000000000');
+        }""",
+        {"EV": RE, "JK": re_["jkey"], "REF": mpl["ref"], "PK": mpl["pkey"], "RQ": RID, "RK": RK})
+    cp.goto(BASE + "/app"); cp.wait_for_selector("body[data-ready='1']", timeout=8000)
+    # 열쇠 없는 브라우저의 첫 화면에 «사본 파일» 칸이 더는 없다 — 그 칸은 쓸 수 없었다.
+    # /events/restore 는 주최자 열쇠를 요구하는데 칸은 열쇠가 없을 때만 그려졌다.
+    A(cp.query_selector("#rs-file") is None, "열쇠 없는 첫 화면에 사본 첨부 칸이 그대로 있다")
+    A("사본 파일" not in cp.inner_text("#view"), "첫 화면에 «사본 파일» 안내가 남아 있다")
+    A(cp.query_selector('nav button[data-t="mine"]') is not None, "아래 탭에 «내 대회» 가 없다")
+    cp.click('nav button[data-t="mine"]'); cp.wait_for_selector("#view a.ev", timeout=8000)
+    mtxt = cp.inner_text("#view")
+    for must in ("참여한 대회", "맡은 심사", "내가 준 것", "내가 낸 것"):
+        A(must in mtxt, f"«내 대회» 에 '{must}' 칸이 없다: {mtxt}")
+    A("회비팀" in mtxt, f"«내 대회» 에 내 팀 이름이 없다: {mtxt}")
+    A("내가 연 대회" not in mtxt, "주최자가 아닌데 «내가 연 대회» 칸이 나온다")
+    # 없는 대회를 가리키는 열쇠(404)는 «지워짐». 못 읽은 것을 없음으로 그리면 안 된다
+    A("지워진 대회입니다" in mtxt, f"없는 대회 열쇠가 «지워짐» 으로 안 그려진다: {mtxt}")
+    # 역할마다 제 화면으로 간다. 열쇠는 이미 이 기기에 있으니 주소에 안 싣는다
+    hrefs = cp.eval_on_selector_all("#view a.ev", "es => es.map(e => e.getAttribute('href'))")
+    for want in (f"/e/{RE}", f"/j/{RE}", f"/s/{mpl['ref']}"):
+        A(want in hrefs, f"«내 대회» 에 {want} 줄이 없다: {hrefs}")
+    A(not any("k=" in h for h in hrefs), f"«내 대회» 링크에 열쇠가 실렸다: {hrefs}")
+    # 탭이 여섯이 됐다. 390px 에서 이름이 두 줄로 접히면 아래 줄 높이가 무너진다.
+    # 폭으로 재면 안 잡힌다 — 접힌 글자의 폭은 칸 안에 머문다. 줄 수(그려진 사각형 수)로 잰다.
+    navw = cp.evaluate(
+        """() => [...document.querySelectorAll('nav button')].map(b => {
+            const t = b.childNodes[b.childNodes.length - 1], r = document.createRange();
+            r.selectNodeContents(t);
+            return [b.textContent.trim(), r.getClientRects().length];
+        })""")
+    A(len(navw) == 6, f"아래 탭이 여섯이 아니다: {navw}")
+    A(all(lines == 1 for _, lines in navw), f"390px 에서 탭 이름이 두 줄로 접힌다: {navw}")
+    ok("«내 대회» — 역할 다섯이 한 화면에·지워진 열쇠는 «지워짐»·열쇠는 주소에 안 실림·탭 여섯이 390px 에 들어감")
     cctx.close()
     # 받는 사람 열쇠 새로 — 옛 열쇠는 죽고 새 열쇠로 열린다
     old_rk = RK
@@ -1513,7 +1559,7 @@ with sync_playwright() as p:
     tp.evaluate(f"localStorage.setItem('hackon.owner', '{TOW}')")
     tp.goto(BASE + "/app"); tp.wait_for_selector("body[data-ready='1']", timeout=8000)
     A(tp.query_selector("#ev-trash") is not None, "주최자 열쇠가 있는데 «지운 대회» 목록이 없다")
-    A(tp.query_selector("#rs-file") is None, "주최자 열쇠가 있는데 사본 첨부 칸이 그대로 떠 있다")
+    A(tp.query_selector("#rs-file") is None, "사본 첨부 칸이 남아 있다 — 걷어낸 칸이다")
     tp.click("#ev-trash summary"); tp.wait_for_timeout(300)
     ttxt = tp.inner_text("#ev-trash")
     A("휴지통e2e" in ttxt and "팀 1" in ttxt, f"«지운 대회» 줄에 제목·팀 수가 없다: {ttxt}")
@@ -1946,7 +1992,10 @@ with sync_playwright() as p:
     # ② 열쇠를 잃은 운영자 — 열린 대회가 있어도 «전에 연 대회를 찾으시나요» 칸이 있다 (새 브라우저 = 열쇠 없음)
     fctx = b.new_context(viewport={"width": 390, "height": 844}); fp = fctx.new_page()
     fp.goto(BASE + "/app"); fp.wait_for_selector("body[data-ready='1']", timeout=8000)
-    A(fp.query_selector("#ow-in") is not None and fp.query_selector("#rs-file") is not None, "열쇠 없는 브라우저의 «대회» 탭에 열쇠 찾기·되살리기 칸이 없다")
+    A(fp.query_selector("#ow-in") is not None, "열쇠 없는 브라우저의 «대회» 탭에 열쇠 찾기 칸이 없다")
+    # 사본 첨부 칸은 걷어냈다(2026-09-27). 그 칸은 열쇠가 없을 때만 그려졌는데
+    # /events/restore 는 주최자 열쇠를 요구한다 — 보이는 사람은 쓸 수 없는 칸이었다.
+    A(fp.query_selector("#rs-file") is None, "열쇠 없는 브라우저에 아직 사본 첨부 칸이 있다")
     fctx.close()
     # ③ /give 로 들어와 확인된 후원은 큰 화면·보고서의 «함께한 곳»에 실린다 — 약속한 대로. 대기 중이거나 «밖에서 구함»은 안 실린다
     _, gn = post(f"/api/events/{FE}/needs", {"kind": "snack", "label": "커피", "qty": 1}, FK)
