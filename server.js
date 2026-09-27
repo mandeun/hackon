@@ -536,12 +536,15 @@ function shrink(vals) {
 function profile(db, pid) {
   const me = db.prepare('SELECT * FROM people WHERE id=?').get(pid);
   if (!me) throw new HttpError(404, '없는 사람입니다');
+  /* 짝으로 붙어 온 사람도 그 대회에 «있었다». 신청 칸에 이름이 없다고 기록이 없는 것이 아니다. */
   const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends, e.due,
+                                  t.person, t.mate, t.name AS owner_name, t.mate_name,
                                   s.url IS NOT NULL AS made, s.url, s.show AS shown, lv.state AS open
                            FROM teams t JOIN events e ON e.id = t.event
                            LEFT JOIN submissions s ON s.team = t.id
                            LEFT JOIN liveness lv ON lv.team = t.id
-                           WHERE t.person = ? ORDER BY e.ends DESC`).all(pid);
+                           WHERE t.person = ? OR (t.mate <> '' AND t.mate = ?)
+                           ORDER BY e.ends DESC`).all(pid, pid);
   const past = rows.filter(r => r.ends < today());
   const came = past.filter(r => r.came).length;
   const made = past.filter(r => r.made).length;
@@ -575,7 +578,9 @@ function profile(db, pid) {
       const open = closed({ due: r.due, ends: r.ends });
       const pub  = !!(r.url && r.shown && open && webUrl(r.url));
       const st   = pub && (r.open === 1 || r.open === 0) ? r.open : null;
-      return { title: r.title, ends: r.ends, team: r.name,
+      /* 같이 온 사람. 내가 신청자면 짝의 이름, 내가 짝이면 신청자의 이름 */
+      const mate = r.mate === pid ? r.owner_name : (r.mate_name || '');
+      return { title: r.title, ends: r.ends, team: r.name, mate,
                role: r.role, came: !!r.came, made: !!r.made,
                url: pub ? webUrl(r.url) : '', shown: !!r.shown,
                /* 주소를 못 싣는 줄은 상태도 안 판다 - «모름» 이라고 말할 근거가 없다 */
@@ -617,7 +622,8 @@ function xpOf(db, pid, season) {
      줄마다 «언제» 를 같이 읽어 온다 — 시각이 없으면 시즌에 못 넣는다(0 이 아니라 모름이다). */
   const at = season ? (t => seasonOf(t) === season) : () => true;
   const past = db.prepare(`SELECT t.came, e.ends, s.url IS NOT NULL AS made FROM teams t JOIN events e ON e.id = t.event
-                           LEFT JOIN submissions s ON s.team = t.id WHERE t.person=? AND e.ends < date('now')`).all(pid);
+                           LEFT JOIN submissions s ON s.team = t.id
+                           WHERE (t.person=? OR (t.mate <> '' AND t.mate=?)) AND e.ends < date('now')`).all(pid, pid);
   const mine = rows => rows.filter(r => pidOf(db, r.contact) === pid && at(r.at)).length;
   const n = {
     made: past.filter(r => r.made && at(r.ends)).length,
@@ -877,6 +883,150 @@ function conditions(db) {
     rows: kept.length >= 2 ? kept.map(r => ({ id: r.id, title: r.title, ends: r.ends,
                                               twist: r.twist, made: r.made, alive: r.alive })) : [],
   };
+}
+
+/* ── 도전장 ───────────────────────────────────────────
+   공격성을 사람이 아니라 «결과물 비교» 로 흘린다. 동사는 «이긴다» 가 아니라 «맞붙는다» 다 —
+   조롱·처벌과 붙는 순간 다른 물건이 된다.
+   따로 점수를 매기지 않는다. 둘이 다음에 같이 나온 대회의 순위를 그대로 읽을 뿐이다. */
+
+/** 두 사람이 같이 있었던 «끝난» 대회 중 가장 최근 것. 없으면 빈 문자열 */
+function metAt(db, a, b) {
+  const r = db.prepare(`SELECT e.id FROM events e
+    WHERE e.ends < date('now')
+      AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
+      AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
+    ORDER BY e.ends DESC LIMIT 1`).get(a, b);
+  return r ? r.id : '';
+}
+
+/** 도전장 하나. 같은 대회에 있던 사람에게만, 그리고 한 쌍에 하나만. */
+function sendDuel(db, me, target) {
+  if (!me || !target || me === target) throw new HttpError(400, '상대를 고를 수 없습니다');
+  if (!db.prepare('SELECT 1 FROM people WHERE id=?').get(target)) throw new HttpError(404, '없는 사람입니다');
+  const ev = metAt(db, me, target);
+  if (!ev) throw new HttpError(403, '같은 대회에 있던 분에게만 보낼 수 있습니다');
+  /* 이미 오간 것이 있으면 새로 안 만든다. 거절한 것은 표에 없으니 다시 보낼 수는 있다 */
+  const old = db.prepare(`SELECT * FROM duels WHERE (sender=? AND target=?) OR (sender=? AND target=?)`)
+                .get(me, target, target, me);
+  if (old) return { id: old.id, already: true, status: old.status };
+  const r = db.prepare('INSERT INTO duels(event,sender,target) VALUES(?,?,?)').run(ev, me, target);
+  return { id: Number(r.lastInsertRowid), already: false, status: 'sent' };
+}
+
+/** 수락하거나 거절한다. 거절은 «지운다» — 거절했다는 기록이 남으면 그것도 벌이다. */
+function answerDuel(db, id, me, yes) {
+  const d = db.prepare('SELECT * FROM duels WHERE id=?').get(+id);
+  if (!d) throw new HttpError(404, '없는 도전장입니다');
+  if (d.target !== me) throw new HttpError(403, '받은 사람만 답할 수 있습니다');
+  if (!yes) { db.prepare('DELETE FROM duels WHERE id=?').run(+id); return { gone: true }; }
+  db.prepare("UPDATE duels SET status='ok' WHERE id=?").run(+id);
+  return { gone: false, status: 'ok' };
+}
+
+/** 결과. 수락한 «뒤에» 둘이 같이 나온 대회의 순위를 읽는다. 없으면 null — «비겼다» 가 아니다. */
+function duelOutcome(db, d) {
+  const evs = db.prepare(`SELECT e.id, e.title, e.ends FROM events e
+    WHERE e.ends < date('now') AND e.ends >= date(?)
+      AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
+      AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
+    ORDER BY e.ends ASC`).all(String(d.created || '').slice(0, 10), d.sender, d.target);
+  for (const e of evs) {
+    let b; try { b = board(db, e.id, true); } catch { continue; }
+    /* board 는 운영자 차림이라 연락처가 들어 있다. 여기서 순위만 꺼내고 나머지는 안 들고 나간다. */
+    const rankOfPerson = pid => {
+      const row = b.rows.find(r => r.contact && pidOf(db, r.contact) === pid);
+      return row && row.rank ? row.rank : null;
+    };
+    const a = rankOfPerson(d.sender), c = rankOfPerson(d.target);
+    if (a && c) return { event: e.id, title: e.title, ends: e.ends, sender: a, target: c,
+                         winner: a < c ? 'sender' : a > c ? 'target' : 'tie' };
+  }
+  return null;
+}
+
+/** 내 도전장. 보낸 사람·받은 사람 말고는 아무도 못 본다. */
+function duelsOf(db, me) {
+  const rows = db.prepare('SELECT * FROM duels WHERE sender=? OR target=? ORDER BY id DESC').all(me, me);
+  const nameOf = pid => (db.prepare('SELECT handle FROM people WHERE id=?').get(pid) || {}).handle || '이름 없음';
+  return rows.map(d => ({
+    id: d.id, status: d.status, at: d.created,
+    mine: d.sender === me,
+    other: { id: d.sender === me ? d.target : d.sender,
+             handle: nameOf(d.sender === me ? d.target : d.sender) },
+    event: d.event,
+    /* 수락 전에는 결과를 안 센다 */
+    outcome: d.status === 'ok' ? duelOutcome(db, d) : null,
+  }));
+}
+
+/* ── 짝 신청 ──────────────────────────────────────────
+   톡방에서 도는 말은 «너도 해봐» 가 아니라 «우리 이거 해봤어» 다.
+   혼자 오는 길을 막지 않고, 둘이 오는 길을 하나 더 낸다.
+   초대 코드는 팀 열쇠와 «다른» 것이다 — 팀 열쇠를 넘기면 받은 사람이 그 팀 주인이 된다. */
+function inviteOf(db, teamId, tkey) {
+  const t = db.prepare('SELECT * FROM teams WHERE id=?').get(+teamId);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  if (!tkey || tkey !== t.tkey) throw new HttpError(403, '팀 열쇠가 필요합니다');
+  if (t.mate) throw new HttpError(409, '이미 짝이 있습니다');
+  let code = t.invite;
+  if (!code) {
+    code = crypto.randomBytes(5).toString('hex');
+    db.prepare('UPDATE teams SET invite=? WHERE id=?').run(code, t.id);
+  }
+  return { code, url: `${mailSite()}/e/${t.event}?pair=${code}` };
+}
+
+/** 초대 코드로 들어온 사람을 그 팀에 짝으로 붙인다. 새 팀을 만들지 않는다 —
+    그래서 링크를 두 번 써도 팀이 셋이 되지 않는다(둘째부터는 409). */
+function joinPair(db, event, code, b) {
+  const t = db.prepare('SELECT * FROM teams WHERE event=? AND invite=? AND invite<>\'\'').get(event, String(code || ''));
+  if (!t) throw new HttpError(404, '초대 링크가 맞지 않습니다');
+  if (t.mate) throw new HttpError(409, '이 팀은 이미 둘입니다');
+  const name = plain(b.name, 40);
+  if (!name) throw new HttpError(400, '이름이 필요합니다');
+  if (!b.agree) throw new HttpError(400, '개인정보 수집·이용에 동의해 주세요');
+  const contact = String(b.contact || b.email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contact)) throw new HttpError(400, '이메일 꼴이 아닙니다');
+  const pid = pidOf(db, contact);
+  if (pid === t.person) throw new HttpError(409, '신청한 분과 같은 연락처입니다');
+  db.prepare('INSERT OR IGNORE INTO people(id,handle) VALUES(?,?)').run(pid, name);
+  let mem = [];
+  try { mem = JSON.parse(t.members || '[]'); } catch { mem = []; }
+  mem.push({ n: name.slice(0, 20), g: false });
+  const key = crypto.randomBytes(5).toString('hex');
+  db.prepare(`UPDATE teams SET mate=?, mate_name=?, mate_key=?, mate_contact=?,
+                               size=?, members=?, solo=0, invite='' WHERE id=?`)
+    .run(pid, name, key, contact, Math.max(2, +t.size || 1), JSON.stringify(mem), t.id);
+  return { id: t.id, event: t.event, team: t.name, tkey: key, with: t.name };
+}
+
+/** 짝이 빠진다. 신청 자체는 안 깨진다 — 남은 사람의 자리는 그대로다. */
+function leavePair(db, teamId, mateKey) {
+  const t = db.prepare('SELECT * FROM teams WHERE id=?').get(+teamId);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  if (!t.mate || !mateKey || mateKey !== t.mate_key) throw new HttpError(403, '짝 열쇠가 필요합니다');
+  let mem = [];
+  try { mem = JSON.parse(t.members || '[]'); } catch { mem = []; }
+  const i = mem.findIndex(x => x && x.n === t.mate_name && !x.g);
+  if (i >= 0) mem.splice(i, 1);
+  db.prepare(`UPDATE teams SET mate='', mate_name='', mate_key='', mate_contact='',
+                               size=1, members=? WHERE id=?`).run(JSON.stringify(mem), t.id);
+  return { left: true };
+}
+
+/** 신청한 사람이 빠질 때. 짝이 있으면 짝을 주인으로 올린다 —
+    먼저 온 사람이 못 오게 됐다고 나중에 온 사람의 신청까지 없애지 않는다. */
+function promoteMate(db, t) {
+  let mem = [];
+  try { mem = JSON.parse(t.members || '[]'); } catch { mem = []; }
+  const i = mem.findIndex(x => x && x.n === t.name && !x.g);
+  if (i >= 0) mem.splice(i, 1);
+  db.prepare(`UPDATE teams SET name=?, contact=?, person=?, tkey=?,
+                               mate='', mate_name='', mate_key='', mate_contact='',
+                               size=1, members=? WHERE id=?`)
+    .run(t.mate_name, t.mate_contact, t.mate, t.mate_key, JSON.stringify(mem), t.id);
+  return { promoted: true, tkey: t.mate_key };
 }
 
 /** 이 대회(주최자)의 평판. 참가자가 남긴 평가에서 나온다. */
@@ -2090,6 +2240,9 @@ function open(file) {
   db.exec(`CREATE TABLE IF NOT EXISTS news(
     id INTEGER PRIMARY KEY, src TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);
+  /* 짝 신청 — 둘이 같이 오는 길. 초대 코드는 팀 열쇠와 다른 것이다 */
+  for (const c of ['invite', 'mate', 'mate_name', 'mate_key', 'mate_contact'])
+    try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   /* 그날의 조건 — 13시 오프닝에서 현장 공개한 제약 한 줄. 끝난 뒤에만 밖으로 나간다 */
   try { db.exec("ALTER TABLE events ADD COLUMN twist TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
@@ -2101,6 +2254,17 @@ function open(file) {
     team    INTEGER PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
     state   INTEGER,
     checked TEXT NOT NULL DEFAULT (datetime('now')))`);
+
+  /* 도전장. 맞붙기로 한 것만 남는다 — 거절은 지워서 기록을 안 남긴다.
+     한 쌍에 한 줄이라 표가 안 불어난다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS duels(
+    id      INTEGER PRIMARY KEY,
+    event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    sender  TEXT NOT NULL,
+    target  TEXT NOT NULL,
+    status  TEXT NOT NULL DEFAULT 'sent',
+    created TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(sender, target))`);
 
   /* 기록증 카드. 본인이 «만들기» 를 누른 순간 생기고, 그때부터 그 사람 프로필 링크의
      미리보기 그림이 된다. 안 만든 사람은 기본 og.png 다 - 빈 카드를 그리지 않는다. */
@@ -4429,6 +4593,26 @@ function routes(db) {
                  LEVELS.includes(b.level) ? b.level : '', m[1]);
           return json(res, 200, profile(db, m[1]));
         }
+        /* 도전장. 본인 확인은 프로필·카드와 같은 길 — 팀 열쇠다.
+           남의 도전장은 아무 열쇠로도 못 본다(당사자 둘뿐이다). */
+        if (p === '/api/duels' && req.method === 'POST') {
+          const tk = req.headers['x-tkey'] || '';
+          const who = tk ? db.prepare('SELECT person FROM teams WHERE tkey=?').get(tk) : null;
+          if (!who || !who.person) throw new HttpError(403, '참가 신청한 브라우저에서만 됩니다');
+          return json(res, 200, sendDuel(db, who.person, String((await body(req)).target || '')));
+        }
+        if ((m = p.match(/^\/api\/duels\/(\d+)\/answer$/)) && req.method === 'POST') {
+          const tk = req.headers['x-tkey'] || '';
+          const who = tk ? db.prepare('SELECT person FROM teams WHERE tkey=?').get(tk) : null;
+          if (!who || !who.person) throw new HttpError(403, '참가 신청한 브라우저에서만 됩니다');
+          return json(res, 200, answerDuel(db, m[1], who.person, !!(await body(req)).ok));
+        }
+        if ((m = p.match(/^\/api\/duels\/([0-9a-f]{12})$/)) && req.method === 'GET') {
+          const tk = req.headers['x-tkey'] || '';
+          if (!tk || !db.prepare('SELECT 1 FROM teams WHERE tkey=? AND person=?').get(tk, m[1]))
+            throw new HttpError(403, '본인만 볼 수 있습니다');
+          return json(res, 200, { rows: duelsOf(db, m[1]) });
+        }
         /* 기록증 카드. 화면이 그린 PNG 를 날바이트로 받는다. 본인 확인은 프로필 고치기와 같은
            길 — 팀 열쇠다(이메일은 남이 알 수 있다). 사람당 한 장이라 표가 안 불어난다. */
         if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/card$/)) && req.method === 'POST') {
@@ -4549,6 +4733,9 @@ function routes(db) {
           const jb = await body(req);
           delete jb._promote;   /* 내부 표식 — 밖에서 보내면 정원 검사를 건너뛴다. 경계에서 지운다 */
           applyGuard(clientIp(req), m[1]);   /* 한 IP 가 한 대회를 가짜 팀으로 채우는 것을 막는다 */
+          /* 초대 코드를 들고 왔으면 새 팀을 만들지 않고 그 팀에 짝으로 붙는다.
+             그래서 같은 링크를 두 번 써도 팀이 셋이 되지 않는다 — 둘째부터는 409 다. */
+          if (jb.pair) return json(res, 201, joinPair(db, m[1], jb.pair, jb));
           const tid = joinTeam(db, m[1], jb);
           if (typeof tid === 'object') return json(res, 202, tid);   /* 정원이 차서 대기자로 — { waiting: 몇 번째 } */
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
@@ -4959,6 +5146,12 @@ function routes(db) {
           needAdmin(db, t.event, key, owner);
           return json(res, 200, { link: `/e/${t.event}?t=${t.tkey}` });
         }
+        /* 짝 초대 링크를 받는다. 팀 열쇠를 가진 사람만 만들 수 있다 */
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/invite$/)) && req.method === 'POST')
+          return json(res, 200, inviteOf(db, m[1], String(req.headers['x-tkey'] || '')));
+        /* 짝이 빠진다. 신청 자체는 안 깨진다 */
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/mate$/)) && req.method === 'DELETE')
+          return json(res, 200, leavePair(db, m[1], String(req.headers['x-tkey'] || '')));
         /* 팀 지우기 — 운영자(열쇠) 또는 그 팀(팀 열쇠). 휴지통으로 가고, 되살리면 같은 id 로 돌아온다. */
         if ((m = p.match(/^\/api\/teams\/(\d+)$/)) && req.method === 'DELETE') {
           const t = db.prepare('SELECT id, event, tkey FROM teams WHERE id=?').get(+m[1]);
@@ -4967,6 +5160,13 @@ function routes(db) {
           let by = 'team';
           if (!tk || tk !== t.tkey) { needAdmin(db, t.event, key, owner); by = 'admin'; }
           else if (pastDue(db, t.id)) throw new HttpError(409, '제출 마감이 지나 취소할 수 없습니다. 운영자에게 말씀해 주세요');   // 본인 취소는 마감 전까지
+          /* 짝이 있으면 팀을 없애지 않고 짝을 주인으로 올린다.
+             먼저 온 사람이 못 오게 됐다고 나중에 온 사람의 신청까지 없애면 안 된다. */
+          const full = db.prepare('SELECT * FROM teams WHERE id=?').get(t.id);
+          if (full && full.mate) {
+            promoteMate(db, full);
+            return json(res, 200, { promoted: true });
+          }
           const trashed = trashTeam(db, t.id, by);
           promoteWaiting(db, t.event);
           return json(res, 200, { trash: trashed });
@@ -5925,6 +6125,123 @@ async function selftest() {
     editEvent(db, cEvB.id, { twist: '소리를 반드시 낸다' });
     /* 이 검사가 만든 것은 이 검사가 치운다 — 뒤의 «공개한 것만 목록에 든다» 가 같은 db 를 센다 */
     for (const x of [cEvA, cEvB, live]) db.prepare('DELETE FROM events WHERE id=?').run(x.id);
+  }
+
+  {
+    /* 도전장 — 같은 대회에 있던 사람에게만. 거절은 아무 데도 안 남는다 */
+    const dEv = createEvent(db, { title: '도전시험', starts: '2026-02-10', ends: '2026-02-10' });
+    const dA = joinTeam(db, dEv.id, { name: '도전갑', contact: 'duelA@x.test', agree: true });
+    const dB = joinTeam(db, dEv.id, { name: '도전을', contact: 'duelB@x.test', agree: true });
+    const other = createEvent(db, { title: '딴대회', starts: '2026-02-11', ends: '2026-02-11' });
+    joinTeam(db, other.id, { name: '남남', contact: 'duelC@x.test', agree: true });
+    const pA = pidOf(db, 'duelA@x.test'), pB = pidOf(db, 'duelB@x.test'), pC = pidOf(db, 'duelC@x.test');
+
+    ok(metAt(db, pA, pB) === dEv.id, '같은 대회에 있었는데 못 찾는다');
+    ok(metAt(db, pA, pC) === '', '같은 대회에 없던 사람을 만났다고 한다');
+
+    let blocked = false;
+    try { sendDuel(db, pA, pC); } catch (e) { blocked = e.code === 403; }
+    ok(blocked, '같은 대회에 없던 사람에게 도전장이 간다');
+    let self = false;
+    try { sendDuel(db, pA, pA); } catch (e) { self = e.code === 400; }
+    ok(self, '자기 자신에게 도전장을 보낸다');
+
+    const d1 = sendDuel(db, pA, pB);
+    ok(d1.id && d1.status === 'sent' && !d1.already, '도전장이 안 만들어진다');
+    ok(sendDuel(db, pA, pB).already === true, '같은 쌍에 도전장이 두 장 생긴다');
+    ok(sendDuel(db, pB, pA).already === true, '방향만 바꾸면 또 생긴다');
+
+    /* 남은 못 본다 */
+    ok(duelsOf(db, pC).length === 0, '남의 도전장이 보인다');
+    ok(duelsOf(db, pA).length === 1 && duelsOf(db, pB).length === 1, '당사자에게 안 보인다');
+    ok(duelsOf(db, pA)[0].mine === true && duelsOf(db, pB)[0].mine === false, '보낸 쪽·받은 쪽이 안 갈린다');
+    ok(duelsOf(db, pA)[0].outcome === null, '수락 전인데 결과가 나온다');
+
+    /* 보낸 사람은 못 받는다 */
+    let notMine = false;
+    try { answerDuel(db, d1.id, pA, true); } catch (e) { notMine = e.code === 403; }
+    ok(notMine, '보낸 사람이 자기 도전장을 수락한다');
+
+    /* 거절 — 표에서 아예 지운다. «거절함» 이라는 기록도 벌이다 */
+    ok(answerDuel(db, d1.id, pB, false).gone === true, '거절이 안 먹는다');
+    ok(db.prepare('SELECT COUNT(*) c FROM duels').get().c === 0, '거절한 도전장이 표에 남는다');
+    ok(duelsOf(db, pA).length === 0 && duelsOf(db, pB).length === 0, '거절한 것이 화면에 남는다');
+
+    /* 다시 보낼 수는 있다. 거절은 «이번엔 아니다» 이지 영구 차단이 아니다 */
+    const d2 = sendDuel(db, pA, pB);
+    ok(!d2.already, '거절한 뒤에 다시 못 보낸다');
+    ok(answerDuel(db, d2.id, pB, true).status === 'ok', '수락이 안 먹는다');
+    ok(duelsOf(db, pA)[0].status === 'ok', '수락이 안 남는다');
+    ok(duelsOf(db, pA)[0].outcome === null, '맞붙을 대회가 없는데 결과가 나온다');
+    ok(!JSON.stringify(duelsOf(db, pA)).includes('@x.test'), '도전장 응답에 연락처가 샌다');
+
+    db.prepare('DELETE FROM duels').run();
+    for (const x of [dEv, other]) db.prepare('DELETE FROM events WHERE id=?').run(x.id);
+  }
+
+  {
+    /* 짝 신청 — 둘이 같은 팀에 붙는다. 링크를 두 번 써도 팀이 셋이 되지 않는다 */
+    const pEvx = createEvent(db, { title: '짝시험', starts: '2026-03-01', ends: '2026-03-01' });
+    const pT = joinTeam(db, pEvx.id, { name: '짝팀', contact: 'pairA@x.test', agree: true });
+    const pTk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(pT).tkey;
+
+    let noKey = false;
+    try { inviteOf(db, pT, 'aaa'); } catch (e) { noKey = e.code === 403; }
+    ok(noKey, '팀 열쇠 없이 초대 링크가 나온다');
+    const inv = inviteOf(db, pT, pTk);
+    ok(inv.code && inv.code !== pTk, '초대 코드가 팀 열쇠와 같다 (넘기면 팀 주인이 된다)');
+    ok(inviteOf(db, pT, pTk).code === inv.code, '부를 때마다 코드가 새로 생긴다');
+
+    const before = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(pEvx.id).c;
+    const jp = joinPair(db, pEvx.id, inv.code, { name: '짝꿍', contact: 'pairB@x.test', agree: true });
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(pEvx.id).c === before,
+       '짝으로 왔는데 팀이 하나 더 생긴다');
+    ok(jp.id === pT && jp.tkey && jp.tkey !== pTk, '짝에게 제 열쇠가 안 간다');
+    const row = () => db.prepare('SELECT * FROM teams WHERE id=?').get(pT);
+    ok(row().size === 2 && row().mate_name === '짝꿍', '둘이 안 됐다');
+    ok(JSON.parse(row().members).length === 2, '자리 수가 안 늘었다');
+
+    /* 같은 링크를 또 쓰면 막힌다. 쓴 코드는 지워지므로 여기서는 «없는 링크» 로 걸린다 */
+    let used = false;
+    try { joinPair(db, pEvx.id, inv.code, { name: '셋째', contact: 'pairC@x.test', agree: true }); }
+    catch (e) { used = e.code === 404; }
+    ok(used, '한 번 쓴 초대 링크가 또 먹는다');
+
+    /* 코드가 어떤 이유로든 살아 있어도 짝이 있으면 안 받는다. 문을 둘 둔다 —
+       위의 «코드 지우기» 하나만 믿으면, 코드를 다시 발급하는 길이 생기는 날 셋이 된다. */
+    db.prepare("UPDATE teams SET invite='zzstale' WHERE id=?").run(pT);
+    let full = false;
+    try { joinPair(db, pEvx.id, 'zzstale', { name: '셋째', contact: 'pairC@x.test', agree: true }); }
+    catch (e) { full = e.code === 409; }
+    ok(full, '짝이 이미 있는데 셋째가 붙는다');
+    let hasMate = false;
+    try { inviteOf(db, pT, pTk); } catch (e) { hasMate = e.code === 409; }
+    ok(hasMate, '짝이 있는데 초대 링크가 또 나온다');
+    db.prepare("UPDATE teams SET invite='' WHERE id=?").run(pT);
+
+    /* 두 사람 다 그 대회에 «있었다» */
+    const pidA = pidOf(db, 'pairA@x.test'), pidB = pidOf(db, 'pairB@x.test');
+    ok(profile(db, pidB).history.some(h => h.title === '짝시험'), '짝의 기록에 대회가 안 남는다');
+    ok(profile(db, pidA).history.find(h => h.title === '짝시험').mate === '짝꿍', '내 기록에 짝 이름이 없다');
+    ok(profile(db, pidB).history.find(h => h.title === '짝시험').mate === '짝팀', '짝의 기록에 상대 이름이 없다');
+
+    /* 짝이 빠져도 신청은 안 깨진다 */
+    let wrongKey = false;
+    try { leavePair(db, pT, pTk); } catch (e) { wrongKey = e.code === 403; }
+    ok(wrongKey, '남의 열쇠로 짝을 뗀다');
+    leavePair(db, pT, jp.tkey);
+    ok(row().mate === '' && row().size === 1, '짝이 빠졌는데 자리가 안 줄었다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE id=?').get(pT).c === 1, '짝이 빠지자 신청이 통째로 없어졌다');
+
+    /* 신청한 사람이 빠지면 짝이 주인이 된다 */
+    const inv2 = inviteOf(db, pT, pTk);
+    const jp2 = joinPair(db, pEvx.id, inv2.code, { name: '짝꿍2', contact: 'pairD@x.test', agree: true });
+    promoteMate(db, db.prepare('SELECT * FROM teams WHERE id=?').get(pT));
+    ok(row().name === '짝꿍2' && row().tkey === jp2.tkey, '짝이 주인으로 안 올라간다');
+    ok(row().mate === '' && row().size === 1, '주인이 된 뒤에도 짝 칸이 남는다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE id=?').get(pT).c === 1, '주인이 빠지자 팀이 사라졌다');
+
+    db.prepare('DELETE FROM events WHERE id=?').run(pEvx.id);
   }
 
   // 뱃지 — 깃허브 README 에 거는 한 조각
