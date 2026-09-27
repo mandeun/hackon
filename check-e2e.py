@@ -2809,6 +2809,26 @@ with sync_playwright() as pw:
       "상태가 안 넘어간다")
     ok("연락한 곳 대장 — 넣고 상태가 한 칸씩 돈다")
 
+    # ── 심사위원 공개 입구 /judge — 심사 열쇠 화면 /j/<id> 를 가리지 않는다 ──
+    # SCREEN 은 객체 하나다. 같은 이름으로 화면을 하나 더 만들면 뒤의 것이 앞의 것을
+    # 조용히 덮는다. 실제로 한 번 덮었다. 그래서 둘을 같이 연다.
+    pg.goto(f"{BASE}/judge", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=8000)
+    jtxt = pg.inner_text("#view")
+    A("먼저 봅니다" in jtxt, f"/judge 가 심사위원 모집 화면이 아니다: {jtxt[:200]}")
+    A("심사 열쇠" not in jtxt, "/judge 에 심사 열쇠 화면이 떴다 (두 화면이 같은 이름을 쓴다)")
+    A(pg.evaluate("getComputedStyle(document.querySelector('nav')).display") == "none",
+      "/judge 에 아래 탭이 보인다 (밖에서 바로 들어오는 주소다)")
+    # 없는 것을 약속하지 않는다 — 참가팀 연락처를 바로 준다고 쓰면 안 된다
+    A("연락처는 이 화면이 주지 않습니다" in jtxt, "/judge 가 주지 않는 것을 밝히지 않는다")
+
+    pg.goto(f"{BASE}/j/{ev}", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=8000)
+    ktxt = pg.inner_text("#view")
+    A("심사 열쇠" in ktxt, f"/j/<id> 가 심사 열쇠 화면이 아니다: {ktxt[:200]}")
+    A("먼저 봅니다" not in ktxt, "/j/<id> 에 모집 화면이 떴다")
+    ok("심사위원 — /judge 는 모집 입구, /j/<id> 는 심사 열쇠. 서로 안 덮는다")
+
     b.close()
 
 A(not errs, "JS 에러: " + "; ".join(errs))

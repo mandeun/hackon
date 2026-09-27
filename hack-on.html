@@ -1461,6 +1461,7 @@ document.addEventListener('keydown', e => { if (TVM && (e.key === 'l' || e.key =
 /* 지금 화면에 그릴 진행표. 카드로 그리기 때문에 문자열이 아니라 그대로 들고 있는다. */
 let PLAN_NOW = [];
 let vArea = '';   // 구하기 화면에서 고른 자치구
+let mineSeg = 'all';      // 내 대회 화면에서 고른 역할 칩
 let findSeg = 'people';   // 구하기 화면의 갈래 — 사람 | 장소 | 연락한 곳. 기본은 사람이다
 /* 처음에 본인이 고르는 실력. 서버의 LEVELS 와 같아야 한다. */
 const LEVELS = ['처음', '해 봤음', '만들 줄 앎', '가르칠 수 있음'];
@@ -2058,7 +2059,11 @@ const SCREEN = {
      상태는 셋이다 — 있음 / 없음(404·지워진 대회) / 모름(지금 못 읽었다).
      못 읽은 줄을 지워진 것으로 그리지 않는다. 열쇠를 지우는 판단은 사람이 한다. */
   async mine() {
-    const hero = sub => `<section class="hero"><div class="top"><span class="pill">이 기기</span></div>
+    /* 이 화면은 «역할» 이 여섯인데 위계가 하나도 없었다 — 제목 여섯 줄에 카드가 세로로 쌓였다.
+       Alan 은 상태를 줄 오른쪽 끝에 칩으로 세우고, Careem 은 칸마다 세 줄만 보이고 나머지를
+       접고, Superlist 는 종류를 위쪽 칩 한 줄로 좁힌다. 셋을 가져왔다.
+       숫자는 «있음 / 없음 / 모름» 셋이다 — 못 읽은 줄이 있으면 0 이 아니라 ? 를 적는다. */
+    const hero = (sub, pill) => `<section class="hero"><div class="top"><span class="pill">${esc(pill || '이 기기')}</span></div>
       <h2>내 대회</h2><p class="sub" style="margin-bottom:0">${sub}</p></section>`;
     if (!LIVE) return hero('데모 모드에는 열쇠가 없습니다. 진짜 서버에서 보입니다.');
 
@@ -2083,7 +2088,7 @@ const SCREEN = {
         const b = await api(`/events/${id}/board`);
         const tid = localStorage.getItem('hackon.team.' + id) || '';
         const t = (b.rows || []).find(r => String(r.id) === String(tid));
-        return { id, ev: b.event, team: t ? t.name : '' };
+        return { id, ev: b.event, team: t ? t.name : '', done: t ? !!t.done : null };
       }),
       settle(judgeIds, async id => ({ id, ev: await api(`/events/${id}`) })),
       settle(voteIds, async id => ({ id, ev: await api(`/events/${id}`) })),
@@ -2095,46 +2100,83 @@ const SCREEN = {
     const dead = (x, what) => x.gone
       ? `<div class="card" style="padding:11px 13px"><div class="meta">지워진 ${what}입니다. 열쇠만 남았습니다.</div></div>`
       : `<div class="card" style="padding:11px 13px"><div class="meta">지금 못 읽었습니다 — ${what}이 있는지는 <b>모릅니다</b>. 잠시 뒤 다시 보세요.</div></div>`;
-    /* 역할 한 줄. 링크는 그 역할의 화면으로 그대로 간다 — 열쇠는 이미 이 브라우저에 있어 주소만으로 열린다 */
-    const row = (href, ev, pill, note) => `<a class="card ev" href="${esc(href)}" style="text-decoration:none;display:flex">
+
+    /* 역할 한 줄. 왼쪽은 무엇인가, 오른쪽 끝은 «지금 어떤 상태인가» 다.
+       전에는 상태가 meta 문장 속에 섞여 있어 눈이 훑지 못했다. */
+    const row = (href, ev, pill, note, st) => `<a class="card ev" href="${esc(href)}" style="text-decoration:none;display:flex;align-items:center">
       ${dateTile(ev.starts)}
       <div class="body"><h3>${esc(ev.title)}</h3>
-      <div class="meta"><span class="pill">${esc(pill)}</span> ${note}</div></div></a>`;
+      <div class="meta"><span class="pill">${esc(pill)}</span> ${note}</div></div>
+      ${st ? `<span class="pill ${st.c || ''}" style="flex:none;margin-left:auto">${esc(st.k)}</span>` : ''}</a>`;
 
-    const sec = (title, body) => body ? `<h2 style="margin-top:26px">${title}</h2>` + body : '';
-
-    const ownBox = my && my.events.length ? sec('내가 연 대회', my.events.map(ownedCard).join(''))
-      : myUnknown ? sec('내가 연 대회', dead({ unknown: true }, '연 대회')) : '';
-    const teamBox = sec('참여한 대회', teams.map(t => t.ev
-      ? row(`/e/${t.id}`, t.ev, '참가팀', t.team ? esc(t.team) : '내 팀')
-      : dead(t, '대회')).join(''));
-    const judgeBox = sec('맡은 심사', judges.map(j => j.ev
-      ? row(`/j/${j.id}`, j.ev, '심사위원', '점수 넣기')
-      : dead(j, '대회')).join(''));
-    const voteBox = sec('관객 평가', voters.map(v => v.ev
-      ? row(`/v/${v.id}`, v.ev, '관객', '표 던지기')
-      : dead(v, '대회')).join(''));
-    const giftBox = sec('내가 준 것', gifts.map(g => g.v
-      ? row(`/s/${g.id}`, g.v.event, needKind(g.v.gift.kind),
-            `${esc(g.v.gift.label || '')} · ${g.v.gift.status === 'ok' || g.v.gift.status === 'done' ? '확인됨' : g.v.gift.status === 'no' ? '거절됨' : '확인 전'}`)
-      : dead(g, '후원')).join(''));
-    const askBox = sec('내가 낸 것', asks.map(a => a.v
-      ? (a.v.event
+    /* 칸 여섯을 자료로 만든다 — 칩 줄·개수·«모름»을 한 곳에서 센다 */
+    const groups = [
+      { key: 'own', title: '내가 연 대회', chip: '연 대회',
+        cards: my ? my.events.map(ownedCard) : [],
+        unknown: myUnknown ? 1 : 0,
+        dead: myUnknown ? [dead({ unknown: true }, '연 대회')] : [] },
+      { key: 'team', title: '참여한 대회', chip: '참여',
+        cards: teams.filter(t => t.ev).map(t => row(`/e/${t.id}`, t.ev, '참가팀',
+          t.team ? esc(t.team) : '내 팀',
+          t.done === null ? null : t.done ? { k: '냈음', c: 'ok' } : { k: '아직', c: 'warn' })),
+        unknown: teams.filter(t => !t.ev && !t.gone).length,
+        dead: teams.filter(t => !t.ev).map(t => dead(t, '대회')) },
+      { key: 'judge', title: '맡은 심사', chip: '심사',
+        cards: judges.filter(j => j.ev).map(j => row(`/j/${j.id}`, j.ev, '심사위원', '점수 넣기', statusOf(j.ev))),
+        unknown: judges.filter(j => !j.ev && !j.gone).length,
+        dead: judges.filter(j => !j.ev).map(j => dead(j, '대회')) },
+      { key: 'vote', title: '관객 평가', chip: '관객',
+        cards: voters.filter(v => v.ev).map(v => row(`/v/${v.id}`, v.ev, '관객', '표 던지기', statusOf(v.ev))),
+        unknown: voters.filter(v => !v.ev && !v.gone).length,
+        dead: voters.filter(v => !v.ev).map(v => dead(v, '대회')) },
+      { key: 'gift', title: '내가 준 것', chip: '후원',
+        cards: gifts.filter(g => g.v).map(g => row(`/s/${g.id}`, g.v.event, needKind(g.v.gift.kind),
+          esc(g.v.gift.label || ''),
+          g.v.gift.status === 'ok' || g.v.gift.status === 'done' ? { k: '확인됨', c: 'ok' }
+            : g.v.gift.status === 'no' ? { k: '거절됨', c: 'warn' } : { k: '확인 전', c: '' })),
+        unknown: gifts.filter(g => !g.v && !g.gone).length,
+        dead: gifts.filter(g => !g.v).map(g => dead(g, '후원')) },
+      { key: 'ask', title: '내가 낸 것', chip: '의뢰',
+        cards: asks.filter(a => a.v).map(a => a.v.event
           ? row(`/r/${a.id}`, a.v.event, a.v.request.kind === 'sponsor' ? '후원 주제' : '의뢰',
-                esc(a.v.request.topic || a.v.request.pain || ''))
+                esc(a.v.request.topic || a.v.request.pain || ''), { k: '대회에 붙음', c: 'ok' })
           : `<a class="card" href="/r/${esc(a.id)}" style="text-decoration:none;display:block">
               <h3>${esc(a.v.request.topic || a.v.request.pain || '이름 없는 요청')}</h3>
-              <div class="meta"><span class="pill warn">아직 대회에 안 붙었습니다</span> 주최자가 주제로 가져가면 여기에 대회가 붙습니다.</div></a>`)
-      : dead(a, '요청')).join(''));
+              <div class="meta"><span class="pill warn">아직 대회에 안 붙었습니다</span> 주최자가 주제로 가져가면 여기에 대회가 붙습니다.</div></a>`),
+        unknown: asks.filter(a => !a.v && !a.gone).length,
+        dead: asks.filter(a => !a.v).map(a => dead(a, '요청')) },
+    ];
 
-    const boxes = ownBox + teamBox + judgeBox + voteBox + giftBox + askBox;
-    if (!boxes) return hero('아직 아무 자리도 없습니다.') + `<div class="card">
-      <h3>여기에 무엇이 모이나</h3>
-      <div class="meta">내가 연 대회, 참가 신청한 대회, 맡은 심사, 던진 표, 보낸 후원, 내가 낸 의뢰가
-        역할별로 한 줄씩 쌓입니다. 링크를 잃어도 이 탭에서 다시 찾습니다.</div>
-      <div style="height:10px"></div>
-      <button class="btn sm" data-go="home">열린 대회 보기</button></div>`;
-    return hero('이 기기가 든 열쇠로 찾은 자리입니다.') + boxes + `<div class="card" style="padding:11px 13px">
+    const total = groups.reduce((a, g) => a + g.cards.length + g.dead.length, 0);
+    if (!total) return hero('아직 아무 자리도 없습니다.', '이 기기 · 열쇠 0개') + `<div class="card">
+      <h3>내가 맡은 자리가 여기 모입니다</h3>
+      <div class="meta">대회에 참가 신청하면, 심사를 맡으면, 후원을 보내면 —
+        그때마다 여기에 한 줄씩 생깁니다. 링크를 잃어도 이 탭에서 다시 찾습니다.</div>
+      <div style="height:12px"></div>
+      <button class="btn sm" data-go="home">열린 대회 보기</button>
+      <div style="margin-top:10px"><a class="lnk" href="/judge">심사위원으로 참여하기</a>
+        <span class="meta">— 대회에 안 나가도 됩니다</span></div></div>`;
+
+    /* 칩 줄. 개수는 셋이다 — 있음(숫자) · 없음(0, 칩 자체를 안 그린다) · 모름(?). */
+    const live = groups.filter(g => g.cards.length || g.dead.length);
+    if (mineSeg !== 'all' && !live.some(g => g.key === mineSeg)) mineSeg = 'all';
+    const countOf = g => g.unknown ? (g.cards.length ? `${g.cards.length}+?` : '?') : String(g.cards.length);
+    const chips = `<div class="htabs" id="mine-segs">
+      <button type="button" data-mseg="all"${mineSeg === 'all' ? ' class="on"' : ''}>전체</button>
+      ${live.map(g => `<button type="button" data-mseg="${g.key}"${mineSeg === g.key ? ' class="on"' : ''}>${esc(g.chip)} ${countOf(g)}</button>`).join('')}</div>`;
+
+    /* 칸마다 세 줄까지. 폰에서 여섯 칸이 다섯 줄씩이면 서른 줄을 스크롤한다. */
+    const sec = g => {
+      const all = g.cards.concat(g.dead);
+      if (!all.length) return '';
+      const head = all.slice(0, 3).join(''), rest = all.slice(3);
+      return `<h2 style="margin-top:26px">${g.title}</h2>${head}` + (rest.length
+        ? `<details><summary>${rest.length}개 더 보기</summary><div class="in">${rest.join('')}</div></details>` : '');
+    };
+
+    return hero('이 기기가 든 열쇠로 찾은 자리입니다.', `이 기기 · 열쇠 ${total}개`) + chips
+      + live.filter(g => mineSeg === 'all' || g.key === mineSeg).map(sec).join('')
+      + `<div class="card" style="padding:11px 13px">
       <div class="meta">이 목록은 <b>이 기기</b>에 저장된 열쇠로 만듭니다. 폰을 바꾸면 따라오지 않습니다 —
         주최자로 연 대회만 로그인으로 따라옵니다.</div></div>`;
   },
@@ -3332,6 +3374,51 @@ const SCREEN = {
       </section>
       ${giveBox()}
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a></p>`;
+  },
+
+  /* ── 심사위원 공개 입구 — /judge ────────────────────────────────
+     심사를 «부탁» 으로 내밀면 아무도 안 온다. «먼저 보는 자리» 로 내민다.
+     새로 만든 길이 아니다 — 줄 수 있는 것(/give)의 «심사» 갈래를 그대로 쓴다.
+     여기서 보낸 것은 그 대회 운영자의 «자리» 목록에 신청으로 들어간다(pledge).
+     적는 것은 사실만 — 지금 코드가 실제로 해 주는 것 밖을 약속하지 않는다. */
+  async bejudge() {
+    const list = LIVE ? await api('/events') : DEMO.events;
+    G.fixed = false;
+    G.events = list.filter(e => statusOf(e).k !== '끝남');
+    if (G.event && !G.events.some(e => e.id === G.event)) { G.event = ''; G.step = 1; }
+    /* 이 화면으로 들어온 사람은 무엇을 줄지 이미 정해져 있다. ①을 건너뛴다. */
+    if (G.kind !== 'judge') { G.kind = 'judge'; G.need = null; G.needLabel = ''; G.step = giveNext(); }
+    return `<section class="hero">
+        <div class="top"><span class="pill">심사위원</span></div>
+        <h2>제출작을<br>남보다 먼저 봅니다</h2>
+        <p class="sub" style="margin-bottom:0">심사를 맡으면 순위가 나오기 전에 결과물을 봅니다.
+          만든 사람과 그 자리에서 이야기할 수 있습니다.</p>
+      </section>
+
+      <div class="card">
+        <h3>무엇을 하나요</h3>
+        <div class="meta">대회 마지막 한 시간, 팀당 4분씩 봅니다.
+          점수는 주최자가 미리 정해 둔 기준표대로 넣습니다 — 자유 서술이 아니라 항목별 점수라
+          처음이어도 막히지 않습니다. 무보수가 표준입니다.</div>
+      </div>
+
+      <div class="card">
+        <h3>무엇을 받나요</h3>
+        <div class="meta">
+          <b>먼저 봅니다.</b> 심사 화면은 순위가 공개되기 전에 열립니다.<br>
+          <b>이름이 남습니다.</b> 대회 페이지와 행사장 큰 화면에 심사위원으로 붙습니다.<br>
+          <b>끝이 아닙니다.</b> 대회가 끝난 뒤 팀이 계속 만들고 있는지가 결과 보고서에 남습니다.</div>
+        <div class="meta" style="margin-top:9px">참가팀 연락처는 이 화면이 주지 않습니다.
+          팀이 동의했을 때 주최자를 통해서만 갑니다.</div>
+      </div>
+
+      ${G.events.length ? `<h3 style="margin-top:20px">어느 대회를 맡으시겠어요</h3>
+        <p class="sub">보내면 그 대회 주최자에게 신청으로 들어갑니다. 주최자가 확인하면 심사 링크를 보냅니다.</p>
+        ${giveBox()}`
+      : `<h3 style="margin-top:20px">지금은 열린 대회가 없습니다</h3>
+        <div class="card"><div class="meta">대회가 열리면 여기에서 바로 맡을 수 있습니다.
+          지금은 이 주소를 적어 두세요 — 새 대회는 보통 2~3주 전에 올라옵니다.</div></div>`}
+      <p class="meta" style="margin:14px 4px"><a href="/app">열린 대회 보기</a></p>`;
   },
 
   /* 행사장 큰 화면 — /tv/<대회id>. 노트북을 HDMI 로 꽂아 두는 용도다.
@@ -4755,6 +4842,10 @@ function wire() {
   document.querySelectorAll('[data-seg]').forEach(b => b.onclick = () => {
     findSeg = b.dataset.seg; render();
   });
+  /* 내 대회의 역할 칩 — 여섯 칸을 하나로 좁힌다 */
+  document.querySelectorAll('[data-mseg]').forEach(b => b.onclick = () => {
+    mineSeg = b.dataset.mseg; render();
+  });
   document.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => {
     if (b.dataset.sec === 'spon') { tab = 'spon'; render(); return; }
     const d = document.getElementById(b.dataset.sec) || document.querySelector('#view h2');
@@ -5453,6 +5544,7 @@ const TVM = location.pathname.match(/^\/tv\/([a-z0-9]+)$/);
    /give/<대회id> 는 그 대회의 협찬 안내 한 장 — 인스타 프로필에 거는 주소다. */
 const GIV = location.pathname.match(/^\/give(?:\/([a-z0-9]+))?$/);
 const ASKP = location.pathname === '/ask';
+const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 — 구하기 «사람» 갈래에서 보내는 곳
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
 const RNK = location.pathname === '/rank';       // 기여 순위 — 백준 랭킹처럼   // «받는 사람» — 후원자·의뢰자가 주제·문제를 올리는 세 화면
 const RCV = location.pathname.match(/^\/r\/([a-z0-9]+)$/);   // 받는 화면 /r/<id>?k=<열쇠>
@@ -5487,6 +5579,8 @@ if (TVM) {
 }
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RNK) { tab = 'rank'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+/* 심사위원 입구. 밖에서 바로 들어오는 주소라 아래 탭을 숨기고 손님 차림으로 연다 */
+else if (JDGP) { tab = 'bejudge'; cur = ''; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIV || ASKP) {
   tab = GIV ? 'give' : 'ask';
   /* cur 은 localStorage 에서 미리 채워져 있다. 대회 없는 /give 로 들어왔는데 그걸 그대로 두면
