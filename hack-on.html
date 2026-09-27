@@ -2272,13 +2272,14 @@ const SCREEN = {
      지금까지 자리는 대회 안에만 있었다. 무엇을 줄 수 있는지만 아는 사람은
      어느 대회에 그 자리가 있는지 몰라서 못 들어왔다(기여형 설계 §2-1). */
   async giveSide() {
-    const op = LIVE ? await api(`/openings${openKind ? '?kind=' + encodeURIComponent(openKind) : ''}`)
-                       .catch(() => null) : null;
-    if (!op) return `<div class="card"><div class="meta">지금 자리 목록을 못 받아 왔습니다 —
+    /* 한 번만 받아서 종류 거르기는 여기서 한다. 칩 개수와 목록이 같은 응답에서 나와야
+       «심사 3» 을 눌렀는데 두 개가 나오는 일이 안 생긴다. */
+    const all = LIVE ? await api('/openings').catch(() => null) : null;
+    if (!all) return `<div class="card"><div class="meta">지금 자리 목록을 못 받아 왔습니다 —
       비어 있는 자리가 있는지는 <b>모릅니다</b>. 잠시 뒤 다시 보세요.</div></div>`;
+    const op = { ...all, rows: openKind ? all.rows.filter(r => r.kind === openKind) : all.rows };
 
     /* 종류 칩. 실제로 올라온 종류만 그린다 — 없는 칸을 눌러 빈 화면을 보게 하지 않는다 */
-    const all = LIVE ? await api('/openings').catch(() => ({ rows: [] })) : { rows: [] };
     const have = [...new Set(all.rows.map(r => r.kind))];
     const chips = `<div class="htabs" id="okinds">
       <button type="button" data-okind=""${openKind ? '' : ' class="on"'}>전체 ${all.rows.length}</button>
