@@ -704,6 +704,7 @@ body.tv #cta{display:none}
   <div id="toast" role="status" aria-live="polite"></div>
   <nav>
     <button data-t="home" class="on"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg></span>대회</button>
+    <button data-t="mine"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg></span>내 대회</button>
     <button data-t="make"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="6"/><path d="M12 8v8M8 12h8"/></svg></span>열기</button>
     <button data-t="find"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>구하기</button>
     <button data-t="board"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 20V11M12 20V5M18 20v-6"/></svg></span>순위</button>
@@ -755,12 +756,17 @@ async function api(path, opt) {
                ...(cur && jkeyOf(cur) ? { 'x-jkey': jkeyOf(cur) } : {}),
                ...(cur && vkeyOf(cur) ? { 'x-vkey': vkeyOf(cur) } : {}),
                ...(RKEY ? { 'x-rkey': RKEY } : {}),
+               /* 열쇠를 인자로 받는 두 갈래. «내 대회» 는 지금 보는 대회가 아닌 여러 대회를
+                  한 번에 읽으므로 cur 에 매인 위쪽 헤더로는 안 된다 — 줄마다 제 열쇠를 들고 온다 */
+               ...(opt?.rkey ? { 'x-rkey': opt.rkey } : {}),
                ...(opt?.pkey ? { 'x-pkey': opt.pkey } : {}),
                ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
   const d = await r.json();
-  if (!r.ok) throw new Error(d.error || '서버 오류');
+  /* 상태 코드를 오류에 실어 보낸다. 부르는 쪽이 «없다(404)» 와 «못 읽었다» 를 갈라야 한다 —
+     둘을 같은 화면으로 그리면 모름을 없음으로 그리게 된다. */
+  if (!r.ok) { const e = new Error(d.error || '서버 오류'); e.status = r.status; throw e; }
   return d;
 }
 /* ═══════ ASK-FIRST 끝 ═══════ */
@@ -1874,6 +1880,18 @@ async function render() {
   document.body.dataset.ready = '1';   // 완주 테스트가 이 표시를 기다린다
 }
 
+/* 내가 연 대회 카드 한 장. 첫 화면과 «내 대회» 탭이 같은 markup 을 쓴다 —
+   두 군데에 베껴 두면 한쪽만 고쳐진다. */
+const ownedCard = e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
+  ${dateTile(e.starts)}
+  <div class="body"><h3>${esc(e.title)}</h3>
+  <div class="meta">${e.listed ? badge(e) : '<span class="pill warn">초안</span>'}
+    ${+e.prize ? ' · 상금 ' + won(e.prize) : ''}
+    · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
+</div>`;
+/* 이 브라우저가 든 열쇠를 접두사별로 모은다. localStorage 를 못 읽는 브라우저(사생활 모드)면 빈 목록 */
+const keyIds = pre => { try { return Object.keys(localStorage).filter(k => k.startsWith(pre)).map(k => k.slice(pre.length)).filter(Boolean); } catch (_) { return []; } };
+
 const SCREEN = {
   async home() {
     /* «로그인» 으로 들어온 사람에게는 목록보다 로그인이 먼저다. 셋을 같은 크기로 세운다 —
@@ -1897,13 +1915,7 @@ const SCREEN = {
         <div><b>${my.total.finishRate}%</b><span>완주율</span></div>
         <div><b>${my.total.promised ? my.total.keptRate + '%' : '—'}</b><span>약속 이행</span></div>
       </div>` : ''}
-      ${my.events.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
-        ${dateTile(e.starts)}
-        <div class="body"><h3>${esc(e.title)}</h3>
-        <div class="meta">${e.listed ? badge(e) : '<span class="pill warn">초안</span>'}
-          ${+e.prize ? ' · 상금 ' + won(e.prize) : ''}
-          · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
-      </div>`).join('')}
+      ${my.events.map(ownedCard).join('')}
       ${AUTH && AUTH.links && AUTH.links.length ? `<div class="card" style="padding:11px 13px"><div class="meta">
         <b>${AUTH.links.map(l => esc(l.label)).join('·')}로 로그인돼 있습니다.</b> 다른 기기에서도 그대로 보입니다.
         ${loginRest().length ? `<br>다른 것으로도 들어오시려면 지금 붙여 두세요 — 안 붙이면 계정이 둘로 갈립니다.<br>
@@ -1933,18 +1945,18 @@ const SCREEN = {
         <div style="height:10px"></div>
         <button class="btn sm" id="ow-go">찾기</button>
       </div>`}
-      ${/* 되살리기는 두 길이다. 주최자 열쇠가 있으면 목록에서 한 번 누른다 — 첨부할 것이 없다.
-            열쇠가 없는 기기(노트북이 죽었거나 다른 폰)에만 사본 파일 칸을 접어 둔다. */''}
+      ${/* 되살리기는 열쇠를 든 사람의 일이다. 목록에서 한 번 누른다 — 첨부할 것이 없다.
+            전에는 열쇠가 없을 때 «사본 파일이 있으면» 칸을 접어 뒀는데, 그 칸은 쓸 수 없었다 —
+            /events/restore 는 주최자 열쇠를 요구하고(restoreEvent), 그 칸은 열쇠가 없을 때만 그려졌다.
+            즉 보이는 사람은 못 쓰고, 쓸 수 있는 사람에겐 안 보였다. 처음 온 손님에게 첫 화면에서
+            «사본 파일» 을 묻는 것도 이상했다. 남는 길은 하나 — 로그인하고 «지운 대회» 에서 누른다. */''}
       ${my ? `<details class="card" style="padding:14px 20px" id="ev-trash"><summary style="cursor:pointer;font-weight:700">지운 대회</summary>
         <div class="meta" style="margin-top:8px">지운 대회는 30일 동안 남습니다.</div>
         ${(trash && trash.length) ? trash.map(t => `<div class="card" style="padding:11px 13px">
           <div class="meta"><b>${esc(t.title || '이름 없는 대회')}</b> · ${esc(String(t.at || '').slice(0, 10))} 지움 · 팀 ${+t.teams}</div>
           <div style="height:8px"></div><button class="btn sec sm" data-untrash-ev="${+t.id}">되살리기</button></div>`).join('')
           : `<div class="meta">지운 대회가 없습니다.</div>`}
-      </details>` : `<details class="card" style="padding:14px 20px"><summary style="cursor:pointer;font-weight:700">사본 파일이 있으면</summary>
-        <div class="meta" style="margin-top:8px">지울 때 받은 파일로 되살립니다.</div>
-        <input type="file" id="rs-file" accept="application/json" style="margin-top:8px">
-        <div style="height:8px"></div><button class="btn sec sm" id="rs-go">되살리기</button></details>`}`;
+      </details>` : ''}`;
     /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
        그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
     if (!list.length && my && my.events.length) return loginBox + mineBox + `
@@ -1961,6 +1973,97 @@ const SCREEN = {
         <div class="meta">${badge(e)} ${esc(e.host)}${+e.prize ? ' · 상금 ' + won(e.prize) : ''}</div></div>
       </div>`).join('') +
       (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '') + findBox;
+  },
+
+  /* ── 내 대회 — 이 브라우저가 든 열쇠를 모아 역할별로 세운다 ──
+     주최자에게는 첫 화면에 목록이 있었지만 나머지 다섯 역할에는 돌아올 길이 아예 없었다.
+     참가자·심사위원·관객·후원자·의뢰자는 받은 링크를 잃으면 자기 자리를 다시 못 찾는다.
+
+     서버에 새 갈래를 만들지 않았다. 열쇠는 이미 이 브라우저에 있고(hackon.team.* · jkey.* ·
+     vkey.* · pkey.* · rkey.*), 제목은 공개 갈래로, 후원·의뢰는 그 열쇠의 제 갈래로 읽는다.
+
+     상태는 셋이다 — 있음 / 없음(404·지워진 대회) / 모름(지금 못 읽었다).
+     못 읽은 줄을 지워진 것으로 그리지 않는다. 열쇠를 지우는 판단은 사람이 한다. */
+  async mine() {
+    const hero = sub => `<section class="hero"><div class="top"><span class="pill">이 기기</span></div>
+      <h2>내 대회</h2><p class="sub" style="margin-bottom:0">${sub}</p></section>`;
+    if (!LIVE) return hero('데모 모드에는 열쇠가 없습니다. 진짜 서버에서 보입니다.');
+
+    let my = null, myUnknown = false;
+    if (myKey()) { try { my = await api('/mine'); } catch (e) { myUnknown = e.status !== 404; } }
+    const own = new Set(my ? my.events.map(e => e.id) : []);
+
+    /* 대회 id 로 잡히는 셋. 내가 연 대회는 위 칸에 이미 있으니 뺀다 —
+       대회를 만들면 심사·관객 열쇠가 같이 저장되므로(만들기 응답) 안 빼면 한 대회가 세 번 나온다. */
+    const teamIds = keyIds('hackon.team.').filter(id => !own.has(id));
+    const judgeIds = keyIds('hackon.jkey.').filter(id => !own.has(id));
+    const voteIds = keyIds('hackon.vkey.').filter(id => !own.has(id));
+    const giftRefs = keyIds('hackon.pkey.');
+    const askIds = keyIds('hackon.rkey.');
+
+    /* 줄마다 따로 실패한다. 하나가 404 여도 나머지는 그려야 한다 */
+    const settle = (list, f) => Promise.all(list.map(x =>
+      f(x).catch(e => ({ id: x, gone: e.status === 404, unknown: e.status !== 404 }))));
+
+    const [teams, judges, voters, gifts, asks] = await Promise.all([
+      settle(teamIds, async id => {
+        const b = await api(`/events/${id}/board`);
+        const tid = localStorage.getItem('hackon.team.' + id) || '';
+        const t = (b.rows || []).find(r => String(r.id) === String(tid));
+        return { id, ev: b.event, team: t ? t.name : '' };
+      }),
+      settle(judgeIds, async id => ({ id, ev: await api(`/events/${id}`) })),
+      settle(voteIds, async id => ({ id, ev: await api(`/events/${id}`) })),
+      settle(giftRefs, async ref => ({ id: ref, v: await api(`/give/${ref}/view`, { pkey: localStorage.getItem('hackon.pkey.' + ref) || '' }) })),
+      settle(askIds, async id => ({ id, v: await api(`/requests/${id}/view`, { rkey: localStorage.getItem('hackon.rkey.' + id) || '' }) })),
+    ]);
+
+    /* 못 읽은 줄·지워진 줄은 같은 모양으로 그리되 말이 다르다 */
+    const dead = (x, what) => x.gone
+      ? `<div class="card" style="padding:11px 13px"><div class="meta">지워진 ${what}입니다. 열쇠만 남았습니다.</div></div>`
+      : `<div class="card" style="padding:11px 13px"><div class="meta">지금 못 읽었습니다 — ${what}이 있는지는 <b>모릅니다</b>. 잠시 뒤 다시 보세요.</div></div>`;
+    /* 역할 한 줄. 링크는 그 역할의 화면으로 그대로 간다 — 열쇠는 이미 이 브라우저에 있어 주소만으로 열린다 */
+    const row = (href, ev, pill, note) => `<a class="card ev" href="${esc(href)}" style="text-decoration:none;display:flex">
+      ${dateTile(ev.starts)}
+      <div class="body"><h3>${esc(ev.title)}</h3>
+      <div class="meta"><span class="pill">${esc(pill)}</span> ${note}</div></div></a>`;
+
+    const sec = (title, body) => body ? `<h2 style="margin-top:26px">${title}</h2>` + body : '';
+
+    const ownBox = my && my.events.length ? sec('내가 연 대회', my.events.map(ownedCard).join(''))
+      : myUnknown ? sec('내가 연 대회', dead({ unknown: true }, '연 대회')) : '';
+    const teamBox = sec('참여한 대회', teams.map(t => t.ev
+      ? row(`/e/${t.id}`, t.ev, '참가팀', t.team ? esc(t.team) : '내 팀')
+      : dead(t, '대회')).join(''));
+    const judgeBox = sec('맡은 심사', judges.map(j => j.ev
+      ? row(`/j/${j.id}`, j.ev, '심사위원', '점수 넣기')
+      : dead(j, '대회')).join(''));
+    const voteBox = sec('관객 평가', voters.map(v => v.ev
+      ? row(`/v/${v.id}`, v.ev, '관객', '표 던지기')
+      : dead(v, '대회')).join(''));
+    const giftBox = sec('내가 준 것', gifts.map(g => g.v
+      ? row(`/s/${g.id}`, g.v.event, needKind(g.v.gift.kind),
+            `${esc(g.v.gift.label || '')} · ${g.v.gift.status === 'ok' || g.v.gift.status === 'done' ? '확인됨' : g.v.gift.status === 'no' ? '거절됨' : '확인 전'}`)
+      : dead(g, '후원')).join(''));
+    const askBox = sec('내가 낸 것', asks.map(a => a.v
+      ? (a.v.event
+          ? row(`/r/${a.id}`, a.v.event, a.v.request.kind === 'sponsor' ? '후원 주제' : '의뢰',
+                esc(a.v.request.topic || a.v.request.pain || ''))
+          : `<a class="card" href="/r/${esc(a.id)}" style="text-decoration:none;display:block">
+              <h3>${esc(a.v.request.topic || a.v.request.pain || '이름 없는 요청')}</h3>
+              <div class="meta"><span class="pill warn">아직 대회에 안 붙었습니다</span> 주최자가 주제로 가져가면 여기에 대회가 붙습니다.</div></a>`)
+      : dead(a, '요청')).join(''));
+
+    const boxes = ownBox + teamBox + judgeBox + voteBox + giftBox + askBox;
+    if (!boxes) return hero('아직 아무 자리도 없습니다.') + `<div class="card">
+      <h3>여기에 무엇이 모이나</h3>
+      <div class="meta">내가 연 대회, 참가 신청한 대회, 맡은 심사, 던진 표, 보낸 후원, 내가 낸 의뢰가
+        역할별로 한 줄씩 쌓입니다. 링크를 잃어도 이 탭에서 다시 찾습니다.</div>
+      <div style="height:10px"></div>
+      <button class="btn sm" data-go="home">열린 대회 보기</button></div>`;
+    return hero('이 기기가 든 열쇠로 찾은 자리입니다.') + boxes + `<div class="card" style="padding:11px 13px">
+      <div class="meta">이 목록은 <b>이 기기</b>에 저장된 열쇠로 만듭니다. 폰을 바꾸면 따라오지 않습니다 —
+        주최자로 연 대회만 로그인으로 따라옵니다.</div></div>`;
   },
 
   async make() {
@@ -2386,7 +2489,7 @@ const SCREEN = {
           <div class="meta">첫 화면 목록에서 사라지고 링크로는 열립니다.</div>
           <div style="height:8px"></div>${e.listed ? '<button class="btn sm" id="gd-unlist">목록에서 내리기</button>' : '<span class="pill">지금 목록에 없습니다</span>'}</div>
         <div class="card"><h3>완전히 지우기</h3>
-          <div class="meta">팀·제출·점수·투표가 함께 지워지고 되돌릴 수 없습니다. 사본(연락처 포함)이 내려받아지니 운영자만 보관하세요.</div>
+          <div class="meta">팀·제출·점수·투표가 함께 지워집니다. <b>30일 안에는 첫 화면 «지운 대회»에서 되살릴 수 있습니다.</b> 사본(연락처 포함)도 내려받아지니 운영자만 보관하세요.</div>
           ${busyDel ? `<label>확인하려면 대회 이름을 그대로 적으세요</label><input id="gd-name" placeholder="${esc(e.title)}"><div class="meta" id="gd-hint">이름이 똑같아지면 아래 단추가 켜집니다.</div>`
                     : '<div class="meta" style="margin-top:6px">신청·자리·제안이 없는 빈 대회라 바로 지울 수 있습니다.</div>'}
           <div style="height:8px"></div><button class="btn sm" id="gd-go" data-title="${esc(e.title)}" style="background:var(--bad)"${busyDel ? ' disabled' : ''}>완전히 지우기</button></div>
@@ -4456,16 +4559,8 @@ function wire() {
       a.download = `hackon-${cur}-사본.json`; a.click(); flash('사본을 내려받았습니다');
     } catch (e) { flash(e.message, true); }
   };
-  const rsgo = $('#rs-go');
-  if (rsgo) rsgo.onclick = async () => {
-    const f = $('#rs-file').files[0]; if (!f) return flash('사본 파일을 고르세요', true);
-    if (!LIVE) return flash('데모에서는 안 됩니다', true);
-    let d; try { d = JSON.parse(await f.text()); } catch { return flash('사본 파일이 아닙니다', true); }
-    try { const r = await api('/events/restore', { method: 'POST', body: d });
-      try { localStorage.setItem('hackon.okey.' + r.id, r.okey); localStorage.setItem('hackon.event', r.id); } catch (_) {}
-      cur = r.id; tab = 'board'; flash('되살렸습니다. 팀 ' + r.teams + ' · 자리 ' + r.needs); }
-    catch (e) { flash(e.message, true); }
-  };
+  /* «사본 파일로 되살리기» 칸은 걷어냈다(첫 화면 주석 참고). /api/events/restore 는 남겨 둔다 —
+     디스크째 잃은 운영자를 사람이 손으로 되살려 주는 마지막 길이고, 화면에서 부르는 곳은 없다. */
   /* 팀 지우기·이름 고치기·되살리기 — 운영자. 지우기는 휴지통이라 겁낼 것 없다. */
   document.querySelectorAll('[data-trash]').forEach(b => b.onclick = async (ev) => {
     ev.stopPropagation();
