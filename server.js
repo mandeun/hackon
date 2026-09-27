@@ -642,7 +642,9 @@ function xpOf(db, pid, season) {
    두 줄을 함께 낸다 — 이번 시즌과 통산. 시즌만 두면 지난 기록이 사라진 것처럼 보이고,
    통산만 두면 1등이 굳는다. */
 function rank(db, limit = 50) {
-  /* 사람마다 프로필을 한 번만 읽는다. 거기에 시즌과 통산이 둘 다 들어 있다 —
+  /* ponytail: 사람 수만큼 profile() 을 부른다. 수백 명까지 괜찮다. 넘으면 완주·수상·기여를
+     한 번에 세는 표 하나를 두고 거기서 읽는다.
+     사람마다 프로필을 한 번만 읽는다. 거기에 시즌과 통산이 둘 다 들어 있다 —
      두 번 읽으면 사람 수만큼 표를 두 번 훑게 된다. */
   const base = db.prepare("SELECT id, handle FROM people WHERE handle<>''").all()
     .map(p => {
@@ -750,6 +752,8 @@ async function livenessTick(db) {
                            JOIN events e ON e.id = t.event
                            WHERE s.show = 1 AND s.url <> ''`).all()
     .filter(r => closed({ due: r.due, ends: r.ends }) && outboundOk(webUrl(r.url)));
+  /* ponytail: 주소를 하나씩 차례로 연다. 스무 개까지는 하루 한 번이라 괜찮다.
+     넘으면 Promise.all 로 다섯씩 묶는다 — 한꺼번에 다 열면 남의 서버를 두드리는 꼴이 된다. */
   const results = [];
   for (const r of rows) results.push({ team: r.id, ok: await livenessCheck(webUrl(r.url)) });
   const plan = livenessPlan(results);
@@ -931,6 +935,8 @@ function duelOutcome(db, d) {
       AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
       AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
     ORDER BY e.ends ASC`).all(String(d.created || '').slice(0, 10), d.sender, d.target);
+  /* ponytail: 도전장마다 board() 를 다시 센다. 도전장이 몇 장일 때 얘기다.
+     화면 한 장에 수십 장이 뜨면 대회별로 board() 를 한 번만 세어 돌려 쓴다. */
   for (const e of evs) {
     let b; try { b = board(db, e.id, true); } catch { continue; }
     /* board 는 운영자 차림이라 연락처가 들어 있다. 여기서 순위만 꺼내고 나머지는 안 들고 나간다. */
