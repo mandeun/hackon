@@ -288,6 +288,15 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
     <a class="btn s" id="empty-open" href="/app?make=1">대회 열기</a>
   </div>
+  <!-- 모여 있는 곳. 신청까지 아직 못 가는 사람이 할 수 있는 일 하나를 여기 둔다.
+       밖에서(당근·커뮤니티) 대화방으로 바로 끌면 그쪽 정책에 걸린다 — 밖에 내는 주소는 이 사이트 하나로 두고,
+       대화방은 들어온 다음에 만난다. 대화방을 적은 대회가 없으면 통째로 숨는다(없음과 모름을 가른다). -->
+  <div id="room" hidden style="margin-top:22px">
+    <h2 style="font-size:17px">모여 있는 곳 <span class="mono grey" id="room-count" style="font-size:14px;font-weight:400"></span></h2>
+    <p class="grey" style="margin:4px 0 8px">신청은 아직 이르신가요. 무엇을 만드는 곳인지 먼저 보고 싶으면 여기서 사람들을 만나세요.</p>
+    <div id="room-l" class="evs"></div>
+  </div>
+
   <!-- 같은 절 안에 둔다 — 첫 화면은 절 셋을 넘기지 않는다(검사가 잠근다). 의뢰가 없으면 통째로 숨는다 -->
   <div id="asks" hidden style="margin-top:22px">
     <h2 style="font-size:17px">풀어 달라는 문제 <span class="mono grey" id="asks-count" style="font-size:14px;font-weight:400"></span></h2>
@@ -425,6 +434,18 @@ function 그리기(){
       '<span class="n">' + esc(e.starts) + (e.ends !== e.starts ? '~' + esc(e.ends).slice(5) : '') +
         ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') + '</span>' +
       '</a>';
+  }).join('');
+  /* 모여 있는 곳 — 아직 안 끝난 대회 중 대화방 주소를 적은 것만. 필터·검색과 무관하게 늘 같은 것을 보여 준다
+     («모집중» 만 걸러 놓은 사람에게 대화방이 사라지면 그게 더 이상하다). */
+  var 방 = 대회들.filter(function(e){ return e.chat && 상태(e).c !== 'done'; }).slice(0, 3);
+  document.getElementById('room').hidden = !방.length;
+  document.getElementById('room-count').textContent = 방.length ? 방.length + '곳' : '';
+  document.getElementById('room-l').innerHTML = 방.map(function(e){
+    return '<a class="ev" href="' + esc(e.chat) + '" target="_blank" rel="noopener">' +
+      '<span class="st open">대화방</span>' +
+      '<span><div class="t">' + esc(e.title) + '</div>' +
+        '<div class="m">' + esc(e.host) + ' · 열려 있는 대화방입니다. 묻고 구경만 해도 됩니다</div></span>' +
+      '<span class="n">새 창에서 열림</span></a>';
   }).join('');
   var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && e.id !== 'demo1'; })[0];
   document.getElementById('foot-note').textContent = 곧 ? '다음 대회 ' + 곧.starts : '';
