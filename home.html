@@ -239,6 +239,8 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a href="#list">대회 찾기</a>
       <a href="#give">협찬·돕기</a>
       <a href="/problems">문제 은행</a>
+      <a id="nav-rank" href="/rank" hidden>순위</a>
+      <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
       <a href="/news">해커온뉴스</a>
       <a id="nav-manual" href="#">운영 매뉴얼</a>
     </nav>
@@ -467,16 +469,39 @@ fetch('/api/requests').then(function(r){ return r.json(); }).then(function(list)
   }).join('');
 }).catch(function(){});
 
+/* 그날의 조건. 둘부터 목록이라 그때 문을 연다 — 하나는 아카이브가 아니다. */
+fetch('/api/conditions').then(function(r){ return r.json(); }).then(function(d){
+  if (d && d.enough) document.getElementById('nav-conds').hidden = false;
+}).catch(function(){});
+
+/* 순위 입구. 이름을 정한 사람이 하나라도 있을 때만 연다 —
+   빈 표로 가는 문을 미리 걸어 두면 «비어 있는 서비스» 로 읽힌다. */
+fetch('/api/rank').then(function(r){ return r.json(); }).then(function(d){
+  var n = ((d && d.all) || []).length || ((d && d.rows) || []).length;
+  if (n) document.getElementById('nav-rank').hidden = false;
+}).catch(function(){});
+
 fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list){
   if (!list || !list.length) return;
-  document.getElementById('showcase').hidden = false;
+  var sc = document.getElementById('showcase');
+  sc.hidden = false;
+  /* 셋부터 «갤러리» 다. 한두 개를 목록 위에 올리면 텅 빈 선반처럼 보인다.
+     코드가 아니라 만들어진 물건이 먼저 보여야 하지만, 물건이 있을 때 얘기다. */
+  if (list.length >= 3) {
+    var lst = document.getElementById('list');
+    if (lst && lst.parentNode) lst.parentNode.insertBefore(sc, lst);
+  }
   document.getElementById('showcase-grid').innerHTML = list.map(function(w, i){
     return '<div class="ev shown">' +
       '<div class="shead">' +
         '<span class="st open">⭐ 추천작</span>' +
         '<span class="sname"><span class="t">' + esc(w.name) + '</span>' +
           '<span class="m">' + esc(w.eventTitle) +
-          (w.note ? ' · ' + esc(w.note) : '') + '</span></span>' +
+          (w.note ? ' · ' + esc(w.note) : '') +
+          /* 등급이 아니라 사실 둘. 모름은 아무 말도 안 한다 — 안 열린다는 뜻이 아니다 */
+          (w.open === '열림' ? ' · ● 열림' : w.open === '안 열림' ? ' · ○ 안 열림' : '') +
+          (w.age ? ' · ' + w.age.mark + ' ' + esc(w.age.name) + ' ' + w.age.days + '일째' : '') +
+          '</span></span>' +
         '<button class="btn o s" data-try="' + i + '">열어보기</button>' +
         '<a class="n grey" href="' + esc(w.url) + '" target="_blank" rel="noopener">새 창</a>' +
       '</div>' +

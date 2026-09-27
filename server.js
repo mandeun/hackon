@@ -557,6 +557,8 @@ function profile(db, pid) {
   return {
     id: me.id, handle: me.handle, level: me.level,
     events: past.length, wins, tier, xp: xpOf(db, pid),
+    /* 이번 시즌 기여. 통산과 «같이» 낸다 — 시즌만 두면 지난 기록이 사라진 것처럼 보인다 */
+    season: seasonNow(), xpSeason: xpOf(db, pid, seasonNow()),
     /* 완주 - 왔고 결과물을 냈나. 이게 이 사람의 실력에 대한 가장 단단한 증거다. */
     finished: made,
     finishRate: came ? Math.round(made / came * 1000) / 10 : 0,
@@ -582,33 +584,71 @@ function profile(db, pid) {
   };
 }
 
+/* ── 시즌 ─────────────────────────────────────────────
+   기여가 영원히 쌓이면 1등이 굳고, 나중에 온 사람은 따라잡을 길이 없다.
+   분기로 끊되 지난 것을 «지우지» 않는다 — 이번 시즌과 통산을 같이 보여 준다.
+   시각을 모르는 줄(예: 옛 requests.at 이 빈 것)은 시즌에 못 넣는다. 통산에만 남는다. */
+const seasonOf = d => {
+  const s = String(d || '').slice(0, 10);
+  const y = +s.slice(0, 4), m = +s.slice(5, 7);
+  return (y && m >= 1 && m <= 12) ? `${y}-Q${Math.floor((m - 1) / 3) + 1}` : '';
+};
+const seasonNow = () => seasonOf(today());
+/** 이 시즌의 마지막 날. 다음 분기 첫날에서 하루 뺀다 */
+function seasonEnd(season) {
+  const m = /^(\d{4})-Q([1-4])$/.exec(String(season || ''));
+  if (!m) return '';
+  return new Date(Date.UTC(+m[1], +m[2] * 3, 0)).toISOString().slice(0, 10);
+}
+/** 며칠 남았나. 오늘이 마지막 날이면 0 이고, 지났으면 음수가 아니라 0 이다 */
+function seasonLeft(season, now) {
+  const e = seasonEnd(season); if (!e) return null;
+  const d = Math.round((Date.parse(e + 'T00:00:00Z') - Date.parse(String(now || today()).slice(0, 10) + 'T00:00:00Z')) / 86400000);
+  return d > 0 ? d : 0;
+}
+
 /* 기여(XP) — 비트코인의 채굴처럼, 남을 위해 한 일이 곧 내 기록이 된다.
    완주·참가·동료 평가 주기·문제 올리기·풀이 보내기·판정하기·자리 맡기. 전부 «연락처 해시 = 사람» 하나에 모인다.
    ponytail: 사람 수만큼 전체 표를 훑는다(pidOf 는 HMAC 이라 SQL 로 못 잇는다). 수천 명 넘으면 solutions·requests·pledges 에 pid 열을 둔다 */
 const XP = { made: 10, came: 3, rated: 2, ratedEvent: 2, solved: 5, asked: 3, judged: 3, pledged: 5 };
 const XP_LABEL = { made: '완주', came: '참가', rated: '동료 평가 주기', ratedEvent: '대회 평가 주기', solved: '문제 풀이', asked: '문제 올리기', judged: '풀이 판정', pledged: '자리 맡기(확정)' };
-function xpOf(db, pid) {
-  const past = db.prepare(`SELECT t.came, s.url IS NOT NULL AS made FROM teams t JOIN events e ON e.id = t.event
+function xpOf(db, pid, season) {
+  /* season 이 있으면 그 분기에 일어난 것만 센다. 빈 문자열이면 통산이다.
+     줄마다 «언제» 를 같이 읽어 온다 — 시각이 없으면 시즌에 못 넣는다(0 이 아니라 모름이다). */
+  const at = season ? (t => seasonOf(t) === season) : () => true;
+  const past = db.prepare(`SELECT t.came, e.ends, s.url IS NOT NULL AS made FROM teams t JOIN events e ON e.id = t.event
                            LEFT JOIN submissions s ON s.team = t.id WHERE t.person=? AND e.ends < date('now')`).all(pid);
-  const mine = rows => rows.filter(r => pidOf(db, r.contact) === pid).length;
+  const mine = rows => rows.filter(r => pidOf(db, r.contact) === pid && at(r.at)).length;
   const n = {
-    made: past.filter(r => r.made).length,
-    came: past.filter(r => r.came).length,
-    rated: db.prepare('SELECT COUNT(*) c FROM ratings WHERE giver=?').get(pid).c,
-    ratedEvent: db.prepare('SELECT COUNT(*) c FROM event_ratings WHERE giver=?').get(pid).c,
-    solved: mine(db.prepare("SELECT contact FROM solutions WHERE contact<>''").all()),
-    asked: mine(db.prepare("SELECT contact FROM requests WHERE contact<>''").all()),
-    judged: mine(db.prepare("SELECT r.contact FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.contact<>''").all()),
-    pledged: mine(db.prepare("SELECT contact FROM pledges WHERE status IN ('ok','done') AND contact<>''").all()),
+    made: past.filter(r => r.made && at(r.ends)).length,
+    came: past.filter(r => r.came && at(r.ends)).length,
+    rated: db.prepare('SELECT at FROM ratings WHERE giver=?').all(pid).filter(r => at(r.at)).length,
+    ratedEvent: db.prepare('SELECT at FROM event_ratings WHERE giver=?').all(pid).filter(r => at(r.at)).length,
+    solved: mine(db.prepare("SELECT contact, at FROM solutions WHERE contact<>''").all()),
+    asked: mine(db.prepare("SELECT contact, created AS at FROM requests WHERE contact<>''").all()),
+    judged: mine(db.prepare("SELECT r.contact, v.at FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.contact<>''").all()),
+    pledged: mine(db.prepare("SELECT contact, created AS at FROM pledges WHERE status IN ('ok','done') AND contact<>''").all()),
   };
   const items = Object.keys(XP).filter(k => n[k] > 0).map(k => ({ key: k, label: XP_LABEL[k], count: n[k], xp: n[k] * XP[k] }));
-  return { total: items.reduce((a, x) => a + x.xp, 0), items };
+  return { total: items.reduce((a, x) => a + x.xp, 0), items, season: season || '' };
 }
-/* 순위 — 백준 랭킹처럼 기여 순. 이름을 정한 사람만 오른다(이름 없는 해시는 아무 뜻이 없다) */
+/* 순위 — 백준 랭킹처럼 기여 순. 이름을 정한 사람만 오른다(이름 없는 해시는 아무 뜻이 없다).
+   두 줄을 함께 낸다 — 이번 시즌과 통산. 시즌만 두면 지난 기록이 사라진 것처럼 보이고,
+   통산만 두면 1등이 굳는다. */
 function rank(db, limit = 50) {
-  return db.prepare("SELECT id, handle FROM people WHERE handle<>''").all()
-    .map(p => { const pr = profile(db, p.id); return { id: p.id, handle: p.handle, tier: pr.tier.name, level: pr.tier.level, finished: pr.finished, wins: pr.wins, xp: pr.xp.total }; })
-    .filter(r => r.xp > 0).sort((a, b) => b.xp - a.xp || b.level - a.level).slice(0, limit);
+  /* 사람마다 프로필을 한 번만 읽는다. 거기에 시즌과 통산이 둘 다 들어 있다 —
+     두 번 읽으면 사람 수만큼 표를 두 번 훑게 된다. */
+  const base = db.prepare("SELECT id, handle FROM people WHERE handle<>''").all()
+    .map(p => {
+      const pr = profile(db, p.id);
+      return { id: p.id, handle: p.handle, tier: pr.tier.name, level: pr.tier.level,
+               finished: pr.finished, wins: pr.wins,
+               all: pr.xp.total, sxp: pr.xpSeason.total };
+    });
+  const cut = key => base.filter(r => r[key] > 0)
+    .sort((a, b) => b[key] - a[key] || b.level - a.level)
+    .slice(0, limit).map(r => ({ ...r, xp: r[key] }));
+  return { season: cut('sxp'), all: cut('all') };
 }
 
 /* 티어 5단계 — 캐글 progression(참가→기여→전문가→마스터→그랜드마스터)을 완주·수상·동료 실력으로 옮긴 것.
@@ -818,6 +858,26 @@ function appHtml() {
 const OG_ANCHOR = '<link rel="manifest" href="/manifest.webmanifest">';
 /** 머리에 딱지를 끼워 넣는다. 자리를 못 찾으면 원본 그대로 돌려준다 — 화면이 먼저다. */
 const withOg = (html, tags) => html.includes(OG_ANCHOR) ? html.replace(OG_ANCHOR, OG_ANCHOR + tags) : html;
+
+/** «그날의 조건» 아카이브. 현장에서 공개한 제약 한 줄을 대회마다 쌓는다.
+    조건이 하나뿐이면 아카이브가 아니라 한 줄이다 — 둘부터 화면을 낸다.
+    끝난 대회만 싣는다. 열기 전에 새면 그날 공개할 것이 미리 알려진다. */
+function conditions(db) {
+  const rows = db.prepare(`SELECT e.id, e.title, e.ends, e.due, e.twist,
+      (SELECT COUNT(*) FROM submissions s JOIN teams t ON t.id = s.team
+        WHERE t.event = e.id AND s.url <> '') AS made,
+      (SELECT COUNT(*) FROM liveness lv JOIN teams t2 ON t2.id = lv.team
+        WHERE t2.event = e.id AND lv.state = 1) AS alive
+    FROM events e WHERE e.listed = 1 AND e.twist <> '' ORDER BY e.ends DESC`).all();
+  const kept = rows.filter(r => closed({ due: r.due, ends: r.ends }));
+  return {
+    /* 둘 미만이면 목록을 안 준다. «비어 있다» 가 아니라 «아직 쌓는 중» 이다 */
+    enough: kept.length >= 2,
+    n: kept.length,
+    rows: kept.length >= 2 ? kept.map(r => ({ id: r.id, title: r.title, ends: r.ends,
+                                              twist: r.twist, made: r.made, alive: r.alive })) : [],
+  };
+}
 
 /** 이 대회(주최자)의 평판. 참가자가 남긴 평가에서 나온다. */
 function hostRep(db, event) {
@@ -2030,6 +2090,8 @@ function open(file) {
   db.exec(`CREATE TABLE IF NOT EXISTS news(
     id INTEGER PRIMARY KEY, src TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);
+  /* 그날의 조건 — 13시 오프닝에서 현장 공개한 제약 한 줄. 끝난 뒤에만 밖으로 나간다 */
+  try { db.exec("ALTER TABLE events ADD COLUMN twist TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
   try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(로그인 별명)
   try { db.exec("ALTER TABLE news ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}    // 제보자 계정 — 하루 5건 상한      // 별점 옆 한 줄
@@ -2446,6 +2508,8 @@ function editEvent(db, id, b) {
   /* «문제가 생기면 이 사람에게». 참가자 화면에 그대로 나가는 공개 연락 한 줄이다 — 운영자가 스스로 적는다 */
   if (b.safety !== undefined) { set.push('safety=?'); val.push(plain(b.safety, 120)); }
   if (b.pay !== undefined) { set.push('pay=?'); val.push(plain(b.pay, 120)); }
+  /* 그날의 조건. 현장에서 공개한 제약을 운영자가 적어 둔다 — 아카이브의 원본이 이것뿐이다 */
+  if (b.twist !== undefined) { set.push('twist=?'); val.push(plain(b.twist, 120)); }
   /* 취소 규칙 한 줄. 공개 페이지와 신청 뒤 카드에 접지 않고 그대로 나간다 */
   if (b.cancel_rule !== undefined) { set.push('cancel_rule=?'); val.push(plain(b.cancel_rule, 120)); }
   if (b.mode !== undefined) {
@@ -2679,6 +2743,9 @@ function getEvent(db, id) {
   delete e.jkey;                     // 심사 열쇠도 안 내려보낸다 — 운영자에게만 따로 준다
   delete e.vkey;                     // 관객 투표 열쇠도 마찬가지
   delete e.judged;                   // 심사위원 상태는 운영자 화면에만 — 손님에게 «못 구함»을 보일 이유가 없다
+  /* 그날의 조건은 오프닝에서 공개하는 것이다. 끝나기 전에 공개 응답에 실리면
+     참가자가 미리 준비해 온다 — 그러면 «현장 조건» 이 아니다. 운영자에게만 따로 붙인다. */
+  if (!closed({ due: e.due, ends: e.ends })) delete e.twist;
   e.rubric = JSON.parse(e.rubric);
   for (const r of e.rubric) if (!r.hint && RUBRIC_HINT[r.key]) r.hint = RUBRIC_HINT[r.key];
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
@@ -3945,9 +4012,10 @@ function showcase(db) {
      그리고 만든 사람 본인의 동의(s.show). 앞의 둘은 우리가 켜고, 마지막은 본인만 켠다.
      별표만으로 남의 결과물을 첫 화면에 거는 것은 게시가 아니라 전시다. */
   const rows = db.prepare(`SELECT t.name, t.event, e.title AS event_title, e.due, e.ends,
-                                  s.url, s.note
+                                  s.url, s.note, lv.state AS open
                            FROM teams t JOIN events e ON e.id = t.event
                            JOIN submissions s ON s.team = t.id
+                           LEFT JOIN liveness lv ON lv.team = t.id
                            WHERE t.featured=1 AND e.listed=1 AND s.show=1 AND s.url<>''
                            ORDER BY t.id DESC LIMIT 24`).all();
   return rows
@@ -3957,8 +4025,14 @@ function showcase(db) {
        넣으므로 javascript: 하나가 들어오면 그게 우리 첫 화면에서 돈다.
        열쇠를 «지우고 + 참검사» 두 번 보는 것과 같은 이유다. */
     .filter(r => webUrl(r.url))
-    .map(r => ({ name: r.name, event: r.event, eventTitle: r.event_title,
-                 url: webUrl(r.url), note: r.note || '' }));
+    /* 첫 화면에도 등급이 아니라 사실만 붙인다 — 지금 열리는가, 며칠째 살아 있는가.
+       프로필과 같은 함수를 쓴다. 두 곳에서 따로 세면 한쪽이 반드시 어긋난다. */
+    .map(r => {
+      const st = (r.open === 1 || r.open === 0) ? r.open : null;
+      return { name: r.name, event: r.event, eventTitle: r.event_title,
+               url: webUrl(r.url), note: r.note || '',
+               open: openLabel(st), age: ageOf(r.ends, st) };
+    });
 }
 
 function ledgerOf(db, event) {
@@ -4461,8 +4535,8 @@ function routes(db) {
             const e = getEvent(db, m[1]);
             e.admin = isAdmin(db, m[1], key, owner);
             /* 심사 열쇠는 운영자에게만. 심사위원에게 보낼 링크를 이걸로 만든다. */
-            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged FROM events WHERE id=?').get(m[1]);
-                           e.jkey = kk.jkey; e.vkey = kk.vkey; e.judged = kk.judged; }
+            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged, twist FROM events WHERE id=?').get(m[1]);
+                           e.jkey = kk.jkey; e.vkey = kk.vkey; e.judged = kk.judged; e.twist = kk.twist; }
             return json(res, 200, e);
           }
           if (req.method === 'DELETE') {
@@ -4954,7 +5028,15 @@ function routes(db) {
           const o = db.prepare('SELECT name FROM owners WHERE id=?').get(cookieOwner);
           return json(res, 201, addTip(db, cookieOwner, (o && o.name) || '', await body(req)));
         }
-        if (p === '/api/rank' && req.method === 'GET') return json(res, 200, { rows: rank(db) });
+        if (p === '/api/conditions' && req.method === 'GET')
+          return json(res, 200, conditions(db));
+        if (p === '/api/rank' && req.method === 'GET') {
+          /* 두 줄을 같이 내려보낸다. 화면이 고를 수 있어야 «이번 시즌이 비었다» 를
+             «아무도 없다» 로 그리지 않는다. */
+          const rk = rank(db);
+          return json(res, 200, { rows: rk.season, all: rk.all, season: seasonNow(),
+                                  end: seasonEnd(seasonNow()), left: seasonLeft(seasonNow()) });
+        }
         if (p === '/api/requests' && req.method === 'POST')
           return json(res, 201, addRequest(db, await body(req)));          // 누구나 — 열쇠는 여기서 딱 한 번
         if (p === '/api/requests' && req.method === 'GET')
@@ -5232,6 +5314,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge'
+               || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
 
@@ -5788,6 +5871,61 @@ async function selftest() {
   ok(ageOf('2026-01-01', 1, '2025-06-01') === null, '대회보다 앞선 날짜로 나이가 나온다');
   ok(openLabel(1) === '열림' && openLabel(0) === '안 열림', '열림·안 열림 표기가 다르다');
   ok(openLabel(null) === '모름' && openLabel(undefined) === '모름', '모름을 «안 열림» 으로 그린다');
+
+  // 시즌 — 분기로 끊되 지난 것을 지우지 않는다
+  ok(seasonOf('2026-01-01') === '2026-Q1' && seasonOf('2026-03-31') === '2026-Q1', '1~3월이 Q1 이 아니다');
+  ok(seasonOf('2026-04-01') === '2026-Q2' && seasonOf('2026-12-31') === '2026-Q4', '분기 경계가 틀렸다');
+  ok(seasonOf('') === '' && seasonOf('없는날짜') === '' && seasonOf('2026-13-01') === '',
+     '시각을 모르는 줄이 어떤 시즌에 들어간다');
+  ok(seasonEnd('2026-Q1') === '2026-03-31' && seasonEnd('2026-Q4') === '2026-12-31', '시즌 마지막 날이 틀렸다');
+  ok(seasonEnd('2026-Q2') === '2026-06-30', '30일로 끝나는 분기가 틀렸다');
+  ok(seasonEnd('없음') === '', '없는 시즌에 마지막 날이 나온다');
+  ok(seasonLeft('2026-Q1', '2026-03-30') === 1 && seasonLeft('2026-Q1', '2026-03-31') === 0,
+     '남은 날 계산이 틀렸다');
+  ok(seasonLeft('2026-Q1', '2026-09-01') === 0, '지난 시즌에 음수가 나온다');
+
+  {
+    /* 시즌 XP 는 그 분기에 끝난 대회만 센다. 통산은 그대로 남는다 */
+    const sEv = createEvent(db, { title: '시즌시험', starts: '2026-01-05', ends: '2026-01-05' });
+    const sT  = joinTeam(db, sEv.id, { name: '시즌팀', contact: 'season@x.test', agree: true });
+    editEvent(db, sEv.id, { due: '2099-01-01T00:00' });
+    submit(db, sT, { url: 'https://season.test/a', note: '만든 것' });
+    const sId = pidOf(db, 'season@x.test');
+    ok(xpOf(db, sId, '2026-Q1').total > 0, '그 분기에 끝난 대회가 시즌에 안 잡힌다');
+    ok(xpOf(db, sId, '2026-Q3').total === 0, '다른 분기 것이 이번 시즌에 잡힌다');
+    ok(xpOf(db, sId, '').total >= xpOf(db, sId, '2026-Q1').total, '통산이 시즌보다 작다');
+    const rk = rank(db);
+    ok(Array.isArray(rk.season) && Array.isArray(rk.all), '순위가 두 줄로 안 나온다');
+    ok(rk.all.length >= rk.season.length, '통산이 시즌보다 짧다');
+  }
+
+  {
+    /* 그날의 조건 — 끝나기 전에는 어디로도 안 나간다 */
+    const cEvA = createEvent(db, { title: '조건A', starts: '2026-02-01', ends: '2026-02-01' });
+    const cEvB = createEvent(db, { title: '조건B', starts: '2026-05-01', ends: '2026-05-01' });
+    const live = createEvent(db, { title: '아직안끝남', starts: '2099-01-01', ends: '2099-01-01' });
+    for (const x of [cEvA, cEvB, live]) db.prepare('UPDATE events SET listed=1 WHERE id=?').run(x.id);
+    editEvent(db, cEvA.id, { twist: '단추를 하나만 쓴다' });
+    editEvent(db, cEvB.id, { twist: '소리를 반드시 낸다' });
+    editEvent(db, live.id, { twist: '아직 아무도 모른다' });
+
+    ok(!('twist' in getEvent(db, live.id)), '안 끝난 대회의 조건이 공개 응답에 실린다');
+    ok(getEvent(db, cEvA.id).twist === '단추를 하나만 쓴다', '끝난 대회의 조건이 안 나온다');
+
+    const cd = conditions(db);
+    ok(cd.enough && cd.rows.length === 2, `끝난 대회 둘이 아카이브에 안 쌓인다: ${cd.n}`);
+    ok(cd.rows.every(r => r.title !== '아직안끝남'), '안 끝난 대회가 아카이브에 샜다');
+    ok(cd.rows[0].title === '조건B', '최근 것이 위로 안 온다');
+
+    /* 하나뿐이면 목록을 안 준다 — 아카이브가 아니라 한 줄이다 */
+    editEvent(db, cEvB.id, { twist: '' });
+    const cd1 = conditions(db);
+    ok(!cd1.enough && cd1.rows.length === 0, '하나뿐인데 아카이브를 낸다');
+    ok(cd1.n === 1, '남은 건수를 안 세어 준다');
+    editEvent(db, cEvB.id, { twist: '소리를 반드시 낸다' });
+    /* 이 검사가 만든 것은 이 검사가 치운다 — 뒤의 «공개한 것만 목록에 든다» 가 같은 db 를 센다 */
+    for (const x of [cEvA, cEvB, live]) db.prepare('DELETE FROM events WHERE id=?').run(x.id);
+  }
 
   // 뱃지 — 깃허브 README 에 거는 한 조각
   const bsv = badgeSvg({ handle: '<script>a', tier: { name: '골드', level: 3 }, finished: 5, wins: 2 });
