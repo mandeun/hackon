@@ -4890,7 +4890,8 @@ function routes(db) {
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
-               || p === '/ask' || p === '/problems' || p === '/rank' || p.match(/^\/r\/[a-z0-9]+$/)
+               || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge'
+               || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
 
       /* 화면 파일은 /e/<id> 같은 깊은 주소에서도 그대로 나간다. 그 안의 <script src="qr.js">
