@@ -399,7 +399,7 @@ with sync_playwright() as p:
 
     # 로고를 누르면 처음으로 — 어디서 헤매도 여기로 돌아온다
     visit(f"/app#{ev}")
-    pg.click('nav button[data-t="spon"]')
+    pg.click('#host-tabs [data-sec="spon"]')
     pg.wait_for_timeout(500)
     pg.click("#b-home")
     pg.wait_for_timeout(600)
@@ -896,7 +896,7 @@ with sync_playwright() as p:
     gp2.wait_for_selector("body[data-ready='1']", timeout=8000)
 
     # (1) 순위 — 마감 전이면 «나온 팀». 점수는 서버가 안 준다(Kaggle 식 private 리더보드).
-    gp2.click('nav button[data-t="board"]')
+    # /app#<id> 가 곧 순위 화면이다 (아래 탭에서 내렸다)
     gp2.wait_for_timeout(1000)
     btxt = gp2.inner_text("#view")
     brows = api(f"/api/events/{ev}/board")["rows"]
@@ -907,7 +907,7 @@ with sync_playwright() as p:
     ok(f"순위 — 운영자가 아니어도 나온 팀이 보인다 ({len(brows)}팀)")
 
     # (2) 후원 보고 — 읽는 것만. 고치는 칸은 한 개도 없어야 한다.
-    gp2.click('nav button[data-t="spon"]')
+    gp2.click('#ev-more [data-sec="spon"]')
     gp2.wait_for_timeout(1400)
     stxt = gp2.inner_text("#view")
     A("undefined" not in stxt, f"후원 보고에 undefined 가 보인다: {stxt[:240]}")
@@ -1480,6 +1480,10 @@ with sync_playwright() as p:
     A(cp.query_selector("#rs-file") is None, "열쇠 없는 첫 화면에 사본 첨부 칸이 그대로 있다")
     A("사본 파일" not in cp.inner_text("#view"), "첫 화면에 «사본 파일» 안내가 남아 있다")
     A(cp.query_selector('nav button[data-t="mine"]') is not None, "아래 탭에 «내 대회» 가 없다")
+    # 아래 탭은 넷이다. 순위·후원 보고는 «한 대회 안»의 화면이라 대회 화면에서 연다.
+    # 390px 에서 여섯 개는 글자가 줄바꿈되고, 첫 방문자가 못 쓰는 탭이 둘이었다.
+    navs = cp.eval_on_selector_all('nav button', 'bs => bs.map(b => b.dataset.t)')
+    A(navs == ["home", "find", "make", "mine"], f"아래 탭이 넷(대회·구하기·열기·내 대회)이 아니다: {navs}")
     cp.click('nav button[data-t="mine"]'); cp.wait_for_selector("#view a.ev", timeout=8000)
     mtxt = cp.inner_text("#view")
     for must in ("참여한 대회", "맡은 심사", "내가 준 것", "내가 낸 것"):
@@ -2089,7 +2093,7 @@ with sync_playwright() as p:
 
     # ── 6. 협찬사에게 줄 숫자가 쌓이는가 (이 서비스의 차별점) ──
     visit(f"/app#{ev}")
-    pg.click('nav button[data-t="spon"]')
+    pg.click('#host-tabs [data-sec="spon"]')
 
     # 협찬사 등록 — 서버에는 있었는데 화면이 없어서 공개 페이지가 영영 비어 있던 자리다
     pg.wait_for_selector("#p-name")
@@ -2200,7 +2204,7 @@ with sync_playwright() as p:
 
     # 진행 순서 표준 — 채우면 경고가 없어야 하고, 망가뜨리면 잡아내야 한다
     visit(f"/app#{ev}")
-    pg.click('nav button[data-t="board"]')
+    # 아래 탭에서 «순위»를 내린 뒤로는 /app#<id> 가 곧 이 화면이다
     pg.wait_for_timeout(900)
     # 다 채워 놓으면 '아직 안 정한 것' 칸이 접힌다. 접힌 안쪽은 안 보여서 못 누른다.
     pg.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
@@ -2259,7 +2263,7 @@ with sync_playwright() as p:
     post(f"/api/teams/{tid}/check", {"week": 2, "remove": True}, key=OK)
     ok("이어가기 — 2·6·12주 점검, 90일 생존율이 협찬사 집계로 이어진다")
     visit(f"/app#{ev}")
-    pg.click('nav button[data-t="spon"]')
+    pg.click('#host-tabs [data-sec="spon"]')
     pg.wait_for_selector("#p-name")
 
     pg.wait_for_selector("#o-add")

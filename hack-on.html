@@ -708,11 +708,9 @@ body.tv #cta{display:none}
   <div id="toast" role="status" aria-live="polite"></div>
   <nav>
     <button data-t="home" class="on"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg></span>대회</button>
-    <button data-t="mine"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg></span>내 대회</button>
-    <button data-t="make"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="6"/><path d="M12 8v8M8 12h8"/></svg></span>열기</button>
     <button data-t="find"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>구하기</button>
-    <button data-t="board"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 20V11M12 20V5M18 20v-6"/></svg></span>순위</button>
-    <button data-t="spon"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7.5-4.6-9.3-9.4C1.6 8.6 3.6 5 7 5c2.1 0 3.5 1.2 5 3 1.5-1.8 2.9-3 5-3 3.4 0 5.4 3.6 4.3 6.6C19.5 16.4 12 21 12 21z"/></svg></span>후원 보고</button>
+    <button data-t="make"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="6"/><path d="M12 8v8M8 12h8"/></svg></span>열기</button>
+    <button data-t="mine"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg></span>내 대회</button>
   </nav>
 </div>
 
@@ -1876,8 +1874,9 @@ async function render() {
         ? `<a href="/auth/logout" class="chip" style="margin-left:6px">${esc(AUTH.name || '로그인됨')} · 나가기</a>`
         : `<a href="/app?login=1" class="chip" style="margin-left:6px;font-weight:800">로그인</a>`)   /* 노랑은 카카오 색이다. 셋을 받는 단추에 한 곳의 색을 입히지 않는다 */
     : '';
-  // 팀 화면은 순위에서 들어가는 곳이라 아래 탭은 '순위'를 켜 둔다
-  const navOn = tab === 'team' ? 'board' : tab;
+  /* 아래 탭은 넷이다. 순위·팀·후원 보고는 «한 대회 안»의 화면이라 탭을 따로 두지 않고
+     대회 화면 안에서 오간다 — 아래 탭은 그 셋에서 «대회»를 켜 둔다. */
+  const navOn = ['team', 'board', 'spon'].includes(tab) ? 'home' : tab;
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === navOn));
   // innerHTML 을 쓰되 서버에서 온 값은 전부 esc() 를 거친다. 화면 조립이 문자열 한 곳에
   // 모여 있어야 라켓온처럼 "서버 호출이 사라졌는지"를 검사로 셀 수 있다.
@@ -2946,6 +2945,12 @@ const SCREEN = {
                  : `<div class="gsteps" id="how3" style="margin:12px 0 0"><span class="on">① 신청</span><span class="sep">→</span><span>② 그날 와서 만들기</span><span class="sep">→</span><span>③ 제출</span></div>`}
       </section>
       ${(e.sponsors || []).length ? `<div class="card" id="spon-top" style="padding:14px 16px"><div class="meta" style="margin-bottom:6px">함께한 곳</div>${logoBand(e.sponsors).replace('class="logos"', 'class="logos big"')}</div>` : ''}
+      ${/* 후원 보고를 아래 탭에서 내렸다(탭 넷). 이건 «한 대회 안»의 화면이라 그 대회에서 연다.
+             손님에게도 보인다 — 받은 것과 쓴 것은 후원자만의 것이 아니다. */''}
+      <div class="card" id="ev-more" style="padding:11px 13px;display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+        <button class="btn sec sm" data-sec="spon">후원 보고 보기</button>
+        <span class="meta">받은 것과 쓴 것, 그리고 남은 것</span>
+      </div>
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
       ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
         <div class="meta">운영자 공지가 시각과 함께 남습니다. 메일·문자는 안 보내니 이 페이지를 열어 두세요.</div>
