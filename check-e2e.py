@@ -1497,7 +1497,7 @@ with sync_playwright() as p:
     for want in (f"/e/{RE}", f"/j/{RE}", f"/s/{mpl['ref']}"):
         A(want in hrefs, f"«내 대회» 에 {want} 줄이 없다: {hrefs}")
     A(not any("k=" in h for h in hrefs), f"«내 대회» 링크에 열쇠가 실렸다: {hrefs}")
-    # 탭이 여섯이 됐다. 390px 에서 이름이 두 줄로 접히면 아래 줄 높이가 무너진다.
+    # 탭은 넷이다. 390px 에서 이름이 두 줄로 접히면 아래 줄 높이가 무너진다.
     # 폭으로 재면 안 잡힌다 — 접힌 글자의 폭은 칸 안에 머문다. 줄 수(그려진 사각형 수)로 잰다.
     navw = cp.evaluate(
         """() => [...document.querySelectorAll('nav button')].map(b => {
@@ -1505,9 +1505,9 @@ with sync_playwright() as p:
             r.selectNodeContents(t);
             return [b.textContent.trim(), r.getClientRects().length];
         })""")
-    A(len(navw) == 6, f"아래 탭이 여섯이 아니다: {navw}")
+    A(len(navw) == 4, f"아래 탭이 넷이 아니다: {navw}")
     A(all(lines == 1 for _, lines in navw), f"390px 에서 탭 이름이 두 줄로 접힌다: {navw}")
-    ok("«내 대회» — 역할 다섯이 한 화면에·지워진 열쇠는 «지워짐»·열쇠는 주소에 안 실림·탭 여섯이 390px 에 들어감")
+    ok("«내 대회» — 역할 다섯이 한 화면에·지워진 열쇠는 «지워짐»·열쇠는 주소에 안 실림·탭 넷이 390px 에 들어감")
     cctx.close()
     # 받는 사람 열쇠 새로 — 옛 열쇠는 죽고 새 열쇠로 열린다
     old_rk = RK
@@ -2825,7 +2825,10 @@ with sync_playwright() as pw:
     pg.goto(f"{BASE}/j/{ev}", wait_until="networkidle")
     pg.wait_for_selector("body[data-ready='1']", timeout=8000)
     ktxt = pg.inner_text("#view")
-    A("심사 열쇠" in ktxt, f"/j/<id> 가 심사 열쇠 화면이 아니다: {ktxt[:200]}")
+    # 이 브라우저는 앞 단계에서 심사 열쇠를 이미 받아 뒀다. 그러면 열쇠 칸을 건너뛰고
+    # 이름 칸으로 간다 — 둘 중 어느 쪽이든 «심사하는 화면» 이면 된다.
+    A("심사 열쇠" in ktxt or "심사위원 이름" in ktxt,
+      f"/j/<id> 가 심사 화면이 아니다: {ktxt[:200]}")
     A("먼저 봅니다" not in ktxt, "/j/<id> 에 모집 화면이 떴다")
     ok("심사위원 — /judge 는 모집 입구, /j/<id> 는 심사 열쇠. 서로 안 덮는다")
 
