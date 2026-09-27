@@ -56,6 +56,20 @@ def codepost(path, payload, key=None, vkey=None):
     return post(path, payload, key=key, vkey=vkey)[0]
 
 
+def delete_of(path, tkey=None, key=None):
+    """DELETE 를 해 보고 상태 코드만 돌려준다."""
+    req = urllib.request.Request(BASE + path, method="DELETE")
+    if tkey:
+        req.add_header("x-tkey", tkey)
+    if key:
+        req.add_header("x-okey", key)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
 def raw_post(path, data, ctype, tkey=None):
     """날바이트를 보낸다 (기록증 카드는 base64 로 감싸면 본문 상한에 걸린다). 상태 코드만."""
     req = urllib.request.Request(BASE + path, data=data, method="POST")
@@ -700,6 +714,38 @@ with sync_playwright() as p:
     A(cr["event"]["title"], "증서에 박을 대회 이름이 없다")
     A("@" not in json.dumps(cr, ensure_ascii=False), "증서 명단에 연락처가 샜다")
     ok("증서 — 심사한 사람이 곧 위촉장 명단, 연락처 0건")
+
+    # ── 짝 신청 · 그날의 조건 ─────────────────────────────
+    # 따로 연 대회에서 본다 — 위 대회의 팀 수를 세는 검사가 흔들린다
+    pev = post("/api/events", {"title": "짝e2e", "starts": "2099-03-20", "ends": "2099-03-20"})[1]
+    pok = pev["okey"]
+    pt = post(f"/api/events/{pev['id']}/teams",
+              {"name": "짝주인", "email": "pw1@x.test", "agree": True})[1]
+    A(codepost(f"/api/teams/{pt['id']}/invite", {}) == 403, "팀 열쇠 없이 초대 링크가 나온다")
+    inv = post(f"/api/teams/{pt['id']}/invite", {}, tkey=pt["tkey"])[1]
+    A(inv["code"] != pt["tkey"], "초대 코드가 팀 열쇠와 같다")
+    n0 = len(api(f"/api/events/{pev['id']}/board", key=pok)["rows"])
+    mate = post(f"/api/events/{pev['id']}/teams",
+                {"name": "짝꿍e2e", "email": "pw2@x.test", "agree": True, "pair": inv["code"]})[1]
+    n1 = len(api(f"/api/events/{pev['id']}/board", key=pok)["rows"])
+    A(n1 == n0, f"짝으로 왔는데 팀이 늘었다: {n0} → {n1}")
+    A(mate["tkey"] != pt["tkey"], "짝에게 주인 열쇠가 갔다")
+    A(codepost(f"/api/events/{pev['id']}/teams",
+               {"name": "셋째e2e", "email": "pw3@x.test", "agree": True, "pair": inv["code"]}) in (404, 409),
+      "초대 링크를 두 번 써서 셋이 된다")
+    # 짝이 빠져도 신청은 안 깨진다
+    A(delete_of(f"/api/teams/{pt['id']}/mate", tkey=mate["tkey"]) == 200, "짝이 못 빠진다")
+    A(len(api(f"/api/events/{pev['id']}/board", key=pok)["rows"]) == n0, "짝이 빠지자 신청이 사라졌다")
+    ok("짝 신청 — 둘이 한 팀, 링크를 두 번 써도 셋이 안 된다")
+
+    # 그날의 조건은 끝나기 전에 안 샌다
+    A(post(f"/api/events/{pev['id']}", {"twist": "단추를 하나만 쓴다"}, key=pok, method="PATCH")[0] == 200,
+      "그날의 조건이 저장이 안 된다")
+    A("twist" not in api(f"/api/events/{pev['id']}"), "안 끝난 대회의 조건이 공개 응답에 실린다")
+    cnd = api("/api/conditions")
+    A(cnd["enough"] is False, "조건이 둘도 안 됐는데 아카이브를 낸다")
+    A(json.dumps(cnd, ensure_ascii=False).find("단추를 하나만") < 0, "안 끝난 대회의 조건이 아카이브에 샜다")
+    ok("그날의 조건 — 끝나기 전엔 안 새고, 둘부터 아카이브")
 
     # ── 주최자 열쇠 — 로그인 없이 내 대회를 따라오게 한다 ──
     def api_owner(path):
