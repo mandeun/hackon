@@ -1384,7 +1384,18 @@ const CANCEL_RULE = '대회 이틀 전까지 취소 자유. 그 뒤는 주최자
 const cancelLine = e => `<div class="meta" id="cancel-rule" style="margin-top:6px"><b>취소 규칙</b> · ${
   esc(e.cancel_rule || CANCEL_RULE)} · 취소는 팀 화면에서</div>`;
 
-const FOUND = ['캠퍼스픽', '위비티', '이벤터스', '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
+/* «어디서 보셨나요». 실제로 사람이 오는 순서로 놓는다 — 지금 들어오는 길이 당근과 오픈 대화방인데
+   목록에 없어서 전부 «기타» 로 뭉쳤다. 뭉친 칸은 2회차에 홍보를 어디다 쓸지 못 알려 준다. */
+const FOUND = ['당근', '오픈 대화방', '인스타', '캠퍼스픽', '위비티', '이벤터스',
+               '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
+/* 초대 링크. /e/<id>?f=당근 으로 뿌리면 신청할 때 «어디서 보셨나요» 를 안 묻고 그대로 센다 —
+   한 사람씩 데려오는 판에서는 누가 뿌린 링크가 먹혔는지가 유일한 단서다.
+   목록에 있는 값만 받는다. 아무 문자열이나 받으면 지나가던 사람이 집계에 줄을 만들 수 있다.
+   사람이 링크를 남에게 넘겨 쓸 수도 있으니 정확한 명부가 아니라 «대략 어느 길» 로만 읽는다. */
+function foundFromLink() {
+  const f = new URLSearchParams(location.search).get('f') || '';
+  return FOUND.includes(f) ? f : '';
+}
 /* 처음에는 이름과 이메일만 받는다. 역할·유입 경로는 신청한 뒤에 묻는다.
    이메일은 확정 안내와 후원사 크레딧이 전부 그리로 가서 처음부터 받는다.
    후원사 제공은 수집 동의와 별개의 체크다(제3자 제공). */
@@ -1458,7 +1469,8 @@ function moreForm(t) {
       <input id="m-want" placeholder="예) 화면 만드는 분 한 분">` : ''}
     ${!t.found ? `<label>어디서 보셨나요</label>
       <select id="m-found"><option value="">고르기</option>
-        ${FOUND.map(f => `<option>${f}</option>`).join('')}</select>` : ''}
+        ${(() => { const pre = foundFromLink();
+          return FOUND.map(f => `<option${f === pre ? ' selected' : ''}>${f}</option>`).join(''); })()}</select>` : ''}
     ${!t.note ? `<label>하고 싶은 것 (선택)</label>
       <textarea id="m-note" rows="2" placeholder="어떤 불편을 풀고 싶은지 한 줄"></textarea>` : ''}
     ${!t.link ? `<label>만든 것 링크 (선택)</label>
@@ -2705,6 +2717,24 @@ const SCREEN = {
              <div style="height:10px"></div>
              <button class="btn sm" id="b-list">첫 화면 목록에 올리기</button>
            </div>`}
+
+      ${/* 모집 점검. «대회가 성립하나»(missing) 와 «사람이 오나» 는 다른 물음이다 —
+            앞의 것은 서버가 판정하고 목록 공개를 막는 것이고, 이건 막지 않는다.
+            비어 있어도 대회는 돌아가므로 «해야 한다» 고 쓰지 않는다. 다만 안 보이면 아무도 안 채운다.
+            정원 대비 신청은 세지 않는다 — 33일 남은 대회에 «2/20» 을 빨갛게 띄우면 겁만 준다.
+            취소 규칙도 안 센다. 비어 있어도 CANCEL_RULE 이 참가자 화면에 이미 보인다 — 보이는 것을 «안 했다» 고 적으면 목록이 거짓말이 된다. */''}
+      ${(() => {
+        const 남은 = [];
+        if (!e.chat) 남은.push(['대화방 주소', '밖에서는 이 사이트만 가리키고, 대화방은 들어온 사람에게 보여 줍니다. 비어 있으면 첫 화면에 «모여 있는 곳» 이 안 뜹니다']);
+        if (!e.notice) 남은.push(['첫 소식', '신청한 사람에게 아무 소식도 안 가면 당일까지 기억에서 사라집니다']);
+        if (!남은.length) return '';
+        return `<div class="card">
+          <h3>사람이 오게 하려면 <span class="pill">${남은.length}가지 남음</span></h3>
+          <div class="meta">비워 둬도 대회는 돌아갑니다. 다만 이게 비어 있으면 모집이 안 돕니다.</div>
+          <ul style="margin:10px 0 0;padding-left:18px">
+            ${남은.map(([k, w]) => `<li style="margin:6px 0"><b>${esc(k)}</b><br><span class="meta">${esc(w)}</span></li>`).join('')}
+          </ul></div>`;
+      })()}
 
       ${(() => { return `<details${폄('정보')}>
         <summary>${todo ? '아직 안 정한 것' : '대회 정보 고치기'}
@@ -4658,6 +4688,7 @@ function wire() {
     try {
       const r = await api(`/events/${cur}/teams`, { method: 'POST', body: {
         name, email,
+        found: foundFromLink() || undefined,   // 초대 링크로 왔으면 여기서 세고 두 번째 칸에서 다시 안 묻는다
         share: !!($('#t-share') && $('#t-share').checked),
         agree: true } });
       if (r.waiting) { flash(`정원이 찼습니다. 대기 ${r.waiting}번째 — 자리가 나면 이메일로 팀 링크를 보냅니다`); return; }
