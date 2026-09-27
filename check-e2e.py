@@ -691,6 +691,16 @@ with sync_playwright() as p:
     ok("전체 비교 — 앞 팀으로 돌아가 점수를 고칠 수 있다")
     jctx.close()
 
+    # ── 증서 ─────────────────────────────────────────────
+    # 위촉장 명단을 따로 안 적는다. 실제로 심사한 사람이 곧 심사위원이다
+    A(code_of(f"/api/events/{ev}/credits") == 403, "열쇠 없이 증서 명단이 나온다")
+    cr = api(f"/api/events/{ev}/credits", key=OK)
+    A(any(j["name"] == "박심사" for j in cr["judges"]),
+      f"심사한 사람이 위촉장 명단에 없다: {cr['judges']}")
+    A(cr["event"]["title"], "증서에 박을 대회 이름이 없다")
+    A("@" not in json.dumps(cr, ensure_ascii=False), "증서 명단에 연락처가 샜다")
+    ok("증서 — 심사한 사람이 곧 위촉장 명단, 연락처 0건")
+
     # ── 주최자 열쇠 — 로그인 없이 내 대회를 따라오게 한다 ──
     def api_owner(path):
         req = urllib.request.Request(BASE + path)

@@ -5510,7 +5510,9 @@ function wire() {
       캡처만 돌아도 어디서 나온 것인지 남아야 해서 도메인을 그림 안에 박는다. */
   function drawRecord(cv, d) {
     const g = cv.getContext('2d'), W = cv.width, H = cv.height;
-    const TC = ['#AEB6C8', '#B87333', '#8E9BB0', '#D4A017', '#1F6F5C'][(d.tier || {}).level] || '#AEB6C8';
+    /* 화면의 티어 색은 흰 종이 위에 쓰라고 고른 것이다. 먹빛 카드에 그대로 올리면
+       실버와 플래티넘이 바탕에 묻는다 — 어두운 데 쓸 색을 따로 둔다. */
+    const TC = ['#A7B6CC', '#D08B4F', '#C9D4E4', '#F2C53D', '#4FE0BC'][(d.tier || {}).level] || '#A7B6CC';
     g.fillStyle = '#141824'; g.fillRect(0, 0, W, H);
     g.textBaseline = 'alphabetic';
     g.fillStyle = '#C8F53B'; g.font = FONT(46, 800); g.fillText('HACK:ON', 84, 128);
@@ -5527,7 +5529,7 @@ function wire() {
     const cells = [['완주', d.finished], ['수상', d.wins || 0],
                    ['지금 열림', live], ['기여', (d.xp || {}).total || 0]];
     cells.forEach(([k, v], i) => {
-      const x = 84 + (i % 2) * 466, y = 580 + Math.floor(i / 2) * 250;
+      const x = 84 + (i % 2) * 466, y = 556 + Math.floor(i / 2) * 250;
       g.fillStyle = '#1E2534'; rrect(g, x, y, 446, 210, 28);
       g.fillStyle = '#7C879B'; g.font = FONT(32, 600); g.fillText(k, x + 36, y + 72);
       g.fillStyle = '#FFFFFF'; g.font = FONT(84, 800); g.fillText(String(v), x + 36, y + 166);
@@ -5537,7 +5539,7 @@ function wire() {
     const old = (d.history || []).filter(h => h.age).sort((a, b) => b.age.days - a.age.days)[0];
     if (old) {
       g.fillStyle = '#C8F53B'; g.font = FONT(38, 700);
-      g.fillText(`${old.age.mark} ${old.team} — ${old.age.days}일째 열려 있음`, 84, 1155);
+      g.fillText(`${old.age.mark} ${old.team} — ${old.age.days}일째 열려 있음`, 84, 1135);
     }
     g.fillStyle = '#5C6474'; g.font = FONT(34, 700);
     g.fillText(`${location.host}/p/${d.id}`, 84, 1252);
