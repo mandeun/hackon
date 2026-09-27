@@ -274,6 +274,10 @@ a.btn{display:inline-flex;align-items:center;justify-content:center;text-decorat
 .stat b{display:block;font-size:22px;color:var(--navy);line-height:1.15;letter-spacing:-.03em;
         font-variant-numeric:tabular-nums}
 .stat span{font-size:11.5px;color:var(--ink3)}
+/* 깔때기 — 타일 사이의 꺾쇠와 타일 밑의 비율 */
+.stat i{flex:none;align-self:center;font-style:normal;font-size:18px;font-weight:800;color:var(--ink3)}
+.stat em{display:block;margin-top:3px;font-style:normal;font-size:11.5px;color:var(--ink3);
+         font-variant-numeric:tabular-nums}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{border-bottom:1px solid var(--rule);padding:8px 6px;text-align:left}
 th{color:var(--ink3);font-weight:700;font-size:12px}
@@ -810,12 +814,12 @@ const loginRest = () => ((AUTH && AUTH.providers) || [])
 /* 대회 유형 — 이름 짓기가 막히는 사람을 위한 시작점. 누르면 이름·정원·유형·주제 힌트가 채워지고, 다 고칠 수 있다.
    «실질 유효한 대회»의 검증은 따로 안 만든다 — 날짜·여는 사람·주제가 비면 첫 화면 목록에 안 오르는 기존 규칙이 그 검증이다. */
 const TEMPLATES = [
-  { chip: '동아리 안에서',  title: '우리 동아리 만들기 대회',       cap: 12, kind: '당일',    topic: '동아리 운영에서 번거로운 일 하나', note: '12명 · 하루. 회비·출석·공지 같은 우리 일을 고른다' },
-  { chip: '학교끼리',       title: '우리 학교 대 옆 학교 해커톤',    cap: 40, kind: '당일',    topic: '학교 생활에서 매번 손이 가는 일',  note: '40명 · 하루. 학교별 팀으로 붙는다. 장소는 한쪽 학교' },
-  { chip: '회사·일터',      title: '우리 팀 업무 자동화 해커톤',     cap: 15, kind: '당일',    topic: '내 일에서 매주 반복하는 작업 하나', note: '15명 · 하루. 코딩 경험 없어도 된다 — 만드는 건 AI, 고르는 건 사람' },
-  { chip: '우리 가게',      title: '우리 가게 문제 풀기 대회',       cap: 10, kind: '당일',    topic: '가게에서 사장님이 매일 손으로 하는 일', note: '10명 · 하루. 사장님이 문제를 올리고 결과물을 받는다' },
-  { chip: '반나절 3시간',   title: '점심 뒤 세 시간 만들기',          cap: 10, kind: '당일',    topic: '', note: '10명 · 13~16시. 여섯 시간이 부담이면 이걸로. 발표 없이 주소 제출로 끝' },
-  { chip: '온라인 1주',     title: '일주일 만들기 온라인 대회',      cap: 30, kind: '온라인 1주', topic: '', note: '모이지 않는다. 각자 만들고 마지막 날 발표' },
+  { chip: '동아리 안에서',  title: '우리 동아리 만들기 대회',       cap: 12, hours: '6시간', kind: '당일',    topic: '동아리 운영에서 번거로운 일 하나', note: '12명 · 하루. 회비·출석·공지 같은 우리 일을 고른다' },
+  { chip: '학교끼리',       title: '우리 학교 대 옆 학교 해커톤',    cap: 40, hours: '6시간', kind: '당일',    topic: '학교 생활에서 매번 손이 가는 일',  note: '40명 · 하루. 학교별 팀으로 붙는다. 장소는 한쪽 학교' },
+  { chip: '회사·일터',      title: '우리 팀 업무 자동화 해커톤',     cap: 15, hours: '6시간', kind: '당일',    topic: '내 일에서 매주 반복하는 작업 하나', note: '15명 · 하루. 코딩 경험 없어도 된다 — 만드는 건 AI, 고르는 건 사람' },
+  { chip: '우리 가게',      title: '우리 가게 문제 풀기 대회',       cap: 10, hours: '6시간', kind: '당일',    topic: '가게에서 사장님이 매일 손으로 하는 일', note: '10명 · 하루. 사장님이 문제를 올리고 결과물을 받는다' },
+  { chip: '반나절 3시간',   title: '점심 뒤 세 시간 만들기',          cap: 10, hours: '3시간', kind: '당일',    topic: '', note: '10명 · 13~16시. 여섯 시간이 부담이면 이걸로. 발표 없이 주소 제출로 끝' },
+  { chip: '온라인 1주',     title: '일주일 만들기 온라인 대회',      cap: 30, hours: '7일', kind: '온라인 1주', topic: '', note: '모이지 않는다. 각자 만들고 마지막 날 발표' },
 ];
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
@@ -1874,6 +1878,67 @@ async function render() {
   document.body.dataset.ready = '1';   // 완주 테스트가 이 표시를 기다린다
 }
 
+/* 만들기 화면의 미리보기. «대회» 탭 카드와 같은 마크업을 쓴다 — 다르게 그리면 미리보기가 아니다. */
+function mkPreview() {
+  const box = $('#f-pv'); if (!box) return;
+  const t   = ($('#f-title') || {}).value || '';
+  const cap = ($('#f-capshow') || {}).value || '20명';
+  const hr  = ($('#f-hourshow') || {}).value || '6시간';
+  const host = (AUTH && AUTH.name) || '나';
+  box.innerHTML = `<label>‘대회’ 탭에 이렇게 올라갑니다</label>
+    <div class="card ev" aria-hidden="true">
+      ${dateTile('')}
+      <div class="body"><h3>${t.trim() ? esc(t.trim())
+        : '<span style="color:var(--ink3)">이름을 넣으면 여기에 나옵니다</span>'}</h3>
+      <div class="meta"><span class="pill warn">초안</span> ${esc(host)} · ${esc(cap)} · ${esc(hr)}</div>
+      <div class="meta">날짜·상금·제출 마감은 만든 뒤에 넣습니다. 넣으면 여기에 D-day 가 붙습니다.</div></div>
+    </div>`;
+}
+
+/* 며칠 남았나. 목록에서 «언제인지» 다음으로 먼저 보는 것이 이것이다 —
+   Devpost 는 «4 days left», 캠퍼스픽은 «D-1» 을 카드마다 박아 둔다. 지난 것은 안 적는다(띠가 이미 말한다). */
+function dday(starts) {
+  const d0 = new Date(String(starts || '').slice(0, 10) + 'T00:00:00');
+  if (isNaN(+d0)) return '';
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const n = Math.round((d0 - t0) / 86400000);
+  return n === 0 ? '오늘' : n > 0 ? 'D-' + n : '';
+}
+
+/* 목록 카드의 둘째 줄. 여기 있는 것은 전부 서버가 이미 세어서 보내는 값이다(/api/events) —
+   전에는 다 버리고 띠·주최자·상금만 그렸다. 고를 근거가 카드에 없으면 아무도 안 들어가 본다. */
+function evLine(e) {
+  const p = [];
+  const dd = dday(e.starts);            if (dd) p.push(`<b>${dd}</b>`);
+  if (+e.teams)     p.push(`참가 ${+e.teams}팀`);
+  if (+e.openNeeds) p.push(`<b style="color:var(--acc)">${+e.openNeeds}자리 비었습니다</b>`);
+  if (+e.pastEvents) p.push(`지난 ${+e.pastEvents}회 · 완주 ${e.pastFinish}%`);
+  if ((e.sponsors || []).length) p.push('함께 ' + e.sponsors.map(esc).join('·'));
+  return p.length ? `<div class="meta">${p.join(' · ')}</div>` : '';
+}
+
+/* 신청 → 온 팀 → 완주를 한 줄로 잇는다.
+   따로 놓으면 «완주율 0%» 가 잘한 건지 못한 건지 안 보인다. 어디서 떨어졌는지가 보여야 한다.
+   «온 팀» 에는 모름이 있다 — 등록을 한 번도 안 찍은 대회의 0 은 «아무도 안 왔다» 가 아니다. */
+function funnel(o, ev) {
+  const t = +o.teams || 0;
+  const pct = n => t ? Math.round(n / t * 100) + '%' : '';
+  const before = ev && ev.starts && new Date(String(ev.starts).slice(0, 10) + 'T23:59:59') > new Date();
+  /* 넷을 가른다. 서버는 운영자가 아니면 came 을 아예 안 내려보낸다(outcomes 의 delete o.came) —
+     그 «모름» 을 0 으로 그리면 손님 화면에 «온 팀 0» 이라는 거짓말이 뜬다. 실제로 그렇게 떠 있었다. */
+  const came = o.came === undefined || o.came === null ? ['모름', '운영자만 봅니다']
+             : before ? ['아직', '대회 전입니다']
+             : +o.came ? [o.came + '팀', pct(+o.came)]
+             : ['모름', '등록을 한 번도 안 찍었습니다'];
+  return `<div class="stat fun">
+    <div><b>${t}팀</b><span>신청</span></div>
+    <i aria-hidden="true">›</i>
+    <div><b>${esc(String(came[0]))}</b><span>온 팀</span><em>${esc(String(came[1]))}</em></div>
+    <i aria-hidden="true">›</i>
+    <div><b>${+o.finished || 0}팀</b><span>완주</span><em>${o.finishRate}%</em></div>
+  </div>`;
+}
+
 const SCREEN = {
   async home() {
     /* «로그인» 으로 들어온 사람에게는 목록보다 로그인이 먼저다. 셋을 같은 크기로 세운다 —
@@ -1958,7 +2023,8 @@ const SCREEN = {
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
         <div class="body"><h3>${esc(e.title)}</h3>
-        <div class="meta">${badge(e)} ${esc(e.host)}${+e.prize ? ' · 상금 ' + won(e.prize) : ''}</div></div>
+        <div class="meta">${badge(e)} ${esc(e.host)}${+e.prize ? ' · 상금 ' + won(e.prize) : ''}</div>
+        ${evLine(e)}</div>
       </div>`).join('') +
       (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '') + findBox;
   },
@@ -2002,6 +2068,9 @@ const SCREEN = {
       </div>
       <label>참가 형태</label><input value="개인전 · 혼자 참가 가능" disabled>
       <input type="hidden" id="f-kind" value="당일">
+      ${/* 만들기 전에 무엇이 나오는지 보여 준다. Luma 의 «만들기» 화면은 설명이 한 줄도 없다 —
+             폼이 곧 결과 페이지라서, 채우는 동안 결과가 보이기 때문이다. */''}
+      <div id="f-pv" style="margin-top:12px"></div>
       <div style="height:12px"></div>
       <button class="btn" id="f-save">1단계 · 대회 만들기</button>
       <div class="meta" style="margin-top:8px">만들면 운영 화면으로 갑니다. 날짜·상금·마감은 나중에 고쳐도 됩니다.${myKey() ? '<br>전에 연 대회와 같은 주최자로 묶입니다.' : ''}</div>
@@ -2051,17 +2120,24 @@ const SCREEN = {
           data-name="${esc(r.name)}"
           data-how="${esc(r.tel || r.url)}">대장에 넣기</button>` : ''}
       </div>
-      <div class="meta" style="margin-top:12px">다녀오셨으면 한 줄 남겨 주세요.</div>
-      <input id="vt-${esc(r.id)}" maxlength="120" aria-label="${esc(r.name)} 제보 메모"
-        placeholder="한 줄 메모 (안 써도 됩니다)">
-      <div class="shrow" style="margin-top:9px">
-        ${['콘센트', '와이파이', '빌렸어요', '안 맞아요'].map(k =>
-          `<button class="btn sec sm" data-tip="${esc(r.id)}" data-kind="${k}">${k}</button>`).join('')}
-      </div>
+      <details class="more"><summary data-more="${esc(r.id)}">다녀오셨으면 한 줄
+        <span class="when">제보</span></summary><div class="in">
+        <input id="vt-${esc(r.id)}" maxlength="120" aria-label="${esc(r.name)} 제보 메모"
+          placeholder="한 줄 메모 (안 써도 됩니다)">
+        <div class="shrow" style="margin-top:9px">
+          ${['콘센트', '와이파이', '빌렸어요', '안 맞아요'].map(k =>
+            `<button class="btn sec sm" data-tip="${esc(r.id)}" data-kind="${k}">${k}</button>`).join('')}
+        </div>
+      </div></details>
     </div>`;
 
     return `<h2>구하기</h2>
       <p class="sub">장소·심사위원·강사·스태프. 인원만 넣으면 <b>몇이 필요하고 어디서 구하는지</b>가 나옵니다.</p>
+      ${/* 장소 목록이 길어서 그 아래 «사람»·«연락한 곳» 까지 내려가는 사람이 없었다.
+             운영 화면에 이미 있는 줄(.htabs · data-sec)을 그대로 쓴다. */''}
+      <div class="htabs">${[['sec-venue', '장소'], ['sec-people', '사람']]
+        .concat(lead ? [['sec-leads', '연락한 곳']] : [])
+        .map(([id, t]) => `<button type="button" data-sec="${id}">${t}</button>`).join('')}</div>
 
       <div class="card">
         <label>참가 인원 (몇 명 올 예정인가요)</label>
@@ -2076,7 +2152,7 @@ const SCREEN = {
       </div>
       <p class="sub">콘센트는 노트북 한 대에 하나. 와이파이는 동시 ${f.room.wifi}대, 휴대폰까지면 두 배입니다.</p>
 
-      <h3 style="margin-top:18px">지금 빌릴 수 있는 곳</h3>
+      <h3 id="sec-venue" style="margin-top:18px">지금 빌릴 수 있는 곳</h3>
       ${vn && vn.rows.length ? `
         <p class="sub">서울시 공공서비스예약에서 이 인원이 드는 곳만 골랐습니다.</p>
         <p class="sub">${vday ? `${esc(vday)} 에 접수하는 곳을 먼저 보여 줍니다.`
@@ -2124,7 +2200,7 @@ const SCREEN = {
             data-how="${esc(pl.at)}">연락처 대장에 넣기</button>` : ''}
       </div>`).join('')}
 
-      <h3 style="margin-top:18px">사람은 몇 명이 필요한가</h3>
+      <h3 id="sec-people" style="margin-top:18px">사람은 몇 명이 필요한가</h3>
       <p class="sub">명부를 파는 곳은 없습니다. <b>어디에 있는 사람인지와 뭐라고 써서 보낼지</b>를 드립니다.</p>
       ${f.need.map(r => `<div class="card">
         <h3>${esc(r.role)} ${r.count ? `<span class="pill ok">${r.count}명</span>`
@@ -2139,7 +2215,7 @@ const SCREEN = {
       </div>`).join('')}
       <div id="f-mail"></div>
 
-      ${lead ? `<h3 style="margin-top:18px">연락한 곳</h3>
+      ${lead ? `<h3 id="sec-leads" style="margin-top:18px">연락한 곳</h3>
         <p class="sub">혼자 열면 어디에 보냈는지를 잊습니다.</p>
         ${lead.rows.length ? `<table><tr><th>무엇</th><th>어디</th><th>상태</th><th></th></tr>
           ${lead.rows.map(r => `<tr>
@@ -2186,12 +2262,46 @@ const SCREEN = {
     /* 주제·요청 — 붙은 것(운영자면 연락처 포함)과 후보 */
     const reqsAll = LIVE ? await api(`/events/${cur}/requests`).catch(() => []) : [];
     const reqsCand = LIVE ? await api('/requests').catch(() => []) : [];
-    /* 열쇠가 없으면 순위와 공유 주소까지만 보여 준다. 연락처는 서버가 이미 안 준다. */
-    if (LIVE && !e.admin) return `<h2>${esc(e.title)} ${badge(e)}</h2>
+    /* 열쇠가 없어도 이 탭의 이름은 «순위» 다. 전에는 순위 자리에 «운영자로 열기» 안내만 그려서,
+       참가자·관객이 탭을 눌러도 순위를 한 줄도 못 봤다 — 탭 이름이 가리키는 것이 화면에 없었다.
+       점수는 서버가 마감 전에 null 로 지워 보낸다(Kaggle 이 public/private 리더보드를 나눈 것과 같은 이유).
+       그래서 마감 전에는 «누가 나왔나», 마감 뒤에는 «순위와 만든 것» 을 그린다.
+       운영자로 들어가는 문은 없애지 않고 맨 아래로 접어 둔다. */
+    if (LIVE && !e.admin) {
+      const sHead = e.vmode ? '관객 평가' : e.pmode ? '비교 점수' : '점수';
+      const sOf = r => e.vmode ? (r.votes ? r.vote + ' (' + r.votes + '표)' : '—')
+                     : e.pmode ? (r.pscore === null ? '—' : r.pscore + ' (' + r.pairs + '번)')
+                     : (r.score === null ? '—' : String(r.score));
+      /* 만든 것. 마감 전에는 서버가 주소를 안 내려보내므로 이 목록은 저절로 빈다. */
+      const made = d.rows.filter(r => r.url);
+      return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 참가 ${e.teams}팀</p>
       ${dueBox(e)}
-      <div class="card">
-        <h3>운영자로 열기</h3>
+      ${!d.rows.length
+        ? `<div class="card"><div class="meta">아직 신청한 팀이 없습니다.</div></div>`
+        : d.closed
+        ? `<h3>순위</h3>
+          <table><tr><th>순위</th><th>팀</th><th class="n">${sHead}</th></tr>
+          ${d.rows.map(r => `<tr><td>${r.rank ?? '—'}</td><td>${esc(r.name)}</td>
+            <td class="n">${esc(sOf(r))}</td></tr>`).join('')}</table>
+          ${made.length ? `<h3 style="margin-top:18px">무엇을 만들었나</h3>
+            ${made.map(r => `<div class="card">
+              <h3>${r.rank ? r.rank + '위 · ' : ''}${esc(r.name)}</h3>
+              ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
+              <div style="height:9px"></div>
+              <a class="btn sec sm" target="_blank" rel="noopener noreferrer"
+                href="${/^https?:\/\//i.test(r.url) ? esc(r.url) : '#'}">만든 것 열기</a>
+            </div>`).join('')}` : ''}`
+        : `<h3>나온 팀</h3>
+          <table><tr><th>자리</th><th>팀</th><th class="n">제출</th></tr>
+          ${d.rows.map(r => `<tr><td>${r.no}</td><td>${esc(r.name)}</td>
+            <td class="n">${(r.done || r.hidden) ? '<span class="pill ok">냈음</span>'
+                                                 : '<span class="pill">아직</span>'}</td></tr>`).join('')}</table>
+          <p class="sub">점수와 순위는 <b>제출 마감 뒤에</b> 열립니다.
+            심사 중에 순위가 보이면 심사위원이 그것을 보고 맞추게 됩니다.</p>`}
+      <details class="card" style="padding:14px 20px">
+        <summary style="cursor:pointer;font-weight:700">운영자로 열기</summary>
+        <div style="margin-top:8px">
         ${keyless() ? (AUTH.loggedIn
           ? `<div class="meta">지금 로그인한 계정(${esc(AUTH.name || '지금 계정')})으로 만든 대회가 아닙니다. 만든 계정으로 로그인하세요. 그 계정을 모르면 hi@mandeun.com 으로.</div>
              <div class="meta" style="margin-top:6px">계정을 모르겠으면: <b>대회를 만든 폰·컴퓨터</b>에서 이 화면을 열고 로그인하세요. 그 기기에 남은 열쇠가 그 계정에 붙고, 그 뒤엔 어디서든 열립니다.</div>
@@ -2203,9 +2313,10 @@ const SCREEN = {
         <label>열쇠</label><input id="ok-in" placeholder="영문과 숫자 10자">
         <div style="height:10px"></div>
         <button class="btn sm" id="ok-go">열기</button>`}
-      </div>
-      
+        </div>
+      </details>
       <div class="share">${shareBase()}/e/${esc(e.id)}</div>`;
+    }
 
     const sp = LIVE ? await api(`/events/${cur}/spread`) : { rows: [], gap: 0 };
     /* 심사평을 몇 팀에게 남겼는지. 참가자 불만 1위가 '왜 떨어졌는지 모른다' 인데,
@@ -3695,12 +3806,12 @@ const SCREEN = {
     const pk = LIVE ? await api(`/events/${cur}/pack`).catch(() => null) : null;
     const fw = LIVE ? await api(`/events/${cur}/follow`).catch(() => null) : null;
     const fs = LIVE ? await api(`/events/${cur}/followup-summary`).catch(() => ({ tools:[] })) : DEMO.followupSummary;
+    /* 이 화면은 둘로 갈린다. 운영자는 고치는 화면을, 나머지는 읽는 보고서를 본다.
+       전에는 안 갈려서 남의 대회를 연 사람에게 협찬사 추가 폼과 내보내기 단추가 그대로 보였다. */
+    const admin = !LIVE || !!ev.admin;
     return `<h2>협찬사에게 주는 숫자</h2>
       <p class="sub">‘몇 명이 봤다’를 쓰지 않습니다.</p>
-      <div class="stat">
-        <div><b>${o.finishRate}%</b><span>완주율</span></div>
-        <div><b>${o.came ?? 0}/${o.teams}</b><span>온 팀</span></div>
-      </div>
+      ${funnel(o, ev)}
       <div class="stat">
         <div><b>${o.interview}</b><span>면접 연결</span></div>
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
@@ -3719,7 +3830,7 @@ const SCREEN = {
           : '<div class="meta" style="margin-top:8px">아직 응답이 없습니다.</div>'}
       </div>
 
-      ${(o.found || []).length ? `<div class="card">
+      ${admin && (o.found || []).length ? `<div class="card">
         <h3>어디서 왔나</h3>
         <div class="meta">2회차 홍보를 어디에 할지 이 표가 정합니다.
           혼자 온 사람 ${o.solo || 0}명.</div>
@@ -3727,7 +3838,7 @@ const SCREEN = {
         ${o.found.map(f => `<tr><td>${esc(f.k)}</td><td class="n">${f.c}팀</td></tr>`).join('')}</table>
       </div>` : ''}
 
-${pk ? `<details open><summary>협찬사에게 넘길 것
+${admin && pk ? `<details open><summary>협찬사에게 넘길 것
         <span class="when">${pk.sponsors.length ? pk.sponsors.reduce((a, x) => a + x.kept, 0)
           + '/' + pk.sponsors.reduce((a, x) => a + x.total, 0) + ' 약속 이행' : '협찬사 없음'}</span>
         </summary><div class="in">
@@ -3747,7 +3858,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
 
         <div class="shrow" style="margin-top:9px">
           <button class="btn sec sm" id="x-sum">협찬사용 집계 (CSV)</button>
-          <button class="btn sec sm" id="x-lead">동의자 연락처 (${pk.leads}팀)</button>
+          <button class="btn sec sm" id="x-lead">동의자 연락처 (${pk.leads ?? '—'}팀)</button>
         </div>
         <div class="meta" style="margin-top:8px">
           집계에 이름·연락처는 없습니다. ${pk.minCell}건 미만은 뭉쳐서 나갑니다.
@@ -3760,7 +3871,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
         ${ev.sponsors.length
           ? logoBand(ev.sponsors)
           : `<div class="meta" style="margin-top:8px">아직 없습니다.</div>`}
-        <label>회사 이름</label><input id="p-name" placeholder="예) 오픈에이아이">
+        ${admin ? `<label>회사 이름</label><input id="p-name" placeholder="예) 오픈에이아이">
         <div class="row">
           <div><label>무엇을 받았나</label>
             <select id="p-kind"><option>크레딧</option><option>상품</option><option>멘토</option><option>현금</option><option>현물</option></select></div>
@@ -3782,10 +3893,10 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
           <label>로고 이미지 주소</label><input id="p-logo" placeholder="찾기를 누르면 채워집니다">
           <label>눌렀을 때 갈 곳</label><input id="p-link" placeholder="https://회사홈페이지"></div></details>
         <div style="height:10px"></div>
-        <button class="btn sm" id="p-add">협찬사 추가</button>
+        <button class="btn sm" id="p-add">협찬사 추가</button>` : ''}
       </div></details>
 
-      ${fw ? `<details${fw.next.length ? ' open' : ''}><summary>2주 뒤 안부
+      ${admin && fw ? `<details${fw.next.length ? ' open' : ''}><summary>2주 뒤 안부
         <span class="when">${fw.next.length ? fw.next.length + '건 물어볼 때가 됐습니다'
           : fw.asked12 ? fw.aliveRate + '% 살아 있음' : '2 · 6 · 12주'}</span>
         </summary><div class="in">
@@ -3805,7 +3916,7 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
         <div class="meta">칸을 누르면 <b>안 물어봄 → 이어감 → 중단</b> 순으로 바뀝니다.</div>
       </div></details>` : ''}
 
-      ${LIVE ? `<details><summary>끝난 뒤 멘토 <span class="when">행사 전에 정해 둔다</span></summary>
+      ${admin && LIVE ? `<details><summary>끝난 뒤 멘토 <span class="when">행사 전에 정해 둔다</span></summary>
         <div class="in">
         <div class="meta">끝나고 팀을 봐 줄 사람을 <b>행사 전에</b> 정해 둡니다.
           끝나고 정하면 아무도 안 합니다.</div>
@@ -3847,14 +3958,20 @@ ${pk ? `<details open><summary>협찬사에게 넘길 것
           <button class="btn sm" id="a-add">짝지어 주기</button>` : ''}
       </div></details>` : ''}
 
-<details open><summary>성과 기록하기</summary><div class="in">
+${admin ? `<details open><summary>성과 기록하기</summary><div class="in">
         <div class="meta">행사 뒤 2주 동안 여기에 쌓습니다.</div>
         <label>무엇</label>
         <select id="o-kind"><option>면접</option><option>도입검토</option><option>채용</option><option>후속미팅</option></select>
         <label>어느 회사</label><input id="o-who" placeholder="회사 이름">
         <div style="height:10px"></div>
         <button class="btn sm" id="o-add">기록 추가</button>
-      </div></details>`;
+      </div></details>` : `<div class="card">
+        <h3>이 대회의 운영자이신가요</h3>
+        <div class="meta">여기 숫자는 누구나 봅니다. 고치는 것은 운영자만 합니다 —
+          <b>순위</b> 탭에서 운영자로 열면 약속 이행·협찬사·성과 기록이 나옵니다.</div>
+        <div style="height:8px"></div>
+        <button class="btn sec sm" data-go="board">순위 탭으로</button>
+      </div>`}`;
   },
 };
 
@@ -4163,10 +4280,12 @@ function wire() {
     const ft = $('#f-title'); if (ft && (!ft.value.trim() || ft.dataset.auto === '1')) { ft.value = TPL.title; ft.dataset.auto = '1'; }
     if ($('#f-kind')) $('#f-kind').value = TPL.kind;
     if ($('#f-capshow')) $('#f-capshow').value = TPL.cap + '명';
-    if ($('#f-hourshow')) $('#f-hourshow').value = TPL.kind === '온라인 1주' ? '7일' : '6시간';
+    if ($('#f-hourshow')) $('#f-hourshow').value = TPL.hours || (TPL.kind === '온라인 1주' ? '7일' : '6시간');
     if ($('#f-tplnote')) $('#f-tplnote').textContent = TPL.note + ' — 이름은 고쳐도 됩니다.';
+    mkPreview();
   });
-  if ($('#f-title')) $('#f-title').addEventListener('input', () => { $('#f-title').dataset.auto = '0'; });
+  if ($('#f-title')) $('#f-title').addEventListener('input', () => { $('#f-title').dataset.auto = '0'; mkPreview(); });
+  mkPreview();
   document.querySelectorAll('[data-how]').forEach(b => b.onclick = () => {
     document.querySelectorAll('[data-how]').forEach(x => x.classList.toggle('on', x === b));
     if ($('#f-kind')) $('#f-kind').value = b.dataset.how;
