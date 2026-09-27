@@ -536,10 +536,11 @@ function shrink(vals) {
 function profile(db, pid) {
   const me = db.prepare('SELECT * FROM people WHERE id=?').get(pid);
   if (!me) throw new HttpError(404, '없는 사람입니다');
-  const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends,
-                                  s.url IS NOT NULL AS made
+  const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends, e.due,
+                                  s.url IS NOT NULL AS made, s.url, s.show AS shown, lv.state AS open
                            FROM teams t JOIN events e ON e.id = t.event
                            LEFT JOIN submissions s ON s.team = t.id
+                           LEFT JOIN liveness lv ON lv.team = t.id
                            WHERE t.person = ? ORDER BY e.ends DESC`).all(pid);
   const past = rows.filter(r => r.ends < today());
   const came = past.filter(r => r.came).length;
@@ -565,8 +566,19 @@ function profile(db, pid) {
     manner: shrink(rt.map(r => r.manner)),
     /* 배치 중 - 몇 번 안 나온 사람은 등급을 안 붙인다. */
     placed: past.length >= 2,
-    history: rows.map(r => ({ title: r.title, ends: r.ends, team: r.name,
-                              role: r.role, came: !!r.came, made: !!r.made })),
+    /* 만든 것. 주소가 «공개» 로 나가는 문 셋은 쇼케이스와 똑같다 —
+       본인 동의(show) · 마감 지남 · 주소 검사. 셋 중 하나라도 안 맞으면 주소를 안 싣는다.
+       프로필은 아무나 열 수 있는 주소라 여기가 새면 쇼케이스 동의가 뜻을 잃는다. */
+    history: rows.map(r => {
+      const open = closed({ due: r.due, ends: r.ends });
+      const pub  = !!(r.url && r.shown && open && webUrl(r.url));
+      const st   = pub && (r.open === 1 || r.open === 0) ? r.open : null;
+      return { title: r.title, ends: r.ends, team: r.name,
+               role: r.role, came: !!r.came, made: !!r.made,
+               url: pub ? webUrl(r.url) : '', shown: !!r.shown,
+               /* 주소를 못 싣는 줄은 상태도 안 판다 - «모름» 이라고 말할 근거가 없다 */
+               open: pub ? openLabel(st) : '', age: pub ? ageOf(r.ends, st) : null };
+    }),
   };
 }
 
@@ -613,6 +625,44 @@ function rankOf(made, wins, skill, n) {
   let i = 0;
   for (let k = 0; k < RANKS.length; k++) if (RANKS[k].need(made, wins, skill, n)) i = k;
   return { name: RANKS[i].name, level: i, next: TIER_NEXT[i] };
+}
+
+/* ── 만든 것 ──────────────────────────────────────────
+   결과물에는 «등급» 을 안 붙인다. 대회마다 심사위원이 다르고, board() 의 등수 보정은
+   한 대회 «안에서만» 성립한다 - 서로 다른 대회의 점수를 같은 티어로 부르면 그건 거짓말이다.
+   붙이는 것은 사실 둘뿐이다. 지금 열리는가, 그리고 며칠째 살아 있는가. */
+const AGE_TIERS = [
+  { key: 'seed', name: '새싹', mark: '\u{1F331}', from: 0 },
+  { key: 'herb', name: '풀',   mark: '\u{1F33F}', from: 30 },
+  { key: 'tree', name: '나무', mark: '\u{1F333}', from: 365 },
+];
+/** 나이는 «열려 있을 때만» 센다. 죽은 주소에 나이를 붙이면 자랑이 아니라 묘비다. */
+function ageOf(ends, state, now) {
+  if (state !== 1) return null;
+  const d0 = Date.parse(String(ends || '').slice(0, 10) + 'T00:00:00Z');
+  const d1 = Date.parse(String(now || today()).slice(0, 10) + 'T00:00:00Z');
+  if (!Number.isFinite(d0) || !Number.isFinite(d1) || d1 < d0) return null;
+  const days = Math.floor((d1 - d0) / 86400000);
+  let t = AGE_TIERS[0];
+  for (const x of AGE_TIERS) if (days >= x.from) t = x;
+  return { days, key: t.key, name: t.name, mark: t.mark };
+}
+/** 상태 셋 - 열림·안 열림·모름. NULL 을 «안 열림» 으로 그리지 않는다(오답노트 E22). */
+const openLabel = st => st === 1 ? '열림' : st === 0 ? '안 열림' : '모름';
+
+/** 한 판 돌린 결과를 표에 쓸지 말지. 망이 막혀 한꺼번에 실패하면 살아 있는 것까지
+    전부 «안 열림» 으로 덮어쓴다 - 그건 지난 사실을 지우는 것이다(오답노트 E3).
+    확인된 비율이 기준에 못 미치면 한 줄도 안 쓰고 지난 상태를 그대로 둔다. */
+const LIVE_MIN_RATE = 0.5;
+function livenessPlan(results) {
+  const n = results.length;
+  if (!n) return { write: false, rows: [], rate: 0, why: '볼 것이 없습니다' };
+  const done = results.filter(r => r.ok === true || r.ok === false);
+  const rate = done.length / n;
+  if (rate < LIVE_MIN_RATE)
+    return { write: false, rows: [], rate,
+             why: `확인된 것이 ${Math.round(rate * 100)}% 뿐입니다 — 지난 상태를 그대로 둡니다` };
+  return { write: true, rows: done.map(r => ({ team: r.team, state: r.ok ? 1 : 0 })), rate, why: '' };
 }
 
 /** 이 대회(주최자)의 평판. 참가자가 남긴 평가에서 나온다. */
@@ -1829,6 +1879,21 @@ function open(file) {
   try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
   try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(로그인 별명)
   try { db.exec("ALTER TABLE news ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}    // 제보자 계정 — 하루 5건 상한      // 별점 옆 한 줄
+  /* 만든 것이 «지금도 열리는가». 상태는 셋이다 - 1 열림 · 0 안 열림 · NULL 모름.
+     한 번도 못 열어 본 것과 «열어 봤는데 죽었다» 를 같은 화면으로 그리지 않는다(오답노트 E22). */
+  db.exec(`CREATE TABLE IF NOT EXISTS liveness(
+    team    INTEGER PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    state   INTEGER,
+    checked TEXT NOT NULL DEFAULT (datetime('now')))`);
+
+  /* 기록증 카드. 본인이 «만들기» 를 누른 순간 생기고, 그때부터 그 사람 프로필 링크의
+     미리보기 그림이 된다. 안 만든 사람은 기본 og.png 다 - 빈 카드를 그리지 않는다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS cards(
+    person  TEXT PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE,
+    mime    TEXT NOT NULL,
+    data    BLOB NOT NULL,
+    created TEXT NOT NULL DEFAULT (datetime('now')))`);
+
   /* 이 표가 생기기 전에 띄운 공지(events.notice)를 한 번 옮겨 둔다 — 안 그러면 큰 화면엔 공지가 있는데
      공개 페이지 «소식»은 비어 «있는 것을 없음으로» 그린다. 시각은 notice_at 그대로 */
   for (const r of db.prepare("SELECT id, notice, notice_at FROM events WHERE notice<>'' AND id NOT IN (SELECT event FROM notices)").all())
@@ -5488,6 +5553,40 @@ async function selftest() {
      '마감이 지나고 운영자가 별표해도, 본인 동의가 없으면 쇼케이스에 안 실린다');
   showConsent(db, scT, true);
   const shown = showcase(db).find(w => w.url === 'https://shown.test/a');
+  /* 프로필의 «만든 것» 도 같은 문 셋을 지난다. 프로필은 아무나 여는 주소라
+     여기가 새면 쇼케이스 동의가 뜻을 잃는다. */
+  const pfT  = joinTeam(db, scEv.id, { name: '프로필팀', contact: 'prof@x.test', agree: true });
+  editEvent(db, scEv.id, { due: '2099-01-01T00:00' });          // 내고
+  submit(db, pfT, { url: 'https://prof.test/a', note: '만든 것' });
+  editEvent(db, scEv.id, { due: '2000-01-01T00:00' });          // 마감을 지나게 한다
+  const pfId = pidOf(db, 'prof@x.test');
+  const pfOf = () => profile(db, pfId).history.find(h => h.team === '프로필팀');
+  ok(pfOf() && pfOf().url === '', '동의 안 한 주소가 프로필에 실린다');
+  showConsent(db, pfT, true);
+  ok(pfOf().url === 'https://prof.test/a', '동의해도 프로필에 만든 것이 안 실린다');
+  ok(pfOf().open === '모름' && pfOf().age === null, '한 번도 안 열어 본 것을 «모름» 이라 안 한다');
+  db.prepare('INSERT INTO liveness(team,state) VALUES(?,1)').run(pfT);
+  ok(pfOf().open === '열림' && pfOf().age && pfOf().age.key === 'seed', '열려 있는데 나이가 안 붙는다');
+  db.prepare('UPDATE liveness SET state=0 WHERE team=?').run(pfT);
+  ok(pfOf().open === '안 열림' && pfOf().age === null, '죽은 주소에 나이가 붙는다');
+
+  // 만든 것 — 등급이 아니라 나이. 열려 있을 때만 센다
+  ok(ageOf('2026-01-01', 1, '2026-01-29').key === 'seed', '한 달 전은 새싹이다');
+  ok(ageOf('2026-01-01', 1, '2026-01-31').key === 'herb', '서른 날이면 풀이다');
+  ok(ageOf('2026-01-01', 1, '2027-01-01').key === 'tree', '일 년이면 나무다');
+  ok(ageOf('2026-01-01', 0, '2027-01-01') === null, '안 열리는 것에 나이가 붙는다');
+  ok(ageOf('2026-01-01', 1, '2025-06-01') === null, '대회보다 앞선 날짜로 나이가 나온다');
+  ok(openLabel(1) === '열림' && openLabel(0) === '안 열림', '열림·안 열림 표기가 다르다');
+  ok(openLabel(null) === '모름' && openLabel(undefined) === '모름', '모름을 «안 열림» 으로 그린다');
+
+  /* 한 판 결과를 표에 쓸지. 망이 막혀 한꺼번에 실패하면 살아 있는 것까지 죽었다고 덮어쓴다(E3) */
+  const lp1 = livenessPlan([{ team: 1, ok: true }, { team: 2, ok: false }, { team: 3, ok: null }]);
+  ok(lp1.write && lp1.rows.length === 2, '확인된 것만 쓰지 않는다');
+  ok(lp1.rows.every(r => r.team !== 3), '못 본 것을 «안 열림» 으로 쓴다');
+  ok(!livenessPlan([{ team: 1, ok: true }, { team: 2, ok: null }, { team: 3, ok: null }]).write,
+     '절반도 확인이 안 됐는데 표를 덮어쓴다');
+  ok(!livenessPlan([]).write, '볼 것이 없는데 쓴다');
+
   ok(!!shown, '본인이 동의하면 그때 실린다');
   ok(shown.name === '동의안한팀' && shown.note === '만든 것', '이름과 설명이 같이 간다');
   const at1 = db.prepare('SELECT show_at FROM submissions WHERE team=?').get(scT).show_at;
