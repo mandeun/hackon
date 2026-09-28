@@ -373,6 +373,20 @@ with sync_playwright() as p:
       "«모여 있는 곳» 이 대화방으로 안 보낸다")
     ok("모여 있는 곳 — 주소를 적은 대회만 첫 화면에 걸린다")
 
+    # ── 노랑이 — 그림 파일은 서빙 목록에 안 적으면 404 가 된다 ──
+    for f in ("norangi.svg", "norangi-run.svg", "norangi-hi.svg"):
+        A(code_of("/" + f) == 200, f"{f} 가 404 다 — STATIC_OK 에 안 적혔다")
+    svg = urllib.request.urlopen(BASE + "/norangi.svg").read().decode()
+    body = re.sub(r"<!--[\s\S]*?-->", "", svg)
+    A("#FFB020" in body and "#C8F53B" not in body, "노랑이가 아직 라임이다 — 단추 색과 캐릭터가 섞인다")
+    A("#0B1020" in body, "노랑이 눈이 먹이 아니다")
+    # 첫 화면이 그 파일을 실제로 부르는가 — 목록에만 있고 안 쓰면 아무 데도 안 보인다
+    pg.goto(BASE + "/")
+    pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
+    A(pg.is_visible(".brandline img"), "첫 화면에 노랑이가 안 보인다")
+    A("너랑" in pg.inner_text(".brandline"), "브랜드 줄에 이름의 뜻이 없다")
+    ok("노랑이 — 셋 다 200, 앰버·먹, 첫 화면 브랜드 줄에 실제로 그려진다")
+
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
     visit(f"/app#{ev}")
     txt = pg.inner_text("#view")

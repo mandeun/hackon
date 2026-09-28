@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  노랑이 — HACK:ON 마스코트 · 기본 자세
+
+  이름의 뜻: 「NO」라고 생각했던 걸 「너랑」 해서 이룸 → 노랑이.
+  생김의 뜻: NO 가 뒤집혀 ON 이 되고, 콘센트 구멍에 불이 들어오면서 사람이 됐다.
+    머리 = 콘센트(둥근 네모 + 구멍 둘). 지금은 그 구멍이 눈이다.
+    팔다리 = 사람과 사람을 잇던 선. 끝의 마디는 손과 발이다.
+
+  색은 둘뿐 — 먹 #0B1020, 라임 #FFB020
+  모둠(g) id 는 편집기에서 레이어 이름으로 보입니다. 자세는 팔다리 path 만 고치면 됩니다.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120"
+     role="img" aria-label="노랑이">
+  <title>노랑이</title>
+  <desc>콘센트가 머리이고 연결선이 팔다리가 된 사람. 한 손을 들고 서 있다.</desc>
+
+  <g id="팔다리" fill="none" stroke="#FFB020" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path id="몸통" d="M60 60 V86"/>
+    <path id="팔-왼" d="M60 68 L38 78"/>
+    <path id="팔-오른" d="M60 68 L84 50"/>
+    <path id="다리-왼" d="M60 86 L46 108"/>
+    <path id="다리-오른" d="M60 86 L74 108"/>
+  </g>
+
+  <g id="손발" fill="#FFB020">
+    <rect id="손-왼" x="26" y="74" width="13" height="11" rx="4"/>
+    <rect id="손-오른" x="80" y="40" width="13" height="11" rx="4"/>
+    <rect id="발-왼" x="36" y="105" width="13" height="11" rx="4"/>
+    <rect id="발-오른" x="71" y="105" width="13" height="11" rx="4"/>
+  </g>
+
+  <g id="머리">
+    <rect id="콘센트" x="34" y="10" width="52" height="50" rx="19" fill="#FFB020"/>
+    <rect id="눈-왼" x="47" y="27" width="7" height="17" rx="3.5" fill="#0B1020"/>
+    <rect id="눈-오른" x="66" y="27" width="7" height="17" rx="3.5" fill="#0B1020"/>
+  </g>
+</svg>

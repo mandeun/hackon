@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  노랑이 — 두 손 들기. 「채워졌습니다」·「고맙습니다」 자리에 씁니다.
+  자리가 다 찼을 때, 신청이 끝났을 때.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120"
+     role="img" aria-label="노랑이 — 두 손 들기">
+  <title>노랑이 — 두 손 들기</title>
+  <g id="팔다리" fill="none" stroke="#FFB020" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M60 60 V86"/>
+    <path d="M60 68 L36 48"/>
+    <path d="M60 68 L84 48"/>
+    <path d="M60 86 L47 108"/>
+    <path d="M60 86 L73 108"/>
+  </g>
+  <g id="손발" fill="#FFB020">
+    <rect x="26" y="38" width="13" height="11" rx="4" transform="rotate(-40 32 43)"/>
+    <rect x="81" y="38" width="13" height="11" rx="4" transform="rotate(40 87 43)"/>
+    <rect x="37" y="105" width="13" height="11" rx="4"/>
+    <rect x="70" y="105" width="13" height="11" rx="4"/>
+  </g>
+  <g id="머리">
+    <rect x="34" y="10" width="52" height="50" rx="19" fill="#FFB020"/>
+    <rect x="47" y="27" width="7" height="17" rx="3.5" fill="#0B1020"/>
+    <rect x="66" y="27" width="7" height="17" rx="3.5" fill="#0B1020"/>
+  </g>
+</svg>
