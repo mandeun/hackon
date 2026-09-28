@@ -2943,6 +2943,11 @@ function getEvent(db, id) {
   delete e.jkey;                     // 심사 열쇠도 안 내려보낸다 — 운영자에게만 따로 준다
   delete e.vkey;                     // 관객 투표 열쇠도 마찬가지
   delete e.judged;                   // 심사위원 상태는 운영자 화면에만 — 손님에게 «못 구함»을 보일 이유가 없다
+  delete e.pay;                      // 입금 안내(계좌번호·예금주 이름)는 «맡기 확정된 사람» 에게만 — giveView 가 열쇠를 보고 따로 준다
+  delete e.wifi;                      // 장소 와이파이는 큰 화면(tv)에만 — 벽에 거는 것과 공개 API 에 싣는 것은 다르다
+  /* 이 함수는 «지울 것» 을 적는 방식이라, events 에 칸이 새로 생기면 기본값이 «공개» 다.
+     pay 가 정확히 그래서 샜다(감사 09-28 2번) — 열쇠 없는 /api/events/:id·/board·/tv 셋으로 계좌번호가 나갔다.
+     칸을 더할 때는 여기 한 줄을 같이 적고, 아래 selftest 의 «공개 응답에 안 나갈 칸» 목록에도 적는다. */
   /* 그날의 조건은 오프닝에서 공개하는 것이다. 끝나기 전에 공개 응답에 실리면
      참가자가 미리 준비해 온다 — 그러면 «현장 조건» 이 아니다. 운영자에게만 따로 붙인다. */
   if (!closed({ due: e.due, ends: e.ends })) delete e.twist;
@@ -3489,7 +3494,6 @@ function tv(db, event) {
     /* 빈 자리 — 로고 벽이 «장소 · 희망가 30만원 · 비었습니다» 로 판다. 돈은 주최자에게 직접 */
     open: db.prepare(`SELECT n.id, n.kind, n.label, n.price, n.qty, (SELECT COUNT(*) FROM pledges p WHERE p.need=n.id AND p.status IN ('ok','done')) AS filled FROM needs n WHERE n.event=? ORDER BY n.id`).all(event)
       .filter(n => (+n.qty || 0) - (+n.filled || 0) > 0).slice(0, 6),
-    pay: e.pay || '',
     teams: rows.length,
     done: rows.filter(r => r.url).length,
     /* 아직 안 낸 팀 이름은 마감 한 시간 전부터만 띄운다.
@@ -3497,7 +3501,8 @@ function tv(db, event) {
     urgent: !!e.due && new Date(e.due) - new Date() < 3600000,
     waiting: (e.due && new Date(e.due) - new Date() < 3600000 && !closed(e))
       ? rows.filter(r => !r.url).map(r => r.name) : [],
-    wifi: e.wifi || '',
+    /* 와이파이는 벽에 거는 화면에만 싣는다. getEvent 는 이제 이 칸을 안 내려보내므로 여기서 직접 읽는다. */
+    wifi: db.prepare('SELECT wifi FROM events WHERE id=?').get(event).wifi || '',
     notice: noticeOf(e),
     /* 순위는 마감이 지나고 심사가 시작된 뒤에만 벽에 띄운다.
        그 전에 띄우면 심사위원이 보고 점수를 맞추고, 참가자는 압박만 받는다. */
@@ -4025,7 +4030,8 @@ function giveView(db, ref, k) {
   }
   return {
     gift: { ref, kind, label, name: row.name, org: row.org || '', status, at: row.created },
-    event: { id: e.id, pay: (row.status === 'ok' || row.status === 'done') ? (e.pay || '') : '', title: e.title, host: e.host, starts: e.starts, ends: e.ends, due: e.due,
+    event: { id: e.id, pay: (row.status === 'ok' || row.status === 'done')
+               ? (db.prepare('SELECT pay FROM events WHERE id=?').get(row.event).pay || '') : '', title: e.title, host: e.host, starts: e.starts, ends: e.ends, due: e.due,
              closed: isClosed, ended: !!e.ends && today() > e.ends,
              teams: o.teams, finished: o.finished, finishRate: isClosed ? o.finishRate : null },
     top: pk ? pk.top.map(t => ({ rank: t.rank, name: t.name, note: t.note, url: t.url })) : [],
@@ -4790,8 +4796,10 @@ function routes(db) {
             const e = getEvent(db, m[1]);
             e.admin = isAdmin(db, m[1], key, owner);
             /* 심사 열쇠는 운영자에게만. 심사위원에게 보낼 링크를 이걸로 만든다. */
-            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged, twist FROM events WHERE id=?').get(m[1]);
+            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged, twist, pay, wifi FROM events WHERE id=?').get(m[1]);
                            e.jkey = kk.jkey; e.vkey = kk.vkey; e.judged = kk.judged; e.twist = kk.twist;
+                           /* 입금 안내·와이파이는 운영자 편집 칸이 읽는다. 손님 응답에서는 getEvent 가 지운다. */
+                           e.pay = kk.pay || ''; e.wifi = kk.wifi || '';
               /* 이 대회가 «지금 로그인한 계정» 것인가. 열쇠로 들어온 사람은 고칠 수는 있어도
                  «내 대회» 목록에는 안 뜬다 — 그 차이를 화면이 알아야 붙이기를 권할 수 있다.
                  로그인을 안 했으면 «아니다» 가 아니라 «모른다» 라서 칸을 아예 안 보낸다. */
@@ -5649,6 +5657,24 @@ async function selftest() {
   ok(/^[0-9a-f]{10}$/.test(okey), '운영자 열쇠가 발급된다');
   ok(/^[0-9a-f]{12}$/.test(evR.owner), '주최자 열쇠도 같이 발급된다');
   ok(!('okey' in getEvent(db, ev)), '열쇠는 안 내려보낸다');
+  /* 손님 응답에 «절대 실리면 안 되는 칸» 을 한 줄로 못 박는다(감사 09-28 2번).
+     getEvent 은 SELECT * 에서 «지울 것» 을 빼는 방식이라, events 에 칸을 더하면 기본값이 공개다.
+     입금 안내(pay)가 정확히 그래서 열쇠 없는 세 길로 계좌번호를 내보내고 있었다.
+     새 칸을 더하면 getEvent 의 delete 와 이 목록에 같이 적는다. */
+  {
+    editEvent(db, ev, { pay: '테스트은행 0000-0000 아무개', wifi: '테스트망 / 0000' });
+    const 비밀칸 = ['okey', 'owner', 'jkey', 'vkey', 'judged', 'pay', 'wifi'];
+    const 손님 = getEvent(db, ev);
+    ok(비밀칸.every(k => !(k in 손님)), '손님용 대회 응답에 감춰야 할 칸이 남아 있다');
+    const 큰화면 = JSON.stringify(tv(db, ev));
+    ok(!큰화면.includes('0000-0000'), '큰 화면 응답에 입금 안내가 실린다');
+    ok(tv(db, ev).wifi === '테스트망 / 0000', '큰 화면에 와이파이가 안 실린다');   // 벽에 거는 것은 그대로 둔다
+    ok(!JSON.stringify(board(db, ev, false)).includes('0000-0000'), '열쇠 없는 순위표에 입금 안내가 실린다');
+    /* 반대쪽 — 다 지워 버리는 수정은 통과하면 안 된다. 운영자와 확정된 후원자는 그대로 봐야 한다. */
+    ok(db.prepare('SELECT pay FROM events WHERE id=?').get(ev).pay === '테스트은행 0000-0000 아무개',
+       '입금 안내가 저장 자체가 안 된다');
+    editEvent(db, ev, { pay: '', wifi: '' });
+  }
   ok(board(db, ev, true).rows.length === 0, '빈 대회');
   ok(isAdmin(db, ev, okey) && !isAdmin(db, ev, 'x'), '열쇠가 맞아야 운영자다');
   ok(isAdmin(db, ev, '', evR.owner), '주최자 열쇠로도 열린다');
@@ -7406,6 +7432,18 @@ async function selftest() {
     const of = addOffer(db, qe.id, { kind: 'snack', name: '커피집', contact: 'c@x.y' });
     setOffer(db, of.id, { status: 'ok' });
     ok(giveView(db, of.ref, of.pkey).gift.status === 'ok', '제안이 확인되면 같은 열쇠로 확정 상태가 보인다');
+    /* 입금 안내는 «확정된 사람에게만» 이다. 손님 응답에서 지우는 것(감사 09-28 2번)과
+       이 길이 서로 어긋나면 안 된다 — 다 지워 버리는 수정은 여기서 빨개진다. */
+    {
+      editEvent(db, qe.id, { pay: '테스트은행 1111-2222 아무개' });
+      ok(giveView(db, pl.ref, pl.pkey).event.pay === '', '아직 확정 안 된 후원자에게 입금 안내가 보인다');
+      setPledge(db, pl.id, { status: 'ok' });
+      ok(giveView(db, pl.ref, pl.pkey).event.pay === '테스트은행 1111-2222 아무개',
+         '확정된 후원자에게 입금 안내가 안 보인다');
+      ok(!JSON.stringify(getEvent(db, qe.id)).includes('1111-2222'), '손님 응답으로 입금 안내가 샌다');
+      editEvent(db, qe.id, { pay: '' });
+      setPledge(db, pl.id, { status: 'pending' });
+    }
     /* 달력·CSV */
     const ics = icsOf(getEvent(db, qe.id), 'https://x.test');
     ok(ics.includes('DTSTART;VALUE=DATE:20990101') && ics.includes('DTEND;VALUE=DATE:20990102') && !ics.includes('+09:00'), '종일 일정은 날짜만 — 시간대 없음');
