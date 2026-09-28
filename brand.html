@@ -1,0 +1,143 @@
+<!doctype html>
+<!-- ─────────────────────────────────────────────────────────────
+     노랑이와 색 셋. 방문자가 «이게 무슨 서비스고 왜 이렇게 생겼나» 를
+     한 번에 읽는 한 장. 규칙의 원본은 docs/BRAND.md 와 노랑이.md 에 있고,
+     여기 적힌 색 값은 selftest 가 코드(BRAND)와 대조한다 — 셋이 어긋나면 빨개진다.
+     외부 스크립트·글꼴 없음. 그림은 전부 SVG 라 전체가 20KB 를 안 넘는다.
+     ───────────────────────────────────────────────────────────── -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#EEF1F4">
+<title>노랑이 — HACK:ON 이 이렇게 생긴 이유</title>
+<meta name="description" content="NO 라고 생각했던 걸 너랑 해서 이룹니다. 콘센트가 머리이고 사람과 사람을 잇던 선이 팔다리인 마스코트 «노랑이», 그리고 색 셋이 각각 맡은 일.">
+<link rel="icon" href="/icon.svg">
+<link rel="canonical" href="https://hackon.kr/brand">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HACK:ON">
+<meta property="og:url" content="https://hackon.kr/brand">
+<meta property="og:title" content="노랑이 — HACK:ON 이 이렇게 생긴 이유">
+<meta property="og:description" content="NO 를 뒤집으면 ON. 콘센트에 불이 들어오고 사람이 됩니다.">
+<meta property="og:image" content="https://hackon.kr/og.png">
+<style>
+:root{--pg:#EEF1F4;--card:#fff;--soft:#F4F6F8;--ink:#191F28;--grey:#5B6470;--hair:#EAECEF;
+  --acc:#0B1020;--on:#C8F53B;--amber:#FFB020;
+  --sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--pg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.65;letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
+.wrap{max-width:720px;margin:0 auto;padding:0 20px}
+.top{background:var(--card);border-bottom:1px solid var(--hair)}
+.top .wrap{display:flex;align-items:center;gap:18px;min-height:60px;flex-wrap:wrap}
+.top a{color:var(--ink);text-decoration:none;font-size:14px}
+.top a.logo{font-weight:800;letter-spacing:-.03em;margin-right:auto}
+.top .stamp{color:var(--on)}
+.hero{background:var(--acc);color:#fff;padding:44px 0 48px}
+.hero .wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.hero img{flex:none}
+.hero h1{font-size:clamp(26px,6vw,38px);font-weight:900;letter-spacing:-.04em;line-height:1.2;margin:0 0 10px}
+.hero p{margin:0;color:#AEB6C8;font-size:15.5px}
+main{padding:8px 0 56px}
+section{background:var(--card);border-radius:20px;padding:26px 22px;margin:16px 0}
+h2{font-size:20px;font-weight:800;letter-spacing:-.02em;margin:0 0 6px}
+h2+.lead{margin:0 0 16px;color:var(--grey);font-size:15px}
+.story{display:block;width:100%;height:auto;border-radius:14px;background:var(--acc)}
+table{width:100%;border-collapse:collapse;font-size:14.5px;margin-top:6px}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--hair);vertical-align:top}
+th{font-size:13px;color:var(--grey);font-weight:700}
+tr:last-child td{border-bottom:0}
+.sw{display:inline-block;width:15px;height:15px;border-radius:5px;vertical-align:-2px;margin-right:7px;border:1px solid rgba(0,0,0,.14)}
+code{font-family:var(--mono);font-size:13px;background:var(--soft);padding:2px 6px;border-radius:6px}
+ul{margin:10px 0 0;padding-left:20px}
+li{margin:7px 0}
+.poses{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px}
+.pose{flex:1 1 150px;text-align:center;background:var(--soft);border-radius:14px;padding:16px 10px}
+.pose span{display:block;margin-top:6px;font-size:13.5px;color:var(--grey)}
+footer{padding:22px 0 44px;font-size:13px;color:var(--grey)}
+footer .wrap{display:flex;gap:16px;flex-wrap:wrap}
+footer a{color:inherit}
+@media (max-width:640px){ section{padding:22px 16px;border-radius:16px} .hero{padding:32px 0 36px} }
+</style>
+</head>
+<body>
+
+<header class="top"><div class="wrap">
+  <a class="logo" href="/" translate="no">HACK<span class="stamp">:</span>ON</a>
+  <a href="/">대회 찾기</a>
+  <a href="/problems">문제 은행</a>
+  <a href="/news">해커온뉴스</a>
+</div></header>
+
+<div class="hero"><div class="wrap">
+  <img src="/norangi.svg" alt="노랑이" width="104" height="104">
+  <div>
+    <h1>「NO」라고 생각했던 걸<br>「너<span style="color:var(--amber)">랑</span>」 해서 이룹니다.</h1>
+    <p>그래서 이름이 <b style="color:#fff">노랑이</b>입니다.</p>
+  </div>
+</div></div>
+
+<main><div class="wrap">
+
+  <section>
+    <h2>어떻게 생겨났나</h2>
+    <p class="lead">안 된다고 접어 둔 것이, 뒤집으면 켜집니다.</p>
+    <img class="story" src="/story-norangi.svg" alt="NO 가 뒤집혀 ON 이 되고, 콘센트에 불이 들어오며 노랑이가 되는 네 컷">
+  </section>
+
+  <section>
+    <h2>생김새가 곧 하는 일입니다</h2>
+    <ul>
+      <li><b>머리는 콘센트</b>입니다. 둥근 네모에 구멍 둘. 그 구멍이 지금은 눈입니다.</li>
+      <li><b>팔다리는 사람과 사람을 잇던 선</b>입니다. 끝의 마디가 손과 발이 됐습니다.</li>
+      <li>로고의 <b>O</b> 가 머리고 <b>N</b> 이 몸입니다. 마크와 마스코트가 같은 도형입니다.</li>
+    </ul>
+    <div class="poses">
+      <div class="pose"><img src="/norangi.svg" alt="" width="72" height="72"><span>기본 — 안내·빈 화면</span></div>
+      <div class="pose"><img src="/norangi-run.svg" alt="" width="72" height="72"><span>달리기 — 지금 열려 있어요</span></div>
+      <div class="pose"><img src="/norangi-hi.svg" alt="" width="72" height="72"><span>두 손 — 채워졌습니다</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>색은 셋, 각자 할 일 하나씩</h2>
+    <p class="lead">늘리지 않습니다. 하나가 두 가지 일을 맡는 순간 화면이 무슨 말을 하는지 알 수 없게 됩니다.</p>
+    <table>
+      <tr><th>색</th><th>할 일</th><th>안 하는 것</th></tr>
+      <tr>
+        <td><span class="sw" style="background:#0B1020"></span><b>먹</b><br><code>#0B1020</code></td>
+        <td>바탕 · 글자 · 노랑이의 눈</td><td>—</td>
+      </tr>
+      <tr>
+        <td><span class="sw" style="background:#C8F53B"></span><b>라임</b><br><code>#C8F53B</code></td>
+        <td><b>누를 것</b> 하나. 한 화면에 한 점</td><td>그림·캐릭터에 안 씁니다</td>
+      </tr>
+      <tr>
+        <td><span class="sw" style="background:#FFB020"></span><b>앰버</b><br><code>#FFB020</code></td>
+        <td><b>노랑이와 브랜드 그림</b></td><td>단추에 안 씁니다</td>
+      </tr>
+    </table>
+    <ul>
+      <li>노랑이를 라임으로 두면 <b>단추와 같은 색</b>이 됩니다. 누를 것과 그림이 섞입니다.</li>
+      <li>카카오 노랑에서 <b>충분히 떨어뜨립니다.</b> 가까우면 남이 만든 것으로 읽힙니다.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>지키는 것 넷</h2>
+    <ul>
+      <li><b>작아지면 팔다리를 뺍니다.</b> 아이콘에는 머리(콘센트)만 남깁니다 — 구멍 둘만 있으면 아무리 줄여도 콘센트로 읽힙니다.</li>
+      <li><b>자세는 팔다리만 고칩니다.</b> 머리와 손발 마디는 안 건드립니다. 그래야 같은 애로 보입니다.</li>
+      <li><b>눈은 늘 먹입니다.</b> 그 구멍이 콘센트였던 흔적입니다.</li>
+      <li><b>입을 그리지 않습니다.</b> 콘센트 구멍은 둘입니다. 셋이 되면 콘센트가 아닙니다.</li>
+    </ul>
+  </section>
+
+</div></main>
+
+<footer><div class="wrap">
+  <a href="/">← 대회 찾기</a>
+  <a href="https://github.com/mandeun/hackon" rel="noopener">소스 보기</a>
+</div></footer>
+
+</body>
+</html>

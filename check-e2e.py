@@ -395,6 +395,23 @@ with sync_playwright() as p:
     A("너랑" in pg.inner_text(".brandline"), "브랜드 줄에 이름의 뜻이 없다")
     ok("노랑이 — 셋 다 200, 앰버·먹, 첫 화면 브랜드 줄에 실제로 그려진다")
 
+    # ── 소개 페이지 /brand ──
+    A(code_of("/brand") == 200, "/brand 가 안 열린다")
+    A(code_of("/story-norangi.svg") == 200, "네 컷 이야기가 404 다")
+    pg.goto(BASE + "/brand", wait_until="networkidle")
+    btxt = pg.inner_text("body")
+    for 말 in ("너랑", "콘센트", "한 화면에 한 점", "입을 그리지 않습니다"):
+        A(말 in btxt, f"/brand 에 «{말}» 가 없다")
+    # 그림 넷(노랑이 셋 + 네 컷)이 실제로 뜨는가 — 깨진 그림은 화면에서만 보인다
+    broke = pg.eval_on_selector_all("img", "els => els.filter(i => !i.complete || i.naturalWidth === 0).map(i => i.getAttribute('src'))")
+    A(not broke, f"/brand 에 안 뜨는 그림이 있다: {broke}")
+    A(pg.eval_on_selector_all("img", "els => els.length") >= 4, "/brand 에 그림이 모자란다")
+    # 첫 화면에서 갈 길이 있는가 — 아무도 안 들어오는 페이지는 없는 것과 같다
+    pg.goto(BASE + "/")
+    pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
+    A(pg.get_attribute(".brandline .more", "href") == "/brand", "첫 화면에서 소개 페이지로 가는 길이 없다")
+    ok("노랑이 소개 /brand — 이름·생김새·색 셋·규칙 넷, 그림 안 깨짐, 첫 화면에서 연결")
+
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
     visit(f"/app#{ev}")
     txt = pg.inner_text("#view")

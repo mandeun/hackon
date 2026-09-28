@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  노랑이가 생긴 이야기 — 네 컷.  인스타 캐러셀·소개 슬라이드에 그대로 씁니다.
+    ① NO        안 된다고 생각했다
+    ② 뒤집힌다   NO 를 뒤집으면 ON
+    ③ 불이 켜진다 콘센트 구멍에 불이 들어온다
+    ④ 노랑이     사람이 된다
+  색은 둘뿐 — 먹 #0B1020, 라임 #FFB020
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300"
+     role="img" aria-label="NO 가 뒤집혀 ON 이 되고, 불이 켜지며 노랑이가 되는 네 컷">
+  <title>노랑이가 생긴 이야기</title>
+  <rect width="960" height="300" fill="#0B1020"/>
+
+  <!-- ① NO -->
+  <g id="컷1" transform="translate(30 60)">
+    <g fill="none" stroke="#5C6474" stroke-width="9" stroke-linecap="round">
+      <path d="M22 122 V44"/><path d="M24 44 L82 122"/><path d="M84 122 V44"/>
+    </g>
+    <rect x="104" y="44" width="80" height="80" rx="28" fill="none" stroke="#5C6474" stroke-width="9"/>
+    <text x="103" y="176" fill="#7C8497" font-family="'Gothic A1','Apple SD Gothic Neo',sans-serif"
+          font-size="20" font-weight="700" text-anchor="middle">안 된다고 생각했다</text>
+  </g>
+
+  <!-- ② 뒤집힌다 -->
+  <g id="컷2" transform="translate(270 60)">
+    <g transform="translate(184 0) scale(-1 1)">
+      <g fill="none" stroke="#8C94A6" stroke-width="9" stroke-linecap="round">
+        <path d="M22 122 V44"/><path d="M24 44 L82 122"/><path d="M84 122 V44"/>
+      </g>
+      <rect x="104" y="44" width="80" height="80" rx="28" fill="none" stroke="#8C94A6" stroke-width="9"/>
+    </g>
+    <text x="92" y="176" fill="#7C8497" font-family="'Gothic A1','Apple SD Gothic Neo',sans-serif"
+          font-size="20" font-weight="700" text-anchor="middle">뒤집으면 ON</text>
+  </g>
+
+  <!-- ③ 불이 켜진다 -->
+  <g id="컷3" transform="translate(510 60)">
+    <rect x="0" y="44" width="80" height="80" rx="28" fill="#FFB020"/>
+    <rect x="26" y="68" width="8" height="26" rx="4" fill="#0B1020"/>
+    <rect x="46" y="68" width="8" height="26" rx="4" fill="#0B1020"/>
+    <g fill="none" stroke="#FFB020" stroke-width="8" stroke-linecap="round">
+      <path d="M100 122 V54"/><path d="M102 54 L158 122"/><path d="M160 122 V54"/>
+    </g>
+    <g fill="#FFB020">
+      <circle cx="100" cy="48" r="9"/><circle cx="100" cy="128" r="9"/>
+      <circle cx="160" cy="48" r="9"/><circle cx="160" cy="128" r="9"/>
+    </g>
+    <text x="80" y="176" fill="#AEB6C8" font-family="'Gothic A1','Apple SD Gothic Neo',sans-serif"
+          font-size="20" font-weight="700" text-anchor="middle">점에 불이 들어온다</text>
+  </g>
+
+  <!-- ④ 노랑이 -->
+  <g id="컷4" transform="translate(750 42)">
+    <g transform="translate(30 0) scale(1.45)">
+      <g fill="none" stroke="#FFB020" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M60 60 V86"/><path d="M60 68 L38 78"/><path d="M60 68 L84 50"/>
+        <path d="M60 86 L46 108"/><path d="M60 86 L74 108"/>
+      </g>
+      <g fill="#FFB020">
+        <rect x="26" y="74" width="13" height="11" rx="4"/>
+        <rect x="80" y="40" width="13" height="11" rx="4"/>
+        <rect x="36" y="105" width="13" height="11" rx="4"/>
+        <rect x="71" y="105" width="13" height="11" rx="4"/>
+      </g>
+      <rect x="34" y="10" width="52" height="50" rx="19" fill="#FFB020"/>
+      <rect x="47" y="27" width="7" height="17" rx="3.5" fill="#0B1020"/>
+      <rect x="66" y="27" width="7" height="17" rx="3.5" fill="#0B1020"/>
+    </g>
+    <text x="105" y="194" fill="#FFB020" font-family="'Gothic A1','Apple SD Gothic Neo',sans-serif"
+          font-size="22" font-weight="800" text-anchor="middle">노랑이</text>
+  </g>
+
+  <g fill="none" stroke="#3A4463" stroke-width="3" stroke-linecap="round">
+    <path d="M232 150 h22"/><path d="M472 150 h22"/><path d="M712 150 h22"/>
+  </g>
+  <text x="480" y="272" fill="#5C6474" font-family="'Gothic A1','Apple SD Gothic Neo',sans-serif"
+        font-size="18" text-anchor="middle">NO 라고 생각했던 걸 너랑 해서 이룸 — 노랑이</text>
+</svg>
