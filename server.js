@@ -1426,7 +1426,11 @@ const NEWS_SRC = { hf: '허깅페이스 모델', paper: '오늘의 논문', spac
   /* 2026-09-27 개발 아닌 직무 — 수집원 17곳이 전부 개발·AI업계 매체여서 마케팅·영업·CS 탭이 굶었다.
      이 둘은 일반 비즈니스 매체라 AI 글만 걸러 담는다(AI_ONLY). 실측 AI 관련율: 모비인사이드 40%, 플래텀 30%.
      매드타임스(12%)·더피알(0%)·아웃스탠딩(0%)은 재 보고 안 붙였다. */
-  mobi: '모비인사이드', platum: '플래텀' };
+  mobi: '모비인사이드', platum: '플래텀',
+  /* 2026-09-28 사람 — 앞의 24곳이 전부 «매체» 였다. 새 도구를 먼저 써 보고 알려 주는 것은 사람이다.
+     유튜브 채널 RSS 는 열쇠가 필요 없다. 여덟 곳을 재서 항목이 실제로 오는 일곱만 붙였다
+     (The AI Advantage 는 0건이라 뺐다). 잡담·브이로그가 섞이니 AI 글만 담는다. */
+  tube: '만드는 사람들' };
 /* RSS 도 Atom 도 같은 함수로 — GeekNews·Product Hunt 는 Atom(<entry>, <link href>)이라 RSS 정규식만 쓰면 조용히 0건이 된다(실제로 그랬다) */
 function parseFeed(x, max) {
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/<[^>]+>/g, '').trim();
@@ -1468,14 +1472,27 @@ function addTip(db, ownerId, ownerName, b) {
 }
 /* 일반 비즈니스 매체용 관문. 이 낱말이 제목에 없으면 안 담는다 —
    없으면 광고업계·부동산 소식이 페이지를 덮는다(모비인사이드는 60%, 플래텀은 70%가 AI 무관이었다). */
-const AI_ONLY = /\bai\b|인공지능|gpt|claude|클로드|llm|생성형|챗지피티|제미나이|gemini|자동화|에이전트|agent|프롬프트|prompt|코파일럿|copilot/i;
+/* «AI 글만» 거르는 자. 2026-09-28 에 낱말을 늘렸다 — 이름만 나오는 글이 샜다.
+   유튜브 제목 120개를 재 보니 DeepSeek·AGI·바이브 코딩·OpenAI 가 전부 안 걸렸다.
+   `\bai\b` 는 그대로 둔다. 자바스크립트의 \w 는 ASCII 라 한글이 낱말 문자가 아니고,
+   그래서 «AI를·AI가» 사이에 경계가 생겨 잘 걸린다 (파이썬으로 재면 반대로 보인다 — 한 번 속았다).
+   새 낱말을 더하면 아래 selftest 의 «걸려야 하는 것/안 걸려야 하는 것» 표에도 한 줄 적는다. */
+const AI_ONLY = /\bai\b|인공지능|gpt|claude|클로드|llm|생성형|챗지피티|제미나이|gemini|자동화|에이전트|agent|프롬프트|prompt|코파일럿|copilot|\bagi\b|openai|오픈에이아이|anthropic|앤트로픽|deepseek|딥시크|llama|qwen|mistral|바이브\s?코딩|vibe\s?coding|커서|cursor|sora|midjourney/i;
 /* 수집원 표. 네 번째 값은 «AI 글만» — 일반 비즈니스 매체에만 켠다(AI 전문 매체는 그냥 담는다). */
 const NEWS_FEEDS = [['ai', 'https://www.aitimes.com/rss/allArticle.xml', 12, false], ['geek', 'https://news.hada.io/rss/news', 10, false], ['hn', 'https://hnrss.org/frontpage', 8, false],
                                   ['ph', 'https://www.producthunt.com/feed', 8, false], ['yozm', 'https://yozm.wishket.com/magazine/feed/', 8, false],
                                   ['show', 'https://hnrss.org/show', 6, false], ['aikr', 'https://news.aikoreacommunity.com/rss/', 6, false],
                                   ['devhack', 'https://dev.to/feed/tag/hackathon', 5, false], ['medhack', 'https://medium.com/feed/tag/hackathon', 5, false], ['lob', 'https://lobste.rs/rss', 6, false],
                                   ['devkr', 'https://dev.to/feed/tag/korea', 4, false], ['ghblog', 'https://github.blog/feed/', 4, false], ['yc', 'https://www.ycombinator.com/blog/rss', 4, false], ['smash', 'https://www.smashingmagazine.com/feed/', 4, false],
-                                  ['mobi', 'https://www.mobiinside.co.kr/feed/', 8, true], ['platum', 'https://platum.kr/feed', 6, true]];
+                                  ['mobi', 'https://www.mobiinside.co.kr/feed/', 8, true], ['platum', 'https://platum.kr/feed', 6, true],
+                                  /* 사람 — 채널마다 셋까지만. 여덟을 재서 항목이 오는 일곱 (2026-09-28 실측) */
+                                  ['tube', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYaDkwVaOhuoe_LuFr3lWkA', 3, true],   // 조코딩
+                                  ['tube', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCUpJs89fSBXNolQGOYKn0YQ', 3, true],   // 노마드 코더
+                                  ['tube', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCt2wAAXgm87ACiQnDHQEW6Q', 3, true],   // 테디노트
+                                  ['tube', 'https://www.youtube.com/feeds/videos.xml?channel_id=UChpleBmo18P08aKCIgti38g', 3, true],   // Matt Wolfe
+                                  ['tube', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCNJ1Ymd5yFuUPtn21xtRbbw', 3, true],   // AI Explained
+                                  ['tube', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCawZsQWqfGSbCI5yjkdVkTA', 3, true],   // Matthew Berman
+                                  ['tube', 'https://www.youtube.com/feeds/videos.xml?channel_id=UC_x36zCEGilGpB1m-V4gmjg', 3, true]];   // IndyDevDan
 /* 한 피드에서 담을 것만 고른다. 관문은 여기 한 곳에만 있다 — 호출하는 쪽이 한 줄이라 조용히 빠지기 어렵다. */
 function pickFeed(src, items, aiOnly) {
   /* 안 넘기면 관문이 «조용히» 꺼진다. 그 실패는 며칠 뒤 페이지가 광고로 덮인 뒤에나 보인다 —
@@ -1557,9 +1574,11 @@ const newsKind = src => NEWS_KIND_OF[src] || 'read';
    둘을 arXiv 초록이 먹고 GeekNews 는 한 줄도 못 들어갔다. 이 화면을 여는 사람이 오늘 할 일은 초록 읽기가 아니다.
    숫자를 고칠 때는 아래 점검(«출처 표와 무게·할 일 표가 어긋난다»)이 먼저 빨개진다. */
 const NEWS_W = { tip: 60, hackon: 55, geek: 30, show: 28, yozm: 26, gh: 24, ph: 22, space: 22, ai: 20, hf: 18, hn: 18, aikr: 18,
-  ds: 14, lob: 12, mobi: 12, platum: 12, ghblog: 12, smash: 12, devkr: 10, yc: 10, devhack: 10, paper: 8, medhack: 8 };
+  ds: 14, lob: 12, mobi: 12, platum: 12, ghblog: 12, smash: 12, devkr: 10, yc: 10, devhack: 10, paper: 8, medhack: 8,
+  tube: 26 };   // 사람이 직접 써 보고 고른 것이라 매체보다 위. 제보·우승작보다는 아래
 /* 출처가 무엇인지에서 나오는 «할 일». 제목에서 더 구체적인 신호가 잡히면 아래 표가 이깁니다. */
 const NEWS_DO = {
+  tube: '10분 영상이다. 따라 하면서 같이 눌러 보는 것이 읽는 것보다 빠르다',
   hf: '허깅페이스에서 받아 코랩이나 내 컴퓨터에서 한 번 돌려 본다',
   space: '설치 없이 브라우저에서 눌러 본다 — 쓸 만한지 5분이면 안다',
   ds: '표를 내려받아 내 데이터와 같은 칸이 있는지 맞춰 본다',
@@ -8624,10 +8643,29 @@ async function selftest() {
      && pickFeed('lob', [_ad, _ai], false).length === 2,
      'AI 관문 — 일반 매체는 AI 글만 담고, AI 전문 매체는 그냥 담는다');
   /* 표에 관문이 실제로 켜져 있는가. 함수가 맞아도 표에서 빠지면 아무 일도 안 일어난다. */
-  ok(NEWS_FEEDS.filter(f => f[3]).map(f => f[0]).sort().join(',') === 'mobi,platum'
-     && NEWS_FEEDS.length === 16
+  /* AI 만 거르는 자 — 실제로 걸러진 제목으로 짠다. 한국어 조사가 붙은 «AI를» 이 안 잡히던 것을
+     2026-09-28 에 찾았다(유튜브 제목 120개를 재다가 나왔다). 낱말을 더하면 여기에도 한 줄 적는다. */
+  {
+    const 걸려야 = ['노션에 AI를 붙여놓으면 어디까지 할까?', 'AI가 만든 영상', 'AI 이야기',
+                   'DeepSeek is CRAZY', 'Sam Altman: AGI in 2026', '바이브 코딩으로 하루 만에',
+                   'Claude 로 자동화', '프롬프트 한 줄', 'OpenAI 새 모델'];
+    const 안걸려야 = ['Waiting for the train', 'Chair design 101', 'He Said No',
+                     '어린이집 교사였던 UXUI 신입 디자이너', '집중 안 돼서 카페 온 사람', 'Retail 매장 이야기'];
+    for (const t of 걸려야) ok(AI_ONLY.test(t), `AI 글인데 안 걸린다: ${t}`);
+    for (const t of 안걸려야) ok(!AI_ONLY.test(t), `AI 글이 아닌데 걸린다: ${t}`);
+    /* 관문이 실제로 버리는가 — 표만 맞고 pickFeed 가 안 쓰면 소용없다 */
+    const kept = pickFeed('tube', [{ title: 'AI를 붙여 봤다', url: 'https://a.example/1' },
+                                   { title: '카페 브이로그', url: 'https://a.example/2' }], true);
+    ok(kept.length === 1 && kept[0].title === 'AI를 붙여 봤다', '유튜브 잡담이 그대로 들어온다');
+    ok(pickFeed('tube', [{ title: '카페 브이로그', url: 'https://a.example/2' }], false).length === 1,
+       '관문을 끄면 그대로 담겨야 한다');
+  }
+
+  ok([...new Set(NEWS_FEEDS.filter(f => f[3]).map(f => f[0]))].sort().join(',') === 'mobi,platum,tube'
+     && NEWS_FEEDS.length === 23
+     && NEWS_FEEDS.filter(f => f[0] === 'tube').length === 7
      && NEWS_FEEDS.every(f => typeof f[3] === 'boolean'),
-     '수집원 표 — 모든 행이 관문 값을 명시하고, 켜진 곳은 일반 매체 둘뿐 (전체 16곳)');
+     '수집원 표 — 모든 행이 관문 값을 명시하고, AI 만 거르는 곳은 일반 매체 둘과 사람 일곱 (전체 23줄)');
   /* 관문 값을 안 넘기면 조용히 꺼지지 않고 터진다 */
   ok((() => { try { pickFeed('x', [], undefined); return false; } catch { return true; } })(),
      'AI 관문 — aiOnly 를 안 넘기면 그 자리에서 터진다');
