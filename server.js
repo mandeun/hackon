@@ -24,9 +24,9 @@ const ROOT = __dirname;
 const PORT = process.env.PORT || 8788;
 const DBFILE = process.env.DB || path.join(ROOT, 'data', 'hackon.db');
 
-/* 카카오 로그인. 키가 없으면 통째로 꺼지고 지금처럼 열쇠로만 돈다.
-   키를 넣는 순간 켜진다 — 있는 사람은 로그인하고, 없는 사람은 열쇠를 그대로 쓴다.
-   닉네임만 받는다. 이메일을 받으면 비즈 앱 심사가 붙어서 바로 못 쓴다. */
+/* 로그인(카카오·구글·네이버)은 아래 LOGINS 표 한 곳에 있다. 키가 없는 공급자는 통째로
+   꺼지고 열쇠로만 돈다. 키를 넣는 순간 켜진다 — 있는 사람은 로그인하고, 없는 사람은 열쇠를
+   그대로 쓴다. 별명만 받고, 이메일은 와도 «같은 사람인가»를 대조하는 값으로만 쓴다. */
 /* ─────────────────────────────────────────────────────────────
    구하기 표. 늘리거나 고칠 곳은 여기 하나다.
 
@@ -536,11 +536,15 @@ function shrink(vals) {
 function profile(db, pid) {
   const me = db.prepare('SELECT * FROM people WHERE id=?').get(pid);
   if (!me) throw new HttpError(404, '없는 사람입니다');
-  const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends,
-                                  s.url IS NOT NULL AS made
+  /* 짝으로 붙어 온 사람도 그 대회에 «있었다». 신청 칸에 이름이 없다고 기록이 없는 것이 아니다. */
+  const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends, e.due,
+                                  t.person, t.mate, t.name AS owner_name, t.mate_name,
+                                  s.url IS NOT NULL AS made, s.url, s.show AS shown, lv.state AS open
                            FROM teams t JOIN events e ON e.id = t.event
                            LEFT JOIN submissions s ON s.team = t.id
-                           WHERE t.person = ? ORDER BY e.ends DESC`).all(pid);
+                           LEFT JOIN liveness lv ON lv.team = t.id
+                           WHERE t.person = ? OR (t.mate <> '' AND t.mate = ?)
+                           ORDER BY e.ends DESC`).all(pid, pid);
   const past = rows.filter(r => r.ends < today());
   const came = past.filter(r => r.came).length;
   const made = past.filter(r => r.made).length;
@@ -556,6 +560,8 @@ function profile(db, pid) {
   return {
     id: me.id, handle: me.handle, level: me.level,
     events: past.length, wins, tier, xp: xpOf(db, pid),
+    /* 이번 시즌 기여. 통산과 «같이» 낸다 — 시즌만 두면 지난 기록이 사라진 것처럼 보인다 */
+    season: seasonNow(), xpSeason: xpOf(db, pid, seasonNow()),
     /* 완주 - 왔고 결과물을 냈나. 이게 이 사람의 실력에 대한 가장 단단한 증거다. */
     finished: made,
     finishRate: came ? Math.round(made / came * 1000) / 10 : 0,
@@ -565,9 +571,45 @@ function profile(db, pid) {
     manner: shrink(rt.map(r => r.manner)),
     /* 배치 중 - 몇 번 안 나온 사람은 등급을 안 붙인다. */
     placed: past.length >= 2,
-    history: rows.map(r => ({ title: r.title, ends: r.ends, team: r.name,
-                              role: r.role, came: !!r.came, made: !!r.made })),
+    /* 만든 것. 주소가 «공개» 로 나가는 문 셋은 쇼케이스와 똑같다 —
+       본인 동의(show) · 마감 지남 · 주소 검사. 셋 중 하나라도 안 맞으면 주소를 안 싣는다.
+       프로필은 아무나 열 수 있는 주소라 여기가 새면 쇼케이스 동의가 뜻을 잃는다. */
+    history: rows.map(r => {
+      const open = closed({ due: r.due, ends: r.ends });
+      const pub  = !!(r.url && r.shown && open && webUrl(r.url));
+      const st   = pub && (r.open === 1 || r.open === 0) ? r.open : null;
+      /* 같이 온 사람. 내가 신청자면 짝의 이름, 내가 짝이면 신청자의 이름 */
+      const mate = r.mate === pid ? r.owner_name : (r.mate_name || '');
+      return { title: r.title, ends: r.ends, team: r.name, mate,
+               role: r.role, came: !!r.came, made: !!r.made,
+               url: pub ? webUrl(r.url) : '', shown: !!r.shown,
+               /* 주소를 못 싣는 줄은 상태도 안 판다 - «모름» 이라고 말할 근거가 없다 */
+               open: pub ? openLabel(st) : '', age: pub ? ageOf(r.ends, st) : null };
+    }),
   };
+}
+
+/* ── 시즌 ─────────────────────────────────────────────
+   기여가 영원히 쌓이면 1등이 굳고, 나중에 온 사람은 따라잡을 길이 없다.
+   분기로 끊되 지난 것을 «지우지» 않는다 — 이번 시즌과 통산을 같이 보여 준다.
+   시각을 모르는 줄(예: 옛 requests.at 이 빈 것)은 시즌에 못 넣는다. 통산에만 남는다. */
+const seasonOf = d => {
+  const s = String(d || '').slice(0, 10);
+  const y = +s.slice(0, 4), m = +s.slice(5, 7);
+  return (y && m >= 1 && m <= 12) ? `${y}-Q${Math.floor((m - 1) / 3) + 1}` : '';
+};
+const seasonNow = () => seasonOf(today());
+/** 이 시즌의 마지막 날. 다음 분기 첫날에서 하루 뺀다 */
+function seasonEnd(season) {
+  const m = /^(\d{4})-Q([1-4])$/.exec(String(season || ''));
+  if (!m) return '';
+  return new Date(Date.UTC(+m[1], +m[2] * 3, 0)).toISOString().slice(0, 10);
+}
+/** 며칠 남았나. 오늘이 마지막 날이면 0 이고, 지났으면 음수가 아니라 0 이다 */
+function seasonLeft(season, now) {
+  const e = seasonEnd(season); if (!e) return null;
+  const d = Math.round((Date.parse(e + 'T00:00:00Z') - Date.parse(String(now || today()).slice(0, 10) + 'T00:00:00Z')) / 86400000);
+  return d > 0 ? d : 0;
 }
 
 /* 기여(XP) — 비트코인의 채굴처럼, 남을 위해 한 일이 곧 내 기록이 된다.
@@ -575,28 +617,46 @@ function profile(db, pid) {
    ponytail: 사람 수만큼 전체 표를 훑는다(pidOf 는 HMAC 이라 SQL 로 못 잇는다). 수천 명 넘으면 solutions·requests·pledges 에 pid 열을 둔다 */
 const XP = { made: 10, came: 3, rated: 2, ratedEvent: 2, solved: 5, asked: 3, judged: 3, pledged: 5 };
 const XP_LABEL = { made: '완주', came: '참가', rated: '동료 평가 주기', ratedEvent: '대회 평가 주기', solved: '문제 풀이', asked: '문제 올리기', judged: '풀이 판정', pledged: '자리 맡기(확정)' };
-function xpOf(db, pid) {
-  const past = db.prepare(`SELECT t.came, s.url IS NOT NULL AS made FROM teams t JOIN events e ON e.id = t.event
-                           LEFT JOIN submissions s ON s.team = t.id WHERE t.person=? AND e.ends < date('now')`).all(pid);
-  const mine = rows => rows.filter(r => pidOf(db, r.contact) === pid).length;
+function xpOf(db, pid, season) {
+  /* season 이 있으면 그 분기에 일어난 것만 센다. 빈 문자열이면 통산이다.
+     줄마다 «언제» 를 같이 읽어 온다 — 시각이 없으면 시즌에 못 넣는다(0 이 아니라 모름이다). */
+  const at = season ? (t => seasonOf(t) === season) : () => true;
+  const past = db.prepare(`SELECT t.came, e.ends, s.url IS NOT NULL AS made FROM teams t JOIN events e ON e.id = t.event
+                           LEFT JOIN submissions s ON s.team = t.id
+                           WHERE (t.person=? OR (t.mate <> '' AND t.mate=?)) AND e.ends < date('now')`).all(pid, pid);
+  const mine = rows => rows.filter(r => pidOf(db, r.contact) === pid && at(r.at)).length;
   const n = {
-    made: past.filter(r => r.made).length,
-    came: past.filter(r => r.came).length,
-    rated: db.prepare('SELECT COUNT(*) c FROM ratings WHERE giver=?').get(pid).c,
-    ratedEvent: db.prepare('SELECT COUNT(*) c FROM event_ratings WHERE giver=?').get(pid).c,
-    solved: mine(db.prepare("SELECT contact FROM solutions WHERE contact<>''").all()),
-    asked: mine(db.prepare("SELECT contact FROM requests WHERE contact<>''").all()),
-    judged: mine(db.prepare("SELECT r.contact FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.contact<>''").all()),
-    pledged: mine(db.prepare("SELECT contact FROM pledges WHERE status IN ('ok','done') AND contact<>''").all()),
+    made: past.filter(r => r.made && at(r.ends)).length,
+    came: past.filter(r => r.came && at(r.ends)).length,
+    rated: db.prepare('SELECT at FROM ratings WHERE giver=?').all(pid).filter(r => at(r.at)).length,
+    ratedEvent: db.prepare('SELECT at FROM event_ratings WHERE giver=?').all(pid).filter(r => at(r.at)).length,
+    solved: mine(db.prepare("SELECT contact, at FROM solutions WHERE contact<>''").all()),
+    asked: mine(db.prepare("SELECT contact, created AS at FROM requests WHERE contact<>''").all()),
+    judged: mine(db.prepare("SELECT r.contact, v.at FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.contact<>''").all()),
+    pledged: mine(db.prepare("SELECT contact, created AS at FROM pledges WHERE status IN ('ok','done') AND contact<>''").all()),
   };
   const items = Object.keys(XP).filter(k => n[k] > 0).map(k => ({ key: k, label: XP_LABEL[k], count: n[k], xp: n[k] * XP[k] }));
-  return { total: items.reduce((a, x) => a + x.xp, 0), items };
+  return { total: items.reduce((a, x) => a + x.xp, 0), items, season: season || '' };
 }
-/* 순위 — 백준 랭킹처럼 기여 순. 이름을 정한 사람만 오른다(이름 없는 해시는 아무 뜻이 없다) */
+/* 순위 — 백준 랭킹처럼 기여 순. 이름을 정한 사람만 오른다(이름 없는 해시는 아무 뜻이 없다).
+   두 줄을 함께 낸다 — 이번 시즌과 통산. 시즌만 두면 지난 기록이 사라진 것처럼 보이고,
+   통산만 두면 1등이 굳는다. */
 function rank(db, limit = 50) {
-  return db.prepare("SELECT id, handle FROM people WHERE handle<>''").all()
-    .map(p => { const pr = profile(db, p.id); return { id: p.id, handle: p.handle, tier: pr.tier.name, level: pr.tier.level, finished: pr.finished, wins: pr.wins, xp: pr.xp.total }; })
-    .filter(r => r.xp > 0).sort((a, b) => b.xp - a.xp || b.level - a.level).slice(0, limit);
+  /* ponytail: 사람 수만큼 profile() 을 부른다. 수백 명까지 괜찮다. 넘으면 완주·수상·기여를
+     한 번에 세는 표 하나를 두고 거기서 읽는다.
+     사람마다 프로필을 한 번만 읽는다. 거기에 시즌과 통산이 둘 다 들어 있다 —
+     두 번 읽으면 사람 수만큼 표를 두 번 훑게 된다. */
+  const base = db.prepare("SELECT id, handle FROM people WHERE handle<>''").all()
+    .map(p => {
+      const pr = profile(db, p.id);
+      return { id: p.id, handle: p.handle, tier: pr.tier.name, level: pr.tier.level,
+               finished: pr.finished, wins: pr.wins,
+               all: pr.xp.total, sxp: pr.xpSeason.total };
+    });
+  const cut = key => base.filter(r => r[key] > 0)
+    .sort((a, b) => b[key] - a[key] || b.level - a.level)
+    .slice(0, limit).map(r => ({ ...r, xp: r[key] }));
+  return { season: cut('sxp'), all: cut('all') };
 }
 
 /* 티어 5단계 — 캐글 progression(참가→기여→전문가→마스터→그랜드마스터)을 완주·수상·동료 실력으로 옮긴 것.
@@ -613,6 +673,366 @@ function rankOf(made, wins, skill, n) {
   let i = 0;
   for (let k = 0; k < RANKS.length; k++) if (RANKS[k].need(made, wins, skill, n)) i = k;
   return { name: RANKS[i].name, level: i, next: TIER_NEXT[i] };
+}
+
+/* ── 만든 것 ──────────────────────────────────────────
+   결과물에는 «등급» 을 안 붙인다. 대회마다 심사위원이 다르고, board() 의 등수 보정은
+   한 대회 «안에서만» 성립한다 - 서로 다른 대회의 점수를 같은 티어로 부르면 그건 거짓말이다.
+   붙이는 것은 사실 둘뿐이다. 지금 열리는가, 그리고 며칠째 살아 있는가. */
+const AGE_TIERS = [
+  { key: 'seed', name: '새싹', mark: '\u{1F331}', from: 0 },
+  { key: 'herb', name: '풀',   mark: '\u{1F33F}', from: 30 },
+  { key: 'tree', name: '나무', mark: '\u{1F333}', from: 365 },
+];
+/** 나이는 «열려 있을 때만» 센다. 죽은 주소에 나이를 붙이면 자랑이 아니라 묘비다. */
+function ageOf(ends, state, now) {
+  if (state !== 1) return null;
+  const d0 = Date.parse(String(ends || '').slice(0, 10) + 'T00:00:00Z');
+  const d1 = Date.parse(String(now || today()).slice(0, 10) + 'T00:00:00Z');
+  if (!Number.isFinite(d0) || !Number.isFinite(d1) || d1 < d0) return null;
+  const days = Math.floor((d1 - d0) / 86400000);
+  let t = AGE_TIERS[0];
+  for (const x of AGE_TIERS) if (days >= x.from) t = x;
+  return { days, key: t.key, name: t.name, mark: t.mark };
+}
+/** 상태 셋 - 열림·안 열림·모름. NULL 을 «안 열림» 으로 그리지 않는다(오답노트 E22). */
+const openLabel = st => st === 1 ? '열림' : st === 0 ? '안 열림' : '모름';
+
+/** 한 판 돌린 결과를 표에 쓸지 말지. 망이 막혀 한꺼번에 실패하면 살아 있는 것까지
+    전부 «안 열림» 으로 덮어쓴다 - 그건 지난 사실을 지우는 것이다(오답노트 E3).
+    확인된 비율이 기준에 못 미치면 한 줄도 안 쓰고 지난 상태를 그대로 둔다. */
+const LIVE_MIN_RATE = 0.5;
+function livenessPlan(results) {
+  const n = results.length;
+  if (!n) return { write: false, rows: [], rate: 0, why: '볼 것이 없습니다' };
+  const done = results.filter(r => r.ok === true || r.ok === false);
+  const rate = done.length / n;
+  if (rate < LIVE_MIN_RATE)
+    return { write: false, rows: [], rate,
+             why: `확인된 것이 ${Math.round(rate * 100)}% 뿐입니다 — 지난 상태를 그대로 둡니다` };
+  return { write: true, rows: done.map(r => ({ team: r.team, state: r.ok ? 1 : 0 })), rate, why: '' };
+}
+
+/** 우리 서버가 «남이 적어 준 주소» 를 직접 여는 길이다. 집 안으로는 못 가게 막는다 —
+    막지 않으면 제출 칸에 http://127.0.0.1:8788/... 을 적어 우리 자신을 부르게 할 수 있다. */
+function outboundOk(u) {
+  let h; try { h = new URL(String(u || '')); } catch { return false; }
+  if (h.protocol !== 'http:' && h.protocol !== 'https:') return false;
+  const n = h.hostname.toLowerCase();
+  if (n.startsWith('[')) return false;                       // IPv6 리터럴은 통째로 막는다
+  if (n === 'localhost' || n === '0.0.0.0' || n === '::1') return false;
+  if (/(^|\.)(localhost|local|internal|home|lan)$/.test(n)) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(n)) {
+    const [a, b] = n.split('.').map(Number);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 169 && b === 254) return false;
+  }
+  return true;
+}
+
+/** 한 주소를 열어 본다. 셋을 돌려준다 — true 열림 · false 안 열림 · null 못 봤음.
+    못 본 것을 false 로 바꾸지 않는다. 그 한 줄이 «모름» 을 «죽음» 으로 만든다. */
+async function livenessCheck(url) {
+  const go = m => fetch(url, { method: m, redirect: 'manual',
+    headers: { 'user-agent': 'hackon.kr' }, signal: AbortSignal.timeout(8000) });
+  try {
+    const r = await go('HEAD');
+    /* HEAD 를 안 받는 곳이 제법 있다. 405·501 이면 GET 으로 한 번 더 본다 */
+    const s2 = (r.status === 405 || r.status === 501) ? (await go('GET')).status : r.status;
+    return s2 < 400;
+  } catch { return null; }
+}
+
+/** 하루 한 번. 쇼케이스에 동의했고 마감이 지난 것만 본다 — 화면에 나가는 것과 같은 범위다. */
+async function livenessTick(db) {
+  const rows = db.prepare(`SELECT t.id, s.url, e.due, e.ends
+                           FROM teams t JOIN submissions s ON s.team = t.id
+                           JOIN events e ON e.id = t.event
+                           WHERE s.show = 1 AND s.url <> ''`).all()
+    .filter(r => closed({ due: r.due, ends: r.ends }) && outboundOk(webUrl(r.url)));
+  /* ponytail: 주소를 하나씩 차례로 연다. 스무 개까지는 하루 한 번이라 괜찮다.
+     넘으면 Promise.all 로 다섯씩 묶는다 — 한꺼번에 다 열면 남의 서버를 두드리는 꼴이 된다. */
+  const results = [];
+  for (const r of rows) results.push({ team: r.id, ok: await livenessCheck(webUrl(r.url)) });
+  const plan = livenessPlan(results);
+  if (plan.write) {
+    const up = db.prepare(`INSERT INTO liveness(team,state,checked) VALUES(?,?,datetime('now'))
+                           ON CONFLICT(team) DO UPDATE SET state=excluded.state, checked=excluded.checked`);
+    db.exec('BEGIN');
+    try { for (const x of plan.rows) up.run(x.team, x.state); db.exec('COMMIT'); }
+    catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
+  return plan;
+}
+
+/* ── 뱃지 ────────────────────────────────────────────
+   깃허브 README·노션·이력서에 거는 한 조각. solved.ac 가 이렇게 퍼졌다.
+   카톡에서 도는 물건이 아니라 «코드 있는 곳» 에서 도는 물건이라, 개발자 쪽 확산은 이게 1순위다.
+   SVG 라 서버가 문자열만 만들면 된다 — 설치할 것이 없다. */
+const TIER_COLOR = ['#5C6474', '#A2734C', '#7E8A97', '#C9A227', '#2E9E8F'];   // 새싹·브론즈·실버·골드·플래티넘
+const xmlEsc = s => String(s == null ? '' : s)
+  .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
+/** 글자 폭을 눈대중한다. 한글은 영문 두 배로 본다 — 안 재면 긴 이름이 테두리를 넘는다 */
+const textW = (s, px) => [...String(s || '')].reduce((a, c) => a + (c.charCodeAt(0) < 128 ? 0.56 : 1) * px, 0);
+
+/** 사람 하나를 뱃지 한 장으로. 연락처는 한 칸도 안 들어간다(프로필과 같은 규칙). */
+function badgeSvg(prof) {
+  const left  = 'HACK:ON';
+  /* 이름을 안 정한 사람은 해시를 안 적는다. 해시는 아무 뜻이 없고, 뜻 없는 것을 자랑거리로 주지 않는다 */
+  const right = [prof.handle ? prof.handle : null, prof.tier.name,
+                 `완주 ${prof.finished}`, prof.wins ? `수상 ${prof.wins}` : null]
+                .filter(Boolean).join(' · ');
+  const pad = 9, fs = 11;
+  const lw = Math.round(textW(left, fs) + pad * 2), rw = Math.round(textW(right, fs) + pad * 2);
+  const w = lw + rw, h = 20;
+  const col = TIER_COLOR[prof.tier.level] || TIER_COLOR[0];
+  /* 글씨는 시스템 글꼴로 둔다. 웹폰트를 걸면 깃허브가 그림을 프록시로 받아 가면서 글자가 깨진다 */
+  const font = "-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" role="img" `
+    + `aria-label="${xmlEsc(left + ': ' + right)}">`
+    + `<title>${xmlEsc(left + ': ' + right)}</title>`
+    + `<rect width="${w}" height="${h}" rx="3" fill="#141824"/>`
+    + `<rect x="${lw}" width="${rw}" height="${h}" rx="3" fill="${col}"/>`
+    + `<rect x="${lw}" width="6" height="${h}" fill="${col}"/>`
+    + `<g font-family="${font}" font-size="${fs}" font-weight="700">`
+    + `<text x="${pad}" y="14" fill="#C8F53B">${xmlEsc(left)}</text>`
+    + `<text x="${lw + pad}" y="14" fill="#FFFFFF">${xmlEsc(right)}</text>`
+    + `</g></svg>`;
+}
+
+/* ── 위촉장·감사장·확인증 ─────────────────────────────
+   4050 이 가장 크게 받는 것은 상금이 아니라 «이름이 박힌 종이» 다. 카톡 프사와 밴드에 올라간다.
+   명단을 따로 적지 않는다 — 한 일이 곧 명단이다. 심사한 사람이 심사위원이고, 낸 사람이 출제자다. */
+function creditsOf(db, event) {
+  const e = getEvent(db, event);
+  const j = new Map();
+  const bump = (name, n) => { const k = String(name || '').trim(); if (!k) return;
+                              j.set(k, (j.get(k) || 0) + n); };
+  for (const r of db.prepare(`SELECT s.judge AS name, COUNT(DISTINCT s.team) AS n
+                              FROM scores s JOIN teams t ON t.id = s.team
+                              WHERE t.event = ? GROUP BY s.judge`).all(event)) bump(r.name, r.n);
+  for (const r of db.prepare(`SELECT judge AS name, COUNT(*) AS n FROM pairs
+                              WHERE event = ? GROUP BY judge`).all(event)) bump(r.name, r.n);
+  return {
+    event: { id: e.id, title: e.title, ends: e.ends, host: e.host },
+    /* 심사위원 — «위촉했다» 가 아니라 «실제로 봤다» 를 센다 */
+    judges: [...j].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n),
+    /* 문제를 낸 사람. 연락처는 안 싣는다 — 종이에 적히는 것은 이름뿐이다 */
+    askers: db.prepare(`SELECT name, topic, pain FROM requests
+                        WHERE event = ? AND name <> '' ORDER BY id`).all(event)
+              .map(r => ({ name: r.name, topic: r.topic || r.pain || '' })),
+    /* 자리를 맡아 준 사람. 확인된 줄만(ledgerOf 와 같은 기준) */
+    givers: ledgerOf(db, event).map(r => ({ name: r.name, org: r.org || '',
+                                            kind: r.kind, label: r.label })),
+  };
+}
+
+/* ── 기록증 카드 ──────────────────────────────────────
+   화면이 canvas 로 그린 PNG 를 그대로 받는다. base64 로 감싸면 본문이 1.3 배가 되고
+   JSON 상한(100KB)에 걸린다 — 날바이트로 받고 앞 여덟 자를 직접 본다. */
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+const isPng = buf => Buffer.isBuffer(buf) && buf.length > 8 && buf.subarray(0, 8).equals(PNG_MAGIC);
+function rawBody(req, max) {
+  return new Promise((res, rej) => {
+    const cs = []; let n = 0;
+    req.on('data', c => { n += c.length; if (n > max) return rej(new HttpError(413, '너무 큽니다')); cs.push(c); });
+    req.on('end', () => res(Buffer.concat(cs)));
+    req.on('error', () => rej(new HttpError(400, '받다가 끊겼습니다')));
+  });
+}
+
+/** 링크 미리보기 딱지. 사람마다 다른 그림이 붙어야 두 번째 링크도 눌린다. */
+function ogTags({ title, desc, url, image }) {
+  const t = xmlEsc(title), d = xmlEsc(desc), u = xmlEsc(url), i = xmlEsc(image);
+  return `<meta property="og:type" content="profile">`
+    + `<meta property="og:site_name" content="HACK:ON">`
+    + `<meta property="og:locale" content="ko_KR">`
+    + `<meta property="og:title" content="${t}">`
+    + `<meta property="og:description" content="${d}">`
+    + `<meta property="og:url" content="${u}">`
+    + `<meta property="og:image" content="${i}">`
+    + `<meta name="twitter:card" content="summary_large_image">`
+    + `<meta name="description" content="${d}">`;
+}
+
+/** 화면 파일은 한 번만 읽어 둔다. 고치면 mtime 이 달라지니 그때 다시 읽는다. */
+let APP_HTML = '', APP_AT = 0;
+function appHtml() {
+  const f = path.join(ROOT, 'hack-on.html');
+  const at = +fs.statSync(f).mtimeMs;
+  if (!APP_HTML || APP_AT !== at) { APP_HTML = fs.readFileSync(f, 'utf8'); APP_AT = at; }
+  return APP_HTML;
+}
+const OG_ANCHOR = '<link rel="manifest" href="/manifest.webmanifest">';
+/** 머리에 딱지를 끼워 넣는다. 자리를 못 찾으면 원본 그대로 돌려준다 — 화면이 먼저다. */
+const withOg = (html, tags) => html.includes(OG_ANCHOR) ? html.replace(OG_ANCHOR, OG_ANCHOR + tags) : html;
+
+/** «그날의 조건» 아카이브. 현장에서 공개한 제약 한 줄을 대회마다 쌓는다.
+    조건이 하나뿐이면 아카이브가 아니라 한 줄이다 — 둘부터 화면을 낸다.
+    끝난 대회만 싣는다. 열기 전에 새면 그날 공개할 것이 미리 알려진다. */
+function conditions(db) {
+  const rows = db.prepare(`SELECT e.id, e.title, e.ends, e.due, e.twist,
+      (SELECT COUNT(*) FROM submissions s JOIN teams t ON t.id = s.team
+        WHERE t.event = e.id AND s.url <> '') AS made,
+      (SELECT COUNT(*) FROM liveness lv JOIN teams t2 ON t2.id = lv.team
+        WHERE t2.event = e.id AND lv.state = 1) AS alive
+    FROM events e WHERE e.listed = 1 AND e.twist <> '' ORDER BY e.ends DESC`).all();
+  const kept = rows.filter(r => closed({ due: r.due, ends: r.ends }));
+  return {
+    /* 둘 미만이면 목록을 안 준다. «비어 있다» 가 아니라 «아직 쌓는 중» 이다 */
+    enough: kept.length >= 2,
+    n: kept.length,
+    rows: kept.length >= 2 ? kept.map(r => ({ id: r.id, title: r.title, ends: r.ends,
+                                              twist: r.twist, made: r.made, alive: r.alive })) : [],
+  };
+}
+
+/* ── 도전장 ───────────────────────────────────────────
+   공격성을 사람이 아니라 «결과물 비교» 로 흘린다. 동사는 «이긴다» 가 아니라 «맞붙는다» 다 —
+   조롱·처벌과 붙는 순간 다른 물건이 된다.
+   따로 점수를 매기지 않는다. 둘이 다음에 같이 나온 대회의 순위를 그대로 읽을 뿐이다. */
+
+/** 두 사람이 같이 있었던 «끝난» 대회 중 가장 최근 것. 없으면 빈 문자열 */
+function metAt(db, a, b) {
+  const r = db.prepare(`SELECT e.id FROM events e
+    WHERE e.ends < date('now')
+      AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
+      AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
+    ORDER BY e.ends DESC LIMIT 1`).get(a, b);
+  return r ? r.id : '';
+}
+
+/** 도전장 하나. 같은 대회에 있던 사람에게만, 그리고 한 쌍에 하나만. */
+function sendDuel(db, me, target) {
+  if (!me || !target || me === target) throw new HttpError(400, '상대를 고를 수 없습니다');
+  if (!db.prepare('SELECT 1 FROM people WHERE id=?').get(target)) throw new HttpError(404, '없는 사람입니다');
+  const ev = metAt(db, me, target);
+  if (!ev) throw new HttpError(403, '같은 대회에 있던 분에게만 보낼 수 있습니다');
+  /* 이미 오간 것이 있으면 새로 안 만든다. 거절한 것은 표에 없으니 다시 보낼 수는 있다 */
+  const old = db.prepare(`SELECT * FROM duels WHERE (sender=? AND target=?) OR (sender=? AND target=?)`)
+                .get(me, target, target, me);
+  if (old) return { id: old.id, already: true, status: old.status };
+  const r = db.prepare('INSERT INTO duels(event,sender,target) VALUES(?,?,?)').run(ev, me, target);
+  return { id: Number(r.lastInsertRowid), already: false, status: 'sent' };
+}
+
+/** 수락하거나 거절한다. 거절은 «지운다» — 거절했다는 기록이 남으면 그것도 벌이다. */
+function answerDuel(db, id, me, yes) {
+  const d = db.prepare('SELECT * FROM duels WHERE id=?').get(+id);
+  if (!d) throw new HttpError(404, '없는 도전장입니다');
+  if (d.target !== me) throw new HttpError(403, '받은 사람만 답할 수 있습니다');
+  if (!yes) { db.prepare('DELETE FROM duels WHERE id=?').run(+id); return { gone: true }; }
+  db.prepare("UPDATE duels SET status='ok' WHERE id=?").run(+id);
+  return { gone: false, status: 'ok' };
+}
+
+/** 결과. 수락한 «뒤에» 둘이 같이 나온 대회의 순위를 읽는다. 없으면 null — «비겼다» 가 아니다. */
+function duelOutcome(db, d) {
+  const evs = db.prepare(`SELECT e.id, e.title, e.ends FROM events e
+    WHERE e.ends < date('now') AND e.ends >= date(?)
+      AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
+      AND EXISTS(SELECT 1 FROM teams t WHERE t.event = e.id AND t.person = ?)
+    ORDER BY e.ends ASC`).all(String(d.created || '').slice(0, 10), d.sender, d.target);
+  /* ponytail: 도전장마다 board() 를 다시 센다. 도전장이 몇 장일 때 얘기다.
+     화면 한 장에 수십 장이 뜨면 대회별로 board() 를 한 번만 세어 돌려 쓴다. */
+  for (const e of evs) {
+    let b; try { b = board(db, e.id, true); } catch { continue; }
+    /* board 는 운영자 차림이라 연락처가 들어 있다. 여기서 순위만 꺼내고 나머지는 안 들고 나간다. */
+    const rankOfPerson = pid => {
+      const row = b.rows.find(r => r.contact && pidOf(db, r.contact) === pid);
+      return row && row.rank ? row.rank : null;
+    };
+    const a = rankOfPerson(d.sender), c = rankOfPerson(d.target);
+    if (a && c) return { event: e.id, title: e.title, ends: e.ends, sender: a, target: c,
+                         winner: a < c ? 'sender' : a > c ? 'target' : 'tie' };
+  }
+  return null;
+}
+
+/** 내 도전장. 보낸 사람·받은 사람 말고는 아무도 못 본다. */
+function duelsOf(db, me) {
+  const rows = db.prepare('SELECT * FROM duels WHERE sender=? OR target=? ORDER BY id DESC').all(me, me);
+  const nameOf = pid => (db.prepare('SELECT handle FROM people WHERE id=?').get(pid) || {}).handle || '이름 없음';
+  return rows.map(d => ({
+    id: d.id, status: d.status, at: d.created,
+    mine: d.sender === me,
+    other: { id: d.sender === me ? d.target : d.sender,
+             handle: nameOf(d.sender === me ? d.target : d.sender) },
+    event: d.event,
+    /* 수락 전에는 결과를 안 센다 */
+    outcome: d.status === 'ok' ? duelOutcome(db, d) : null,
+  }));
+}
+
+/* ── 짝 신청 ──────────────────────────────────────────
+   톡방에서 도는 말은 «너도 해봐» 가 아니라 «우리 이거 해봤어» 다.
+   혼자 오는 길을 막지 않고, 둘이 오는 길을 하나 더 낸다.
+   초대 코드는 팀 열쇠와 «다른» 것이다 — 팀 열쇠를 넘기면 받은 사람이 그 팀 주인이 된다. */
+function inviteOf(db, teamId, tkey) {
+  const t = db.prepare('SELECT * FROM teams WHERE id=?').get(+teamId);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  if (!tkey || tkey !== t.tkey) throw new HttpError(403, '팀 열쇠가 필요합니다');
+  if (t.mate) throw new HttpError(409, '이미 짝이 있습니다');
+  let code = t.invite;
+  if (!code) {
+    code = crypto.randomBytes(5).toString('hex');
+    db.prepare('UPDATE teams SET invite=? WHERE id=?').run(code, t.id);
+  }
+  return { code, url: `${mailSite()}/e/${t.event}?pair=${code}` };
+}
+
+/** 초대 코드로 들어온 사람을 그 팀에 짝으로 붙인다. 새 팀을 만들지 않는다 —
+    그래서 링크를 두 번 써도 팀이 셋이 되지 않는다(둘째부터는 409). */
+function joinPair(db, event, code, b) {
+  const t = db.prepare('SELECT * FROM teams WHERE event=? AND invite=? AND invite<>\'\'').get(event, String(code || ''));
+  if (!t) throw new HttpError(404, '초대 링크가 맞지 않습니다');
+  if (t.mate) throw new HttpError(409, '이 팀은 이미 둘입니다');
+  const name = plain(b.name, 40);
+  if (!name) throw new HttpError(400, '이름이 필요합니다');
+  if (!b.agree) throw new HttpError(400, '개인정보 수집·이용에 동의해 주세요');
+  const contact = String(b.contact || b.email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contact)) throw new HttpError(400, '이메일 꼴이 아닙니다');
+  const pid = pidOf(db, contact);
+  if (pid === t.person) throw new HttpError(409, '신청한 분과 같은 연락처입니다');
+  db.prepare('INSERT OR IGNORE INTO people(id,handle) VALUES(?,?)').run(pid, name);
+  let mem = [];
+  try { mem = JSON.parse(t.members || '[]'); } catch { mem = []; }
+  mem.push({ n: name.slice(0, 20), g: false });
+  const key = crypto.randomBytes(5).toString('hex');
+  db.prepare(`UPDATE teams SET mate=?, mate_name=?, mate_key=?, mate_contact=?,
+                               size=?, members=?, solo=0, invite='' WHERE id=?`)
+    .run(pid, name, key, contact, Math.max(2, +t.size || 1), JSON.stringify(mem), t.id);
+  return { id: t.id, event: t.event, team: t.name, tkey: key, with: t.name };
+}
+
+/** 짝이 빠진다. 신청 자체는 안 깨진다 — 남은 사람의 자리는 그대로다. */
+function leavePair(db, teamId, mateKey) {
+  const t = db.prepare('SELECT * FROM teams WHERE id=?').get(+teamId);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  if (!t.mate || !mateKey || mateKey !== t.mate_key) throw new HttpError(403, '짝 열쇠가 필요합니다');
+  let mem = [];
+  try { mem = JSON.parse(t.members || '[]'); } catch { mem = []; }
+  const i = mem.findIndex(x => x && x.n === t.mate_name && !x.g);
+  if (i >= 0) mem.splice(i, 1);
+  db.prepare(`UPDATE teams SET mate='', mate_name='', mate_key='', mate_contact='',
+                               size=1, members=? WHERE id=?`).run(JSON.stringify(mem), t.id);
+  return { left: true };
+}
+
+/** 신청한 사람이 빠질 때. 짝이 있으면 짝을 주인으로 올린다 —
+    먼저 온 사람이 못 오게 됐다고 나중에 온 사람의 신청까지 없애지 않는다. */
+function promoteMate(db, t) {
+  let mem = [];
+  try { mem = JSON.parse(t.members || '[]'); } catch { mem = []; }
+  const i = mem.findIndex(x => x && x.n === t.name && !x.g);
+  if (i >= 0) mem.splice(i, 1);
+  db.prepare(`UPDATE teams SET name=?, contact=?, person=?, tkey=?,
+                               mate='', mate_name='', mate_key='', mate_contact='',
+                               size=1, members=? WHERE id=?`)
+    .run(t.mate_name, t.mate_contact, t.mate, t.mate_key, JSON.stringify(mem), t.id);
+  return { promoted: true, tkey: t.mate_key };
 }
 
 /** 이 대회(주최자)의 평판. 참가자가 남긴 평가에서 나온다. */
@@ -750,8 +1170,75 @@ function pickVenues(rows, size, area, day, tips) {
     .slice(0, 40);
 }
 
-const KAKAO = process.env.KAKAO_KEY || '';
-const KAKAO_SECRET = process.env.KAKAO_SECRET || '';
+/* ── 로그인 공급자 ────────────────────────────────────
+   카카오·구글·네이버가 한 표에 들어 있다. OAuth 한 바퀴는 셋이 똑같고
+   주소와 응답 필드만 다르다 — 갈래를 세 벌 복사하면 state 검사도 세 벌이 되고,
+   한 벌을 고칠 때 두 벌이 남는다(감사 09-26 1번이 그 모양이었다).
+   키가 없는 공급자는 이 자리가 통째로 없는 것과 같다.
+
+   trust — 이 이메일을 «같은 사람»의 근거로 써도 되는가. 여기가 느슨하면
+   남의 메일 주소를 자기 계정에 적어 둔 사람이 그 계정을 가져간다.
+     · 구글 — email_verified 를 준다. 그 값이 참일 때만.
+     · 카카오 — is_email_valid && is_email_verified 일 때만(동의 항목이라 아예 안 올 수도 있다).
+     · 네이버 — 확인 여부를 안 준다. 그래서 @naver.com 만 믿는다 —
+       그 주소는 네이버가 가진 우편함이라 아이디가 곧 증명이다. 외부 메일로 바꿔 둔
+       사람은 «모름»으로 두고 자동으로 합치지 않는다. */
+const LOGINS = {
+  kakao: {
+    label: '카카오', brand: '#FEE500', ink: '#191600',
+    id: process.env.KAKAO_KEY || '', secret: process.env.KAKAO_SECRET || '',
+    authorize: 'https://kauth.kakao.com/oauth/authorize',
+    token: 'https://kauth.kakao.com/oauth/token',
+    profile: 'https://kapi.kakao.com/v2/user/me',
+    scope: 'profile_nickname',
+    read: (me) => {
+      const a = me.kakao_account || {};
+      return {
+        uid: String(me.id || ''),
+        nick: (me.properties && me.properties.nickname) || a.profile && a.profile.nickname || '',
+        email: a.email || '',
+        trust: !!(a.email && a.is_email_valid && a.is_email_verified),
+      };
+    },
+  },
+  google: {
+    label: '구글', brand: '#fff', ink: '#1A1E1D',
+    id: process.env.GOOGLE_KEY || '', secret: process.env.GOOGLE_SECRET || '',
+    authorize: 'https://accounts.google.com/o/oauth2/v2/auth',
+    token: 'https://oauth2.googleapis.com/token',
+    profile: 'https://openidconnect.googleapis.com/v1/userinfo',
+    scope: 'openid email profile',
+    read: (me) => ({
+      uid: String(me.sub || ''),
+      nick: me.name || me.given_name || '',
+      email: me.email || '',
+      trust: !!(me.email && me.email_verified),
+    }),
+  },
+  naver: {
+    label: '네이버', brand: '#03C75A', ink: '#fff',
+    id: process.env.NAVER_KEY || '', secret: process.env.NAVER_SECRET || '',
+    authorize: 'https://nid.naver.com/oauth2.0/authorize',
+    token: 'https://nid.naver.com/oauth2.0/token',
+    profile: 'https://openapi.naver.com/v1/nid/me',
+    scope: '',                 /* 제공 항목은 콘솔에서 고른다. 주소에 scope 를 실으면 무시된다 */
+    tokenGet: true,            /* 네이버 토큰 발급은 문서대로 GET + 쿼리. state 도 같이 보낸다 */
+    read: (me) => {
+      const r = me.response || {};
+      return {
+        uid: String(r.id || ''),
+        nick: r.nickname || r.name || '',
+        email: r.email || '',
+        trust: /@naver\.com$/i.test(String(r.email || '')),
+      };
+    },
+  },
+};
+/* 켜진 공급자만. 화면도 이 목록만 보고 단추를 그린다 — 목록이 두 곳에 적히면 어긋난다.
+   위에 적힌 순서가 곧 화면 순서다(첫 단추는 카카오 — 한국에서 가장 많이 누른다). */
+const loginsOn = () => Object.keys(LOGINS).filter((k) => !!LOGINS[k].id);
+/* 화면이 단추를 그릴 목록. 이름을 화면에 적지 않게 여기서 같이 보낸다 */
+const loginMenu = () => loginsOn().map((k) => ({ id: k, label: LOGINS[k].label }));
 const SITE = (process.env.SITE || '').replace(/\/$/, '');
 /* 주소가 여럿이다(hackon.kr · hackon.mandeun.com). 돌아갈 주소를 SITE 하나로
    박으면 hackon.kr 에서 로그인한 사람이 다른 도메인으로 튕긴다. 들어온 주소로
@@ -1439,9 +1926,26 @@ function open(file) {
     CREATE TABLE IF NOT EXISTS owners(
       id      TEXT PRIMARY KEY,
       name    TEXT NOT NULL DEFAULT '',
-      kakao   TEXT NOT NULL DEFAULT '',   -- 카카오 회원번호. 비면 열쇠만 쓰는 사람
+      kakao   TEXT NOT NULL DEFAULT '',   -- 옛 자리. 지금은 logins 표가 갖는다(아래 옮겨심기)
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    /* 로그인 한 줄 = 공급자 하나. 한 사람이 카카오로도 구글로도 들어오면 줄이 둘,
+       주인(owner)은 하나다. owners 에 칸을 하나씩 늘리는 쪽은 공급자가 늘 때마다
+       같은 일을 또 하게 된다.
+       ehash — 이메일을 그대로 두지 않는다. 서버 서명 열쇠로 HMAC 한 값만 남긴다.
+       «같은 사람인가»는 대조만 하면 되니 원문이 필요 없고, 새어도 주소가 안 나간다. */
+    CREATE TABLE IF NOT EXISTS logins(
+      provider TEXT NOT NULL,             -- kakao | google | naver
+      uid      TEXT NOT NULL,             -- 그 공급자가 준 회원번호(앱마다 다르다)
+      owner    TEXT NOT NULL,             -- 주최자 열쇠 = 계정
+      ehash    TEXT NOT NULL DEFAULT '',  -- 믿을 수 있는 이메일의 HMAC. 못 믿으면 빈 값
+      nick     TEXT NOT NULL DEFAULT '',
+      created  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY(provider, uid)
+    );
+    CREATE INDEX IF NOT EXISTS logins_owner ON logins(owner);
+    CREATE INDEX IF NOT EXISTS logins_ehash ON logins(ehash);
     CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
     /* 유입 기록. 어느 화면을 몇 번 봤는지, 어디서 왔는지만 하루 단위로 센다.
@@ -1694,17 +2198,22 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'"); } catch {}
   try { db.exec('ALTER TABLE events ADD COLUMN listed INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE owners ADD COLUMN kakao TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { moveKakaoToLogins(db); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN logo TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN link TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN proof TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE sponsors ADD COLUMN done TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN sponsor_ok INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* 기여 선언 — «가져올 것». 기여형 설계 §2-2. 비면 «시간»(그냥 참가)이다 */
+  try { db.exec("ALTER TABLE teams ADD COLUMN bring TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 협찬사 제공 동의를 한 시각. 동의 여부(sponsor_ok)와 함께 남겨 언제 동의했는지 보인다. 예전 배포판에 이미 있던 칸이다. */
   try { db.exec("ALTER TABLE teams ADD COLUMN share TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 예전 배포판에서 share 로만 동의를 남긴 참가자도 크레딧 명단(sponsor_ok)에 들어가게 옮긴다. */
   try { db.exec("UPDATE teams SET sponsor_ok=1 WHERE share<>'' AND sponsor_ok=0"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN tkey TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN wifi TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 모이는 곳. «언제» 는 있는데 «어디» 를 적을 칸이 아예 없었다 — 대역 셋이 여기서 멈췄다(대역시험 4). */
+  try { db.exec("ALTER TABLE events ADD COLUMN place TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN person TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN notice TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN notice_at TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -1796,6 +2305,12 @@ function open(file) {
      questions — 대회 안 묻고 답하기. 팀 열쇠로 묻고 운영자만 답한다. 익명 없음, 커뮤니티 아님 */
   try { db.exec("ALTER TABLE events ADD COLUMN safety TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN pay TEXT NOT NULL DEFAULT ''"); } catch {}      // 입금 안내 한 줄 — 맡기 확정된 사람에게만 보인다. 앱은 돈을 안 만진다
+  /* 2026-09-27 취소 규칙(스페이스클라우드·이벤터스: 규칙은 주최자가 정하고 상세 페이지에 박는다).
+     cancel_rule — 한 줄. 비면 빈 문자열 그대로 둔다. 기본 문장은 «보여 줄 때»만 쓴다(화면이 갖고 있다) —
+     기본값을 DB 에 써 두면 주최자가 안 정한 것과 «이 문장으로 정한 것» 을 나중에 가를 수 없다. */
+  try { db.exec("ALTER TABLE events ADD COLUMN cancel_rule TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* event_trash.notified — 지우기 직전에 알림이 닿은 팀 수. 지운 뒤에 세면 셀 곳이 없다 */
+  try { db.exec('ALTER TABLE event_trash ADD COLUMN notified INTEGER NOT NULL DEFAULT 0'); } catch {}
   /* teams.no — 자리 번호. 신청할 때 한 번 받고 그 뒤로는 안 바뀐다(팀이 빠져도 뒤가 안 당겨진다 — 인쇄한 자리표와 어긋나면 점수가 딴 팀에 붙는다).
      이미 있는 팀은 신청 순으로 한 번 매긴다 */
   try { db.exec('ALTER TABLE teams ADD COLUMN no INTEGER NOT NULL DEFAULT 0'); } catch {}
@@ -1924,9 +2439,40 @@ function open(file) {
   db.exec(`CREATE TABLE IF NOT EXISTS news(
     id INTEGER PRIMARY KEY, src TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);
+  /* 짝 신청 — 둘이 같이 오는 길. 초대 코드는 팀 열쇠와 다른 것이다 */
+  for (const c of ['invite', 'mate', 'mate_name', 'mate_key', 'mate_contact'])
+    try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
+  /* 그날의 조건 — 13시 오프닝에서 현장 공개한 제약 한 줄. 끝난 뒤에만 밖으로 나간다 */
+  try { db.exec("ALTER TABLE events ADD COLUMN twist TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
-  try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(카카오 닉네임)
+  try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(로그인 별명)
   try { db.exec("ALTER TABLE news ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}    // 제보자 계정 — 하루 5건 상한      // 별점 옆 한 줄
+  /* 만든 것이 «지금도 열리는가». 상태는 셋이다 - 1 열림 · 0 안 열림 · NULL 모름.
+     한 번도 못 열어 본 것과 «열어 봤는데 죽었다» 를 같은 화면으로 그리지 않는다(오답노트 E22). */
+  db.exec(`CREATE TABLE IF NOT EXISTS liveness(
+    team    INTEGER PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    state   INTEGER,
+    checked TEXT NOT NULL DEFAULT (datetime('now')))`);
+
+  /* 도전장. 맞붙기로 한 것만 남는다 — 거절은 지워서 기록을 안 남긴다.
+     한 쌍에 한 줄이라 표가 안 불어난다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS duels(
+    id      INTEGER PRIMARY KEY,
+    event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    sender  TEXT NOT NULL,
+    target  TEXT NOT NULL,
+    status  TEXT NOT NULL DEFAULT 'sent',
+    created TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(sender, target))`);
+
+  /* 기록증 카드. 본인이 «만들기» 를 누른 순간 생기고, 그때부터 그 사람 프로필 링크의
+     미리보기 그림이 된다. 안 만든 사람은 기본 og.png 다 - 빈 카드를 그리지 않는다. */
+  db.exec(`CREATE TABLE IF NOT EXISTS cards(
+    person  TEXT PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE,
+    mime    TEXT NOT NULL,
+    data    BLOB NOT NULL,
+    created TEXT NOT NULL DEFAULT (datetime('now')))`);
+
   /* 이 표가 생기기 전에 띄운 공지(events.notice)를 한 번 옮겨 둔다 — 안 그러면 큰 화면엔 공지가 있는데
      공개 페이지 «소식»은 비어 «있는 것을 없음으로» 그린다. 시각은 notice_at 그대로 */
   for (const r of db.prepare("SELECT id, notice, notice_at FROM events WHERE notice<>'' AND id NOT IN (SELECT event FROM notices)").all())
@@ -2007,7 +2553,7 @@ function privacyPage() {
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HACK:ON 개인정보 처리방침</title>
 <style>body{font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;max-width:680px;margin:0 auto;padding:24px 20px;line-height:1.7;color:#191F28}h1{font-size:24px}h2{font-size:17px;margin-top:26px}li{margin:4px 0}</style></head><body>
 <h1>HACK:ON 개인정보 처리방침</h1>
-<p>HACK:ON(hackon.mandeun.com 과 같은 이름의 아이폰 앱)은 로그인 없이 씁니다. 아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
+<p>HACK:ON(hackon.mandeun.com 과 같은 이름의 아이폰 앱)은 로그인을 안 해도 씁니다 — 열쇠 하나가 곧 계정입니다. 로그인은 여러 기기에서 같은 대회를 열기 위한 선택입니다. 아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
 <h2>1. 받는 것과 이유</h2>
 <ul>
 <li><b>참가 신청</b> — 이름(팀 이름), 이메일. 대회 운영·참가 확인·결과 안내·상금 지급. 협찬사 제공은 따로 동의한 사람만.</li>
@@ -2015,17 +2561,19 @@ function privacyPage() {
 <li><b>주제·문제 올리기(받는 사람)</b> — 공개될 이름, 연락처. 결과 안내에만 씁니다.</li>
 <li><b>앱 피드백</b> — 적은 글, 연락처(선택).</li>
 <li><b>푸시 알림</b> — 기기 토큰. 사람 정보가 아니며 «따라가기»를 끄면 지웁니다.</li>
+<li><b>로그인(선택)</b> — 카카오·구글·네이버 중 고른 곳에서 <b>회원번호와 별명</b>. 어느 기기에서든 내 대회를 열기 위해서. 회원번호는 HACK:ON 에만 발급되는 번호라 그 서비스의 아이디가 아니며, 비밀번호는 받지 않습니다.</li>
+<li><b>이메일(그 서비스가 주는 경우)</b> — <b>같은 사람인지 알아보는 데만</b> 씁니다. 구글로 들어온 분이 지난번 카카오로 들어온 분과 같은 사람이면 대회가 흩어지지 않아야 하기 때문입니다. 주소는 저장하지 않고 되돌릴 수 없게 바꾼 값만 둡니다. 이 주소로 메일을 보내지 않고, 광고에 쓰지 않습니다.</li>
 </ul>
 <h2>2. 보는 사람</h2>
 <p>연락처는 그 대회의 운영자만 봅니다. 공개 페이지·큰 화면·결과 보고서에는 연락처가 나가지 않습니다. 협찬사에는 «협찬사 제공 동의»를 한 참가자의 이메일만, 그 대회의 협찬사에만 갑니다.</p>
 <h2>3. 두는 기간</h2>
-<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다).</p>
+<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다). 로그인 정보(회원번호·별명·바꾼 이메일 값)는 계정을 지울 때까지 둡니다 — hi@mandeun.com 으로 말씀하시면 지웁니다.</p>
 <h2>4. 앱이 쓰는 기기 기능</h2>
 <ul><li>카메라 — 심사·투표 링크의 QR 을 찍을 때만. 사진은 저장하지 않습니다.</li><li>알림 — 대회 전날·마감 30분 전·새 소식. 켜고 끄는 것은 본인이 정합니다.</li><li>저장 공간 — 마지막으로 받은 대회 정보를 기기에 두어 인터넷이 끊겨도 진행표를 보여 줍니다.</li></ul>
 <h2>5. 하지 않는 것</h2>
 <p>광고 추적, 제3자 분석 도구, 위치 수집, 연락처 접근, 앱 안 결제를 하지 않습니다.</p>
 <h2>6. 묻는 곳</h2>
-<p>hi@mandeun.com · 개정 2026-09-24</p>
+<p>hi@mandeun.com · 개정 2026-09-26</p>
 </body></html>`;
 }
 
@@ -2119,6 +2667,93 @@ function cookieOf(req, name) {
     if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1));
   }
   return '';
+}
+
+/* ── 같은 사람 알아보기 ────────────────────────────────
+   로그인이 셋이 되면 «구글로 들어온 이 사람이 지난주 카카오로 들어온 그 사람인가»를
+   서버가 판단해야 한다. 아니라고 하면 계정이 둘로 갈리고 지난 대회가 안 보인다.
+   근거는 넷뿐이고, 센 것부터 쓴다.
+     ① 공급자+회원번호가 이미 있다 → 그 계정. 이건 증명이다.
+     ② 로그인한 채로 «다른 로그인도 붙이기»를 눌러 왔다 → 본인이 직접 붙였다.
+     ③ 믿을 수 있는 이메일이 기존 로그인과 같다 → 같은 사람으로 본다.
+     ④ 이 브라우저가 들고 있던 주최자 열쇠 → 로그인 전에 연 대회를 잃지 않게 붙인다.
+   그래도 없으면 새 계정.
+   ③④가 서로 다른 계정을 가리키면 둘을 합친다 — 한쪽을 버리면 방금 만든 대회나
+   지난 대회 한쪽이 사라진다. 사람은 하나다. 단, 열쇠 쪽에 이미 다른 로그인이 붙어 있으면
+   («열쇠만 쓰는 계정»이 아니라 남의 계정일 수 있다) 손대지 않는다. */
+/* 카카오만 있던 시절의 계정을 logins 표로 옮긴다. OR IGNORE 라 몇 번 켜도 같은 결과다.
+   owners.kakao 는 이제 읽지 않지만 지우지 않는다 — 옮겨심기가 틀렸을 때 돌아갈 자리다. */
+const moveKakaoToLogins = (db) => db.exec(
+  "INSERT OR IGNORE INTO logins(provider,uid,owner,nick) "
+  + "SELECT 'kakao', kakao, id, name FROM owners WHERE kakao<>''");
+function emailKey(db, email, trust) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!trust || e.indexOf('@') < 1) return '';
+  return crypto.createHmac('sha256', secretOf(db)).update('email:' + e).digest('hex');
+}
+/* 계정 합치기. owner 를 갖는 표(events·news·logins)의 주인을 옮기고 빈 계정을 지운다.
+   owner 칸이 늘면 여기도 늘어야 한다 — 검사가 그 누락을 잡는다. */
+function mergeOwners(db, from, into) {
+  if (!from || !into || from === into) return into;
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE events SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE event_trash SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE news SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE logins SET owner=? WHERE owner=?').run(into, from);
+    const keep = db.prepare('SELECT name FROM owners WHERE id=?').get(into);
+    const gone = db.prepare('SELECT name FROM owners WHERE id=?').get(from);
+    if (gone && gone.name && (!keep || !keep.name))
+      db.prepare('UPDATE owners SET name=? WHERE id=?').run(gone.name, into);
+    db.prepare('DELETE FROM owners WHERE id=?').run(from);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return into;
+}
+const linksOf = (db, owner) => (owner
+  ? db.prepare('SELECT provider FROM logins WHERE owner=? ORDER BY created, provider').all(owner).map((r) => r.provider)
+  : []);
+/* 로그인 한 번. 위 ①~④를 순서대로 본다. how 는 검사와 화면 문구가 읽는다. */
+function loginAs(db, provider, prof, opt) {
+  const { pre = '', link = '' } = opt || {};
+  const uid = String((prof && prof.uid) || '');
+  if (!uid) throw new HttpError(400, '사용자 정보를 못 받았습니다');
+  const nick = String((prof && prof.nick) || '').slice(0, 40);
+  const eh = emailKey(db, prof && prof.email, prof && prof.trust);
+  const alive = (id) => !!(id && db.prepare('SELECT 1 FROM owners WHERE id=?').get(id));
+  /* 열쇠만 쓰던 계정만 끌어온다. 이미 로그인이 붙은 계정은 남의 것일 수 있다 */
+  const absorb = (from, into) => {
+    if (alive(from) && from !== into && !linksOf(db, from).length) mergeOwners(db, from, into);
+  };
+
+  const had = db.prepare('SELECT owner FROM logins WHERE provider=? AND uid=?').get(provider, uid);
+  if (had && alive(had.owner)) {
+    /* 빈 값으로 덮지 않는다. 이메일 제공은 «동의 항목»이라 다음 로그인에 안 올 수 있는데,
+       그때 지워 버리면 어제 «같은 사람»이던 것이 오늘 남이 된다(검사가 여기서 한 번 터졌다). */
+    if (eh) db.prepare('UPDATE logins SET ehash=? WHERE provider=? AND uid=?').run(eh, provider, uid);
+    if (nick) db.prepare('UPDATE logins SET nick=? WHERE provider=? AND uid=?').run(nick, provider, uid);
+    if (nick) db.prepare("UPDATE owners SET name=COALESCE(NULLIF(name,''),?) WHERE id=?").run(nick, had.owner);
+    absorb(pre, had.owner);
+    return { owner: had.owner, how: 'known' };
+  }
+
+  let owner = '', how = '';
+  if (alive(link)) { owner = link; how = 'linked'; }
+  if (!owner && eh) {
+    const same = db.prepare("SELECT owner FROM logins WHERE ehash=? AND ehash<>'' LIMIT 1").get(eh);
+    if (same && alive(same.owner)) { owner = same.owner; how = 'email'; }
+  }
+  if (owner) absorb(pre, owner);
+  if (!owner && alive(pre)) { owner = pre; how = 'key'; }
+  if (!owner) {
+    owner = crypto.randomBytes(6).toString('hex');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(owner, nick);
+    how = 'new';
+  }
+  db.prepare('INSERT OR REPLACE INTO logins(provider,uid,owner,ehash,nick) VALUES(?,?,?,?,?)')
+    .run(provider, uid, owner, eh, nick);
+  if (nick) db.prepare("UPDATE owners SET name=COALESCE(NULLIF(name,''),?) WHERE id=?").run(nick, owner);
+  return { owner, how };
 }
 
 /* 열쇠를 마구 넣어 보는 것을 막는다. 12자 열쇠라도 무한히 시도하면 언젠가 맞는다. */
@@ -2222,13 +2857,14 @@ const RUBRICS = {
 const DEFAULT_RUBRIC = RUBRICS['만들기'].rows;
 
 /** 대회를 만든 뒤 나머지를 채운다. 처음부터 다 물으면 만들다가 그만둔다. */
-const EDITABLE = ['title', 'host', 'topic', 'starts', 'ends', 'prize', 'cap', 'due', 'wifi'];
+const EDITABLE = ['title', 'host', 'topic', 'starts', 'ends', 'prize', 'cap', 'due', 'wifi', 'place'];
 function editEvent(db, id, b) {
   const set = [], val = [];
   for (const k of EDITABLE) {
     if (b[k] === undefined) continue;
     set.push(`${k}=?`);
-    val.push(k === 'prize' || k === 'cap' ? Math.max(0, +b[k] || 0) : plain(b[k], k === 'topic' ? 200 : k === 'wifi' ? 200 : 80));
+    val.push(k === 'prize' || k === 'cap' ? Math.max(0, +b[k] || 0)
+             : plain(b[k], k === 'topic' ? 200 : k === 'wifi' ? 200 : k === 'place' ? 120 : 80));
   }
   if (b.budget !== undefined) { set.push('budget=?'); val.push(Math.max(0, Math.floor(+b.budget || 0))); }
   /* 오픈 대화방 주소. http(s) 가 아니면 빈 값으로 — javascript: 같은 것이 공개 페이지에 걸리면 안 된다 */
@@ -2236,6 +2872,10 @@ function editEvent(db, id, b) {
   /* «문제가 생기면 이 사람에게». 참가자 화면에 그대로 나가는 공개 연락 한 줄이다 — 운영자가 스스로 적는다 */
   if (b.safety !== undefined) { set.push('safety=?'); val.push(plain(b.safety, 120)); }
   if (b.pay !== undefined) { set.push('pay=?'); val.push(plain(b.pay, 120)); }
+  /* 그날의 조건. 현장에서 공개한 제약을 운영자가 적어 둔다 — 아카이브의 원본이 이것뿐이다 */
+  if (b.twist !== undefined) { set.push('twist=?'); val.push(plain(b.twist, 120)); }
+  /* 취소 규칙 한 줄. 공개 페이지와 신청 뒤 카드에 접지 않고 그대로 나간다 */
+  if (b.cancel_rule !== undefined) { set.push('cancel_rule=?'); val.push(plain(b.cancel_rule, 120)); }
   if (b.mode !== undefined) {
     if (!['onsite', 'online'].includes(b.mode)) throw new HttpError(400, 'mode 는 onsite·online 중 하나입니다');
     set.push('mode=?'); val.push(b.mode);
@@ -2300,6 +2940,15 @@ function moreTeam(db, id, b, can) {
   if (b.sponsor_ok !== undefined && !!b.sponsor_ok !== !!t.sponsor_ok) {
     if (!owns) throw new HttpError(403, '협찬사 제공 동의는 본인만 바꿀 수 있습니다');
     set.push('sponsor_ok=?'); val.push(b.sponsor_ok ? 1 : 0);
+  }
+  /* 기여 선언 — 바꿀 수 있는 값이다. «못 가져오게 됐다» 를 고칠 수 없으면 선언이 거짓말이 된다.
+     본인만 바꾼다: 남이 대신 선언하면 안 지켜졌을 때 그 사람 이름이 남는다. */
+  if (b.bring !== undefined) {
+    const next = bringList(b.bring).join(',');
+    if (next !== String(t.bring || '')) {
+      if (!owns) throw new HttpError(403, '가져올 것은 신청한 분만 고칠 수 있습니다');
+      set.push('bring=?'); val.push(next);
+    }
   }
   /* 인원은 바뀌는 값이라 덮어쓰기를 허용한다. 한 명 들어오면 고쳐야 한다.
      주인 확인은 setSeats 와 같아야 한다 - 안 그러면 거기서 막은 정원 변경이 이 길로 그냥 된다. */
@@ -2407,6 +3056,18 @@ const needAdmin = (db, event, key, owner) => {
 /** 이 사람이 연 대회들과 누적 성적.
     "우리 동아리 해커톤은 끝난 뒤에도 팀의 82퍼센트가 약속된 피드백을 받았다" —
     주최자가 다음 모집에 쓸 수 있는 것은 참가자 수가 아니라 이 숫자다. */
+/** 대회의 주인을 옮긴다. 라우트가 «누구로 옮길지» 를 정하고, 여기서는 옮기기만 한다.
+    옛 주인은 안 지운다 — 다른 대회를 갖고 있을 수 있다. 같은 주인이면 아무것도 안 하고 0 을 돌려준다. */
+function adoptEvent(db, event, toOwner) {
+  const row = db.prepare('SELECT owner FROM events WHERE id=?').get(event);
+  if (!row) throw new HttpError(404, '없는 대회입니다');
+  if (!toOwner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(toOwner))
+    throw new HttpError(400, '옮겨 갈 계정이 없습니다');
+  if (row.owner === toOwner) return { owner: toOwner, moved: 0 };
+  db.prepare('UPDATE events SET owner=? WHERE id=?').run(toOwner, event);
+  return { owner: toOwner, moved: 1 };
+}
+
 function mine(db, owner) {
   const o = db.prepare('SELECT * FROM owners WHERE id=?').get(owner);
   if (!o) throw new HttpError(404, '없는 열쇠입니다');
@@ -2458,6 +3119,9 @@ function getEvent(db, id) {
   delete e.jkey;                     // 심사 열쇠도 안 내려보낸다 — 운영자에게만 따로 준다
   delete e.vkey;                     // 관객 투표 열쇠도 마찬가지
   delete e.judged;                   // 심사위원 상태는 운영자 화면에만 — 손님에게 «못 구함»을 보일 이유가 없다
+  /* 그날의 조건은 오프닝에서 공개하는 것이다. 끝나기 전에 공개 응답에 실리면
+     참가자가 미리 준비해 온다 — 그러면 «현장 조건» 이 아니다. 운영자에게만 따로 붙인다. */
+  if (!closed({ due: e.due, ends: e.ends })) delete e.twist;
   e.rubric = JSON.parse(e.rubric);
   for (const r of e.rubric) if (!r.hint && RUBRIC_HINT[r.key]) r.hint = RUBRIC_HINT[r.key];
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
@@ -2534,7 +3198,7 @@ function pastDue(db, team) {
 
 function submit(db, team, b) {
   if (pastDue(db, team)) throw new HttpError(409, '제출 마감이 지났습니다');
-  const prev = db.prepare('SELECT show, show_at FROM submissions WHERE team=?').get(team);
+  const prev = db.prepare('SELECT url, show, show_at FROM submissions WHERE team=?').get(team);
   /* 제출 폼도 동의 체크칸을 같이 보낸다. 안 보내면 지금 값을 그대로 둔다 -
      칸이 없는 옛 화면이 저장할 때 남의 동의를 꺼 버리면 안 된다. */
   const on = b.show === undefined ? (prev ? prev.show : 0) : (b.show ? 1 : 0);
@@ -2545,7 +3209,10 @@ function submit(db, team, b) {
               ON CONFLICT(team) DO UPDATE SET url=excluded.url, note=excluded.note,
                 aiuse=excluded.aiuse, aidrop=excluded.aidrop,
                 show=excluded.show, show_at=excluded.show_at, sale=excluded.sale, at=datetime('now')`)
-    .run(team, webUrl(b.url), b.note || '',
+    /* 빈 주소로는 이미 낸 주소를 덮지 않는다. 다시 열어 설명만 고친 참가자가
+       먼저 낸 주소를 잃고 순위표에 «미제출» 로 바뀌었다(대역시험 1).
+       주소를 바꾸려면 새 주소를 적는다 — 지우는 길은 두지 않는다. */
+    .run(team, webUrl(b.url) || ((prev && prev.url) || ''), b.note || '',
          (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at, sale);
   /* 어느 주제·요청으로 만들었나. 이 대회에 붙은 요청만 고를 수 있다. 안 보내면 그대로 */
   if (b.request !== undefined) {
@@ -2786,24 +3453,45 @@ function closed(e) {
   return today() > e.ends;
 }
 
-function board(db, event, admin = false) {
+/** 이 브라우저가 든 팀 열쇠로 그 대회의 «내 팀» 을 찾는다. 없으면 0.
+    열쇠가 빈 값인 옛 팀이 걸리지 않게 열쇠가 있을 때만 묻는다. */
+function myTeamOf(db, event, tkey) {
+  const tk = String(tkey || '');
+  if (!tk) return 0;
+  const r = db.prepare("SELECT id FROM teams WHERE event=? AND tkey=? AND tkey<>''").get(event, tk);
+  return r ? r.id : 0;
+}
+
+function board(db, event, admin = false, mine = 0) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
-           t.agreed, t.photo, t.came, t.size, t.want, t.no,
+           t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring,
            s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
   /* 심사위원별 등수 보정(MLH 의 stack ranking 을 눈금으로). 관대한 심사위원의 90점과 짠 심사위원의 70점이
      같은 «1등»일 수 있다 — 각 심사위원 안에서 등수를 매겨 100~0 으로 펴고, 팀은 자기를 본 심사위원들의 평균을 받는다.
      한 팀만 본 심사위원은 그 팀에 100 을 준다(비교가 없으니 «모름»이지만 0 으로 그리면 벌이 된다). */
-  const perJudge = {};
+  const perJudge = {}, gaveW = {};
   for (const sc of db.prepare(`SELECT s.team, s.judge, s.key, s.value FROM scores s
                                JOIN teams t ON t.id = s.team WHERE t.event = ?`).all(event)) {
     const w = (e.rubric.find(r => r.key === sc.key) || {}).weight || 0;
     perJudge[sc.judge] = perJudge[sc.judge] || {};
+    gaveW[sc.judge] = gaveW[sc.judge] || {};
     perJudge[sc.judge][sc.team] = (perJudge[sc.judge][sc.team] || 0) + sc.value * w / 100;
+    gaveW[sc.judge][sc.team] = (gaveW[sc.judge][sc.team] || 0) + w;
   }
+  /* 일부 항목만 매긴 심사위원. 안 매긴 항목은 «모름» 이지 0 이 아니다 —
+     0 으로 두면 그 팀만 혼자 낮아져 등수 보정이 거짓말을 한다.
+     그 심사위원이 «실제로 본 항목» 의 배점으로 나눠 같은 자에 올린다.
+     다 매겼으면 나누는 값이 그대로라 아무것도 안 바뀐다(대역시험 3). */
+  const WTOT = e.rubric.reduce((a, r) => a + (+r.weight || 0), 0);
+  for (const j of Object.keys(perJudge))
+    for (const t of Object.keys(perJudge[j])) {
+      const gw = gaveW[j][t];
+      if (gw > 0 && gw < WTOT) perJudge[j][t] = perJudge[j][t] * WTOT / gw;
+    }
   const rankPts = {};   // team -> [points per judge]
   for (const j of Object.keys(perJudge)) {
     const ts = Object.entries(perJudge[j]).sort((a, b) => b[1] - a[1]);
@@ -2852,7 +3540,9 @@ function board(db, event, admin = false) {
        먼저 낸 팀의 결과물을 뒤에 내는 팀이 보고 만들 수 있기 때문이다.
        제목과 설명은 그대로 둔다 - 무엇을 만들고 있는지는 서로 알아야 같이 하는 느낌이 난다.
        운영자만 언제든 본다. 심사위원도 마감 뒤에 본다(judgeView 의 hideUrl 과 같은 선). */
-    if (!admin && !closed(e)) { delete row.url; row.hidden = !!t.url; }
+    /* 다만 mine(팀 열쇠를 낸 그 팀)에게는 자기 것을 돌려준다 — 안 주면 제출 칸이
+       비어 보이고, 설명만 고쳐 내는 순간 주소가 지워졌다(대역시험 1). */
+    if (!admin && !closed(e) && !(mine && String(t.id) === String(mine))) { delete row.url; row.hidden = !!t.url; }
     /* 개인정보는 운영자에게만. 화면에서 감추면 브라우저 콘솔에서 다 보인다. */
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
                   delete row.photo; delete row.came; delete row.apply;
@@ -3098,12 +3788,33 @@ function eventLoad(db, event) {
   };
 }
 const emptyEvent = load => Object.values(load).every(v => v === 0);
-function deleteEvent(db, event, b) {
+/* 신청자가 있는 대회를 접을 때는 «먼저 알리고 그 다음에 지운다».
+   소모임은 아예 막는다(「모임장은 멤버들이 있는 한 모임을 임의로 삭제할 수 없습니다」). hackon 은 막지 않고
+   순서를 고정한다 — 지운 뒤에 알리면 대회도 팀 링크도 이미 없어서 «무엇이 취소됐는지» 를 댈 데가 없다.
+   메일이 꺼져 있으면(RESEND_KEY 없음) 소식에 한 줄로 남긴다. 소식은 지우기 직전 사본에 같이 들어가
+   되살렸을 때 그대로 보인다. 돌려주는 값은 «알림이 닿은 팀 수» 다 — 메일이 나갔거나 소식에 남은 팀. */
+async function notifyDeleted(db, event, e) {
+  const teams = db.prepare('SELECT id, name, contact FROM teams WHERE event=?').all(event);
+  if (!teams.length) return 0;
+  let sent = 0;
+  for (const t of teams) {
+    if (!isEmail(t.contact)) continue;
+    if (await sendMail(db, { event, kind: 'gone', ref: t.id, to: t.contact,
+      subject: `[HACK:ON] ${e.title} — 대회가 접혔습니다`,
+      text: `${t.name} 팀, 신청하신 ${e.title} 이 주최자에 의해 접혔습니다.\n\n이 대회는 더 열리지 않습니다. 낸 결과물과 점수도 같이 내려갑니다.\n까닭은 주최자에게 물어보세요.\n\n답장은 hi@mandeun.com 으로.` })) sent++;
+  }
+  if (sent < teams.length) say(db, event, `대회를 접습니다 · 신청 ${teams.length}팀에 알립니다 (메일 ${sent}팀)`);
+  return teams.length;
+}
+async function deleteEvent(db, event, b, notify = notifyDeleted) {
   const e = db.prepare('SELECT id, title, owner FROM events WHERE id=?').get(event);
   if (!e) throw new HttpError(404, '없는 대회입니다');
   const load = eventLoad(db, event);
   if (!emptyEvent(load) && String((b && b.confirm) || '').trim() !== e.title)
     throw new HttpError(409, `신청·자리·제안이 있는 대회입니다. 지우려면 대회 이름을 그대로 적어 보내세요: ${e.title}`);
+  /* 알림이 먼저다. 여기서 터지면 지우지 않는다 — 안 나간 알림 뒤에 찍히는 «지웠습니다» 는 거짓이다.
+     사본은 알림 뒤에 뜬다. 그래야 소식에 남긴 줄이 사본에도 들어간다. */
+  const notified = await notify(db, event, e);
   const copy = dump(db, event);
   let saved = '';
   try {
@@ -3117,11 +3828,11 @@ function deleteEvent(db, event, b) {
      보통은 주최자가 «대회» 탭의 «지운 대회»에서 한 번 눌러 되살린다. 열쇠는 사본에 없고 owner 칸에 있다. */
   let trash = 0;
   try {
-    trash = Number(db.prepare('INSERT INTO event_trash(event,owner,title,json) VALUES(?,?,?,?)')
-      .run(event, e.owner || '', e.title, JSON.stringify(copy)).lastInsertRowid);
+    trash = Number(db.prepare('INSERT INTO event_trash(event,owner,title,json,notified) VALUES(?,?,?,?,?)')
+      .run(event, e.owner || '', e.title, JSON.stringify(copy), notified).lastInsertRowid);
   } catch { trash = 0; }
   db.prepare('DELETE FROM events WHERE id=?').run(event);
-  return { ok: true, saved: path.basename(saved), dump: copy, load, trash };
+  return { ok: true, saved: path.basename(saved), dump: copy, load, trash, notified };
 }
 
 /* ── «받는 사람» — 후원자·의뢰자 역할 하나 ──
@@ -3313,7 +4024,7 @@ function sponsorName(v) {
 function eventTrash(db, owner) {
   /* 열쇠 없이 물으면 403 이다 — 400 은 «보낸 것이 잘못됐다» 는 뜻이라 «권한이 없다» 를 가린다(감사 e) */
   if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');
-  return db.prepare('SELECT id, event, title, json, at FROM event_trash WHERE owner=? ORDER BY id DESC').all(owner)
+  return db.prepare('SELECT id, event, title, json, at, notified FROM event_trash WHERE owner=? ORDER BY id DESC').all(owner)
     .map(r => {
       let teams = 0;
       try { teams = (JSON.parse(r.json).teams || []).length; } catch { teams = 0; }
@@ -3425,6 +4136,11 @@ function setPledge(db, id, b) {
 
 /* ── 자리 밖 제안(offer) — 메일 대신 앱에서 바로 ── */
 const OFFER_STATUS = ['pending', 'ok', 'no'];
+/* 기여 일곱 종류(인액터스 강연: 정보·전문성·시간·노동력·도메인 지식·문화적 배경·성분).
+   해커톤 말로 옮긴 것이다. 기본값은 «시간» — 그냥 참가하는 것도 기여다. */
+const BRING_KINDS = { time: '시간', venue: '장소', thing: '물건', cash: '돈', link: '연결', record: '기록', skill: '전문성' };
+const bringList = (v) => String(v || '').split(',').map(x => x.trim()).filter(x => BRING_KINDS[x]);
+
 const OFFER_KIND_LABEL = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심사', prize:'상품', mentor:'멘토', snack:'간식', other:'기타' };
 function addOffer(db, event, b) {
   if (!db.prepare('SELECT 1 FROM events WHERE id=?').get(event)) throw new HttpError(404, '없는 대회입니다');
@@ -3578,6 +4294,7 @@ function icsOf(e, base) {
     'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z',
     'DTSTART;VALUE=DATE:' + d(e.starts), 'DTEND;VALUE=DATE:' + next(e.ends || e.starts),
     'SUMMARY:' + esc(e.title), 'URL:' + base + '/e/' + e.id,
+    ...(e.place ? ['LOCATION:' + esc(e.place)] : []),
     'DESCRIPTION:' + esc((e.topic ? '주제 ' + e.topic + '. ' : '') + (e.due ? '제출 마감 ' + e.due.replace('T', ' ') + '. ' : '') + base + '/e/' + e.id),
     'END:VEVENT', 'END:VCALENDAR'].join('\r\n') + '\r\n';
 }
@@ -3588,9 +4305,12 @@ function csvOf(db, event, withContact = true) {
   const cell = v => { let s = String(v == null ? '' : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;   // 엑셀이 수식으로 읽는 첫 글자(감사 8)
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   /* 스태프 방에 올릴 판은 «연락 빼고»로 받는다 — 연락처 열 자체가 없다 */
-  const head = ['자리', '팀', ...(withContact ? ['연락처'] : []), '역할', '체크인', '제출 주소', '점수', '보정 점수', '순위'];
+  /* 확정 칸은 «온다 / 못 옴 / 모름» 셋이다. 아직 안 물은 팀을 «못 옴»이나 빈 칸으로 적으면
+     간식·자리를 그 숫자로 잡게 된다 — 모름은 모름으로 적는다. */
+  const conf = v => (v === 'no' ? '못 옴' : v ? '온다' : '모름');
+  const head = ['자리', '팀', ...(withContact ? ['연락처'] : []), '역할', '확정', '체크인', '제출 주소', '점수', '보정 점수', '순위'];
   const lines = [head.join(',')];
-  for (const r of b.rows) lines.push([r.no, r.name, ...(withContact ? [r.contact] : []), r.role, r.came, r.url || '', r.score, r.rscore, r.rank].map(cell).join(','));
+  for (const r of b.rows) lines.push([r.no, r.name, ...(withContact ? [r.contact] : []), r.role, conf(r.confirmed), r.came, r.url || '', r.score, r.rscore, r.rank].map(cell).join(','));
   lines.push('', ['자리 종류', '자리', '이름', '소속', '상태'].join(','));
   for (const x of pledgesOf(db, event).filter(x => x.status === 'ok' || x.status === 'done'))
     lines.push([x.kind, x.label, x.name, x.org, x.status].map(cell).join(','));
@@ -3643,6 +4363,51 @@ function needsOf(db, event) {
     }));
 }
 
+/* 대회를 가로질러 «아직 비어 있는 자리» 를 모은다.
+   지금까지 자리는 대회 안에만 있었다 — 대회를 이미 아는 사람만 «맡기» 를 누를 수 있었다.
+   기여형 설계 §2-1(빈자리 판)이 말하는 것은 그 반대다: 무엇을 줄 수 있는지만 아는 사람이
+   자기 것으로 대회를 찾아 들어온다. 그래서 세로(대회별)를 가로(자리별)로 뒤집는다.
+
+   공개 길이다 — 신청자 이름·연락처는 한 줄도 싣지 않는다. 남은 수만 센다. */
+function openings(db, kind) {
+  const today = ymd();
+  /* 남은 날. 하루를 밀리초로 나누지 않고 날짜 문자열끼리 뺀다 — 시간대 때문에 하루가 밀린다 */
+  const dleftOf = (d) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))) return null;
+    const a = new Date(today + 'T00:00:00'), b = new Date(d + 'T00:00:00');
+    return Math.round((b - a) / 86400000);
+  };
+  const rows = db.prepare(`
+    SELECT n.id, n.event, n.kind, n.label, n.qty, n.note, n.price,
+           e.title, e.starts, e.ends, e.host
+    FROM needs n JOIN events e ON e.id = n.event
+    WHERE e.listed = 1 AND e.ends >= ?
+    ORDER BY e.starts, n.id`).all(today);
+  const filled = new Map();
+  for (const r of db.prepare(
+    "SELECT need, COUNT(*) c FROM pledges WHERE status IN ('ok','done') GROUP BY need").all())
+    filled.set(r.need, r.c);
+
+  const out = [];
+  for (const n of rows) {
+    if (kind && n.kind !== kind) continue;
+    const left = Math.max(0, (+n.qty || 1) - (filled.get(n.id) || 0));
+    if (left <= 0) continue;                 // 다 찬 자리는 «비어 있는 자리» 가 아니다
+    out.push({
+      need: n.id, event: n.event, kind: n.kind,
+      label: plain(n.label, 60), note: plain(n.note, 80),
+      left, price: +n.price || 0,
+      title: n.title, starts: n.starts, ends: n.ends, host: n.host,
+      dleft: dleftOf(n.starts),
+    });
+  }
+  /* 급한 것 먼저 — 날짜가 가까운 자리부터. 같은 날이면 남은 수가 적은 것부터(거의 다 찬 자리). */
+  /* 급한 것 먼저 — 날짜가 가까운 자리부터. 날짜를 모르는 것(dleft null)은 뒤로 민다.
+     같은 날이면 남은 수가 적은 것부터: 거의 다 찬 자리는 한 사람이면 완성된다. */
+  out.sort((a, b) => ((a.dleft ?? 9999) - (b.dleft ?? 9999)) || (a.left - b.left));
+  return { kinds: OFFER_KIND_LABEL, rows: out.slice(0, 60), total: out.length };
+}
+
 /* 첫 화면 '지난 대회 우수작'. 운영자가 별표한 팀만. 목록에 올린 대회에서, 링크는 마감 뒤에만.
    메일·연락처 같은 개인정보는 절대 안 싣는다 — 팀 이름·대회 제목·설명·제출 링크뿐. */
 function showcase(db) {
@@ -3650,9 +4415,10 @@ function showcase(db) {
      그리고 만든 사람 본인의 동의(s.show). 앞의 둘은 우리가 켜고, 마지막은 본인만 켠다.
      별표만으로 남의 결과물을 첫 화면에 거는 것은 게시가 아니라 전시다. */
   const rows = db.prepare(`SELECT t.name, t.event, e.title AS event_title, e.due, e.ends,
-                                  s.url, s.note
+                                  s.url, s.note, lv.state AS open
                            FROM teams t JOIN events e ON e.id = t.event
                            JOIN submissions s ON s.team = t.id
+                           LEFT JOIN liveness lv ON lv.team = t.id
                            WHERE t.featured=1 AND e.listed=1 AND s.show=1 AND s.url<>''
                            ORDER BY t.id DESC LIMIT 24`).all();
   return rows
@@ -3662,8 +4428,14 @@ function showcase(db) {
        넣으므로 javascript: 하나가 들어오면 그게 우리 첫 화면에서 돈다.
        열쇠를 «지우고 + 참검사» 두 번 보는 것과 같은 이유다. */
     .filter(r => webUrl(r.url))
-    .map(r => ({ name: r.name, event: r.event, eventTitle: r.event_title,
-                 url: webUrl(r.url), note: r.note || '' }));
+    /* 첫 화면에도 등급이 아니라 사실만 붙인다 — 지금 열리는가, 며칠째 살아 있는가.
+       프로필과 같은 함수를 쓴다. 두 곳에서 따로 세면 한쪽이 반드시 어긋난다. */
+    .map(r => {
+      const st = (r.open === 1 || r.open === 0) ? r.open : null;
+      return { name: r.name, event: r.event, eventTitle: r.event_title,
+               url: webUrl(r.url), note: r.note || '',
+               open: openLabel(st), age: ageOf(r.ends, st) };
+    });
 }
 
 function ledgerOf(db, event) {
@@ -3821,7 +4593,7 @@ function routes(db) {
              들어온 사람이 "여긴 빈 곳이구나" 하고 나간다. */
         {
           const rows = db.prepare(
-            `SELECT id,title,host,starts,ends,prize,
+            `SELECT id,title,host,starts,ends,prize,place,chat,
                     (julianday('now') - julianday(created)) AS ageDays,
                     (julianday(ends)  - julianday('now'))   AS dueDays
              FROM events WHERE listed = 1 ORDER BY created DESC LIMIT 50`).all();
@@ -3989,6 +4761,11 @@ function routes(db) {
           if (req.method === 'POST')
             return json(res, 200, savePair(db, m[1], await body(req)));
         }
+        /* 위촉장·감사장·확인증에 들어갈 이름. 연락처는 한 칸도 안 나간다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/credits$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner);
+          return json(res, 200, creditsOf(db, m[1]));
+        }
         if (p === '/api/find' && req.method === 'GET')
           return json(res, 200, findHelp(q.size));
 
@@ -4055,6 +4832,40 @@ function routes(db) {
                  LEVELS.includes(b.level) ? b.level : '', m[1]);
           return json(res, 200, profile(db, m[1]));
         }
+        /* 도전장. 본인 확인은 프로필·카드와 같은 길 — 팀 열쇠다.
+           남의 도전장은 아무 열쇠로도 못 본다(당사자 둘뿐이다). */
+        if (p === '/api/duels' && req.method === 'POST') {
+          const tk = req.headers['x-tkey'] || '';
+          const who = tk ? db.prepare('SELECT person FROM teams WHERE tkey=?').get(tk) : null;
+          if (!who || !who.person) throw new HttpError(403, '참가 신청한 브라우저에서만 됩니다');
+          return json(res, 200, sendDuel(db, who.person, String((await body(req)).target || '')));
+        }
+        if ((m = p.match(/^\/api\/duels\/(\d+)\/answer$/)) && req.method === 'POST') {
+          const tk = req.headers['x-tkey'] || '';
+          const who = tk ? db.prepare('SELECT person FROM teams WHERE tkey=?').get(tk) : null;
+          if (!who || !who.person) throw new HttpError(403, '참가 신청한 브라우저에서만 됩니다');
+          return json(res, 200, answerDuel(db, m[1], who.person, !!(await body(req)).ok));
+        }
+        if ((m = p.match(/^\/api\/duels\/([0-9a-f]{12})$/)) && req.method === 'GET') {
+          const tk = req.headers['x-tkey'] || '';
+          if (!tk || !db.prepare('SELECT 1 FROM teams WHERE tkey=? AND person=?').get(tk, m[1]))
+            throw new HttpError(403, '본인만 볼 수 있습니다');
+          return json(res, 200, { rows: duelsOf(db, m[1]) });
+        }
+        /* 기록증 카드. 화면이 그린 PNG 를 날바이트로 받는다. 본인 확인은 프로필 고치기와 같은
+           길 — 팀 열쇠다(이메일은 남이 알 수 있다). 사람당 한 장이라 표가 안 불어난다. */
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/card$/)) && req.method === 'POST') {
+          const tk = req.headers['x-tkey'] || '';
+          if (!tk || !db.prepare('SELECT 1 FROM teams WHERE tkey=? AND person=?').get(tk, m[1]))
+            throw new HttpError(403, '본인 확인이 안 됩니다 — 신청한 브라우저에서 만들어 주세요');
+          const buf = await rawBody(req, 600 * 1024);
+          /* content-type 을 믿지 않는다. 앞 여덟 자를 직접 본다 */
+          if (!isPng(buf)) throw new HttpError(400, 'PNG 가 아닙니다');
+          db.prepare(`INSERT INTO cards(person,mime,data,created) VALUES(?,?,?,datetime('now'))
+                      ON CONFLICT(person) DO UPDATE SET data=excluded.data, created=excluded.created`)
+            .run(m[1], 'image/png', buf);
+          return json(res, 200, { ok: true, url: `${mailSite()}/og/p/${m[1]}.png` });
+        }
         /* 내 열쇠 찾기. 기록이 있으면 프로필 주소를 메일로 보낸다 — 응답만 봐서는 있는지 없는지 모른다(감사 9). */
         if (p === '/api/whoami' && req.method === 'POST') {
           const w = whoami(db, (await body(req)).contact);
@@ -4102,13 +4913,16 @@ function routes(db) {
         }
 
         if (p === '/api/auth' && req.method === 'GET') {
-          const me2 = owner ? db.prepare('SELECT id,name,kakao FROM owners WHERE id=?').get(owner) : null;
+          const me2 = owner ? db.prepare('SELECT id,name FROM owners WHERE id=?').get(owner) : null;
           return json(res, 200, {
-            kakao: !!KAKAO,                 // 카카오 로그인을 쓸 수 있는가
+            /* 켜진 로그인 목록. 화면은 이것만 보고 단추를 그린다 — 화면에 또 적으면 어긋난다 */
+            providers: loginMenu(),
             loggedIn: !!cookieOwner,        // 지금 로그인 상태인가
             owner: me2 ? me2.id : '',
             name: me2 ? me2.name : '',
-            linked: !!(me2 && me2.kakao),   // 카카오에 묶인 계정인가
+            /* 이 계정에 붙은 로그인들. 비면 열쇠만 쓰는 사람.
+               이름도 서버가 붙여 보낸다 — 화면에 «kakao=카카오» 표를 또 두면 어긋난다 */
+            links: me2 ? linksOf(db, me2.id).map((id) => ({ id, label: (LOGINS[id] || {}).label || id })) : [],
           });
         }
         if (p === '/api/visits' && req.method === 'GET') {
@@ -4144,13 +4958,17 @@ function routes(db) {
             const e = getEvent(db, m[1]);
             e.admin = isAdmin(db, m[1], key, owner);
             /* 심사 열쇠는 운영자에게만. 심사위원에게 보낼 링크를 이걸로 만든다. */
-            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged FROM events WHERE id=?').get(m[1]);
-                           e.jkey = kk.jkey; e.vkey = kk.vkey; e.judged = kk.judged; }
+            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged, twist FROM events WHERE id=?').get(m[1]);
+                           e.jkey = kk.jkey; e.vkey = kk.vkey; e.judged = kk.judged; e.twist = kk.twist;
+              /* 이 대회가 «지금 로그인한 계정» 것인가. 열쇠로 들어온 사람은 고칠 수는 있어도
+                 «내 대회» 목록에는 안 뜬다 — 그 차이를 화면이 알아야 붙이기를 권할 수 있다.
+                 로그인을 안 했으면 «아니다» 가 아니라 «모른다» 라서 칸을 아예 안 보낸다. */
+              if (cookieOwner) e.owned = db.prepare('SELECT owner FROM events WHERE id=?').get(m[1]).owner === cookieOwner ? 1 : 0; }
             return json(res, 200, e);
           }
           if (req.method === 'DELETE') {
             needAdmin(db, m[1], key, owner);
-            return json(res, 200, deleteEvent(db, m[1], await body(req)));
+            return json(res, 200, await deleteEvent(db, m[1], await body(req)));
           }
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/teams$/)) && req.method === 'POST') {
@@ -4158,6 +4976,9 @@ function routes(db) {
           const jb = await body(req);
           delete jb._promote;   /* 내부 표식 — 밖에서 보내면 정원 검사를 건너뛴다. 경계에서 지운다 */
           applyGuard(clientIp(req), m[1]);   /* 한 IP 가 한 대회를 가짜 팀으로 채우는 것을 막는다 */
+          /* 초대 코드를 들고 왔으면 새 팀을 만들지 않고 그 팀에 짝으로 붙는다.
+             그래서 같은 링크를 두 번 써도 팀이 셋이 되지 않는다 — 둘째부터는 409 다. */
+          if (jb.pair) return json(res, 201, joinPair(db, m[1], jb.pair, jb));
           const tid = joinTeam(db, m[1], jb);
           if (typeof tid === 'object') return json(res, 202, tid);   /* 정원이 차서 대기자로 — { waiting: 몇 번째 } */
           const nt = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tid);
@@ -4167,7 +4988,8 @@ function routes(db) {
 
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/board$/))) {
           const adm = isAdmin(db, m[1], key, owner);
-          const bd = board(db, m[1], adm);
+          /* 팀 열쇠를 들고 온 브라우저에게는 그 팀 것만 감추지 않는다(board 의 mine). */
+          const bd = board(db, m[1], adm, adm ? 0 : myTeamOf(db, m[1], req.headers['x-tkey'] || ''));
           /* 심사 링크를 만들려면 운영자에게 심사 열쇠가 필요하다. 손님에겐 절대 안 준다. */
           if (adm) { const kk = db.prepare('SELECT jkey, vkey, judged FROM events WHERE id=?').get(m[1]);
                      bd.event.jkey = kk.jkey; bd.event.vkey = kk.vkey; bd.event.judged = kk.judged;
@@ -4280,6 +5102,20 @@ function routes(db) {
           if (b.notice) db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1], plain(b.notice, 200));
           return json(res, 200, { ok: true });
         }
+        /* ── 이 대회를 내 로그인 계정에 붙인다 ──
+           대회를 열 때만 주인이 정해진다. 열쇠로만 열어 둔 대회는 나중에 로그인해도 «내 대회» 에 안 뜨고,
+           기기를 바꾸면 그대로 잃는다. 로그인할 때 자동으로 끌어오는 길(absorb)은 «로그인이 아직 안 붙은
+           계정» 만 끌어오기 때문에, 이미 로그인을 쓰던 사람에게는 안 걸린다. 그래서 손으로 붙이는 길을 둔다.
+
+           운영 열쇠가 있어야 하고(needAdmin), 옮겨 갈 곳은 **쿠키로 로그인한 계정**이어야 한다.
+           x-owner 헤더는 안 쓴다 — 그건 브라우저가 들고 있는 값이라, 그걸 받으면 열쇠 하나로
+           아무 계정에나 대회를 밀어 넣을 수 있다. */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/adopt$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);
+          if (!cookieOwner) throw new HttpError(401, '먼저 로그인해 주세요. 로그인한 계정으로 옮깁니다');
+          return json(res, 200, adoptEvent(db, m[1], cookieOwner));
+        }
+
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/list$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);
           const b = await body(req);
@@ -4568,6 +5404,12 @@ function routes(db) {
           needAdmin(db, t.event, key, owner);
           return json(res, 200, { link: `/e/${t.event}?t=${t.tkey}` });
         }
+        /* 짝 초대 링크를 받는다. 팀 열쇠를 가진 사람만 만들 수 있다 */
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/invite$/)) && req.method === 'POST')
+          return json(res, 200, inviteOf(db, m[1], String(req.headers['x-tkey'] || '')));
+        /* 짝이 빠진다. 신청 자체는 안 깨진다 */
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/mate$/)) && req.method === 'DELETE')
+          return json(res, 200, leavePair(db, m[1], String(req.headers['x-tkey'] || '')));
         /* 팀 지우기 — 운영자(열쇠) 또는 그 팀(팀 열쇠). 휴지통으로 가고, 되살리면 같은 id 로 돌아온다. */
         if ((m = p.match(/^\/api\/teams\/(\d+)$/)) && req.method === 'DELETE') {
           const t = db.prepare('SELECT id, event, tkey FROM teams WHERE id=?').get(+m[1]);
@@ -4576,6 +5418,13 @@ function routes(db) {
           let by = 'team';
           if (!tk || tk !== t.tkey) { needAdmin(db, t.event, key, owner); by = 'admin'; }
           else if (pastDue(db, t.id)) throw new HttpError(409, '제출 마감이 지나 취소할 수 없습니다. 운영자에게 말씀해 주세요');   // 본인 취소는 마감 전까지
+          /* 짝이 있으면 팀을 없애지 않고 짝을 주인으로 올린다.
+             먼저 온 사람이 못 오게 됐다고 나중에 온 사람의 신청까지 없애면 안 된다. */
+          const full = db.prepare('SELECT * FROM teams WHERE id=?').get(t.id);
+          if (full && full.mate) {
+            promoteMate(db, full);
+            return json(res, 200, { promoted: true });
+          }
           const trashed = trashTeam(db, t.id, by);
           promoteWaiting(db, t.event);
           return json(res, 200, { trash: trashed });
@@ -4631,14 +5480,23 @@ function routes(db) {
         if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/solutions$/)) && req.method === 'POST')
           return json(res, 201, addSolution(db, m[1], await body(req)));   // 문제 은행 — 대회 없이 «풀었습니다»
         /* 줄은 이미 «합쳐지고 점수 매겨지고 종류가 붙은» 채로 나간다 — 화면은 그리기만 한다(server.js 의 newsEnrich).
+           providers 도 같이 싣는다 — 제보 칸의 로그인 단추를 그리는 데 쓴다. 소식 화면이 /api/auth 를 또 부르지 않게.
            kinds·pick 도 함께 내려보낸다. 묶음 이름과 «꼭 볼 것» 개수 규칙이 화면에 또 적히면 둘이 어긋난다. */
-        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, kinds: NEWS_KINDS, buckets: NEWS_BUCKETS, pick: { n: NEWS_PICK_N, min: NEWS_PICK_MIN, per: NEWS_PICK_PER_SRC, perKind: NEWS_PICK_PER_KIND }, full: NEWS_FULL, rows: newsFeed(db, JOBS.includes(q.job) ? q.job : ''), loggedIn: !!cookieOwner });
+        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, kinds: NEWS_KINDS, buckets: NEWS_BUCKETS, pick: { n: NEWS_PICK_N, min: NEWS_PICK_MIN, per: NEWS_PICK_PER_SRC, perKind: NEWS_PICK_PER_KIND }, full: NEWS_FULL, rows: newsFeed(db, JOBS.includes(q.job) ? q.job : ''), loggedIn: !!cookieOwner, providers: loginMenu() });
         if (p === '/api/news/tip' && req.method === 'POST') {
-          if (!cookieOwner) throw new HttpError(401, '제보는 카카오 로그인이 필요합니다');
+          if (!cookieOwner) throw new HttpError(401, '제보는 로그인이 필요합니다');
           const o = db.prepare('SELECT name FROM owners WHERE id=?').get(cookieOwner);
           return json(res, 201, addTip(db, cookieOwner, (o && o.name) || '', await body(req)));
         }
-        if (p === '/api/rank' && req.method === 'GET') return json(res, 200, { rows: rank(db) });
+        if (p === '/api/conditions' && req.method === 'GET')
+          return json(res, 200, conditions(db));
+        if (p === '/api/rank' && req.method === 'GET') {
+          /* 두 줄을 같이 내려보낸다. 화면이 고를 수 있어야 «이번 시즌이 비었다» 를
+             «아무도 없다» 로 그리지 않는다. */
+          const rk = rank(db);
+          return json(res, 200, { rows: rk.season, all: rk.all, season: seasonNow(),
+                                  end: seasonEnd(seasonNow()), left: seasonLeft(seasonNow()) });
+        }
         if (p === '/api/requests' && req.method === 'POST')
           return json(res, 201, addRequest(db, await body(req)));          // 누구나 — 열쇠는 여기서 딱 한 번
         if (p === '/api/requests' && req.method === 'GET')
@@ -4752,6 +5610,11 @@ function routes(db) {
 
         if (p === '/api/showcase' && req.method === 'GET')
           return json(res, 200, showcase(db));
+        /* 공개 — 대회를 안 고르고도 «지금 비어 있는 자리» 를 본다. 연락처는 안 싣는다 */
+        if (p === '/api/openings' && req.method === 'GET') {
+          const k = String(u.searchParams.get('kind') || '');
+          return json(res, 200, openings(db, NEED_KINDS.includes(k) ? k : ''));
+        }
         if (p === '/api/health') return json(res, 200, {
           ok: true, events: db.prepare('SELECT COUNT(*) c FROM events').get().c,
           teams: db.prepare('SELECT COUNT(*) c FROM teams').get().c,
@@ -4762,64 +5625,73 @@ function routes(db) {
 
       /* 공개 링크. /e/<대회id> 는 화면 파일을 그대로 내려보내고, 화면이 주소를 보고
          읽기 전용으로 그린다. 서버에 화면을 하나 더 두지 않는 게 요점이다. */
-      /* ── 카카오 로그인 ────────────────────────────────
-         키가 없으면 이 자리는 통째로 없는 것과 같다. */
-      if (p === '/auth/kakao' && KAKAO) {
-        const back = siteOf(req);
+      /* ── 로그인 (카카오·구글·네이버) ──────────────────
+         갈래 하나로 셋을 받는다. 키가 없는 공급자의 주소는 없는 주소다.
+         «/auth/<이름>» 으로 나가고 «/auth/<이름>/done» 으로 돌아온다. */
+      const goAuth = p.match(/^\/auth\/([a-z]+)$/);
+      if (goAuth && LOGINS[goAuth[1]] && LOGINS[goAuth[1]].id) {
+        const P = LOGINS[goAuth[1]], back = siteOf(req);
         /* state — 이 브라우저가 시작한 로그인인지 돌아올 때 대조한다. 없으면 공격자가 자기 code 링크를 보내
-           피해자 브라우저를 공격자 카카오에 묶는다(레드팀 09-26 1번). 10분짜리 쿠키 */
+           피해자 브라우저를 공격자 계정에 묶는다(레드팀 09-26 1번). 10분짜리 쿠키 */
         const st = crypto.randomBytes(12).toString('hex');
-        const u = 'https://kauth.kakao.com/oauth/authorize'
-          + `?client_id=${encodeURIComponent(KAKAO)}`
-          + `&redirect_uri=${encodeURIComponent(back + '/auth/kakao/done')}`
-          + '&response_type=code&scope=profile_nickname' + `&state=${st}`;
-        res.writeHead(302, { location: u, 'set-cookie': `hackon_st=${st}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600` + (back.startsWith('https') ? '; Secure' : '') });
+        /* ?link=1 — 이미 로그인한 사람이 «다른 로그인도 붙이기»를 누른 것.
+           돌아왔을 때 새 계정을 만들지 않고 지금 계정에 붙인다. 쿠키로 들고 간다 */
+        const wantLink = u.searchParams.get('link') === '1'
+          && !!unsign(db, cookieOf(req, 'hackon_s'));
+        const url = P.authorize
+          + `?client_id=${encodeURIComponent(P.id)}`
+          + `&redirect_uri=${encodeURIComponent(back + '/auth/' + goAuth[1] + '/done')}`
+          + '&response_type=code'
+          + (P.scope ? `&scope=${encodeURIComponent(P.scope)}` : '')
+          + `&state=${st}`;
+        const sec = back.startsWith('https') ? '; Secure' : '';
+        res.writeHead(302, {
+          location: url,
+          'set-cookie': [
+            `hackon_st=${st}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600` + sec,
+            `hackon_lk=${wantLink ? '1' : ''}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=${wantLink ? 600 : 0}` + sec,
+          ],
+        });
         return res.end();
       }
-      if (p === '/auth/kakao/done' && KAKAO) {
-        const back = siteOf(req);
+      const backAuth = p.match(/^\/auth\/([a-z]+)\/done$/);
+      if (backAuth && LOGINS[backAuth[1]] && LOGINS[backAuth[1]].id) {
+        const prov = backAuth[1], P = LOGINS[prov], back = siteOf(req);
         const code = u.searchParams.get('code');
         if (!code) { res.writeHead(302, { location: '/app' }); return res.end(); }
         const stGot = u.searchParams.get('state') || '', stMine = cookieOf(req, 'hackon_st') || '';
         if (!stMine || stGot !== stMine) throw new HttpError(403, '로그인 요청이 이 브라우저에서 시작된 것이 아닙니다. 다시 눌러 주세요');
         const form = new URLSearchParams({
-          grant_type: 'authorization_code', client_id: KAKAO,
-          redirect_uri: back + '/auth/kakao/done', code,
+          grant_type: 'authorization_code', client_id: P.id,
+          redirect_uri: back + '/auth/' + prov + '/done', code, state: stGot,
         });
-        if (KAKAO_SECRET) form.set('client_secret', KAKAO_SECRET);
-        const tk = await (await fetch('https://kauth.kakao.com/oauth/token', {
-          method: 'POST',
-          headers: { 'content-type': 'application/x-www-form-urlencoded;charset=utf-8' },
-          body: form.toString(),
-        })).json();
+        if (P.secret) form.set('client_secret', P.secret);
+        /* 네이버는 문서가 GET + 쿼리다. 카카오·구글은 POST 폼이다 */
+        const tk = await (await (P.tokenGet
+          ? fetch(P.token + '?' + form.toString())
+          : fetch(P.token, {
+              method: 'POST',
+              headers: { 'content-type': 'application/x-www-form-urlencoded;charset=utf-8' },
+              body: form.toString(),
+            }))).json();
         if (!tk.access_token) {
-          /* 카카오가 준 코드(KOE010=비밀키 불일치, KOE303=redirect_uri 불일치, KOE320=코드 만료)를 같이 보여준다. 없으면 장님이다 */
-          console.error('kakao token', back, tk.error_code || tk.error, tk.error_description || '');
-          throw new HttpError(400, '카카오 로그인에 실패했습니다 (' + (tk.error_code || tk.error || '?') + ')');
+          /* 공급자가 준 코드를 같이 보여 준다. 없으면 장님이다
+             (카카오 KOE010=비밀키 불일치·KOE303=주소 불일치·KOE320=코드 만료,
+              구글 redirect_uri_mismatch·invalid_client, 네이버 invalid_request) */
+          console.error(prov + ' token', back, tk.error_code || tk.error, tk.error_description || '');
+          throw new HttpError(400, P.label + ' 로그인에 실패했습니다 (' + (tk.error_code || tk.error || '?') + ')');
         }
-        const me = await (await fetch('https://kapi.kakao.com/v2/user/me', {
+        const me = await (await fetch(P.profile, {
           headers: { authorization: 'Bearer ' + tk.access_token },
         })).json();
-        const kid = String(me.id || '');
-        if (!kid) throw new HttpError(400, '카카오 사용자 정보를 못 받았습니다');
-        const nick = (me.properties && me.properties.nickname) || '';
+        const prof = P.read(me || {});
+        if (!prof.uid) throw new HttpError(400, P.label + ' 사용자 정보를 못 받았습니다');
 
-        /* 이미 이 카카오로 만든 주최자가 있으면 그걸 쓰고,
-           없으면 지금 브라우저가 들고 있던 열쇠를 그 카카오에 붙인다.
-           그래야 로그인 전에 연 대회를 잃지 않는다. */
-        let o = db.prepare('SELECT id FROM owners WHERE kakao=?').get(kid);
-        let oid = o && o.id;
-        if (!oid) {
-          const had = unsign(db, cookieOf(req, 'hackon_pre'));
-          if (had && db.prepare('SELECT 1 FROM owners WHERE id=?').get(had)) {
-            db.prepare('UPDATE owners SET kakao=?, name=COALESCE(NULLIF(name,\'\'),?) WHERE id=?')
-              .run(kid, nick, had);
-            oid = had;
-          } else {
-            oid = crypto.randomBytes(6).toString('hex');
-            db.prepare('INSERT INTO owners(id,name,kakao) VALUES(?,?,?)').run(oid, nick, kid);
-          }
-        }
+        /* 누구인가 — ①공급자 회원번호 ②본인이 누른 붙이기 ③믿을 수 있는 이메일 ④이 브라우저 열쇠 */
+        const { owner: oid } = loginAs(db, prov, prof, {
+          pre: unsign(db, cookieOf(req, 'hackon_pre')),
+          link: cookieOf(req, 'hackon_lk') === '1' ? unsign(db, cookieOf(req, 'hackon_s')) : '',
+        });
         res.writeHead(302, {
           location: '/app',
           'set-cookie': [
@@ -4827,6 +5699,7 @@ function routes(db) {
             + (back.startsWith('https') ? '; Secure' : ''),
             'hackon_pre=; Path=/; Max-Age=0',
             'hackon_st=; Path=/auth; Max-Age=0',
+            'hackon_lk=; Path=/auth; Max-Age=0',
           ],
         });
         return res.end();
@@ -4839,6 +5712,43 @@ function routes(db) {
       /* 운영 매뉴얼. 전에는 깃허브로 내보냈는데, 매뉴얼을 보려고 사이트를 떠나야 했다.
          읽을 것을 읽으러 밖으로 내보내면 대부분 안 돌아온다.
          GUIDE.md 를 그대로 읽어 만든다 - 문서가 두 벌이 되면 반드시 어긋난다. */
+      /* 뱃지. 깃허브 README 에 <img> 로 거는 한 조각이다 — 여기가 개발자 쪽 확산의 입구다.
+         이름을 안 정한 사람은 순위에도 안 오르므로 뱃지도 안 준다(뜻 없는 해시를 자랑거리로 주지 않는다). */
+      if ((m = p.match(/^\/badge\/([0-9a-f]{12})\.svg$/)) && req.method === 'GET') {
+        let pr = null;
+        try { pr = profile(db, m[1]); } catch { throw new HttpError(404, '없습니다'); }
+        res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8',
+          'cache-control': 'public, max-age=3600', ...SEC_HEADERS });
+        return res.end(badgeSvg(pr));
+      }
+      /* 기록증 카드 그림. 만든 사람만 있다 — 없으면 404 고, 그때는 링크에 기본 og.png 가 붙는다 */
+      if ((m = p.match(/^\/og\/p\/([0-9a-f]{12})\.png$/)) && req.method === 'GET') {
+        const c = db.prepare('SELECT mime, data FROM cards WHERE person=?').get(m[1]);
+        if (!c) throw new HttpError(404, '없습니다');
+        res.writeHead(200, { 'content-type': c.mime,
+          'cache-control': 'public, max-age=600', ...SEC_HEADERS });
+        return res.end(c.data);
+      }
+      /* 사람 화면은 머리띠를 갈아 끼워 내보낸다. 링크 미리보기가 늘 같은 그림이면
+         카톡에서 두 번째부터 아무도 안 누른다 — 그 한 장이 공유의 전부다. */
+      if ((m = p.match(/^\/p\/([0-9a-f]{12})$/)) && req.method === 'GET') {
+        let pr = null; try { pr = profile(db, m[1]); } catch {}
+        if (pr) {
+          const has  = !!db.prepare('SELECT 1 FROM cards WHERE person=?').get(m[1]);
+          const who  = pr.handle || '한 참가자';
+          const live = pr.history.filter(h => h.open === '열림').length;
+          const desc = [`${pr.tier.name} · 완주 ${pr.finished}`,
+                        pr.wins ? `수상 ${pr.wins}` : '',
+                        live ? `지금 열리는 것 ${live}` : ''].filter(Boolean).join(' · ');
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-cache', ...SEC_HEADERS });
+          return res.end(withOg(appHtml(), ogTags({
+            title: `${who} — HACK:ON 기록`, desc,
+            url: `${mailSite()}/p/${m[1]}`,
+            image: has ? `${mailSite()}/og/p/${m[1]}.png` : `${mailSite()}/og.png`,
+          })));
+        }
+      }
       /* 개인정보 처리방침 — 앱스토어가 요구한다. 앱과 웹이 같은 것을 받는다 */
       if (p === '/privacy') {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
@@ -4863,7 +5773,9 @@ function routes(db) {
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
-               || p === '/ask' || p === '/problems' || p === '/rank' || p.match(/^\/r\/[a-z0-9]+$/)
+               || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge'
+               || p === '/conditions'
+               || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
 
       /* 화면 파일은 /e/<id> 같은 깊은 주소에서도 그대로 나간다. 그 안의 <script src="qr.js">
@@ -4892,7 +5804,7 @@ function routes(db) {
 /* #endregion reuse:router */
 
 /* ───────────────────── 자체 점검 ───────────────────── */
-function selftest() {
+async function selftest() {
   const tmp = path.join(ROOT, 'data', 'test.db');
   for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true });
   const db = open(tmp);
@@ -4914,6 +5826,125 @@ function selftest() {
   ok(secretOf(db) === secretOf(db), '서명 열쇠는 다시 만들지 않는다');
   const signed = sign(db, evR.owner);
   ok(unsign(db, signed) === evR.owner, '서명한 쿠키를 되읽는다');
+
+  /* ── 로그인 셋과 «같은 사람» 판정 (2026-09-26) ──────────
+     여기가 틀리면 둘 중 하나다. 계정이 갈려 지난 대회가 사라지거나,
+     남의 계정이 넘어간다. 뒤쪽이 훨씬 나쁘다. */
+  {
+    ok(Object.keys(LOGINS).join(',') === 'kakao,google,naver', '로그인은 셋 — 적힌 순서가 화면 순서다');
+    ok(Object.values(LOGINS).every((P) =>
+         /^https:\/\//.test(P.authorize) && /^https:\/\//.test(P.token) && /^https:\/\//.test(P.profile)
+         && typeof P.read === 'function' && P.label),
+       '공급자마다 주소 셋·읽는 법·한국어 이름이 있다');
+    /* 응답 모양이 셋 다 다르다. 읽는 법을 여기서 고정한다 */
+    const rk = LOGINS.kakao.read({ id: 77, properties: { nickname: '가가' },
+      kakao_account: { email: 'a@b.com', is_email_valid: true, is_email_verified: true } });
+    ok(rk.uid === '77' && rk.nick === '가가' && rk.trust === true, '카카오 응답을 읽는다');
+    ok(LOGINS.kakao.read({ id: 1, kakao_account: { email: 'a@b.com', is_email_valid: true } }).trust === false,
+       '카카오 — 확인 안 된 메일은 안 믿는다');
+    const rg = LOGINS.google.read({ sub: 'g1', name: '구구', email: 'A@B.com', email_verified: true });
+    ok(rg.uid === 'g1' && rg.nick === '구구' && rg.trust === true, '구글 응답을 읽는다');
+    ok(LOGINS.google.read({ sub: 'g2', email: 'x@y.com', email_verified: false }).trust === false,
+       '구글 — email_verified 가 거짓이면 안 믿는다');
+    const rn = LOGINS.naver.read({ response: { id: 'n1', nickname: '네네', email: 'me@naver.com' } });
+    ok(rn.uid === 'n1' && rn.nick === '네네' && rn.trust === true, '네이버 응답을 읽는다');
+    ok(LOGINS.naver.read({ response: { id: 'n2', email: 'me@gmail.com' } }).trust === false,
+       '네이버 — 외부 메일은 «모름». 남의 주소를 적어 둘 수 있다');
+
+    /* 이메일은 원문을 안 남긴다 */
+    const h1 = emailKey(db, 'Same@Example.com', true);
+    ok(h1 && h1 === emailKey(db, ' same@example.com ', true), '대소문자·공백이 달라도 같은 사람이다');
+    ok(/^[0-9a-f]{64}$/.test(h1), '이메일은 되돌릴 수 없는 값으로만 남는다');
+    ok(emailKey(db, 'same@example.com', false) === '' && emailKey(db, '홍길동', true) === '',
+       '못 믿는 메일·메일 아닌 값은 아예 값을 만들지 않는다');
+
+    /* ① 공급자+회원번호는 증명이다 */
+    const a1 = loginAs(db, 'google', { uid: 'u1', nick: '유', email: 'u1@example.com', trust: true });
+    ok(a1.how === 'new' && /^[0-9a-f]{12}$/.test(a1.owner), '처음 들어온 사람은 새 계정');
+    ok(loginAs(db, 'google', { uid: 'u1', nick: '유' }).owner === a1.owner, '같은 구글로 또 오면 같은 계정');
+    /* ③ 믿을 수 있는 이메일이 같으면 딴 공급자로 와도 같은 사람 */
+    const a2 = loginAs(db, 'naver', { uid: 'n-u1', nick: '유', email: 'U1@Example.com', trust: true });
+    ok(a2.owner === a1.owner && a2.how === 'email', '구글 다음 네이버로 와도 같은 사람이면 한 계정');
+    ok(linksOf(db, a1.owner).join(',') === 'google,naver', '두 로그인이 한 계정에 붙는다');
+    /* 못 믿는 메일로는 절대 합치지 않는다 — 계정 탈취가 여기서 난다 */
+    const a3 = loginAs(db, 'kakao', { uid: 'k-x', nick: '남', email: 'u1@example.com', trust: false });
+    ok(a3.owner !== a1.owner && a3.how === 'new', '확인 안 된 메일이 같다고 남의 계정을 주지 않는다');
+    /* ② 로그인한 채로 «다른 로그인도 붙이기» */
+    const a4 = loginAs(db, 'kakao', { uid: 'k-u1', nick: '유' }, { link: a1.owner });
+    ok(a4.owner === a1.owner && a4.how === 'linked', '직접 붙이면 메일 없이도 한 계정');
+    ok(loginAs(db, 'kakao', { uid: 'k-u2' }, { link: 'ffffffffffff' }).how === 'new',
+       '없는 계정에 붙이라고 하면 새 계정 — 없는 주인을 만들지 않는다');
+    /* ④ 로그인 전에 이 브라우저에서 연 대회는 따라온다 */
+    const pv = createEvent(db, { title: '로그인 전 대회', host: 'ㄱ' });
+    const a5 = loginAs(db, 'google', { uid: 'u2' }, { pre: pv.owner });
+    ok(a5.owner === pv.owner && a5.how === 'key', '로그인 전에 연 대회의 열쇠에 로그인이 붙는다');
+    /* ③과 ④가 다른 계정을 가리키면 합친다 — 한쪽을 버리면 대회가 사라진다 */
+    const pv2 = createEvent(db, { title: '합쳐질 대회', host: 'ㄴ' });
+    const a6 = loginAs(db, 'naver', { uid: 'n-u2', nick: '유', email: 'u1@example.com', trust: true }, { pre: pv2.owner });
+    ok(a6.owner === a1.owner && a6.how === 'email', '메일로 알아본 계정이 이긴다');
+    ok(db.prepare('SELECT owner FROM events WHERE id=?').get(pv2.id).owner === a1.owner,
+       '합칠 때 대회가 따라온다 — 방금 만든 대회를 잃지 않는다');
+    ok(!db.prepare('SELECT 1 FROM owners WHERE id=?').get(pv2.owner), '합친 뒤 빈 계정은 남지 않는다');
+    /* ⑤ 손으로 붙이기 — «로그인할 때 자동으로» 가 안 걸리는 경우가 이 사람들이다.
+       이미 로그인을 쓰던 사람이 나중에 열쇠로 남의(또는 옛 기기의) 대회를 열면 absorb 가 안 돈다.
+       그때 «내 계정에 붙이기» 가 유일한 길이다. */
+    {
+      const kv = createEvent(db, { title: '열쇠로만 연 대회', host: 'ㄷ' });
+      ok(!mine(db, a1.owner).events.some(e => e.id === kv.id), '붙이기 전에는 «내 대회» 에 없다');
+      const r1 = adoptEvent(db, kv.id, a1.owner);
+      ok(r1.moved === 1 && r1.owner === a1.owner, '붙이면 주인이 옮겨진다');
+      ok(mine(db, a1.owner).events.some(e => e.id === kv.id), '붙인 뒤에는 «내 대회» 에 뜬다');
+      ok(adoptEvent(db, kv.id, a1.owner).moved === 0, '두 번 눌러도 한 번만 옮긴다');
+      ok(db.prepare('SELECT 1 FROM owners WHERE id=?').get(kv.owner), '옛 주인 계정을 지우지 않는다');
+      let noOwner = false;
+      try { adoptEvent(db, kv.id, 'ffffffffffff'); } catch { noOwner = true; }
+      ok(noOwner, '없는 계정으로는 못 옮긴다');
+      let noEvent = false;
+      try { adoptEvent(db, 'zzzzzzzz', a1.owner); } catch { noEvent = true; }
+      ok(noEvent, '없는 대회는 못 옮긴다');
+    }
+
+    /* 이미 로그인이 붙은 계정은 «열쇠를 들고 왔다»고 삼키지 않는다 */
+    const c1 = loginAs(db, 'google', { uid: 'v1', nick: '다른이', email: 'v1@example.com', trust: true });
+    const c2 = loginAs(db, 'naver', { uid: 'v2', email: 'v1@example.com', trust: true }, { pre: a1.owner });
+    ok(c2.owner === c1.owner, '메일이 가리키는 계정으로 들어간다');
+    ok(db.prepare('SELECT 1 FROM owners WHERE id=?').get(a1.owner), '로그인이 붙은 계정은 남의 로그인에 안 먹힌다');
+    /* 열쇠 자체는 증명이다 — 그 계정으로 들어간다 */
+    const c3 = loginAs(db, 'kakao', { uid: 'k-y' }, { pre: a1.owner });
+    ok(c3.owner === a1.owner && c3.how === 'key', '주최자 열쇠를 든 브라우저는 그 계정이다');
+    let noUid = false;
+    try { loginAs(db, 'google', { uid: '' }, {}); } catch { noUid = true; }
+    ok(noUid, '회원번호 없이 로그인되면 안 된다');
+  }
+  /* owner 칸을 가진 표가 늘면 mergeOwners 도 늘어야 한다. 표를 세어 코드와 대조한다 */
+  {
+    const owned = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
+      .map((t) => t.name)
+      .filter((n) => db.prepare('SELECT COUNT(*) c FROM pragma_table_info(?) WHERE name=\'owner\'').get(n).c);
+    ok(owned.join(',') === 'event_trash,events,logins,news',
+       'owner 를 가진 표는 넷 — 늘었으면 mergeOwners 도 고쳐야 한다: ' + owned.join(','));
+    /* 소식(제보)도 따라간다 */
+    const o1 = crypto.randomBytes(6).toString('hex'), o2 = crypto.randomBytes(6).toString('hex');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o1, '갑');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o2, '');
+    db.prepare("INSERT INTO news(src,key,title,url,owner) VALUES('제보',?,'제보 한 줄','https://x.test',?)").run('k-' + o1, o1);
+    db.prepare("INSERT INTO event_trash(event,owner,title,json) VALUES('gone',?,'지운 대회','{}')").run(o1);
+    mergeOwners(db, o1, o2);
+    ok(db.prepare('SELECT owner FROM news WHERE key=?').get('k-' + o1).owner === o2, '합칠 때 제보도 따라온다');
+    ok(db.prepare("SELECT owner FROM event_trash WHERE event='gone'").get().owner === o2,
+       '합칠 때 휴지통의 지운 대회도 따라온다 — 되살릴 권리를 잃지 않는다');
+    ok(db.prepare('SELECT name FROM owners WHERE id=?').get(o2).name === '갑', '이름이 빈 쪽으로 이름을 옮긴다');
+  }
+  /* 옛 DB 옮겨심기 — owners.kakao 에만 있던 계정이 logins 로 온다. 몇 번 돌려도 같다(E19) */
+  {
+    const old = crypto.randomBytes(6).toString('hex');
+    db.prepare("INSERT INTO owners(id,name,kakao) VALUES(?,'옛사람','9001')").run(old);
+    moveKakaoToLogins(db); moveKakaoToLogins(db);
+    ok(db.prepare("SELECT COUNT(*) c FROM logins WHERE provider='kakao' AND uid='9001'").get().c === 1,
+       '카카오만 있던 계정이 한 줄로 옮겨진다 — 두 번 돌려도 한 줄');
+    ok(loginAs(db, 'kakao', { uid: '9001', nick: '옛사람' }).owner === old,
+       '옮긴 뒤에도 그 카카오로 들어오면 옛 계정이 열린다');
+  }
   {
     /* 팀 휴지통 — 지우면 빠지고, 되살리면 같은 id·같은 열쇠로 돌아온다 */
     const tv = createEvent(db, { title: '휴지통 검사', host: 'ㅎ' });
@@ -4976,6 +6007,55 @@ function selftest() {
     ok(!doneDue(db).some(x => x.ref === rqd.id), '한 번 보낸 의뢰엔 다시 안 간다');
     /* 크레딧 종류 */
     ok(NEED_KINDS.includes('credit') && OFFER_KIND_LABEL.credit === '크레딧', '자리 종류에 크레딧이 있다');
+    /* 비어 있는 자리 — 대회를 가로지른다. 기여형 설계 §2-1(빈자리 판).
+       세 가지를 본다: 다 찬 자리는 빠지는가 · 안 올린 대회는 안 보이는가 · 연락처가 새지 않는가. */
+    {
+      const eo1 = createEvent(db, { title: '자리검사 올림', starts: '2099-03-01', ends: '2099-03-01' });
+      const eo2 = createEvent(db, { title: '자리검사 초안', starts: '2099-03-02', ends: '2099-03-02' });
+      db.prepare('UPDATE events SET listed=1 WHERE id=?').run(eo1.id);   // eo2 는 초안으로 둔다
+      const nOpen = addNeed(db, eo1.id, { kind: 'judge', label: '심사위원', qty: 2 });
+      const nFull = addNeed(db, eo1.id, { kind: 'snack', label: '간식', qty: 1 });
+      addNeed(db, eo2.id, { kind: 'venue', label: '장소', qty: 1 });
+      addPledge(db, nFull.id, eo1.id, { name: '김간식', contact: 'snack@x.test' });
+      const pf = db.prepare('SELECT id FROM pledges WHERE need=?').get(nFull.id);
+      setPledge(db, pf.id, { status: 'ok' });
+      /* «아직 확인 전» 신청 하나를 남아 있는 자리에 붙인다 — 이 줄은 응답에 실제로 실리므로
+         연락처 검사가 여기서 진짜로 물린다. 다 찬 자리에만 신청을 두면 검사가 헛돈다. */
+      addPledge(db, nOpen.id, eo1.id, { name: '박심사', contact: 'judge@x.test' });
+
+      const op = openings(db, '');
+      const mine = op.rows.filter(r => r.event === eo1.id);
+      ok(mine.length === 1 && mine[0].kind === 'judge' && mine[0].left === 2,
+         '비어 있는 자리 — 다 찬 자리는 빠지고 남은 수가 맞는다');
+      ok(!op.rows.some(r => r.event === eo2.id), '목록에 안 올린 대회의 자리는 안 보인다');
+      for (const secret of ['snack@x.test', '김간식', 'judge@x.test', '박심사'])
+        ok(!JSON.stringify(op).includes(secret),
+           `비어 있는 자리 응답에 «${secret}» 이 샌다`);
+      ok(mine[0].left === 2, '«확인 전» 신청은 자리를 채우지 않는다 (운영자가 확인해야 찬다)');
+      ok(openings(db, 'judge').rows.every(r => r.kind === 'judge'), '종류로 거를 수 있다');
+      ok(op.rows.every(r => r.dleft === null || r.dleft >= 0), '이미 지난 대회의 자리는 안 섞인다');
+      /* 이 검사가 만든 것은 이 검사가 치운다 — 뒤에 오는 «공개한 것만 목록에 든다» 가 같은 db 를 센다 */
+      for (const id of [eo1.id, eo2.id]) db.prepare('DELETE FROM events WHERE id=?').run(id);
+    }
+    /* 기여 선언 — «가져올 것». 기여형 설계 §2-2 */
+    {
+      const eb = createEvent(db, { title: '선언검사', starts: '2099-04-01', ends: '2099-04-01' });
+      const tb = joinTeam(db, eb.id, { name: '선언팀', agree: true, email: 'bring@x.test' });
+      const tk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tb).tkey;
+      moreTeam(db, tb, { bring: 'venue,skill' }, { tkey: tk });
+      ok(db.prepare('SELECT bring FROM teams WHERE id=?').get(tb).bring === 'venue,skill', '가져올 것이 저장된다');
+      moreTeam(db, tb, { bring: 'venue,없는것,skill,cash' }, { tkey: tk });
+      ok(db.prepare('SELECT bring FROM teams WHERE id=?').get(tb).bring === 'venue,skill,cash',
+         '목록에 없는 종류는 버린다');
+      let denied = 0;
+      try { moreTeam(db, tb, { bring: 'cash' }, {}); } catch (e) { denied = e.code; }
+      ok(denied === 403, '남이 대신 선언을 바꾸지 못한다');
+      moreTeam(db, tb, { bring: '' }, { tkey: tk });
+      ok(db.prepare('SELECT bring FROM teams WHERE id=?').get(tb).bring === '', '선언은 되돌릴 수 있다 (못 가져오게 될 수 있다)');
+      moreTeam(db, tb, { bring: 'record' }, { tkey: tk });
+      ok(board(db, eb.id).rows[0].bring === 'record', '선언은 공개된다 (손님에게도 보인다)');
+      db.prepare('DELETE FROM events WHERE id=?').run(eb.id);
+    }
     /* 결과물 «넘길 수 있어요» — 마감 뒤 받는 화면에만 보인다. 만든 것 링크 — 주소 꼴만 남는다 */
     {
       const es = createEvent(db, { title: '판매 검사', starts: '2026-01-10', ends: '2026-01-10', topic: '동아리 회비' });
@@ -5245,6 +6325,257 @@ function selftest() {
      '마감이 지나고 운영자가 별표해도, 본인 동의가 없으면 쇼케이스에 안 실린다');
   showConsent(db, scT, true);
   const shown = showcase(db).find(w => w.url === 'https://shown.test/a');
+  /* 프로필의 «만든 것» 도 같은 문 셋을 지난다. 프로필은 아무나 여는 주소라
+     여기가 새면 쇼케이스 동의가 뜻을 잃는다. */
+  const pfT  = joinTeam(db, scEv.id, { name: '프로필팀', contact: 'prof@x.test', agree: true });
+  editEvent(db, scEv.id, { due: '2099-01-01T00:00' });          // 내고
+  submit(db, pfT, { url: 'https://prof.test/a', note: '만든 것' });
+  editEvent(db, scEv.id, { due: '2000-01-01T00:00' });          // 마감을 지나게 한다
+  const pfId = pidOf(db, 'prof@x.test');
+  const pfOf = () => profile(db, pfId).history.find(h => h.team === '프로필팀');
+  ok(pfOf() && pfOf().url === '', '동의 안 한 주소가 프로필에 실린다');
+  showConsent(db, pfT, true);
+  ok(pfOf().url === 'https://prof.test/a', '동의해도 프로필에 만든 것이 안 실린다');
+  ok(pfOf().open === '모름' && pfOf().age === null, '한 번도 안 열어 본 것을 «모름» 이라 안 한다');
+  db.prepare('INSERT INTO liveness(team,state) VALUES(?,1)').run(pfT);
+  ok(pfOf().open === '열림' && pfOf().age && pfOf().age.key === 'seed', '열려 있는데 나이가 안 붙는다');
+  db.prepare('UPDATE liveness SET state=0 WHERE team=?').run(pfT);
+  ok(pfOf().open === '안 열림' && pfOf().age === null, '죽은 주소에 나이가 붙는다');
+
+  // 만든 것 — 등급이 아니라 나이. 열려 있을 때만 센다
+  ok(ageOf('2026-01-01', 1, '2026-01-29').key === 'seed', '한 달 전은 새싹이다');
+  ok(ageOf('2026-01-01', 1, '2026-01-31').key === 'herb', '서른 날이면 풀이다');
+  ok(ageOf('2026-01-01', 1, '2027-01-01').key === 'tree', '일 년이면 나무다');
+  ok(ageOf('2026-01-01', 0, '2027-01-01') === null, '안 열리는 것에 나이가 붙는다');
+  ok(ageOf('2026-01-01', 1, '2025-06-01') === null, '대회보다 앞선 날짜로 나이가 나온다');
+  ok(openLabel(1) === '열림' && openLabel(0) === '안 열림', '열림·안 열림 표기가 다르다');
+  ok(openLabel(null) === '모름' && openLabel(undefined) === '모름', '모름을 «안 열림» 으로 그린다');
+
+  // 시즌 — 분기로 끊되 지난 것을 지우지 않는다
+  ok(seasonOf('2026-01-01') === '2026-Q1' && seasonOf('2026-03-31') === '2026-Q1', '1~3월이 Q1 이 아니다');
+  ok(seasonOf('2026-04-01') === '2026-Q2' && seasonOf('2026-12-31') === '2026-Q4', '분기 경계가 틀렸다');
+  ok(seasonOf('') === '' && seasonOf('없는날짜') === '' && seasonOf('2026-13-01') === '',
+     '시각을 모르는 줄이 어떤 시즌에 들어간다');
+  ok(seasonEnd('2026-Q1') === '2026-03-31' && seasonEnd('2026-Q4') === '2026-12-31', '시즌 마지막 날이 틀렸다');
+  ok(seasonEnd('2026-Q2') === '2026-06-30', '30일로 끝나는 분기가 틀렸다');
+  ok(seasonEnd('없음') === '', '없는 시즌에 마지막 날이 나온다');
+  ok(seasonLeft('2026-Q1', '2026-03-30') === 1 && seasonLeft('2026-Q1', '2026-03-31') === 0,
+     '남은 날 계산이 틀렸다');
+  ok(seasonLeft('2026-Q1', '2026-09-01') === 0, '지난 시즌에 음수가 나온다');
+
+  {
+    /* 시즌 XP 는 그 분기에 끝난 대회만 센다. 통산은 그대로 남는다 */
+    const sEv = createEvent(db, { title: '시즌시험', starts: '2026-01-05', ends: '2026-01-05' });
+    const sT  = joinTeam(db, sEv.id, { name: '시즌팀', contact: 'season@x.test', agree: true });
+    editEvent(db, sEv.id, { due: '2099-01-01T00:00' });
+    submit(db, sT, { url: 'https://season.test/a', note: '만든 것' });
+    const sId = pidOf(db, 'season@x.test');
+    ok(xpOf(db, sId, '2026-Q1').total > 0, '그 분기에 끝난 대회가 시즌에 안 잡힌다');
+    ok(xpOf(db, sId, '2026-Q3').total === 0, '다른 분기 것이 이번 시즌에 잡힌다');
+    ok(xpOf(db, sId, '').total >= xpOf(db, sId, '2026-Q1').total, '통산이 시즌보다 작다');
+    const rk = rank(db);
+    ok(Array.isArray(rk.season) && Array.isArray(rk.all), '순위가 두 줄로 안 나온다');
+    ok(rk.all.length >= rk.season.length, '통산이 시즌보다 짧다');
+  }
+
+  {
+    /* 그날의 조건 — 끝나기 전에는 어디로도 안 나간다 */
+    const cEvA = createEvent(db, { title: '조건A', starts: '2026-02-01', ends: '2026-02-01' });
+    const cEvB = createEvent(db, { title: '조건B', starts: '2026-05-01', ends: '2026-05-01' });
+    const live = createEvent(db, { title: '아직안끝남', starts: '2099-01-01', ends: '2099-01-01' });
+    for (const x of [cEvA, cEvB, live]) db.prepare('UPDATE events SET listed=1 WHERE id=?').run(x.id);
+    editEvent(db, cEvA.id, { twist: '단추를 하나만 쓴다' });
+    editEvent(db, cEvB.id, { twist: '소리를 반드시 낸다' });
+    editEvent(db, live.id, { twist: '아직 아무도 모른다' });
+
+    ok(!('twist' in getEvent(db, live.id)), '안 끝난 대회의 조건이 공개 응답에 실린다');
+    ok(getEvent(db, cEvA.id).twist === '단추를 하나만 쓴다', '끝난 대회의 조건이 안 나온다');
+
+    const cd = conditions(db);
+    ok(cd.enough && cd.rows.length === 2, `끝난 대회 둘이 아카이브에 안 쌓인다: ${cd.n}`);
+    ok(cd.rows.every(r => r.title !== '아직안끝남'), '안 끝난 대회가 아카이브에 샜다');
+    ok(cd.rows[0].title === '조건B', '최근 것이 위로 안 온다');
+
+    /* 하나뿐이면 목록을 안 준다 — 아카이브가 아니라 한 줄이다 */
+    editEvent(db, cEvB.id, { twist: '' });
+    const cd1 = conditions(db);
+    ok(!cd1.enough && cd1.rows.length === 0, '하나뿐인데 아카이브를 낸다');
+    ok(cd1.n === 1, '남은 건수를 안 세어 준다');
+    editEvent(db, cEvB.id, { twist: '소리를 반드시 낸다' });
+    /* 이 검사가 만든 것은 이 검사가 치운다 — 뒤의 «공개한 것만 목록에 든다» 가 같은 db 를 센다 */
+    for (const x of [cEvA, cEvB, live]) db.prepare('DELETE FROM events WHERE id=?').run(x.id);
+  }
+
+  {
+    /* 도전장 — 같은 대회에 있던 사람에게만. 거절은 아무 데도 안 남는다 */
+    const dEv = createEvent(db, { title: '도전시험', starts: '2026-02-10', ends: '2026-02-10' });
+    const dA = joinTeam(db, dEv.id, { name: '도전갑', contact: 'duelA@x.test', agree: true });
+    const dB = joinTeam(db, dEv.id, { name: '도전을', contact: 'duelB@x.test', agree: true });
+    const other = createEvent(db, { title: '딴대회', starts: '2026-02-11', ends: '2026-02-11' });
+    joinTeam(db, other.id, { name: '남남', contact: 'duelC@x.test', agree: true });
+    const pA = pidOf(db, 'duelA@x.test'), pB = pidOf(db, 'duelB@x.test'), pC = pidOf(db, 'duelC@x.test');
+
+    ok(metAt(db, pA, pB) === dEv.id, '같은 대회에 있었는데 못 찾는다');
+    ok(metAt(db, pA, pC) === '', '같은 대회에 없던 사람을 만났다고 한다');
+
+    let blocked = false;
+    try { sendDuel(db, pA, pC); } catch (e) { blocked = e.code === 403; }
+    ok(blocked, '같은 대회에 없던 사람에게 도전장이 간다');
+    let self = false;
+    try { sendDuel(db, pA, pA); } catch (e) { self = e.code === 400; }
+    ok(self, '자기 자신에게 도전장을 보낸다');
+
+    const d1 = sendDuel(db, pA, pB);
+    ok(d1.id && d1.status === 'sent' && !d1.already, '도전장이 안 만들어진다');
+    ok(sendDuel(db, pA, pB).already === true, '같은 쌍에 도전장이 두 장 생긴다');
+    ok(sendDuel(db, pB, pA).already === true, '방향만 바꾸면 또 생긴다');
+
+    /* 남은 못 본다 */
+    ok(duelsOf(db, pC).length === 0, '남의 도전장이 보인다');
+    ok(duelsOf(db, pA).length === 1 && duelsOf(db, pB).length === 1, '당사자에게 안 보인다');
+    ok(duelsOf(db, pA)[0].mine === true && duelsOf(db, pB)[0].mine === false, '보낸 쪽·받은 쪽이 안 갈린다');
+    ok(duelsOf(db, pA)[0].outcome === null, '수락 전인데 결과가 나온다');
+
+    /* 보낸 사람은 못 받는다 */
+    let notMine = false;
+    try { answerDuel(db, d1.id, pA, true); } catch (e) { notMine = e.code === 403; }
+    ok(notMine, '보낸 사람이 자기 도전장을 수락한다');
+
+    /* 거절 — 표에서 아예 지운다. «거절함» 이라는 기록도 벌이다 */
+    ok(answerDuel(db, d1.id, pB, false).gone === true, '거절이 안 먹는다');
+    ok(db.prepare('SELECT COUNT(*) c FROM duels').get().c === 0, '거절한 도전장이 표에 남는다');
+    ok(duelsOf(db, pA).length === 0 && duelsOf(db, pB).length === 0, '거절한 것이 화면에 남는다');
+
+    /* 다시 보낼 수는 있다. 거절은 «이번엔 아니다» 이지 영구 차단이 아니다 */
+    const d2 = sendDuel(db, pA, pB);
+    ok(!d2.already, '거절한 뒤에 다시 못 보낸다');
+    ok(answerDuel(db, d2.id, pB, true).status === 'ok', '수락이 안 먹는다');
+    ok(duelsOf(db, pA)[0].status === 'ok', '수락이 안 남는다');
+    ok(duelsOf(db, pA)[0].outcome === null, '맞붙을 대회가 없는데 결과가 나온다');
+    ok(!JSON.stringify(duelsOf(db, pA)).includes('@x.test'), '도전장 응답에 연락처가 샌다');
+
+    db.prepare('DELETE FROM duels').run();
+    for (const x of [dEv, other]) db.prepare('DELETE FROM events WHERE id=?').run(x.id);
+  }
+
+  {
+    /* 짝 신청 — 둘이 같은 팀에 붙는다. 링크를 두 번 써도 팀이 셋이 되지 않는다 */
+    const pEvx = createEvent(db, { title: '짝시험', starts: '2026-03-01', ends: '2026-03-01' });
+    const pT = joinTeam(db, pEvx.id, { name: '짝팀', contact: 'pairA@x.test', agree: true });
+    const pTk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(pT).tkey;
+
+    let noKey = false;
+    try { inviteOf(db, pT, 'aaa'); } catch (e) { noKey = e.code === 403; }
+    ok(noKey, '팀 열쇠 없이 초대 링크가 나온다');
+    const inv = inviteOf(db, pT, pTk);
+    ok(inv.code && inv.code !== pTk, '초대 코드가 팀 열쇠와 같다 (넘기면 팀 주인이 된다)');
+    ok(inviteOf(db, pT, pTk).code === inv.code, '부를 때마다 코드가 새로 생긴다');
+
+    const before = db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(pEvx.id).c;
+    const jp = joinPair(db, pEvx.id, inv.code, { name: '짝꿍', contact: 'pairB@x.test', agree: true });
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(pEvx.id).c === before,
+       '짝으로 왔는데 팀이 하나 더 생긴다');
+    ok(jp.id === pT && jp.tkey && jp.tkey !== pTk, '짝에게 제 열쇠가 안 간다');
+    const row = () => db.prepare('SELECT * FROM teams WHERE id=?').get(pT);
+    ok(row().size === 2 && row().mate_name === '짝꿍', '둘이 안 됐다');
+    ok(JSON.parse(row().members).length === 2, '자리 수가 안 늘었다');
+
+    /* 같은 링크를 또 쓰면 막힌다. 쓴 코드는 지워지므로 여기서는 «없는 링크» 로 걸린다 */
+    let used = false;
+    try { joinPair(db, pEvx.id, inv.code, { name: '셋째', contact: 'pairC@x.test', agree: true }); }
+    catch (e) { used = e.code === 404; }
+    ok(used, '한 번 쓴 초대 링크가 또 먹는다');
+
+    /* 코드가 어떤 이유로든 살아 있어도 짝이 있으면 안 받는다. 문을 둘 둔다 —
+       위의 «코드 지우기» 하나만 믿으면, 코드를 다시 발급하는 길이 생기는 날 셋이 된다. */
+    db.prepare("UPDATE teams SET invite='zzstale' WHERE id=?").run(pT);
+    let full = false;
+    try { joinPair(db, pEvx.id, 'zzstale', { name: '셋째', contact: 'pairC@x.test', agree: true }); }
+    catch (e) { full = e.code === 409; }
+    ok(full, '짝이 이미 있는데 셋째가 붙는다');
+    let hasMate = false;
+    try { inviteOf(db, pT, pTk); } catch (e) { hasMate = e.code === 409; }
+    ok(hasMate, '짝이 있는데 초대 링크가 또 나온다');
+    db.prepare("UPDATE teams SET invite='' WHERE id=?").run(pT);
+
+    /* 두 사람 다 그 대회에 «있었다» */
+    const pidA = pidOf(db, 'pairA@x.test'), pidB = pidOf(db, 'pairB@x.test');
+    ok(profile(db, pidB).history.some(h => h.title === '짝시험'), '짝의 기록에 대회가 안 남는다');
+    ok(profile(db, pidA).history.find(h => h.title === '짝시험').mate === '짝꿍', '내 기록에 짝 이름이 없다');
+    ok(profile(db, pidB).history.find(h => h.title === '짝시험').mate === '짝팀', '짝의 기록에 상대 이름이 없다');
+
+    /* 짝이 빠져도 신청은 안 깨진다 */
+    let wrongKey = false;
+    try { leavePair(db, pT, pTk); } catch (e) { wrongKey = e.code === 403; }
+    ok(wrongKey, '남의 열쇠로 짝을 뗀다');
+    leavePair(db, pT, jp.tkey);
+    ok(row().mate === '' && row().size === 1, '짝이 빠졌는데 자리가 안 줄었다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE id=?').get(pT).c === 1, '짝이 빠지자 신청이 통째로 없어졌다');
+
+    /* 신청한 사람이 빠지면 짝이 주인이 된다 */
+    const inv2 = inviteOf(db, pT, pTk);
+    const jp2 = joinPair(db, pEvx.id, inv2.code, { name: '짝꿍2', contact: 'pairD@x.test', agree: true });
+    promoteMate(db, db.prepare('SELECT * FROM teams WHERE id=?').get(pT));
+    ok(row().name === '짝꿍2' && row().tkey === jp2.tkey, '짝이 주인으로 안 올라간다');
+    ok(row().mate === '' && row().size === 1, '주인이 된 뒤에도 짝 칸이 남는다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE id=?').get(pT).c === 1, '주인이 빠지자 팀이 사라졌다');
+
+    db.prepare('DELETE FROM events WHERE id=?').run(pEvx.id);
+  }
+
+  // 뱃지 — 깃허브 README 에 거는 한 조각
+  const bsv = badgeSvg({ handle: '<script>a', tier: { name: '골드', level: 3 }, finished: 5, wins: 2 });
+  ok(bsv.startsWith('<svg') && bsv.endsWith('</svg>'), 'SVG 꼴로 안 나온다');
+  ok(!bsv.includes('<script>') && bsv.includes('&lt;script&gt;a'), '이름에 넣은 태그가 그대로 나간다');
+  ok(bsv.includes('골드') && bsv.includes('완주 5') && bsv.includes('수상 2'), '티어·완주·수상이 안 적힌다');
+  ok(!badgeSvg({ handle: '', tier: { name: '새싹', level: 0 }, finished: 0, wins: 0 }).includes('수상'),
+     '수상이 0 인데 «수상» 을 적는다');
+  const wOf = h => +/width="(\d+)"/.exec(badgeSvg({ handle: h, tier: { name: '골드', level: 3 }, finished: 5, wins: 2 }))[1];
+  ok(wOf('가나다라마바사아자차') > wOf('a'), '이름이 길어져도 뱃지 폭이 그대로다');
+
+  // 링크 미리보기 딱지
+  const ogt = ogTags({ title: '큰"따옴표', desc: 'ㄷ', url: 'https://h.test/p/1', image: 'https://h.test/og.png' });
+  ok(ogt.includes('og:image') && ogt.includes('twitter:card'), '미리보기 딱지가 빠졌다');
+  ok(!ogt.includes('큰"따옴표') && ogt.includes('&quot;'), '따옴표가 안 막혀 머리띠가 깨진다');
+  ok(withOg('<x>' + OG_ANCHOR + '</x>', '<b>').includes('<b>'), '딱지가 안 끼워진다');
+  ok(withOg('<x></x>', '<b>') === '<x></x>', '자리를 못 찾았는데 화면을 망친다');
+
+  // 카드는 PNG 만 받는다. content-type 을 안 믿고 앞 여덟 자를 본다
+  ok(isPng(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1])), 'PNG 를 PNG 로 안 본다');
+  ok(!isPng(Buffer.from('GIF89a-----')), 'GIF 를 PNG 로 받는다');
+  ok(!isPng(Buffer.from('<svg onload=alert(1)>')), 'SVG 를 PNG 로 받는다');
+  ok(!isPng(Buffer.alloc(0)) && !isPng('문자열'), '빈 것·문자열을 PNG 로 본다');
+
+  // 위촉장·감사장 명단 — 한 일이 곧 명단이다
+  {
+    const cEv = createEvent(db, { title: '증서시험', starts: today(), ends: today() });
+    const cT  = joinTeam(db, cEv.id, { name: '증서팀', agree: true });
+    db.prepare('INSERT INTO scores(team,judge,key,value) VALUES(?,?,?,?)').run(cT, '심사김', 'done', 80);
+    db.prepare("INSERT INTO requests(id,name,topic,contact,event) VALUES('rqcert','가게사장','간판 정리','who@x.test',?)").run(cEv.id);
+    const cr = creditsOf(db, cEv.id);
+    ok(cr.judges.length === 1 && cr.judges[0].name === '심사김', '심사한 사람이 명단에 안 오른다');
+    ok(cr.askers.length === 1 && cr.askers[0].name === '가게사장', '문제 낸 사람이 명단에 안 오른다');
+    ok(!JSON.stringify(cr).includes('who@x.test'), '증서 명단에 연락처가 실린다');
+  }
+
+  // 우리 서버가 열어 볼 주소 — 집 안으로는 못 간다
+  ok(outboundOk('https://example.com/x'), '바깥 주소를 막는다');
+  ok(!outboundOk('http://127.0.0.1:8788/api/events'), '우리 자신을 부를 수 있다');
+  ok(!outboundOk('http://localhost:3000'), 'localhost 로 나간다');
+  ok(!outboundOk('http://10.0.0.5/') && !outboundOk('http://192.168.0.1/') &&
+     !outboundOk('http://172.16.0.1/') && !outboundOk('http://169.254.169.254/'),
+     '사설망·메타데이터 주소로 나간다');
+  ok(!outboundOk('http://[::1]/') && !outboundOk('file:///etc/passwd'), 'IPv6 안쪽과 file: 이 통과한다');
+  ok(outboundOk('http://172.32.0.1/'), '사설 대역이 아닌 172.32 까지 막는다');
+
+  /* 한 판 결과를 표에 쓸지. 망이 막혀 한꺼번에 실패하면 살아 있는 것까지 죽었다고 덮어쓴다(E3) */
+  const lp1 = livenessPlan([{ team: 1, ok: true }, { team: 2, ok: false }, { team: 3, ok: null }]);
+  ok(lp1.write && lp1.rows.length === 2, '확인된 것만 쓰지 않는다');
+  ok(lp1.rows.every(r => r.team !== 3), '못 본 것을 «안 열림» 으로 쓴다');
+  ok(!livenessPlan([{ team: 1, ok: true }, { team: 2, ok: null }, { team: 3, ok: null }]).write,
+     '절반도 확인이 안 됐는데 표를 덮어쓴다');
+  ok(!livenessPlan([]).write, '볼 것이 없는데 쓴다');
+
   ok(!!shown, '본인이 동의하면 그때 실린다');
   ok(shown.name === '동의안한팀' && shown.note === '만든 것', '이름과 설명이 같이 간다');
   const at1 = db.prepare('SELECT show_at FROM submissions WHERE team=?').get(scT).show_at;
@@ -5314,15 +6645,16 @@ function selftest() {
   ok(emptyEvent(eventLoad(db, dEv.id)), '이름만 넣은 대회는 빈 대회다');
   const dNeed = addNeed(db, dEv.id, { kind: 'judge', label: '심사위원' });
   ok(!emptyEvent(eventLoad(db, dEv.id)), '자리만 올려도 빈 대회가 아니다 (팀·제출만 보면 놓친다)');
-  let dThrew = 0; try { deleteEvent(db, dEv.id, {}); } catch (e) { dThrew = e.code; }
+  let dThrew = 0; try { await deleteEvent(db, dEv.id, {}); } catch (e) { dThrew = e.code; }
   ok(dThrew === 409 && db.prepare('SELECT 1 FROM events WHERE id=?').get(dEv.id), 'confirm 없이는 안 지워진다 (409)');
   const dOut = setPledge(db, addPledge(db, dNeed.id, dEv.id, { name: '밖에서온심사', org: '동네', note: '앱 밖에서 구함' }).id, { status: 'ok' });
   ok(dOut.status === 'ok' && needsOf(db, dEv.id)[0].filled === 1 && ledgerOf(db, dEv.id)[0].name === '밖에서온심사',
      '밖에서 구한 사람은 확인된 기여로 점판·장부에 바로 오른다');
-  const dRes = deleteEvent(db, dEv.id, { confirm: '지우기검사' });
+  const dRes = await deleteEvent(db, dEv.id, { confirm: '지우기검사' });
   ok(dRes.ok && dRes.dump && dRes.dump.event.id === dEv.id && !db.prepare('SELECT 1 FROM events WHERE id=?').get(dEv.id),
      '제목을 맞게 보내면 지워지고 응답에 사본이 실린다');
   ok(!('okey' in dRes.dump.event), '응답 사본에도 운영자 열쇠는 없다');
+  ok(dRes.notified === 0, '신청한 팀이 없으면 알릴 곳도 없다 (' + dRes.notified + ')');
   /* 상호평가 — 팀 열쇠로만, 자기 팀 제외 */
   const prEv = createEvent(db, { title: '상호평가검사' });
   const prA = joinTeam(db, prEv.id, { name: '피가', email: 'pa@x.test', agree: true });
@@ -5402,7 +6734,7 @@ function selftest() {
   db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(rsEv.id, '살아라');
   const rsDump = dump(db, rsEv.id);
   ok(rsDump.needs.length === 1 && rsDump.pledges.length === 1 && rsDump.notices.length === 1, '사본에 자리·신청·소식이 들어간다');
-  deleteEvent(db, rsEv.id, { confirm: '되살리기검사' });
+  await deleteEvent(db, rsEv.id, { confirm: '되살리기검사' });
   let rsBad = 0; try { restoreEvent(db, rsDump, 'wrong-owner'); } catch (e) { rsBad = e.code; }
   ok(rsBad === 403 && !db.prepare('SELECT 1 FROM events WHERE id=?').get(rsEv.id), '남의 주최자 열쇠로는 못 살린다');
   const rsRes = restoreEvent(db, rsDump, rsOwner);
@@ -5420,11 +6752,25 @@ function selftest() {
     addNeed(db, tEv.id, { kind: 'venue', label: '장소' });
     const other = createEvent(db, { title: '남의대회' });
     const otherOwner = db.prepare('SELECT owner FROM events WHERE id=?').get(other.id).owner;
-    const tDel = deleteEvent(db, tEv.id, { confirm: '휴지통검사' });
+    const tDel = await deleteEvent(db, tEv.id, { confirm: '휴지통검사' });
     ok(tDel.trash > 0 && db.prepare('SELECT COUNT(*) c FROM event_trash WHERE event=?').get(tEv.id).c === 1,
        '대회를 지우면 휴지통에 한 줄 남는다');
+    /* 신청자가 있으면 지우기 «전에» 알린다. 메일이 꺼져 있으면 소식에 남고, 그 줄이 사본에 들어간다 */
+    ok(tDel.notified === 1, '신청자 있는 대회를 지우면 알림이 닿은 팀 수가 응답에 실린다 (' + tDel.notified + ')');
+    ok((tDel.dump.notices || []).some(x => String(x.text).includes('대회를 접습니다')),
+       '메일이 꺼져 있으면 소식에 남고, 그 줄이 지우기 직전 사본에 들어간다');
     const tRow = db.prepare('SELECT * FROM event_trash WHERE id=?').get(tDel.trash);
     ok(tRow.owner === tOwner, '휴지통 줄에 주최자(owner)가 따로 저장된다 — 사본에는 열쇠가 없다');
+    ok(tRow.notified === 1, '휴지통 줄에 알림이 닿은 팀 수가 적힌다');
+    /* 알리다 터지면 지우지 않는다 — 안 나간 알림 뒤에 찍는 «지웠습니다» 는 거짓이다 */
+    const nEv = createEvent(db, { title: '알림실패' });
+    joinTeam(db, nEv.id, { name: '알림팀', email: 'nf@x.test', agree: true });
+    let nThrew = '';
+    try { await deleteEvent(db, nEv.id, { confirm: '알림실패' }, () => { throw new Error('메일 서버 죽음'); }); }
+    catch (e) { nThrew = e.message; }
+    ok(nThrew === '메일 서버 죽음' && db.prepare('SELECT 1 FROM events WHERE id=?').get(nEv.id)
+       && !db.prepare('SELECT 1 FROM event_trash WHERE event=?').get(nEv.id),
+       '알림이 터지면 대회는 안 지워지고 휴지통에도 안 들어간다');
     const tList = eventTrash(db, tOwner);
     ok(tList.length === 1 && tList[0].event === tEv.id && tList[0].title === '휴지통검사' && tList[0].teams === 1,
        '내 휴지통 목록에 제목·지운 날·팀 수가 실린다 (' + JSON.stringify(tList[0]) + ')');
@@ -5945,6 +7291,20 @@ function selftest() {
   ok(board(db, ev, true).rows.find(r => r.id === t1).confirmed === 'no', '«못 가요» 가 주최자 표에 실린다');
   db.prepare("UPDATE teams SET confirmed=? WHERE id=?").run(new Date().toISOString(), t1);
   ok(board(db, ev, true).rows.find(r => r.id === t1).confirmed.length > 4, '«올 거예요» 가 주최자 표에 실린다');
+  /* 내보내기에도 확정 칸이 있어야 준비 수량을 그 숫자로 잡는다. 안 물은 팀은 «모름» — 빈 칸이 아니다 */
+  const cvLines = csvOf(db, ev).split('\n');
+  ok(cvLines[0].split(',').includes('확정'), 'CSV 머리줄에 확정 칸이 있다');
+  ok(cvLines.slice(1, 4).some(l => l.split(',').includes('온다'))
+     && cvLines.slice(1, 4).some(l => l.split(',').includes('모름')), 'CSV 확정 칸은 온다·모름을 갈라 적는다');
+
+  /* 취소 규칙 — 주최자가 정하고 대회 페이지에 박는다. 안 정하면 빈 값 그대로다(기본 문장은 화면에만) */
+  ok(getEvent(db, ev).cancel_rule === '', '취소 규칙을 안 정하면 빈 값이다 — 기본 문장을 DB 에 써 두지 않는다');
+  editEvent(db, ev, { cancel_rule: '하루 전까지 팀 화면에서. 그 뒤는 주최자에게' });
+  ok(getEvent(db, ev).cancel_rule === '하루 전까지 팀 화면에서. 그 뒤는 주최자에게', '취소 규칙은 고쳐진다');
+  editEvent(db, ev, { cancel_rule: '가'.repeat(200) });
+  ok(getEvent(db, ev).cancel_rule.length === 120, '취소 규칙은 120자에서 끊긴다');
+  editEvent(db, ev, { cancel_rule: '' });
+  ok(getEvent(db, ev).cancel_rule === '', '취소 규칙은 지울 수 있다');
   db.prepare("UPDATE teams SET came=datetime('now') WHERE id=?").run(t1);
   ok(outcomes(db, ev).came === 1, '체크인이 세어진다');
   ok(outcomes(db, ev).photo === 1, '촬영 동의가 세어진다');
@@ -6549,6 +7909,71 @@ function selftest() {
     }
     const xp = xpOf(db, pidOf(db, 'm@x.test')); ok(xp.items.some(x => x.key === 'asked') && xp.total >= 3, '문제 올린 사람에게 기여가 쌓인다');
   }
+  /* ── 대역시험 4 — «어디로 가면 되나». 모이는 곳을 적을 칸이 아예 없었다 ── */
+  {
+    const ep = createEvent(db, { title: '장소 검사', starts: '2026-02-10', ends: '2026-02-10' });
+    ok(getEvent(db, ep.id).place === '', '새 대회의 모이는 곳은 빈칸이다');
+    editEvent(db, ep.id, { place: '서울 마포구 와우산로 94 학생회관 3층 <b>' });
+    ok(getEvent(db, ep.id).place === '서울 마포구 와우산로 94 학생회관 3층 b', '모이는 곳을 적고 꺾쇠는 빠진다');
+    editEvent(db, ep.id, { place: '가'.repeat(200) });
+    ok(getEvent(db, ep.id).place.length === 120, '모이는 곳은 120자까지');
+    editEvent(db, ep.id, { place: '연세로 50' });
+    ok(getEvent(db, ep.id).place === '연세로 50', '적은 뒤에도 고칠 수 있다');
+    editEvent(db, ep.id, { prize: 1000 });
+    ok(getEvent(db, ep.id).place === '연세로 50', '다른 칸만 보내면 모이는 곳은 그대로');
+    ok(icsOf(getEvent(db, ep.id), 'https://x.test').includes('LOCATION:연세로 50'), '캘린더 파일에 장소가 실린다');
+    editEvent(db, ep.id, { place: '' });
+    ok(!icsOf(getEvent(db, ep.id), 'https://x.test').includes('LOCATION'), '안 적었으면 캘린더에 빈 장소를 안 넣는다');
+  }
+
+  /* ── 대역시험 3 — 손 안 댄 심사 항목은 «모름» 이다. 50 도 0 도 아니다 ── */
+  {
+    const ej = createEvent(db, { title: '부분 심사 검사', starts: '2026-01-10', ends: '2026-01-10' });
+    const q1 = joinTeam(db, ej.id, { name: '다맞은팀', agree: true, email: 'pa@x.test' });
+    const q2 = joinTeam(db, ej.id, { name: '한항목팀', agree: true, email: 'pb@x.test' });
+    const q3 = joinTeam(db, ej.id, { name: '낮은팀', agree: true, email: 'pc@x.test' });
+    score(db, q1, { judge: '반만본사람', values: { idea: 80, make: 80, use: 80, tell: 80 } });
+    score(db, q2, { judge: '반만본사람', values: { idea: 80 } });                   // 나머지는 손을 안 댔다
+    score(db, q3, { judge: '반만본사람', values: { idea: 40, make: 40, use: 40, tell: 40 } });
+    ok(db.prepare('SELECT COUNT(*) c FROM scores WHERE team=? AND judge=?').get(q2, '반만본사람').c === 1,
+       '안 매긴 항목은 줄이 아예 안 생긴다');
+    ok(!db.prepare("SELECT 1 FROM scores WHERE team=? AND key='make'").get(q2), '안 매긴 항목에 50 이 안 들어간다');
+    const R = Object.fromEntries(board(db, ej.id, true).rows.map(r => [r.name, r]));
+    ok(R['한항목팀'].score === 24, '가중 총점은 매긴 항목만 센다 (80×0.30 = 24)');
+    ok(R['한항목팀'].judges === 1, '부분 점수도 «심사 1명» 으로 센다');
+    /* 등수 보정(rscore) — 80점을 준 두 팀은 같은 자리여야 한다. 안 매긴 항목을 0 으로 세면
+       한항목팀이 24 로 떨어져 낮은팀(40)보다 뒤로 밀린다. */
+    ok(R['다맞은팀'].rscore === R['한항목팀'].rscore && R['다맞은팀'].rscore > R['낮은팀'].rscore,
+       '안 매긴 항목이 등수 보정을 끌어내리지 않는다 ('
+       + [R['다맞은팀'].rscore, R['한항목팀'].rscore, R['낮은팀'].rscore].join('/') + ')');
+    /* 심사 화면이 그 항목을 빈칸으로 그릴 수 있어야 한다 */
+    const jv = judgeView(db, ej.id, '반만본사람');
+    const mine = jv.teams.find(t => t.id === q2).mine;
+    ok(mine.idea === 80 && mine.make === undefined, '심사 화면은 안 매긴 항목을 빈칸으로 받는다');
+  }
+
+  /* ── 대역시험 1 — 다시 낸다고 먼저 낸 주소가 지워지면 안 된다 ── */
+  {
+    const eu = createEvent(db, { title: '덮어쓰기 검사', starts: '2026-01-10', ends: '2026-01-10' });
+    editEvent(db, eu.id, { due: '2099-01-01T00:00' });
+    const tu = joinTeam(db, eu.id, { name: '낸팀', agree: true, email: 'over@x.test' });
+    const urlOf = () => db.prepare('SELECT url FROM submissions WHERE team=?').get(tu).url;
+    submit(db, tu, { url: 'https://example.com/first', note: '첫 설명' });
+    submit(db, tu, { note: '설명만 고침' });
+    ok(urlOf() === 'https://example.com/first', '주소 칸을 안 보내면 먼저 낸 주소가 남는다');
+    submit(db, tu, { url: '', note: '빈 칸으로 다시' });
+    ok(urlOf() === 'https://example.com/first', '빈 주소로는 먼저 낸 주소를 못 덮는다');
+    ok(board(db, eu.id, true).rows[0].done === true, '빈 주소를 내도 순위표가 «미제출» 로 안 바뀐다');
+    submit(db, tu, { url: 'https://example.com/second' });
+    ok(urlOf() === 'https://example.com/second', '새 주소는 그대로 덮어쓴다');
+    /* 다시 열었을 때 칸을 채우려면 마감 전에도 «내 팀» 주소가 내려와야 한다 */
+    const tk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(tu).tkey;
+    ok(board(db, eu.id, false).rows[0].url === undefined, '마감 전 남에게는 제출 주소를 안 준다');
+    ok(board(db, eu.id, false, tu).rows[0].url === 'https://example.com/second', '마감 전에도 내 팀 주소는 내려온다');
+    ok(myTeamOf(db, eu.id, tk) === tu && myTeamOf(db, eu.id, 'nope') === 0 && myTeamOf(db, eu.id, '') === 0,
+       '팀 열쇠로 내 팀을 찾는다');
+  }
+
   /* ── 신고 — 앱스토어 심사 지침 1.2 가 요구하는 «신고 수단» ── */
   {
     const ev = createEvent(db, { title: '신고 대회', starts: today(), ends: today() });
@@ -6597,7 +8022,12 @@ function selftest() {
 
 /* ───────────────────── 실행 ───────────────────── */
 if (require.main === module) {
-  if (process.argv.includes('--test')) { selftest(); process.exit(0); }
+  /* 자체 점검은 비동기다(대회 지우기가 알림을 기다린다). 그냥 부르면 아래 줄이 이어서 돌아
+     진짜 DB 를 열고 포트를 잡는다 — 그래서 서버 띄우기를 main() 으로 갈라 두고 둘 중 하나만 부른다. */
+  if (process.argv.includes('--test')) selftest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
+  else main();
+}
+function main() {
   const db = open(DBFILE);
 
   /* 10분마다 통째로 복사해 둔다. 심사 도중에 노트북이 죽는 일이 실제로 생긴다.
@@ -6610,6 +8040,11 @@ if (require.main === module) {
   /* 해커온뉴스 — 켜지고 15초 뒤 한 번, 그 뒤 6시간마다. 밖이 죽어도 앱은 산다. */
   setTimeout(() => newsTick(db).catch(() => {}), 15000).unref();
   setInterval(() => newsTick(db).catch(() => {}), 3 * 60 * 60 * 1000).unref();
+
+  /* 만든 것이 지금도 열리는가. 하루 한 번이면 충분하다 — 더 자주 두드리면 남의 서버를 괴롭힌다.
+     망이 막힌 판은 livenessPlan 이 알아서 «안 씀» 으로 끝낸다(E3). */
+  setTimeout(() => livenessTick(db).catch(e => console.error('liveness', e.message)), 40000).unref();
+  setInterval(() => livenessTick(db).catch(e => console.error('liveness', e.message)), 24 * 60 * 60 * 1000).unref();
   /* 한 시간마다 D-3·D-1 리마인더. 발송 열쇠가 없으면 아예 안 돈다 — 장부에 «건너뜀»이 매시간 쌓이지 않게. */
   if (RESEND_KEY) {
     const mailTick = () => { try { for (const mm of [...remindDue(db), ...doneDue(db)]) void sendMail(db, mm); } catch (e) { console.error('리마인더 실패', e.message); } };

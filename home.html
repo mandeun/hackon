@@ -239,11 +239,13 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a href="#list">대회 찾기</a>
       <a href="#give">협찬·돕기</a>
       <a href="/problems">문제 은행</a>
+      <a id="nav-rank" href="/rank" hidden>순위</a>
+      <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
       <a href="/news">해커온뉴스</a>
       <a id="nav-manual" href="#">운영 매뉴얼</a>
     </nav>
     <nav class="tools" aria-label="도구">
-      <a id="nav-login" href="/auth/kakao" style="display:none">카카오 로그인</a>
+      <a id="nav-login" href="/app?login=1" style="display:none">로그인</a>
       <a id="nav-open" href="/app?make=1" class="btn s">대회 열기</a>
     </nav>
   </div>
@@ -288,6 +290,15 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
     <a class="btn s" id="empty-open" href="/app?make=1">대회 열기</a>
   </div>
+  <!-- 모여 있는 곳. 신청까지 아직 못 가는 사람이 할 수 있는 일 하나를 여기 둔다.
+       밖에서(당근·커뮤니티) 대화방으로 바로 끌면 그쪽 정책에 걸린다 — 밖에 내는 주소는 이 사이트 하나로 두고,
+       대화방은 들어온 다음에 만난다. 대화방을 적은 대회가 없으면 통째로 숨는다(없음과 모름을 가른다). -->
+  <div id="room" hidden style="margin-top:22px">
+    <h2 style="font-size:17px">모여 있는 곳 <span class="mono grey" id="room-count" style="font-size:14px;font-weight:400"></span></h2>
+    <p class="grey" style="margin:4px 0 8px">신청은 아직 이르신가요. 무엇을 만드는 곳인지 먼저 보고 싶으면 여기서 사람들을 만나세요.</p>
+    <div id="room-l" class="evs"></div>
+  </div>
+
   <!-- 같은 절 안에 둔다 — 첫 화면은 절 셋을 넘기지 않는다(검사가 잠근다). 의뢰가 없으면 통째로 숨는다 -->
   <div id="asks" hidden style="margin-top:22px">
     <h2 style="font-size:17px">풀어 달라는 문제 <span class="mono grey" id="asks-count" style="font-size:14px;font-weight:400"></span></h2>
@@ -421,10 +432,24 @@ function 그리기(){
       '<span class="st ' + s.c + '">' + s.k + (d ? ' ' + d : '') + '</span>' +
       '<span><div class="t">' + esc(e.title) + '</div><div class="m">' + esc(e.host) + ' · ' +
         (e.pastEvents ? '지난 대회 ' + e.pastEvents + '번 · 완주율 ' + e.pastFinish + '%' : '첫 대회') +
-        ((e.sponsors || []).length ? ' · 함께: ' + e.sponsors.map(esc).join(', ') : '') + '</div></span>' +
+        ((e.sponsors || []).length ? ' · 함께: ' + e.sponsors.map(esc).join(', ') : '') +
+        /* 어디서 하는지. 안 적혔으면 아무 말도 안 쓴다 — 모름을 «없음»으로 그리지 않는다 */
+        (e.place ? '</div><div class="m">📍 ' + esc(e.place) : '') + '</div></span>' +
       '<span class="n">' + esc(e.starts) + (e.ends !== e.starts ? '~' + esc(e.ends).slice(5) : '') +
         ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') + '</span>' +
       '</a>';
+  }).join('');
+  /* 모여 있는 곳 — 아직 안 끝난 대회 중 대화방 주소를 적은 것만. 필터·검색과 무관하게 늘 같은 것을 보여 준다
+     («모집중» 만 걸러 놓은 사람에게 대화방이 사라지면 그게 더 이상하다). */
+  var 방 = 대회들.filter(function(e){ return e.chat && 상태(e).c !== 'done'; }).slice(0, 3);
+  document.getElementById('room').hidden = !방.length;
+  document.getElementById('room-count').textContent = 방.length ? 방.length + '곳' : '';
+  document.getElementById('room-l').innerHTML = 방.map(function(e){
+    return '<a class="ev" href="' + esc(e.chat) + '" target="_blank" rel="noopener">' +
+      '<span class="st open">대화방</span>' +
+      '<span><div class="t">' + esc(e.title) + '</div>' +
+        '<div class="m">' + esc(e.host) + ' · 열려 있는 대화방입니다. 묻고 구경만 해도 됩니다</div></span>' +
+      '<span class="n">새 창에서 열림</span></a>';
   }).join('');
   var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && e.id !== 'demo1'; })[0];
   document.getElementById('foot-note').textContent = 곧 ? '다음 대회 ' + 곧.starts : '';
@@ -467,16 +492,39 @@ fetch('/api/requests').then(function(r){ return r.json(); }).then(function(list)
   }).join('');
 }).catch(function(){});
 
+/* 그날의 조건. 둘부터 목록이라 그때 문을 연다 — 하나는 아카이브가 아니다. */
+fetch('/api/conditions').then(function(r){ return r.json(); }).then(function(d){
+  if (d && d.enough) document.getElementById('nav-conds').hidden = false;
+}).catch(function(){});
+
+/* 순위 입구. 이름을 정한 사람이 하나라도 있을 때만 연다 —
+   빈 표로 가는 문을 미리 걸어 두면 «비어 있는 서비스» 로 읽힌다. */
+fetch('/api/rank').then(function(r){ return r.json(); }).then(function(d){
+  var n = ((d && d.all) || []).length || ((d && d.rows) || []).length;
+  if (n) document.getElementById('nav-rank').hidden = false;
+}).catch(function(){});
+
 fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list){
   if (!list || !list.length) return;
-  document.getElementById('showcase').hidden = false;
+  var sc = document.getElementById('showcase');
+  sc.hidden = false;
+  /* 셋부터 «갤러리» 다. 한두 개를 목록 위에 올리면 텅 빈 선반처럼 보인다.
+     코드가 아니라 만들어진 물건이 먼저 보여야 하지만, 물건이 있을 때 얘기다. */
+  if (list.length >= 3) {
+    var lst = document.getElementById('list');
+    if (lst && lst.parentNode) lst.parentNode.insertBefore(sc, lst);
+  }
   document.getElementById('showcase-grid').innerHTML = list.map(function(w, i){
     return '<div class="ev shown">' +
       '<div class="shead">' +
         '<span class="st open">⭐ 추천작</span>' +
         '<span class="sname"><span class="t">' + esc(w.name) + '</span>' +
           '<span class="m">' + esc(w.eventTitle) +
-          (w.note ? ' · ' + esc(w.note) : '') + '</span></span>' +
+          (w.note ? ' · ' + esc(w.note) : '') +
+          /* 등급이 아니라 사실 둘. 모름은 아무 말도 안 한다 — 안 열린다는 뜻이 아니다 */
+          (w.open === '열림' ? ' · ● 열림' : w.open === '안 열림' ? ' · ○ 안 열림' : '') +
+          (w.age ? ' · ' + w.age.mark + ' ' + esc(w.age.name) + ' ' + w.age.days + '일째' : '') +
+          '</span></span>' +
         '<button class="btn o s" data-try="' + i + '">열어보기</button>' +
         '<a class="n grey" href="' + esc(w.url) + '" target="_blank" rel="noopener">새 창</a>' +
       '</div>' +
@@ -570,11 +618,17 @@ document.getElementById('open-go').addEventListener('click', function(){
     .then(function(){ go.disabled = false; go.textContent = '대회 열기'; });
 });
 
-/* 카카오 로그인이 켜져 있을 때만 단추를 보여 준다. */
+/* 로그인이 켜져 있을 때만 단추를 보여 준다. 머리띠는 좁아서 첫 공급자 하나만 —
+   나머지는 /app 안의 카드에서 고른다. 목록은 서버가 준 것만 쓴다(여기 적으면 죽은 단추가 남는다). */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
   var el = document.getElementById('nav-login');
-  if (!a.kakao) return;
+  var ps = a.providers || [];
+  if (!ps.length) return;
   el.style.display = '';
+  /* 머리띠에는 «로그인» 한 마디만. 누르면 앱에서 셋을 같은 크기로 보여 준다 —
+     여기에 첫 공급자 이름을 박으면 나머지 둘을 쓰는 사람이 «나는 못 쓰나» 하고 지나친다 */
+  el.textContent = '로그인';
+  el.href = '/app?login=1';
   if (a.loggedIn) { el.textContent = (a.name || '내 대회') + ' 보기'; el.href = '/app'; }
 }).catch(function(){});
 </script>
