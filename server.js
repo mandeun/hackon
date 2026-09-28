@@ -3866,8 +3866,52 @@ function requestsOf(db, event, admin = false) {
   return rows.map(r => { const o = publicRequest({ ...r, teams: by[r.id] || 0 }); if (admin) o.contact = r.contact; return o; });
 }
 /* 후보 — 아직 어느 대회에도 안 붙은 요청. 운영자가 «이 대회 주제로» 가져간다. 올라온 순 */
-function openRequests(db) {
-  return db.prepare("SELECT * FROM requests WHERE event='' AND status='open' ORDER BY created, id LIMIT 50").all()
+/* ── 공개 목록에서 가릴 것.
+   **기계로 가릴 수 있는 것만 가린다** — 욕설은 낱말 목록이라 되고, «주제와 무관한가» 는
+   기계가 못 판정하므로 규칙을 만들지 않는다(P3). 대신 «글이 아닌 것»(자모만, 같은 글자 반복,
+   너무 짧음, 주소만)은 모양으로 가려진다.
+
+   가린 글도 **지우지 않는다.** 올린 사람은 자기 열쇠로 그대로 보고, 운영자도 본다.
+   공개 목록에만 안 실린다 — 판정이 틀렸을 때 되돌릴 수 있어야 한다. */
+/* 낱말을 고를 때는 **멀쩡한 말을 안 잡는 쪽**으로 좁혔다.
+   뺀 것과 까닭: «새끼»(새끼발가락·강아지 새끼) · «씹»(씹다) · «등신»(등신대).
+   덜 잡는 쪽이 낫다 — 잘못 가리면 올린 사람은 자기 글이 왜 안 보이는지 모른다. */
+const SLURS = [
+  '시발', '씨발', '씨빨', 'ㅅㅂ', 'ㅆㅂ', '개새', '좆', '존나', '병신', 'ㅂㅅ',
+  '지랄', '닥쳐', '꺼져', '미친놈', '미친년', '엿먹어', '또라이', 'fuck', 'shit', 'bitch',
+];
+
+/** 낱말 목록으로 가리는 것. 사이에 낀 공백·기호를 빼고 본다 — «시 발», «시*발» 도 같은 말이다. */
+function hasSlur(text) {
+  const k = String(text || '').toLowerCase().replace(/[^0-9a-z가-힣ㄱ-ㅎㅏ-ㅣ]/g, '');
+  return SLURS.some(w => k.includes(w));
+}
+
+/** 글이 아닌 것. 뜻을 판정하지 않는다 — 모양만 본다. */
+function notWriting(text) {
+  const t = String(text || '').trim();
+  const k = t.replace(/\s/g, '');
+  /* **길이로는 안 거른다.** «장부», «재고 세기» 처럼 짧아도 뜻이 있는 말이 있고,
+     «짧으니 쓸모없다» 는 기계가 내릴 판정이 아니다(P3). 모양이 글이 아닌 것만 가린다. */
+  if (!k) return true;
+  if (/^[ㄱ-ㅎㅏ-ㅣ\s]+$/.test(t)) return true;                   // 자음·모음만 (ㅋㅋㅋ, ㅁㄴㅇㄹ)
+  if (/^(.)\1{3,}$/.test(k)) return true;                        // 같은 글자만 넷 이상
+  if (/^https?:\/\/\S+$/i.test(t)) return true;                 // 주소 하나뿐
+  return false;
+}
+
+/** 공개 목록에 실을 수 있나. 실은 글과 가린 까닭을 함께 돌려준다. */
+function publicHide(r) {
+  const joined = [r.topic, r.pain, r.now, r.done, r.name].filter(Boolean).join(' ');
+  if (hasSlur(joined)) return 'slur';
+  if (notWriting(r.pain || r.topic)) return 'thin';
+  return '';
+}
+
+function openRequests(db, all = false) {
+  return db.prepare("SELECT * FROM requests WHERE event='' AND status='open' ORDER BY created, id LIMIT 200").all()
+    .filter(r => all || !publicHide(r))
+    .slice(0, 50)
     .map(r => ({ ...publicRequest(r), solutions: db.prepare('SELECT COUNT(*) c FROM solutions WHERE request=?').get(r.id).c }));
 }
 /* 대회 없이 푼 결과. 백준처럼 «문제 → 풀이» 만 있고 점수는 없다 — 판정은 낸 사람이 «이거면 됩니다» 로. */
@@ -4529,6 +4573,26 @@ const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'qr.js', 's
   /* 첫 화면 표제 사진과 링크 미리보기 그림. 빠져 있어서 둘 다 404 였다 — CSS 는 있는데 사진만 안 나왔다 */
   'hero.jpg', 'og.png']);
 /* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
+/* ── 토스 미니앱에서 오는 요청만 교차 출처를 허용한다.
+   앱인토스 문서: «실제 서비스 환경 https://<appName>.apps.tossmini.com ·
+   QR 테스트 환경 https://<appName>.private-apps.tossmini.com» (SDK 1.x~2.x) ·
+   SDK 3.x 는 web.tossmini.com / private-web.tossmini.com 〔외부 2026-09-28〕.
+   RN 번들은 네이티브라 CORS 를 안 타지만, 웹 방식으로 바뀌거나 라이브 환경이
+   다르게 동작할 때를 대비해 열어 둔다. **목록에 없는 출처는 안 연다.** */
+const MINIAPP_ORIGIN = /^https:\/\/[a-z0-9-]+\.(private-)?(apps|web)\.tossmini\.com$/;
+
+/** 허용 목록에 있으면 그 출처만 돌려준다. 아니면 빈 객체 — `*` 를 쓰지 않는다. */
+function corsFor(origin) {
+  if (!origin || !MINIAPP_ORIGIN.test(origin)) return {};
+  return {
+    'access-control-allow-origin': origin,
+    'vary': 'Origin',
+    'access-control-allow-headers': 'content-type, x-rkey',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-max-age': '86400',
+  };
+}
+
 const SEC_HEADERS = {
   'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https: data: blob:; connect-src 'self'; frame-src https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
   'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-frame-options': 'DENY',
@@ -4549,7 +4613,8 @@ function body(req) {
   });
 }
 const json = (res, code, data) => {
-  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
+  /* res.corsHeaders 는 라우터가 요청 출처를 보고 붙여 둔다(허용 목록 밖이면 비어 있다). */
+  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', ...(res.corsHeaders || {}) });
   res.end(JSON.stringify(data));
 };
 /* #endregion reuse:http-kit */
@@ -4561,6 +4626,12 @@ function routes(db) {
     const u = new URL(req.url, 'http://x');
     const p = u.pathname;
     try {
+      /* 토스 미니앱 출처면 교차 출처를 연다. 그 밖에는 헤더가 없어 브라우저가 막는다. */
+      res.corsHeaders = corsFor(req.headers.origin);
+      if (req.method === 'OPTIONS' && p.startsWith('/api/')) {
+        res.writeHead(Object.keys(res.corsHeaders).length ? 204 : 403, res.corsHeaders);
+        return res.end();
+      }
       const bare = wwwTo(req.headers.host);
       if (bare) { res.writeHead(301, { location: bare + req.url }); return res.end(); }
       /* 화면을 연 것만 센다. api 호출까지 세면 한 사람이 열 번으로 보인다. */
@@ -6692,6 +6763,48 @@ async function selftest() {
     const evQ = createEvent(db, { title: '의뢰로 연 대회' });
     db.prepare('UPDATE requests SET event=? WHERE id=? AND event=\'\'').run(evQ.id, rq2.id);
     ok(!openRequests(db).some(r => r.id === rq2.id) && requestsOf(db, evQ.id).some(r => r.id === rq2.id), '대회에 붙으면 후보에서 빠지고 그 대회 주제가 된다');
+  }
+  {
+    /* ── 공개 목록 가리기. **거르려던 값을 실제로 넣어 본다** (E16).
+       가린 글도 지우지 않는다 — 올린 사람과 운영자는 그대로 본다. */
+    const 욕 = addRequest(db, { kind: 'requester', name: '아무개', pain: '씨발 이딴 거 왜 있냐 진짜 짜증나네' });
+    ok(!openRequests(db).some(r => r.id === 욕.id), '욕설이 든 글은 공개 목록에 안 실린다');
+    ok(openRequests(db, true).some(r => r.id === 욕.id), '가려도 사라지지 않는다 — 운영자는 본다');
+    ok(requestView(db, 욕.id).request.id === 욕.id, '올린 사람은 자기 열쇠로 그대로 본다');
+
+    const 띄움 = addRequest(db, { kind: 'requester', name: '아무개', pain: '시 발 진짜 못 해먹겠다 이거' });
+    ok(!openRequests(db).some(r => r.id === 띄움.id), '사이에 공백을 넣어도 같은 말로 본다');
+
+    const 자모 = addRequest(db, { kind: 'requester', name: '아무개', pain: 'ㅁㄴㅇㄹㅁㄴㅇㄹ' });
+    ok(!openRequests(db).some(r => r.id === 자모.id), '자음·모음만 친 글은 안 실린다');
+
+    const 반복 = addRequest(db, { kind: 'requester', name: '아무개', pain: 'ㅋㅋㅋㅋㅋㅋ' });
+    ok(!openRequests(db).some(r => r.id === 반복.id), '같은 글자만 반복한 글은 안 실린다');
+
+    const 주소 = addRequest(db, { kind: 'requester', name: '아무개', pain: 'https://example.com/spam' });
+    ok(!openRequests(db).some(r => r.id === 주소.id), '주소 하나뿐인 글은 안 실린다');
+
+    const 멀쩡 = addRequest(db, { kind: 'requester', name: '시장 2층 김씨', pain: '주문을 손으로 적는데 나중에 못 찾겠어요' });
+    ok(openRequests(db).some(r => r.id === 멀쩡.id), '멀쩡한 글은 그대로 실린다 — 너무 많이 거르지 않는다');
+    /* 멀쩡한 말을 잡지 않는지 — 낱말 목록을 좁힌 까닭이다 */
+    const 발가락 = addRequest(db, { kind: 'requester', name: '아무개', pain: '새끼발가락 치수 재는 게 번거로워요' });
+    ok(openRequests(db).some(r => r.id === 발가락.id), '«새끼발가락»은 욕이 아니다 — 안 가린다');
+    const 씹다 = addRequest(db, { kind: 'requester', name: '아무개', pain: '씹는 담배 재고 세기가 번거로워요' });
+    ok(openRequests(db).some(r => r.id === 씹다.id), '«씹는»은 욕이 아니다 — 안 가린다');
+    const 넉자 = addRequest(db, { kind: 'requester', name: '아무개', pain: '재고 세기' });
+    ok(openRequests(db).some(r => r.id === 넉자.id), '네 글자라도 뜻이 있으면 실린다');
+    const 두자 = addRequest(db, { kind: 'requester', name: '아무개', pain: '장부' });
+    ok(openRequests(db).some(r => r.id === 두자.id), '두 글자라도 뜻이 있으면 실린다 — 길이로 안 거른다');
+  }
+  {
+    /* ── 토스 미니앱 출처만 교차 출처를 연다 */
+    ok(Object.keys(corsFor('https://hackon-ask.apps.tossmini.com')).length > 0, '토스 실서비스 출처는 허용한다');
+    ok(Object.keys(corsFor('https://hackon-ask.private-apps.tossmini.com')).length > 0, 'QR 테스트 출처도 허용한다');
+    ok(Object.keys(corsFor('https://hackon-ask.web.tossmini.com')).length > 0, 'SDK 3.x 출처도 허용한다');
+    ok(Object.keys(corsFor('https://evil.example.com')).length === 0, '모르는 출처는 안 연다');
+    ok(Object.keys(corsFor('https://tossmini.com.evil.com')).length === 0, '비슷하게 생긴 주소도 안 연다');
+    ok(Object.keys(corsFor('')).length === 0, '출처가 없으면 헤더도 없다');
+    ok(corsFor('https://hackon-ask.apps.tossmini.com')['access-control-allow-origin'] !== '*', '«*» 를 쓰지 않는다');
   }
   let rqThrew = 0; try { addRequest(db, { kind: 'sponsor', name: '', topic: 'x' }); } catch (e) { rqThrew = e.code; }
   ok(rqThrew === 400, '이름 없는 요청은 400');
