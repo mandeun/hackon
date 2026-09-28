@@ -6412,6 +6412,19 @@ async function selftest() {
     }
   }
 
+  /* ── 서빙 목록에 있는 파일이 배포 이미지에도 들어가는가 ──
+     2026-09-28, 노랑이 SVG 셋이 STATIC_OK 에는 있는데 Dockerfile 의 COPY 목록에 없어서
+     로컬에서는 200, 라이브에서는 404 였다. e2e 는 소스 폴더에서 돌아 이걸 못 본다 —
+     완주 검사가 전부 초록인데 실물이 깨져 있었다. 그래서 여기서 목록끼리 맞춰 본다. */
+  {
+    const dock = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
+    const copy = (dock.match(/^COPY (?!--from).*\.\/$/m) || [''])[0];
+    ok(copy, 'Dockerfile 에서 소스를 넣는 COPY 줄을 못 찾았다');
+    const missing = [...STATIC_OK].filter((f) => !copy.includes(' ' + f + ' '));
+    ok(!missing.length,
+       '서빙 목록에 있는데 배포 이미지에 안 들어가는 파일: ' + missing.join(', ') + ' — Dockerfile 의 COPY 에 적는다');
+  }
+
   /* owner 칸을 가진 표가 늘면 mergeOwners 도 늘어야 한다. 표를 세어 코드와 대조한다 */
   {
     const owned = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
