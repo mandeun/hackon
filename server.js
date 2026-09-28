@@ -4804,7 +4804,8 @@ const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'qr.js', 's
   /* 첫 화면 표제 사진과 링크 미리보기 그림. 빠져 있어서 둘 다 404 였다 — CSS 는 있는데 사진만 안 나왔다 */
   'hero.jpg', 'og.png',
   /* 노랑이. 평면 SVG 라 셋 합쳐 5KB 가 안 된다 — 그림 파일로 두면 색을 고칠 때마다 다시 만들어야 한다 */
-  'norangi.svg', 'norangi-run.svg', 'norangi-hi.svg']);
+  'norangi.svg', 'norangi-run.svg', 'norangi-hi.svg', 'story-norangi.svg',
+  'brand.html']);
 /* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
 /* ── 토스 미니앱에서 오는 요청만 교차 출처를 허용한다.
    앱인토스 문서: «실제 서비스 환경 https://<appName>.apps.tossmini.com ·
@@ -4830,9 +4831,13 @@ const SEC_HEADERS = {
   'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https: data: blob:; connect-src 'self'; frame-src https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
   'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-frame-options': 'DENY',
 };
+/* 여기 없는 확장자는 application/octet-stream 으로 나간다. 그런데 nosniff 가 걸려 있어서
+   브라우저가 «그림이겠지» 하고 봐 주지 않는다 — 파일은 200 인데 화면에는 안 그려진다.
+   .svg 가 정확히 그랬다: icon.svg·logo.svg 는 <link> 라 티가 안 났고, <img> 로 쓴 순간 드러났다.
+   아래 selftest 가 STATIC_OK 의 확장자를 전부 이 표와 대조한다. */
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg',
-  '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
+  '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 
 function body(req) {
   return new Promise((res, rej) => {
@@ -6173,7 +6178,7 @@ function routes(db) {
 
       /* #region reuse:static — 화이트리스트 + 경로 탈출 방지 + MIME + 스트림.
          뿌리가 프로젝트 폴더라 server.js·package.json·data/ 까지 열렸다(감사 5·6, 오답노트 E7). 이제 화면 파일만 나간다 */
-      const name = p === '/' ? 'home.html' : p === '/news' ? 'news.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
+      const name = p === '/' ? 'home.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
       if (!STATIC_OK.has(name)) throw new HttpError(404, '없습니다');
       const f = path.join(ROOT, name);
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
@@ -6399,6 +6404,19 @@ async function selftest() {
     ok(Math.abs(hueOf(BRAND.lime) - hueOf(BRAND.amber)) >= HUE_GAP_MIN,
        '라임과 앰버가 서로 붙어 있다 — 나란히 놓으면 둘 다 탁해진다');
 
+    /* 소개 페이지도 같은 표를 적고 있다 — 셋째 자리다. 코드와 어긋나면 방문자가 틀린 값을 읽는다. */
+    {
+      const page = fs.readFileSync(path.join(ROOT, 'brand.html'), 'utf8');
+      const codes = [...page.matchAll(/<code>(#[0-9A-F]{6})<\/code>/g)].map((m) => m[1]);
+      ok(codes.length === 3 && codes.every((c) => Object.values(BRAND).includes(c)),
+         'brand.html 의 색 표가 코드와 다르다: ' + codes.join(','));
+      /* 규칙 넷이 실제로 적혀 있나 — 문장을 지우면 페이지가 «예쁜 그림» 만 남는다 */
+      for (const 말 of ['팔다리를 뺍니다', '눈은 늘 먹', '입을 그리지 않습니다', '한 화면에 한 점'])
+        ok(page.includes(말), `brand.html 에 «${말}» 가 없다`);
+      ok(STATIC_OK.has('brand.html') && STATIC_OK.has('story-norangi.svg'),
+         '소개 페이지나 네 컷이 서빙 목록에 없다');
+    }
+
     /* 노랑이는 앰버다. 라임은 «누를 것» 전용이라 캐릭터에 들어가면 안 된다. 눈은 늘 먹. */
     for (const f of ['norangi.svg', 'norangi-run.svg', 'norangi-hi.svg']) {
       const svg = fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -6415,6 +6433,18 @@ async function selftest() {
          `${f} 의 머리(콘센트)가 앰버 한 덩이가 아니다`);
       ok(STATIC_OK.has(f), `${f} 가 서빙 목록에 없다 — 404 가 된다`);
     }
+    {
+      const st = fs.readFileSync(path.join(ROOT, 'story-norangi.svg'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+      ok(st.includes(BRAND.amber) && !st.includes(BRAND.lime),
+         '네 컷 이야기에 라임이 남아 있다 — 불이 켜진 뒤는 앰버다');
+    }
+  }
+
+  /* 서빙하는 확장자마다 MIME 이 있는가. 없으면 octet-stream 으로 나가고 nosniff 가 막는다 —
+     파일은 200 인데 화면에는 안 나온다. 상태 코드만 보는 검사로는 절대 안 잡힌다. */
+  {
+    const bad = [...STATIC_OK].filter((f) => !MIME[path.extname(f)]);
+    ok(!bad.length, 'MIME 이 없는 확장자로 서빙한다: ' + bad.join(', ') + ' — 200 이어도 화면에 안 그려진다');
   }
 
   /* ── 서빙 목록에 있는 파일이 배포 이미지에도 들어가는가 ──
