@@ -4180,15 +4180,23 @@ function purgeOld(db, force = false) {
 }
 
 /* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
-function needsOf(db, event) {
+/* 자리 판. 한 함수가 두 사람을 본다 — 운영자의 «검토할 목록» 과 손님의 «자리 판».
+   전에는 둘이 같은 것을 받아서, 아직 확인 안 한 사람과 거절당한 사람의 이름·소속·이해관계 표시가
+   열쇠 없는 GET 으로 그대로 나갔다(감사 09-28 5번). 공개 장부(ledgerOf)는 ok·done 만 싣는데
+   이 길만 안 걸렀다. 화면은 브라우저에서 걸러 그리고 있었을 뿐이라, 응답에는 다 실려 있었다.
+   거절당한 사람의 이름이 남의 대회 판에 계속 걸려 있는 것이 특히 나쁘다.
+   손님에게는 «검토 중 N명» 이라는 수만 준다 — 그 수는 화면이 실제로 쓰고 있어서 없애면 기능이 준다. */
+function needsOf(db, event, admin = false) {
   const pl = db.prepare('SELECT id, need, name, org, status, coi FROM pledges WHERE event=? ORDER BY id')
     .all(event);
+  const 보임 = p => admin || p.status === 'ok' || p.status === 'done';
   return db.prepare('SELECT * FROM needs WHERE event=? ORDER BY id').all(event)
     .map(n => ({
       id: n.id, kind: n.kind, label: n.label, qty: n.qty, note: n.note,
       amount: +n.amount || 0, price: +n.price || 0, held: !!n.held, auto: !!n.auto,
       filled: pl.filter(p => p.need === n.id && (p.status === 'ok' || p.status === 'done')).length,
-      pledges: pl.filter(p => p.need === n.id)
+      pending: pl.filter(p => p.need === n.id && p.status === 'pending').length,
+      pledges: pl.filter(p => p.need === n.id && 보임(p))
                  .map(p => ({ id: p.id, name: p.name, org: p.org, status: p.status, coi: !!p.coi })),
     }));
 }
@@ -4290,7 +4298,7 @@ function pledgesOf(db, event) {
 function needsSummary(db, event) {
   const kinds = [];
   for (const n of needsOf(db, event)) {
-    const pending = n.pledges.filter(p => p.status === 'pending').length;
+    const pending = n.pending;
     const k = kinds.find(x => x.kind === n.kind);
     if (k) { k.qty += n.qty; k.filled += n.filled; k.pending += pending; }
     else kinds.push({ kind: n.kind, qty: n.qty, filled: n.filled, pending });
@@ -5169,7 +5177,8 @@ function routes(db) {
         }
         /* ── 빈자리 판 · 공개 장부 · 2주 확인 (PLAN.md §API) ── */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/needs$/))) {
-          if (req.method === 'GET') return json(res, 200, needsOf(db, m[1]));
+          /* 운영자에게는 검토할 목록을, 손님에게는 확인된 것만. 같은 길이라 여기서 가른다. */
+          if (req.method === 'GET') return json(res, 200, needsOf(db, m[1], isAdmin(db, m[1], key, owner)));
           if (req.method === 'POST') {
             needAdmin(db, m[1], key, owner);
             return json(res, 201, addNeed(db, m[1], await body(req)));
@@ -5202,7 +5211,7 @@ function routes(db) {
           if (bd.held !== undefined) { set.push('held=?'); val.push(bd.held ? 1 : 0); }
           if (!set.length) throw new HttpError(400, '고칠 것이 없습니다');
           db.prepare(`UPDATE needs SET ${set.join(',')} WHERE id=?`).run(...val, +m[1]);
-          return json(res, 200, needsOf(db, n.event).find(x => x.id === +m[1]));
+          return json(res, 200, needsOf(db, n.event, true).find(x => x.id === +m[1]));
         }
         if ((m = p.match(/^\/api\/needs\/(\d+)$/)) && req.method === 'DELETE') {
           const n = db.prepare('SELECT event FROM needs WHERE id=?').get(+m[1]);
@@ -5221,7 +5230,7 @@ function routes(db) {
           needAdmin(db, n.event, key, owner);
           const b = await body(req);
           /* 이미 찬 자리에 또 올리면 점판이 «3/2» 가 되고 «확인된 심사 자리 수»가 부풀어 넛지 계산이 오염된다 */
-          const cur = needsOf(db, n.event).find(x => x.id === +m[1]);
+          const cur = needsOf(db, n.event, true).find(x => x.id === +m[1]);
           if (cur && cur.filled >= cur.qty) throw new HttpError(409, '이 자리는 이미 다 찼습니다. 자리 수를 늘리거나 다른 자리에 올리세요');
           const pl = addPledge(db, +m[1], n.event, { name: b.name, org: b.org, note: '앱 밖에서 구함' });
           return json(res, 201, setPledge(db, pl.id, { status: 'ok' }));
@@ -5935,7 +5944,9 @@ async function selftest() {
       ok(ghLogin('https://github.com/karpathy/nanoGPT') === 'karpathy' && ghLogin('https://github.com/torvalds') === 'torvalds' && ghLogin('https://gitlab.com/x') === '' && ghLogin('javascript:1') === '', '깃허브 링크에서 아이디만 뽑는다');
       const nd = addNeed(db, es.id, { kind: 'judge', label: '심사', qty: 1 });
       const pc = addPledge(db, nd.id, es.id, { name: '심사 김', contact: 'j@x.test', coi: true });
-      ok(needsOf(db, es.id).find(n => n.id === nd.id).pledges[0].coi === true, '심사 맡는 분의 이해관계 확인이 남는다');
+      ok(needsOf(db, es.id, true).find(n => n.id === nd.id).pledges[0].coi === true, '심사 맡는 분의 이해관계 확인이 남는다');
+      ok(needsOf(db, es.id).find(n => n.id === nd.id).pledges.length === 0,
+         '아직 확인 안 한 사람의 이해관계 표시가 손님에게 나간다');
       db.prepare("INSERT INTO sponsors(event,name,kind,amount,note,logo,link) VALUES(?,?,?,?,?,?,?)").run(es.id, '파일로고', '현물', 0, '', '', 'https://example.com');
       const sid = db.prepare('SELECT id FROM sponsors WHERE name=?').get('파일로고').id;
       db.prepare('INSERT INTO sponsor_logos(sponsor,mime,data) VALUES(?,?,?)').run(sid, 'image/png', Buffer.from([137, 80, 78, 71]));
@@ -7264,13 +7275,19 @@ async function selftest() {
   ok(pg1.status === 'pending', '신청은 pending 으로 시작한다');
   ok(db.prepare('SELECT contact FROM pledges WHERE id=?').get(pg1.id).contact === 'kim@x.test',
      '연락처는 저장된다 - 운영자가 본다');
-  const pubN = needsOf(db, nbEv.id).find(x => x.id === n1.id);
-  ok(pubN.pledges.length === 1 && pubN.pledges[0].name === '김실무'
-     && pubN.pledges[0].org === '어느회사' && pubN.pledges[0].status === 'pending',
+  const admN = needsOf(db, nbEv.id, true).find(x => x.id === n1.id);
+  ok(admN.pledges.length === 1 && admN.pledges[0].name === '김실무'
+     && admN.pledges[0].org === '어느회사' && admN.pledges[0].status === 'pending',
      '신청이 자리에 붙는다');
-  ok(!('contact' in pubN.pledges[0])
-     && !JSON.stringify(needsOf(db, nbEv.id)).includes('kim@x.test'),
-     '공개 needs 응답에 연락처가 안 실린다');
+  ok(!('contact' in admN.pledges[0])
+     && !JSON.stringify(needsOf(db, nbEv.id, true)).includes('kim@x.test'),
+     '운영자 needs 응답에도 연락처가 안 실린다');
+  /* 손님에게는 아직 확인 안 한 사람의 «이름» 이 가면 안 된다 — 거절당한 사람도 마찬가지다.
+     공개 장부(ledgerOf)가 ok·done 만 싣는 것과 같은 선이다. 감사 09-28 5번. */
+  const pubN = needsOf(db, nbEv.id).find(x => x.id === n1.id);
+  ok(pubN.pledges.length === 0, '검토 중인 신청자 이름이 손님 응답으로 나간다');
+  ok(!JSON.stringify(needsOf(db, nbEv.id)).includes('김실무'), '검토 중인 신청자 이름이 손님 응답으로 나간다');
+  ok(pubN.pending === 1, '검토 중인 건수는 손님에게도 남아야 한다');   // 화면이 실제로 쓰는 수
   ok(pubN.filled === 0, 'pending 는 아직 채운 것이 아니다');
   ok(!JSON.stringify(ledgerOf(db, nbEv.id)).includes('김실무'), 'pending 는 장부에도 안 나온다');
 
@@ -7336,7 +7353,7 @@ async function selftest() {
   /* 자리 점판 — 숫자를 박지 않고 needs 목록에서 직접 세어 비교한다 */
   const 점판 = needsSummary(db, nbEv.id);
   const 직접 = { total: 0, filled: 0, pending: 0 }, 직접종류 = {};
-  for (const n of needsOf(db, nbEv.id)) {
+  for (const n of needsOf(db, nbEv.id, true)) {          // 운영자 쪽이 원본이라 여기서 직접 센다
     const pen = n.pledges.filter(p => p.status === 'pending').length;
     직접.total += n.qty; 직접.filled += n.filled; 직접.pending += pen;
     const k = 직접종류[n.kind] || (직접종류[n.kind] = { qty: 0, filled: 0, pending: 0 });
