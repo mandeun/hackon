@@ -131,6 +131,16 @@ section{background:var(--card);border-radius:22px;padding:var(--s5) var(--s5);ma
 .ev .t{font-weight:700;font-size:18px;line-height:1.35;text-wrap:pretty}
 .ev .m{font-size:14px;color:var(--grey);margin-top:4px}
 .ev .n{grid-column:2;font-family:var(--mono);font-size:13.5px;color:var(--grey);font-variant-numeric:tabular-nums}
+/* 제목 링크를 카드 전체로 펼친다. 카드 아무 데나 눌러도 대회로 간다 */
+.ev{position:relative}
+.ev .t a{color:inherit;text-decoration:none}
+.ev .t a::after{content:'';position:absolute;inset:0}
+/* 대화방은 그 위에 뜬다 — 펼친 링크에 안 먹히게 z-index 를 올린다.
+   라임이 아니라 먹 테두리다. «누를 것» 한 점은 위쪽 «대회 열기» 가 이미 쓰고 있다 */
+.ev .room{position:relative;z-index:1;display:inline-flex;align-items:center;gap:4px;
+  padding:3px 9px;margin-left:2px;border:1px solid var(--hair);border-radius:999px;
+  font-family:var(--sans);font-size:12.5px;font-weight:700;color:var(--ink);text-decoration:none;background:#fff}
+.ev .room:hover{border-color:var(--ink)}
 .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
 .tools[hidden]{display:none}
 .tools .chip{padding:6px 14px;border-radius:99px;border:1px solid var(--hair);background:#fff;color:var(--ink);font:600 13px var(--sans);cursor:pointer;touch-action:manipulation;min-height:44px}
@@ -296,15 +306,6 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
     <a class="btn s" id="empty-open" href="/app?make=1">대회 열기</a>
   </div>
-  <!-- 모여 있는 곳. 신청까지 아직 못 가는 사람이 할 수 있는 일 하나를 여기 둔다.
-       밖에서(당근·커뮤니티) 대화방으로 바로 끌면 그쪽 정책에 걸린다 — 밖에 내는 주소는 이 사이트 하나로 두고,
-       대화방은 들어온 다음에 만난다. 대화방을 적은 대회가 없으면 통째로 숨는다(없음과 모름을 가른다). -->
-  <div id="room" hidden style="margin-top:22px">
-    <h2 style="font-size:17px">모여 있는 곳 <span class="mono grey" id="room-count" style="font-size:14px;font-weight:400"></span></h2>
-    <p class="grey" style="margin:4px 0 8px">신청은 아직 이르신가요. 무엇을 만드는 곳인지 먼저 보고 싶으면 여기서 사람들을 만나세요.</p>
-    <div id="room-l" class="evs"></div>
-  </div>
-
   <!-- 같은 절 안에 둔다 — 첫 화면은 절 셋을 넘기지 않는다(검사가 잠근다). 의뢰가 없으면 통째로 숨는다 -->
   <div id="asks" hidden style="margin-top:22px">
     <h2 style="font-size:17px">풀어 달라는 문제 <span class="mono grey" id="asks-count" style="font-size:14px;font-weight:400"></span></h2>
@@ -443,28 +444,25 @@ function 그리기(){
   document.getElementById('empty').hidden = 목록.length > 0;
   document.getElementById('grid').innerHTML = 목록.map(function(e){
     var s = 상태(e), d = 남은날(e);
-    return '<a class="ev" href="/e/' + esc(e.id) + '">' +
+    /* 카드는 div 다. 전에는 통째로 <a> 였는데, 그러면 안에 «대화방» 링크를 못 넣는다(a 안의 a).
+       제목에 펼친 링크(.t a::after)를 써서 카드 아무 데나 눌러도 대회로 가고,
+       대화방만 그 위에 떠 있게 한다 — Luma·Nextdoor 가 행동을 행사 카드 안에 두는 방식이다. */
+    return '<div class="ev">' +
       '<span class="st ' + s.c + '">' + s.k + (d ? ' ' + d : '') + '</span>' +
-      '<span><div class="t">' + esc(e.title) + '</div><div class="m">' + esc(e.host) + ' · ' +
+      '<span><div class="t"><a href="/e/' + esc(e.id) + '">' + esc(e.title) + '</a></div><div class="m">' + esc(e.host) + ' · ' +
         (e.pastEvents ? '지난 대회 ' + e.pastEvents + '번 · 완주율 ' + e.pastFinish + '%' : '첫 대회') +
         ((e.sponsors || []).length ? ' · 함께: ' + e.sponsors.map(esc).join(', ') : '') +
         /* 어디서 하는지. 안 적혔으면 아무 말도 안 쓴다 — 모름을 «없음»으로 그리지 않는다 */
         (e.place ? '</div><div class="m">📍 ' + esc(e.place) : '') + '</div></span>' +
       '<span class="n">' + esc(e.starts) + (e.ends !== e.starts ? '~' + esc(e.ends).slice(5) : '') +
-        ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') + '</span>' +
-      '</a>';
-  }).join('');
-  /* 모여 있는 곳 — 아직 안 끝난 대회 중 대화방 주소를 적은 것만. 필터·검색과 무관하게 늘 같은 것을 보여 준다
-     («모집중» 만 걸러 놓은 사람에게 대화방이 사라지면 그게 더 이상하다). */
-  var 방 = 대회들.filter(function(e){ return e.chat && 상태(e).c !== 'done'; }).slice(0, 3);
-  document.getElementById('room').hidden = !방.length;
-  document.getElementById('room-count').textContent = 방.length ? 방.length + '곳' : '';
-  document.getElementById('room-l').innerHTML = 방.map(function(e){
-    return '<a class="ev" href="' + esc(e.chat) + '" target="_blank" rel="noopener">' +
-      '<span class="st open">대화방</span>' +
-      '<span><div class="t">' + esc(e.title) + '</div>' +
-        '<div class="m">' + esc(e.host) + ' · 열려 있는 대화방입니다. 묻고 구경만 해도 됩니다</div></span>' +
-      '<span class="n">새 창에서 열림</span></a>';
+        ' · ' + (e.teams != null ? e.teams + '팀' : '—') + ' · ' + (e.prize ? '상금 ' + 돈(e.prize) : '상금 없음') +
+        /* 대화방. 신청까지 아직 못 가는 사람이 할 수 있는 일 하나다 —
+           밖에서 대화방으로 바로 끌면 그쪽 정책에 걸리니, 밖에 내는 주소는 사이트 하나로 두고 여기서 만난다.
+           주소를 안 적은 대회에는 아예 안 그린다. 끝난 대회에도 안 그린다. */
+        (e.chat && 상태(e).c !== 'done'
+          ? ' · <a class="room" href="' + esc(e.chat) + '" target="_blank" rel="noopener">💬 대화방</a>' : '') +
+        '</span>' +
+      '</div>';
   }).join('');
   var 곧 = 목록.filter(function(e){ return 상태(e).c === 'open' && e.id !== 'demo1'; })[0];
   document.getElementById('foot-note').textContent = 곧 ? '다음 대회 ' + 곧.starts : '';

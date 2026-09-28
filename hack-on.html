@@ -2065,6 +2065,20 @@ const SCREEN = {
     /* 사이트 운영자 표시. 보이지 않는 권한은 사고가 난다 — 남의 대회를 내 것인 줄 알고 고치게 된다.
        «내가 연 대회» 칸 안에 두면 안 된다. 그 칸은 내 대회가 0개일 때 통째로 안 그려지는데,
        열쇠를 잃어 대회가 0개로 보이는 사람이 바로 이 권한을 쓰는 사람이다. */
+    /* 첫 운영자 앉히기. 서버가 «문이 열려 있고 아직 아무도 없다» 고 할 때만 그린다.
+       한 번 들어오면 영영 사라진다. 로그인부터 해야 한다 — 옮겨 갈 계정이 있어야 옮긴다. */
+    const claimBox = (AUTH && AUTH.claimable) ? `
+      <div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
+        <h3 style="color:var(--warn)">첫 사이트 운영자 앉히기</h3>
+        <div class="meta">${AUTH.loggedIn
+          ? '지금 로그인한 계정을 사이트 운영자로 앉힙니다. <b>한 번만</b> 되고, 그다음부터 이 칸은 사라집니다.'
+          : '<b>먼저 로그인해 주세요.</b> 로그인한 계정으로 앉힙니다.'}</div>
+        ${AUTH.loggedIn ? `<div style="height:10px"></div>
+          <label>지정 토큰</label>
+          <input id="cl-token" placeholder="서버에 넣어 둔 ADMIN_CLAIM 값" autocomplete="off">
+          <div style="height:10px"></div>
+          <button class="btn sm" id="cl-go">내 계정을 사이트 운영자로</button>` : ''}
+      </div>` : '';
     const adminBox = (AUTH && AUTH.siteAdmin) ? `
       <div class="card" style="padding:11px 13px;border-color:#EBD3AE;background:var(--warn-l)">
         <div class="meta"><b style="color:var(--warn)">사이트 운영자로 보고 있습니다.</b>
@@ -2141,14 +2155,14 @@ const SCREEN = {
       </details>` : ''}`;
     /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
        그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
-    if (!list.length && my && my.events.length) return loginBox + adminBox + mineBox + `
+    if (!list.length && my && my.events.length) return loginBox + claimBox + adminBox + mineBox + `
       <div class="card">
         <h3>다음에 할 일</h3>
         <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
       </div>` + findBox;
-    if (!list.length) return loginBox + adminBox + mineBox + `<h2>아직 열린 대회가 없습니다</h2>
+    if (!list.length) return loginBox + claimBox + adminBox + mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
-    return loginBox + adminBox + mineBox + `<h2>열린 대회</h2>` +
+    return loginBox + claimBox + adminBox + mineBox + `<h2>열린 대회</h2>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
         <div class="body"><h3>${esc(e.title)}</h3>
@@ -5499,6 +5513,16 @@ function wire() {
     jTeam = r.dataset.jgo; jAll = false; render();
   });
 
+  const clGo = $('#cl-go');
+  if (clGo) clGo.onclick = async () => {
+    const t = ($('#cl-token') ? $('#cl-token').value : '').trim();
+    if (!t) return flash('토큰을 넣어 주세요', true);
+    try {
+      await api('/admin/claim', { method: 'POST', body: { token: t } });
+      flash('사이트 운영자가 되었습니다');
+      setTimeout(() => location.reload(), 700);
+    } catch (e) { flash(e.message, true); }
+  };
   const adopt = $('#b-adopt');
   if (adopt) adopt.onclick = async () => {
     try {
