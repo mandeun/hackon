@@ -5234,6 +5234,11 @@ function routes(db) {
             providers: loginMenu(),
             loggedIn: !!cookieOwner,        // 지금 로그인 상태인가
             siteAdmin,                      // 사이트 운영자인가. 화면이 «보는 중» 이라고 적는 근거
+            /* 첫 운영자를 아직 앉힐 수 있나. 토큰이 있고(ADMIN_CLAIM) 아직 아무도 없을 때만 참이다.
+               «문이 열려 있다» 는 사실만 알려 주고 토큰은 안 준다 — 누르는 사람이 토큰을 안다.
+               첫 사람이 들어오는 순간 영영 거짓이 된다. 콘솔에 붙여 넣게 하지 않으려고 둔다. */
+            claimable: !!process.env.ADMIN_CLAIM
+                       && !db.prepare('SELECT COUNT(*) c FROM site_admins').get().c,
 
             owner: me2 ? me2.id : '',
             name: me2 ? me2.name : '',

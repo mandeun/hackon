@@ -3475,6 +3475,13 @@ def claim_post(token):
         return e.code
 
 
+# 화면이 «문이 열려 있다» 를 알아야 지정 칸을 그린다. 토큰은 서버가 안 준다 — 누르는 사람이 안다.
+_ca = json.loads(urllib.request.urlopen(CLAIM_BASE + "/api/auth").read().decode())
+A(_ca.get("claimable") is True, f"토큰이 있는 서버가 claimable 을 안 알려 준다: {_ca}")
+A("테스트-토큰-1234" not in json.dumps(_ca, ensure_ascii=False), "지정 토큰이 응답에 실려 나간다")
+_cb = json.loads(urllib.request.urlopen(BASE + "/api/auth").read().decode())
+A(_cb.get("claimable") is False, "토큰이 없는 서버인데 지정 칸이 열려 있다고 한다")
+
 A(claim_post("테스트-토큰-1234") == 401, "토큰만 맞으면 로그인 없이 사이트 운영자가 된다")
 A(claim_post("틀린토큰") == 401, "로그인 검사보다 토큰 검사가 먼저다 — 토큰 맞고 틀림이 응답으로 갈린다")
 ok("사이트 운영자 — 토큰이 맞아도 로그인 없이는 못 들어간다(401)")
