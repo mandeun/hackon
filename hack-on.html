@@ -2735,6 +2735,18 @@ const SCREEN = {
              <button class="btn sm" id="b-list">첫 화면 목록에 올리기</button>
            </div>`}
 
+      ${/* 이 대회를 내 계정에 붙이기. 열쇠로 들어온 사람은 고칠 수는 있어도 «내 대회» 에는 안 뜬다 —
+            기기를 바꾸면 그대로 잃는다. 서버가 owned 를 내려줄 때(= 로그인해 있을 때)만 그린다.
+            로그인 안 한 사람에게는 «아니다» 가 아니라 «모른다» 라서 아무것도 안 그린다. */''}
+      ${e.admin && e.owned === 0 ? `<div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
+          <h3 style="color:var(--warn)">이 대회가 아직 내 계정에 안 붙어 있습니다</h3>
+          <div class="meta">지금은 <b>이 브라우저의 열쇠</b>로만 열립니다. «내 대회» 목록에 안 뜨고,
+            기기를 바꾸거나 이 브라우저를 비우면 못 찾습니다. 붙이면 로그인만으로 어디서든 열립니다.
+            참가자에게 보이는 것은 아무것도 안 바뀝니다.</div>
+          <div style="height:10px"></div>
+          <button class="btn sm" id="b-adopt">내 계정에 붙이기</button>
+        </div>` : ''}
+
       ${/* 모집 점검. «대회가 성립하나»(missing) 와 «사람이 오나» 는 다른 물음이다 —
             앞의 것은 서버가 판정하고 목록 공개를 막는 것이고, 이건 막지 않는다.
             비어 있어도 대회는 돌아가므로 «해야 한다» 고 쓰지 않는다. 다만 안 보이면 아무도 안 채운다.
@@ -5396,6 +5408,14 @@ function wire() {
     jTeam = r.dataset.jgo; jAll = false; render();
   });
 
+  const adopt = $('#b-adopt');
+  if (adopt) adopt.onclick = async () => {
+    try {
+      const r = await api(`/events/${cur}/adopt`, { method: 'POST', body: {} });
+      flash(r.moved ? '내 계정에 붙였습니다' : '이미 내 계정 것입니다');
+      setTimeout(() => location.reload(), 600);
+    } catch (e) { flash(e.message, true); }
+  };
   const lst = $('#b-list'), unlst = $('#b-unlist');
   const setList = async on => {
     if (!LIVE) return flash('데모에서는 안 됩니다', true);
