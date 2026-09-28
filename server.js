@@ -3184,6 +3184,16 @@ function savePair(db, event, b) {
     const t = db.prepare('SELECT event FROM teams WHERE id=?').get(id);
     if (!t || t.event !== event) throw new HttpError(404, '이 대회의 팀이 아닙니다');
   }
+  /* 누가 비교표에 오를 수 있는지는 pairTeams 가 정한다 — «안 낸 팀을 올리면 나머지가 공짜 승리를 얻는다».
+     보여 주는 쪽(nextPair·pairView)은 그 규칙을 지켰는데 저장하는 쪽은 안 봤다. 그래서 화면이 절대
+     내주지 않는 짝도 직접 보내면 그대로 쌓였고, pairScores 는 쌓인 줄을 전부 세므로 안 낸 팀이
+     1등이 될 수 있었다. 짝 비교가 꺼져 있을 때도 쌓였다가 켜는 순간 한꺼번에 살아났다. 감사 09-28 10번.
+     거르는 자리는 «쓸 때» 다 — 읽을 때 거르면 pall 을 켜고 쌓은 정상 비교까지 죽는다(7432 가 그것을 고정한다). */
+  const 올릴수있는 = new Set(pairTeams(db, event).map(t => t.id));
+  if (!올릴수있는.has(x) || !올릴수있는.has(y))
+    throw new HttpError(409, '비교표에 오르지 않은 팀입니다');
+  if (!db.prepare('SELECT pmode FROM events WHERE id=?').get(event).pmode)
+    throw new HttpError(409, '짝 비교가 켜져 있지 않습니다');
   const lo = Math.min(x, y), hi = Math.max(x, y);
   db.prepare(`INSERT INTO pairs(event,judge,a,b,winner) VALUES(?,?,?,?,?)
               ON CONFLICT(event,judge,a,b) DO UPDATE SET winner=excluded.winner, at=datetime('now')`)
@@ -4187,8 +4197,20 @@ function purgeOld(db, force = false) {
     n += db.prepare("UPDATE pledges SET contact='' WHERE event=? AND contact<>''").run(id).changes;
     n += db.prepare("UPDATE offers SET contact='' WHERE event=? AND contact<>''").run(id).changes;
     n += db.prepare("UPDATE requests SET contact='' WHERE event=? AND contact<>''").run(id).changes;
+    /* 연락처는 teams.contact 하나가 아니다. 짝의 주소(mate_contact)는 이미 쓸고 있는 표 안에 있으면서
+       빠져 있었고, 멘토·심사(supporters)와 대기자(waitlist)도 안 지워졌다. 처리방침은 «6개월» 이라고
+       한 줄로 약속하는데, 손으로 적은 이 표 목록이 그 약속보다 짧았다. 감사 09-28 13번. */
+    n += db.prepare("UPDATE teams SET mate_contact='' WHERE event=? AND mate_contact<>''").run(id).changes;
+    try { n += db.prepare("UPDATE supporters SET contact='' WHERE event=? AND contact<>''").run(id).changes; } catch {}
+    try { n += db.prepare("UPDATE waitlist SET contact='' WHERE event=? AND contact<>''").run(id).changes; } catch {}
   }
   try { n += db.prepare("UPDATE feedback SET contact='' WHERE contact<>'' AND at < date('now','-180 days')").run().changes; } catch {}
+  /* 대회 표에 안 묶인 것들 — 대회를 지워도 남으므로 날짜로만 지울 수 있다.
+     team_trash 는 사본 안에 팀 줄이 통째로(연락처와 팀 열쇠까지) 들어 있어서 특히 오래 두면 안 된다.
+     대회 휴지통과 같은 30일을 쓴다. */
+  try { n += db.prepare("DELETE FROM team_trash WHERE at < datetime('now','-30 days')").run().changes; } catch {}
+  try { n += db.prepare("UPDATE mail_log SET rcpt='' WHERE rcpt<>'' AND at < date('now','-180 days')").run().changes; } catch {}
+  try { n += db.prepare("UPDATE solutions SET contact='' WHERE contact<>'' AND at < date('now','-180 days')").run().changes; } catch {}
   /* 지운 대회 휴지통은 30일. 화면에서 «30일 뒤 지워집니다» 라고 약속한 그 30일이다.
      팀·후원자 연락처가 사본 안에 그대로 들어 있으므로 기한이 지나면 줄째로 지운다. */
   let trash = 0;
@@ -5235,8 +5257,12 @@ function routes(db) {
           const n = db.prepare('SELECT event FROM needs WHERE id=?').get(+m[1]);
           if (!n) throw new HttpError(404, '없는 자리입니다');
           needAdmin(db, n.event, key, owner);
-          if (db.prepare('SELECT 1 FROM pledges WHERE need=? LIMIT 1').get(+m[1]))
+          /* 막는 말이 «먼저 거절하세요» 인데, 거절해도 줄은 남으므로 다시 막혔다 — 안내한 길이 막다른 길이었다.
+             맡겠다는 사람은 무열쇠로 누구나 붙일 수 있으니, 아무나 붙여 두면 운영자가 제 자리를 영영 못 지웠다.
+             이제 거절한 줄은 막는 이유로 안 세고, 자리를 지울 때 같이 치운다. 감사 09-28 6번. */
+          if (db.prepare("SELECT 1 FROM pledges WHERE need=? AND status<>'no' LIMIT 1").get(+m[1]))
             throw new HttpError(409, '맡겠다는 사람이 있는 자리는 지울 수 없습니다. 먼저 거절하세요');
+          db.prepare("DELETE FROM pledges WHERE need=? AND status='no'").run(+m[1]);
           db.prepare('DELETE FROM needs WHERE id=?').run(+m[1]);
           return json(res, 200, { ok: true });
         }
@@ -6727,6 +6753,33 @@ async function selftest() {
     const 자진 = joinTeam(db, 내림대회.id, { name: '자진팀', email: 'self@x.test', agree: true });
     const 자진내림 = trashTeam(db, 자진, 'team');
     ok(untrashTeam(db, 자진내림, true).id === 자진, '스스로 취소한 팀이 되돌리지 못한다');
+
+    /* ── 6개월 뒤에는 어느 표에도 안 남는다 (감사 09-28 13번) ──
+       표 이름을 손으로 적으면 그 목록이 곧 약속보다 짧아진다. 그래서 DB 를 통째로 훑어
+       «그 주소가 아직 어딘가 있나» 를 묻는다. 표가 새로 생겨도 이 단언은 계속 맞는다. */
+    const 어딘가 = 값 => db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
+      .some(t => db.prepare(`PRAGMA table_info(${t.name})`).all()
+        .filter(c => /TEXT/i.test(c.type || ''))
+        .some(c => {
+          try { return !!db.prepare(`SELECT 1 FROM ${t.name} WHERE ${c.name} LIKE ? LIMIT 1`).get('%' + 값 + '%'); }
+          catch { return false; }
+        }));
+    const 옛대회 = createEvent(db, { title: '보관기한검사' });
+    const 옛팀 = joinTeam(db, 옛대회.id, { name: '옛팀', email: 'gone@purge.test', agree: true });
+    db.prepare("UPDATE teams SET mate_contact='mate@purge.test' WHERE id=?").run(옛팀);
+    try { db.prepare("INSERT INTO supporters(event,name,role,contact) VALUES(?,?,?,?)")
+      .run(옛대회.id, '멘토', 'mentor', 'mentor@purge.test'); } catch {}
+    try { db.prepare("INSERT INTO waitlist(event,name,contact) VALUES(?,?,?)")
+      .run(옛대회.id, '대기자', 'wait@purge.test'); } catch {}
+    const 버릴팀 = joinTeam(db, 옛대회.id, { name: '버릴팀', email: 'trashed@purge.test', agree: true });
+    const 버림 = trashTeam(db, 버릴팀, 'team');
+    db.prepare("UPDATE team_trash SET at = datetime('now','-31 days') WHERE id=?").run(버림);
+    ok(어딘가('gone@purge.test') && 어딘가('mate@purge.test') && 어딘가('trashed@purge.test'),
+       '검사용 연락처가 애초에 저장이 안 됐다');
+    db.prepare("UPDATE events SET ends = date('now','-200 days') WHERE id=?").run(옛대회.id);
+    purgeOld(db, true);
+    for (const 주소 of ['gone@purge.test', 'mate@purge.test', 'mentor@purge.test', 'wait@purge.test', 'trashed@purge.test'])
+      ok(!어딘가(주소), '6개월 지난 연락처가 아직 어딘가 남아 있다: ' + 주소);
   }
   ok(privacyPage().includes('개인정보 처리방침') && privacyPage().includes('6개월') && !privacyPage().includes('undefined'), '개인정보 처리방침 페이지가 있다');
   const dl = ledgerOf(db, dEv0 = createEvent(db, { title: '장부표시' }).id);
@@ -7368,6 +7421,7 @@ async function selftest() {
   try { setPledge(db, pg1.id, { status: 'maybe' }); } catch { 이상한상태 = true; }
   ok(이상한상태, '상태는 정해진 넷 중 하나다');
 
+
   /* 2주 확인 - 팀 열쇠나 신청 때 적은 연락처로만 쓴다 */
   let 막힘 = false;
   try { addFollowup(db, nbEv.id, { tool: '뭔가' }, { headers: {} }); } catch { 막힘 = true; }
@@ -7672,6 +7726,25 @@ async function selftest() {
     ok(board(db, fe.id, true).rows.find(r => r.id === f1).pscore === null, '아직 안 붙은 팀은 모름이다');
     setPmode(db, fe.id, { on: 1, all: 0 });
     ok(pairView(db, fe.id, '심사', true).teams === 1, '«제출 없이도»를 끄면 다시 제출한 팀만 오른다');
+
+    /* 보여 주는 쪽이 지키는 규칙을 저장하는 쪽도 지켜야 한다(감사 09-28 10번).
+       화면은 안 낸 팀을 절대 안 내주는데, 같은 요청을 직접 보내면 그대로 쌓였고
+       pairScores 는 쌓인 줄을 전부 센다. 이미 쌓아 둔 줄은 그대로 세는 것이 맞다 —
+       위의 «제출 안 한 팀도 비교 점수를 받는다» 가 그것을 고정한다. 막는 자리는 «쓸 때» 다. */
+    let 막힘 = 0;
+    try { savePair(db, fe.id, { judge: '심사', a: f1, b: f2, winner: f1 }); } catch (e) { 막힘 = e.code; }
+    ok(막힘 === 409, '비교표에 안 오른 팀을 직접 보내면 그대로 저장된다');
+    ok(board(db, fe.id, true).rows.find(r => r.id === f2).pscore === 100,
+       '전에 pall 로 쌓아 둔 비교까지 같이 죽었다');
+    /* 짝 비교가 꺼져 있으면 쌓아 둘 수도 없다 — 켜는 순간 한꺼번에 살아나면 안 된다.
+       여기서는 «자격» 이 아니라 «꺼짐» 때문에 막혀야 하므로, 두 팀 다 제출시켜 자격을 먼저 채운다. */
+    submit(db, f2, { url: 'https://example.com/f2' });
+    submit(db, f3, { url: 'https://example.com/f3' });
+    setPmode(db, fe.id, { on: 0 });
+    let 꺼짐 = 0;
+    try { savePair(db, fe.id, { judge: '심사', a: f2, b: f3, winner: f2 }); } catch (e) { 꺼짐 = e.code; }
+    ok(꺼짐 === 409, '짝 비교가 꺼져 있는데도 비교가 저장된다');
+    setPmode(db, fe.id, { on: 1, all: 1 });
   }
   {
     /* 유입 — 화면만 센다. 그림·스크립트까지 세면 숫자가 의미를 잃는다 */
