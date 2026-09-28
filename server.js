@@ -1626,9 +1626,15 @@ function trashTeam(db, teamId, by) {
   db.prepare('DELETE FROM teams WHERE id=?').run(teamId);
   return Number(r.lastInsertRowid);
 }
-function untrashTeam(db, trashId) {
+/* asTeam 은 «팀 열쇠만 들고 온 참가자» 라는 뜻이다.
+   지울 때 누가 지웠는지(by)를 적어 두면서도 되살릴 때는 안 봤다. 그래서 운영자가 내린 팀이
+   자기 열쇠로 다시 들어올 수 있었고, 되살리면 휴지통 줄이 지워져 «내렸다» 는 기록까지 사라졌다.
+   자기 취소는 마감 뒤 막히는데 되살리기는 안 막혀서 마감 우회로도 됐다. 감사 09-28 8번. */
+function untrashTeam(db, trashId, asTeam = false) {
   const row = db.prepare('SELECT * FROM team_trash WHERE id=?').get(trashId);
   if (!row) throw new HttpError(404, '휴지통에 없습니다');
+  if (asTeam && row.by === 'admin')
+    throw new HttpError(403, '운영자가 내린 신청입니다. 주최자에게 말씀해 주세요');
   const d = JSON.parse(row.json);
   const ins = (table, r) => {
     const ks = Object.keys(r);
@@ -3805,6 +3811,13 @@ function restoreEvent(db, d, owner) {
   if (!owner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(owner)) throw new HttpError(403, '주최자 열쇠가 필요합니다');
   if (typeof e.title !== 'string' || !e.title) throw new HttpError(400, '사본 파일이 아닙니다');
   if (db.prepare('SELECT 1 FROM events WHERE id=?').get(e.id)) throw new HttpError(409, '같은 id 의 대회가 살아 있습니다');
+  /* 쓰던 id 를 그대로 되살리는 것은 «내가 지운 내 대회» 일 때만이다.
+     전에는 살아 있지만 않으면 아무 id 나 쓸 수 있었다. 지워진 대회 id 는 공개 목록을 두 번 보면
+     알 수 있고, team_trash·mail_log·reports·requests 는 대회 표에 묶여 있지 않아 지워도 남는다.
+     그래서 남이 지운 id 를 다시 등록하면 그 대회의 운영자가 되어, 남은 팀 휴지통을 되살려
+     참가자 연락처까지 가져갈 수 있었다. 남의 id 면 새 id 를 준다. 감사 09-28 4번. */
+  if (!db.prepare('SELECT 1 FROM event_trash WHERE event=? AND owner=?').get(e.id, owner))
+    e.id = nid();
   const cols = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
   const okey = crypto.randomBytes(5).toString('hex');   // 사본엔 운영자 열쇠가 없다. 새로 준다
   const row = { ...e, okey, owner, jkey: crypto.randomBytes(5).toString('hex'), vkey: crypto.randomBytes(5).toString('hex') };
@@ -3813,6 +3826,11 @@ function restoreEvent(db, d, owner) {
   db.prepare(`INSERT INTO events(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`).run(...keys.map(k => row[k]));
   const ins = (table, r, drop = ['id']) => {
     const tc = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+    /* 딸린 줄이 «어느 대회 것인가» 는 사본이 정하는 게 아니라 지금 되살리는 이 대회다.
+       전에는 사본의 event 칸을 그대로 넣어서, 살아 있는 남의 대회 id 를 적어 보내면
+       그 대회 안으로 줄이 꽂혔다 — 소식(공개), 가짜 팀, 설문, 자리·후원까지.
+       주최자 열쇠는 무인증 POST 한 번이면 스스로 발급되므로 문턱이 없었다. 감사 09-28 3번. */
+    if (tc.includes('event')) r = { ...r, event: e.id };
     const ks = tc.filter(c => !drop.includes(c) && r[c] !== undefined);
     for (const k of ks) if (r[k] !== null && typeof r[k] === 'object') throw new HttpError(400, '사본 파일이 아닙니다: ' + table + '.' + k);
     return Number(db.prepare(`INSERT INTO ${table}(${ks.join(',')}) VALUES(${ks.map(() => '?').join(',')})`).run(...ks.map(k => r[k])).lastInsertRowid);
@@ -5301,15 +5319,16 @@ function routes(db) {
           const row = db.prepare('SELECT id, event, tkey FROM team_trash WHERE id=?').get(+m[1]);
           if (!row) throw new HttpError(404, '휴지통에 없습니다');
           const tk = String(req.headers['x-tkey'] || '');
-          if (!tk || tk !== row.tkey) needAdmin(db, row.event, key, owner);
-          return json(res, 200, untrashTeam(db, row.id));
+          const 팀으로 = !!tk && tk === row.tkey;
+          if (!팀으로) needAdmin(db, row.event, key, owner);
+          return json(res, 200, untrashTeam(db, row.id, 팀으로));
         }
         /* 참가자가 «신청 취소»를 되돌린다. 팀 열쇠만 있으면 된다 — 휴지통 번호는 몰라도 된다. */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/trash\/mine$/)) && req.method === 'POST') {
           const tk = String(req.headers['x-tkey'] || (await body(req)).tkey || '');
           const row = tk ? db.prepare('SELECT id FROM team_trash WHERE event=? AND tkey=? ORDER BY id DESC').get(m[1], tk) : null;
           if (!row) throw new HttpError(404, '취소된 신청이 없습니다');
-          return json(res, 200, untrashTeam(db, row.id));
+          return json(res, 200, untrashTeam(db, row.id, true));
         }
         /* 팀 링크로 들어온 브라우저가 «내 팀»을 되찾는다. 열쇠가 맞을 때만 팀 id 를 준다 */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/claim$/)) && req.method === 'POST') {
@@ -6667,6 +6686,47 @@ async function selftest() {
        && db.prepare('SELECT 1 FROM event_trash WHERE id=?').get(keep),
        '30일 지난 휴지통 줄만 지워지고 어제 것은 남는다 (' + pg2.trash + '줄)');
     db.prepare('DELETE FROM event_trash WHERE id=?').run(keep);
+
+    /* ── 되살리기가 남의 것을 못 건드린다 (감사 09-28 3·4·8번) ── */
+    /* 3 — 사본이 «어느 대회 것» 이라고 적어 보내도, 딸린 줄은 지금 되살리는 대회로 간다.
+           주최자 열쇠는 대회 하나만 열면 스스로 생기므로 남의 열쇠가 필요 없다. */
+    const 피해 = createEvent(db, { title: '피해대회' });
+    const 남 = createEvent(db, { title: '공격자대회' });
+    const 소식전 = db.prepare('SELECT COUNT(*) c FROM notices WHERE event=?').get(피해.id).c;
+    const 끼움 = restoreEvent(db, {
+      event: { id: 'zz9a0001', title: '되살린것', host: '아무개', starts: '2026-10-01', ends: '2026-10-01' },
+      teams: [{ id: 1, event: 피해.id, name: '끼어든팀', contact: 'x@zz.test' }],
+      notices: [{ id: 1, event: 피해.id, text: '끼어든 소식' }],
+    }, 남.owner);
+    ok(db.prepare('SELECT COUNT(*) c FROM notices WHERE event=?').get(피해.id).c === 소식전,
+       '사본이 적어 보낸 대회로 소식이 꽂힌다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(피해.id).c === 0,
+       '사본이 적어 보낸 대회로 팀이 꽂힌다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(끼움.id).c === 1,
+       '딸린 줄이 되살린 대회로 안 따라온다');
+
+    /* 4 — 남이 지운 대회 id 는 못 가져간다. 내가 지운 내 것은 그 id 그대로 살아난다. */
+    const 뺏길 = createEvent(db, { title: '뺏길대회' });
+    const 뺏길id = 뺏길.id, 뺏길주인 = 뺏길.owner;
+    await deleteEvent(db, 뺏길id, { confirm: '뺏길대회' });
+    const 뺏기 = restoreEvent(db, { event: { id: 뺏길id, title: '내가먼저', host: '아무개', starts: '2026-10-01', ends: '2026-10-01' } }, 남.owner);
+    ok(뺏기.id !== 뺏길id, '남이 지운 대회 id 를 그대로 다시 등록할 수 있다');
+    ok(!isAdmin(db, 뺏길id, '', 남.owner), '남이 지운 대회의 운영자가 된다');
+    const 되찾음 = untrashEvent(db, db.prepare('SELECT id FROM event_trash WHERE event=?').get(뺏길id).id, 뺏길주인);
+    ok(되찾음.id === 뺏길id, '내가 지운 내 대회가 같은 id 로 안 돌아온다');
+
+    /* 8 — 운영자가 내린 팀은 팀 열쇠로 못 되살린다. 운영자는 그대로 되살릴 수 있다. */
+    const 내림대회 = createEvent(db, { title: '내림검사' });
+    const 내릴팀 = joinTeam(db, 내림대회.id, { name: '내릴팀', email: 'kick@x.test', agree: true });
+    const 내림 = trashTeam(db, 내릴팀, 'admin');
+    let 되살림막힘 = 0;
+    try { untrashTeam(db, 내림, true); } catch (e) { 되살림막힘 = e.code; }
+    ok(되살림막힘 === 403, '운영자가 내린 팀이 제 열쇠로 다시 들어온다');
+    ok(db.prepare('SELECT 1 FROM team_trash WHERE id=?').get(내림), '막혔는데 «내렸다» 는 기록이 사라진다');
+    ok(untrashTeam(db, 내림, false).id === 내릴팀, '운영자가 되살리는 길까지 막혔다');
+    const 자진 = joinTeam(db, 내림대회.id, { name: '자진팀', email: 'self@x.test', agree: true });
+    const 자진내림 = trashTeam(db, 자진, 'team');
+    ok(untrashTeam(db, 자진내림, true).id === 자진, '스스로 취소한 팀이 되돌리지 못한다');
   }
   ok(privacyPage().includes('개인정보 처리방침') && privacyPage().includes('6개월') && !privacyPage().includes('undefined'), '개인정보 처리방침 페이지가 있다');
   const dl = ledgerOf(db, dEv0 = createEvent(db, { title: '장부표시' }).id);
