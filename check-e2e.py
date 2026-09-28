@@ -3334,6 +3334,62 @@ with sync_playwright() as pw:
     }""")
     A(agree, "칩 건수가 draw() 의 scope 규칙과 어긋난다 — 칩엔 n 인데 눌러 보면 다른 수가 나온다")
     ok(f"직무 칩 건수 = 눌렀을 때 줄 수 (칩 {len(chips)}개 전부), 0건은 점선")
+
+    # ── 12. 뜻으로 묶였는가 — 나열식 벽이 아니라 «꼭 볼 것 / 도구 / 읽을거리 / 우리 것» ──────
+    # 소식 자체는 남의 RSS 에서 오므로 건수는 단언하지 않는다. 규칙만 본다.
+    pg.click('.chip[data-k="all"]'); pg.wait_for_timeout(200)
+    total = pg.evaluate("document.querySelectorAll('#list .it').length")
+    if total >= 4:
+        heads = pg.evaluate("[...document.querySelectorAll('#list section.grp > h2')].map(h => h.textContent)")
+        A(any(h.startswith("오늘 꼭 볼 것") for h in heads), f"«오늘 꼭 볼 것» 묶음이 없다: {heads}")
+        A(len(heads) >= 2, f"묶음이 하나뿐이다 — 뜻으로 안 나뉘었다: {heads}")
+        # 한 줄은 정확히 한 묶음에만. 묶음 밖에 흘린 줄이 있으면 칩 건수와도 어긋난다.
+        in_grp = pg.evaluate("document.querySelectorAll('#list section.grp .it').length")
+        A(in_grp == total, f"묶음 밖에 흘린 줄이 있다: 전체 {total}, 묶음 안 {in_grp}")
+        # 시간 통 — 날짜 스무 줄 대신 통 이름
+        bks = pg.evaluate("[...document.querySelectorAll('#list h3.bk')].map(h => h.textContent.split(' ')[0])")
+        A(bks and set(bks) <= {"오늘", "어제", "이번", "그전"}, f"시간 통이 아니라 날짜가 찍혀 있다: {bks[:5]}")
+        # 두껍게 그린 줄은 전부 «그래서 뭘 하나» 한 줄을 갖는다. 이게 이 화면의 값이다.
+        fat = pg.evaluate("document.querySelectorAll('#list .it:not(.q)').length")
+        dos = pg.evaluate("document.querySelectorAll('#list .it:not(.q) .do').length")
+        A(0 < dos <= fat, f"«그래서 뭘 하나» 가 하나도 없다: 두꺼운 줄 {fat}, 한 줄 있는 것 {dos}")
+        # 같은 문장이 잇달아 두 번 나오면 값이 아니라 채움말이다 — 둘째부터는 지운다.
+        run = pg.evaluate("""() => {
+          let worst = '';
+          for (const g of document.querySelectorAll('#list section.grp')) {
+            let prev = null;
+            for (const it of g.querySelectorAll('.it:not(.q)')) {
+              const d = it.querySelector('.do');
+              const cur = d ? d.textContent.trim() : null;
+              if (cur && prev && cur === prev) worst = cur;
+              prev = cur === null ? prev : cur;
+            }
+          }
+          return worst;
+        }""")
+        A(not run, f"«그래서 뭘 하나» 가 잇달아 똑같이 나온다: {run[:60]}")
+        A(all(t.strip().startswith("→") and len(t.strip()) > 6
+              for t in pg.evaluate("[...document.querySelectorAll('#list .do')].map(e => e.textContent)")),
+          "«그래서 뭘 하나» 가 빈 줄이다")
+        # 곁줄 — 주인이 요청한 것. 좁은 화면(412px)에서도 사라지지 않아야 한다.
+        A(pg.is_visible("aside#side") and pg.is_visible("#glance"), "곁줄(aside)이 안 보인다")
+        # ★ 화면과 /news.md 가 같은 것을 1위로 미는가.
+        # 규칙(server.js newsPicks / news.html pickOf)이 두 곳에 적혀 있어서, 어긋나면
+        # 복사해 간 사람과 화면을 본 사람이 다른 것을 하게 된다. 그 어긋남을 여기서 잡는다.
+        # 수집은 서버가 뜬 지 15초에 한 번뿐이고 여기는 그보다 한참 뒤라 두 응답이 같은 줄을 본다.
+        screen = pg.evaluate("[...document.querySelectorAll('#list .it.pk .t')].map(e => e.textContent)")
+        md = urllib.request.urlopen(BASE + "/news.md").read().decode("utf-8")
+        mdpick = re.findall(r"^\d+\. \[(.+?)\]\(", md.split("## 오늘 꼭 볼 것")[1].split("\n## ")[0], re.M) if "## 오늘 꼭 볼 것" in md else []
+        A(screen and screen == mdpick, f"화면과 /news.md 의 «꼭 볼 것» 이 다르다\n  화면: {screen}\n  md  : {mdpick}")
+        ok(f"뜻으로 묶임 {heads} · 통 {sorted(set(bks))} · «그래서 뭘 하나» {dos}줄 · 화면=md 꼭 볼 것 {len(screen)}줄")
+    else:
+        ok(f"소식이 {total}건뿐이라 묶음 검사는 건너뜀 (남의 RSS 가 안 올 때)")
+
+    # ── 13. 접근성(axe) — 뉴스 화면도 critical·serious 0 ──
+    from axe_playwright_python.sync_playwright import Axe as _Axe
+    _bad = [v for v in _Axe().run(pg).response["violations"] if v["impact"] in ("critical", "serious")]
+    A(not _bad, "접근성 /news: " + "; ".join(f"{v['id']}x{len(v['nodes'])}({v['nodes'][0]['target'][0][:40]})" for v in _bad))
+    ok("뉴스 화면 접근성 critical·serious 0")
     b.close()
 
 # ── 12. 로그인 셋(카카오·구글·네이버) ─────────────────────

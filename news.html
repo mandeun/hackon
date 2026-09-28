@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>해커온뉴스 — 직무별로 고른 AI 새 소식·도구·우승작</title>
-<meta name="description" content="hackon.kr 이 3시간마다 모으고 직무별로 나누는 AI 새 소식. 제보로 갱신. 링크를 클로드에 붙이면 내 일에 맞게 골라 줍니다.">
+<title>해커온뉴스 — 오늘 꼭 볼 것·새 도구·읽을거리를 직무별로</title>
+<meta name="description" content="hackon.kr 이 3시간마다 스무 곳에서 모아 «오늘 꼭 볼 것 · 새로 나온 도구 · 읽을거리 · 우리 대회에서 나온 것» 으로 묶습니다. 줄마다 «그래서 뭘 하나» 한 줄. 링크를 클로드에 붙이면 내 일에 맞게 골라 줍니다.">
 <link rel="icon" href="/icon.svg">
 <style>
 :root{--ink:#0B1020;--on:#C8F53B;--mist:#AEB6C8;--paper:#F4F6F8;--moss:#1F6F5C;--grey:#5B6470;--hair:#E3E6EA;
@@ -13,38 +13,77 @@
 html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
 a{color:var(--ink)}
 .top{background:var(--ink);color:#fff;padding:22px 20px 26px}
-.wrap{max-width:720px;margin:0 auto}
+.wrap{max-width:1060px;margin:0 auto}
 .brand{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand a{color:#fff;text-decoration:none;font-weight:900;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
 .brand i{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--on);box-shadow:0 0 0 4px rgba(200,245,59,.25)}
 .brand nav a{font-weight:600;font-size:14px;color:var(--mist);margin-left:14px}
 h1{font-size:clamp(26px,6vw,36px);font-weight:900;letter-spacing:-.04em;line-height:1.15;margin:22px 0 8px}
 h1 b{color:var(--on)}
-.lead{color:var(--mist);font-size:15px;line-height:1.6;margin:0}
+.lead{color:var(--mist);font-size:15px;line-height:1.6;margin:0;max-width:640px}
 .paste{margin-top:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .btn{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:12px 18px;border:0;border-radius:12px;background:var(--on);color:var(--ink);font-weight:900;font-size:15px;cursor:pointer;font-family:inherit;text-decoration:none}
 .btn.o{background:transparent;color:#fff;border:1.5px solid #3A4358}
 .btn.s{min-height:40px;padding:9px 14px;font-size:14px}
-.hint{font-size:13px;color:var(--mist);flex-basis:100%}
-main{max-width:720px;margin:0 auto;padding:10px 20px 60px}
-.jobs{display:flex;gap:6px;flex-wrap:wrap;margin-top:18px}
+.hint{font-size:13px;color:var(--mist);flex-basis:100%;max-width:640px}
+main{max-width:1060px;margin:0 auto;padding:10px 20px 60px}
+.jobs{display:flex;gap:6px;flex-wrap:wrap;margin:18px 0 4px}
 .chip{border:1.5px solid var(--hair);background:#fff;border-radius:999px;padding:8px 13px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;color:var(--grey)}
 .chip[aria-pressed=true]{background:var(--ink);color:var(--on);border-color:var(--ink)}
 /* 칩에 건수를 붙인다 — 누르기 전에 빈 탭인지 보인다. 0 은 «모름»이 아니라 «없음»이라 숫자로 적는다 */
-.chip .n{margin-left:5px;font-size:12px;font-weight:700;opacity:.55;font-variant-numeric:tabular-nums}
+/* opacity 로 흐리게 두면 대비가 3.2:1 로 떨어진다 — axe 가 잡았다(2026-09-27, color-contrast×5).
+   눌림 표시는 크기와 굵기로만 준다. 색은 --grey 그대로(흰 바탕 5.9:1). */
+.chip .n{margin-left:5px;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
 /* 0 은 «소식이 없다»는 뜻일 뿐이다 — 어느 직무든 레시피(«지금 이렇게 쓴다»)는 있으니 죽은 탭처럼 흐리지 않는다 */
 .chip[data-n="0"]{border-style:dashed}
+/* 두 칸 — 넓으면 오른쪽에 곁줄(aside), 좁으면 위에서 아래로.
+   DOM 은 곁줄이 먼저다(폰에서 «오늘 한눈에»·레시피를 먼저 보라고). 넓을 때만 order 로 오른쪽에 붙인다. */
+.cols{display:flex;flex-direction:column;gap:0}
+@media(min-width:900px){
+  .cols{flex-direction:row;gap:26px;align-items:flex-start}
+  #feed{flex:1;min-width:0}
+  #side{order:2;flex:none;width:302px;position:sticky;top:16px}
+}
 .card{background:#fff;border:1px solid var(--hair);border-radius:16px;padding:16px;margin-top:18px}
 .card h2{font-size:17px;margin:0 0 6px} .card .m{font-size:13px;color:var(--grey);line-height:1.55}
 .how li{margin:8px 0;font-size:14.5px;line-height:1.5} .how b{font-weight:800} .how a{color:var(--moss)}
-.day{margin-top:22px}
-.day h3{font-size:13px;color:var(--grey);font-weight:700;letter-spacing:.04em;margin:0 0 8px;font-family:var(--mono)}
+/* 곁줄 — «오늘 한눈에 · 레시피 · 방금 들어온 것 · 출처» */
+#side .card{padding:14px 15px}
+.sum{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.sum b{font-weight:800;font-variant-numeric:tabular-nums}
+.sum span{font-size:13px;color:var(--grey);background:var(--paper);border-radius:8px;padding:5px 9px}
+.lt{margin:0;padding:0;list-style:none}
+.lt li{border-top:1px solid var(--hair);padding:8px 0;font-size:13.5px;line-height:1.45}
+.lt li:first-child{border-top:0}
+.lt a{font-weight:700;text-decoration:none;overflow-wrap:anywhere}
+.lt em{display:block;font-style:normal;color:var(--grey);font-size:12px;margin-top:2px}
+/* 묶음 — «오늘 꼭 볼 것 / 새로 나온 도구 / 읽을거리 / 우리 대회에서 나온 것» */
+.grp{margin-top:26px}
+.grp h2{font-size:19px;letter-spacing:-.02em;margin:0;display:flex;align-items:baseline;gap:8px}
+.grp h2 .c{font-size:13px;font-weight:700;color:var(--grey);font-variant-numeric:tabular-nums}
+.grp .sub{margin:3px 0 10px;font-size:13px;color:var(--grey)}
+.bk{font-size:12px;color:var(--grey);font-weight:700;letter-spacing:.06em;margin:16px 0 6px;font-family:var(--mono)}
+.bk .c{font-weight:400;font-variant-numeric:tabular-nums}
+.bk.tail{margin-top:14px;font-family:var(--sans);letter-spacing:0;font-size:12.5px}
 .it{background:#fff;border:1px solid var(--hair);border-radius:14px;padding:12px 14px;margin:8px 0;display:flex;gap:12px;align-items:flex-start}
 .it .s{flex:none;font-size:11.5px;font-weight:800;padding:4px 8px;border-radius:999px;background:var(--paper);color:var(--grey);white-space:nowrap;margin-top:2px}
 .it .s.hackon{background:var(--on);color:var(--ink)} .it .s.tip{background:#FFF3C4;color:#7A5A00} .it .s.paper{background:#EAF3EF;color:var(--moss)}
+.it .b{min-width:0;flex:1}
 .it .t{font-size:15.5px;font-weight:700;line-height:1.45;text-decoration:none;overflow-wrap:anywhere}
-.it .n{font-size:12.5px;color:var(--grey);margin-top:3px} .new{display:inline-block;background:var(--on);color:var(--ink);font-size:10.5px;font-weight:900;border-radius:6px;padding:2px 6px;margin-right:6px;vertical-align:middle} .pk{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--hair)} .pk:first-child{border-top:0} .pk b{font-size:22px;color:var(--moss);min-width:26px} .pk a{font-weight:800;text-decoration:none;font-size:15px} .pk small{display:block;color:var(--grey);font-size:12.5px;margin-top:2px} .it .j{display:inline-block;font-size:11px;font-weight:800;color:var(--moss);margin-right:6px}
-.empty{background:#fff;border:1px solid var(--hair);border-radius:14px;padding:22px;text-align:center;color:var(--grey);margin-top:12px}
+.it .dm{font-size:12px;color:var(--grey);white-space:nowrap}
+/* «그래서 뭘 하나» — 이 한 줄이 이 화면의 값이다. 제목 다음으로 눈에 들어오게 */
+.it .do{font-size:13.5px;color:var(--moss);line-height:1.5;margin-top:4px;font-weight:600}
+.it .n{font-size:12.5px;color:var(--grey);margin-top:3px;line-height:1.5}
+.new{display:inline-block;background:var(--on);color:var(--ink);font-size:10.5px;font-weight:900;border-radius:6px;padding:2px 6px;margin-right:6px;vertical-align:middle}
+.also{display:inline-block;background:#EAF3EF;color:var(--moss);font-size:11px;font-weight:800;border-radius:6px;padding:2px 6px;margin-left:6px;vertical-align:middle;white-space:nowrap}
+.it .j{display:inline-block;font-size:11px;font-weight:800;color:var(--moss);margin-right:6px}
+/* 꼭 볼 것 — 번호를 크게. 순위는 «편집»으로 읽히고 점수는 안 보인다(HN 방식) */
+.it.pk{border-color:#C9D6CF;background:#FCFEFD}
+.it.pk .rk{flex:none;font-size:22px;font-weight:900;color:var(--moss);min-width:24px;text-align:center;font-variant-numeric:tabular-nums;margin-top:-1px}
+.it.pk .t{font-size:16.5px}
+/* 꼬리(그전) — 한 줄로만. 위는 두껍게, 아래는 얇게 */
+.it.q{padding:9px 14px} .it.q .t{font-size:14.5px;font-weight:600}
+.empty{background:#fff;border:1px solid var(--hair);border-radius:14px;padding:22px;text-align:center;color:var(--grey);margin-top:12px;line-height:1.6}
 label{display:block;font-size:13px;font-weight:700;color:var(--grey);margin:10px 0 4px}
 input,select{width:100%;min-height:44px;border:1.5px solid var(--hair);border-radius:10px;padding:8px 12px;font:inherit;font-size:15px;background:#fff}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px} @media(max-width:480px){.row{grid-template-columns:1fr}}
@@ -56,7 +95,7 @@ input,select{width:100%;min-height:44px;border:1.5px solid var(--hair);border-ra
 <div class="top"><div class="wrap">
   <div class="brand"><a href="/"><i></i>HACK:ON</a><nav><a href="/problems">문제 은행</a><a href="/rank">순위</a><a href="/app">대회 열기</a></nav></div>
   <h1>해커온<b>뉴스</b></h1>
-  <p class="lead">내 직무에서 지금 쓸 만한 AI 도구·모델·기사·우승작. 3시간마다 모으고, 제보로 고칩니다. 제목과 주소만 — 본문은 원문에서.</p>
+  <p class="lead">스무 곳에서 3시간마다 모아 «오늘 꼭 볼 것 · 새로 나온 도구 · 읽을거리 · 우리 대회에서 나온 것» 으로 묶습니다. 줄마다 «그래서 뭘 하나» 한 줄. 여러 곳에 같이 실린 글은 한 줄로 합칩니다.</p>
   <div class="paste">
     <button class="btn" id="copy">클로드에 붙여넣기용 복사</button>
     <a class="btn o" id="mdlink" href="/news.md">텍스트로 보기</a>
@@ -65,22 +104,29 @@ input,select{width:100%;min-height:44px;border:1.5px solid var(--hair);border-ra
 </div></div>
 <main>
   <div class="jobs" id="jobs"></div>
-  <div class="card" id="how" hidden><h2 id="how-t"></h2><div class="m">지금 이렇게 씁니다 — 편집자가 고른 것. 더 나은 방법을 알면 아래 «제보»로. 대회에서 나온 것이 여기에 붙습니다.</div><ul class="how" id="how-l"></ul></div>
-  <div class="card" id="fresh" hidden><h2 id="fresh-t"></h2><div class="m" id="fresh-m"></div></div>
-  <div class="card" id="picks" hidden><h2>오늘의 셋 <span class="m" style="font-weight:600">— 사람들이 가장 많이 반응한 것과 제보</span></h2><div id="picks-l"></div></div>
-  <div id="list"><div class="empty">모으는 중…</div></div>
+  <div class="cols">
+    <aside id="side" aria-label="오늘 한눈에·직무 레시피·방금 들어온 것">
+      <div class="card" id="glance"><h2>한눈에</h2><div class="m" id="glance-m">모으는 중…</div><div class="sum" id="glance-s"></div></div>
+      <div class="card" id="how" hidden><h2 id="how-t"></h2><div class="m">지금 이렇게 씁니다 — 편집자가 고른 것. 더 나은 방법을 알면 아래 «제보»로. 대회에서 나온 것이 여기에 붙습니다.</div><ul class="how" id="how-l"></ul></div>
+      <div class="card" id="latest" hidden><h2>방금 들어온 것</h2><div class="m">묶지 않은 시간순. 위 묶음이 가린 것은 없습니다.</div><ol class="lt" id="latest-l"></ol></div>
+      <div class="card" id="srcs" hidden><h2>이 화면이 보는 곳</h2><div class="m" id="srcs-m"></div></div>
+    </aside>
+    <div id="feed">
+      <div id="list"><div class="empty">모으는 중…</div></div>
+    </div>
+  </div>
   <div class="card" id="tip">
     <h2>제보 — 이 직무에서 이거 써 보니 좋더라</h2>
     <div class="m">도구·깃허브·기사·내 결과물 무엇이든. 제목과 주소면 됩니다. 로그인한 사람만, 하루 다섯 건.</div>
     <div id="tip-in" hidden>
-      <div class="row"><div><label>직무</label><select id="t-job"></select></div><div><label>제목</label><input id="t-title" placeholder="예: 인스타 릴스 자막을 3분에 뽑는 도구"></div></div>
-      <label>주소</label><input id="t-url" placeholder="https://...">
-      <label>한 줄 (선택)</label><input id="t-note" placeholder="어떻게 쓰면 좋은지">
+      <div class="row"><div><label for="t-job">직무</label><select id="t-job"></select></div><div><label for="t-title">제목</label><input id="t-title" placeholder="예: 인스타 릴스 자막을 3분에 뽑는 도구"></div></div>
+      <label for="t-url">주소</label><input id="t-url" placeholder="https://...">
+      <label for="t-note">한 줄 (선택)</label><input id="t-note" placeholder="어떻게 쓰면 좋은지">
       <div style="margin-top:12px"><button class="btn s" id="t-go">올리기</button> <span class="m" id="t-msg"></span></div>
     </div>
     <div id="tip-login" hidden style="margin-top:10px"></div>
   </div>
-  <p class="foot">우승작은 끝난 대회의 1위 중 «쇼케이스 공개»에 동의한 팀만 실립니다. 기사·모델·논문은 제목과 주소만 가져오며 원문 저작권은 각 출처에 있습니다. 출처: Hugging Face(모델·논문·앱·데이터) · AI타임스 · GeekNews · Hacker News · Product Hunt · 요즘IT · 깃허브 · 제보. 문의 hi@mandeun.com</p>
+  <p class="foot">우승작은 끝난 대회의 1위 중 «쇼케이스 공개»에 동의한 팀만 실립니다. 기사·모델·논문은 제목과 주소만 가져오며 원문 저작권은 각 출처에 있습니다. «그래서 뭘 하나» 한 줄은 출처와 제목만 보고 기계가 붙인 것이라 원문과 다를 수 있습니다 — 판단은 원문에서 하세요. 문의 hi@mandeun.com</p>
 </main>
 <script>
 /* 직무별 «지금 이렇게 쓴다» — 편집자(mandeun) 가 고른 것. 제보·대회 결과로 갱신한다. 숫자·순위 없음 */
@@ -96,12 +142,33 @@ const HOW = {
 (async () => {
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   const ok = u => /^https?:\/\//i.test(String(u || '')) || String(u || '').startsWith('/');
+  const dom = u => { try { return new URL(u).host.replace(/^www\./i, ''); } catch { return ''; } };
   let cur = new URLSearchParams(location.search).get('job') || 'all';
   const jobsEl = document.getElementById('jobs'), list = document.getElementById('list'), how = document.getElementById('how');
-  let d; try { d = await (await fetch('/api/news')).json(); } catch { d = { src: {}, jobs: Object.keys(HOW), rows: [] }; }
+  /* 서버가 못 오는 것과 «소식이 0건»인 것은 다르다 — 있음 / 없음 / 모름 */
+  let d, down = false;
+  try { d = await (await fetch('/api/news')).json(); } catch { down = true; d = {}; }
   const SRC = d.src || {}, JOBS = d.jobs || Object.keys(HOW), rows = d.rows || [];
+  const KINDS = d.kinds || [['pick', '오늘 꼭 볼 것', ''], ['tool', '새로 나온 도구', ''], ['read', '읽을거리', ''], ['ours', '우리 대회에서 나온 것', '']];
+  const BUCKETS = d.buckets || ['오늘', '어제', '이번 주', '그전'];
+  const P = d.pick || { n: 5, min: 4, per: 2, perKind: 2 }, FULL = d.full || 10;
+  /* 서버(server.js 의 newsPickN·newsPicks)와 «반드시 같은» 규칙. 둘이 어긋나면 화면과 /news.md 가
+     다른 것을 1위로 민다 — 그래서 check-e2e.py 가 화면의 «꼭 볼 것» 과 /news.md 의 것을 맞대 본다.
+     한 출처는 P.per 개까지, 한 묶음은 P.perKind 개까지 — 없으면 다섯 줄이 전부 도구가 된다(2026-09-27 실측). */
+  const pickN = n => n < P.min ? 0 : Math.min(P.n, Math.max(3, Math.ceil(n / 8)));
+  function pickOf(list) {
+    const want = pickN(list.length), sorted = list.slice().sort((a, b) => b.score - a.score || b.id - a.id);
+    const per = {}, kper = {}, out = [], seen = new Set();
+    const take = r => { per[r.src] = (per[r.src] || 0) + 1; kper[r.kind] = (kper[r.kind] || 0) + 1; seen.add(r.id); out.push(r); };
+    for (const r of sorted) { if (out.length >= want) break; if ((per[r.src] || 0) >= P.per || (kper[r.kind] || 0) >= P.perKind) continue; take(r); }
+    for (const r of sorted) { if (out.length >= want) break; if (seen.has(r.id) || (per[r.src] || 0) >= P.per) continue; take(r); }
+    return out;
+  }
+  window.newsPicks = pickOf;   /* check-e2e.py 가 /news.md 와 맞대 본다 */
+
   /* 직무별 건수. 세는 규칙은 draw() 의 scope 와 반드시 같다 — «우리 우승작»(src=hackon)은 어느 직무에서나 보인다.
-     둘이 어긋나면 칩엔 3 이라 적혀 있는데 눌러 보니 0 줄인 화면이 된다. */
+     둘이 어긋나면 칩엔 3 이라 적혀 있는데 눌러 보니 0 줄인 화면이 된다.
+     세는 것은 «합친 뒤» 의 줄이다 — 서버가 이미 합쳐서 내려보낸다. */
   function jobCounts(rows, jobs) {
     const c = { all: rows.length };
     for (const j of jobs) c[j] = rows.filter(r => r.job === j || r.src === 'hackon').length;
@@ -113,27 +180,95 @@ const HOW = {
   jobsEl.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; cur = b.dataset.k; [...jobsEl.children].forEach(c => c.setAttribute('aria-pressed', c.dataset.k === cur)); history.replaceState(null, '', cur === 'all' ? '/news' : '/news?job=' + encodeURIComponent(cur)); draw(); };
   /* 지난번 본 것 뒤로 새로 들어온 것 — 이 브라우저 기준(localStorage). 처음이면 오늘 것 */
   let seen = 0; try { seen = +localStorage.getItem('hackon.news.seen') || 0; } catch (_) {}
-  const today = rows.length ? rows[0].at : '';
-  const isNew = r => seen ? r.id > seen : r.at === today;
-  const score = r => { const m = /(\d[\d,]*)/.exec(r.note || ''); return (r.src === 'tip' ? 100000 : r.src === 'hackon' ? 90000 : 0) + (m ? +m[1].replace(/,/g, '') : 0); };
+  const isNew = r => seen ? r.id > seen : r.bucket === '오늘';
+
+  const srcName = s => SRC[s] || s;
+  function rowHtml(r, o) {
+    o = o || {};
+    const meta = [];
+    if (r.by) meta.push('제보 ' + esc(r.by));
+    if (r.job && cur === 'all') meta.push(`<span class="j">${esc(r.job)}</span>`);
+    if (r.note) meta.push(esc(r.note));
+    if (r.also && r.also.length) meta.push('또 ' + r.also.map(srcName).map(esc).join(' · '));
+    if (o.why && r.why && r.why.length) meta.unshift(esc(r.why.join(' · ')));
+    const also = r.also && r.also.length ? `<span class="also">${r.also.length + 1}곳에서 다룸</span>` : '';
+    const lead = o.rank ? `<span class="rk" aria-hidden="true">${o.rank}</span>` : `<span class="s ${esc(r.src)}">${esc(srcName(r.src))}</span>`;
+    const dm = dom(r.url);
+    return `<div class="it${o.rank ? ' pk' : ''}${o.tight ? ' q' : ''}">${lead}<div class="b">
+      <div>${isNew(r) ? '<span class="new">NEW</span>' : ''}<a class="t" href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>${dm ? ` <span class="dm">${esc(dm)}</span>` : ''}${also}</div>
+      ${o.tight || o.sameDo ? '' : `<div class="do">→ ${esc(r.do || '')}</div>`}
+      ${meta.length ? `<div class="n">${o.rank ? esc(srcName(r.src)) + ' · ' : ''}${meta.join(' · ')}</div>` : (o.rank ? `<div class="n">${esc(srcName(r.src))}</div>` : '')}
+    </div></div>`;
+  }
+
   function draw() {
     const md = cur === 'all' ? '/news.md' : '/news.md?job=' + encodeURIComponent(cur);
-    const scope = rows.filter(r => cur === 'all' || r.job === cur || (cur !== 'all' && r.src === 'hackon'));
-    const fresh = scope.filter(isNew);
-    const fr = document.getElementById('fresh'); fr.hidden = !fresh.length;
-    if (fresh.length) { document.getElementById('fresh-t').textContent = (seen ? '지난번 뒤로 새로 들어온 것 ' : '오늘 들어온 것 ') + fresh.length + '개'; document.getElementById('fresh-m').textContent = '출처: ' + [...new Set(fresh.map(r => SRC[r.src] || r.src))].join(' · '); }
-    const picks = scope.slice().sort((a, b) => score(b) - score(a)).slice(0, 3);
-    const pk = document.getElementById('picks'); pk.hidden = picks.length < 3;
-    if (picks.length >= 3) document.getElementById('picks-l').innerHTML = picks.map((r, i) => `<div class="pk"><b>${i + 1}</b><div><a href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a><small>${esc(SRC[r.src] || r.src)}${r.job ? ' · ' + esc(r.job) : ''}${r.by ? ' · 제보 ' + esc(r.by) : ''}${r.note ? ' · ' + esc(r.note) : ''}</small></div></div>`).join('');
     document.getElementById('mdlink').href = md; document.getElementById('mdaddr').textContent = 'hackon.kr' + md;
+    const scope = rows.filter(r => cur === 'all' || r.job === cur || r.src === 'hackon');
+
+    /* 곁줄 ① 한눈에 — 모름(서버가 안 옴) / 없음(0건) / 있음 을 다른 문장으로 */
+    const gm = document.getElementById('glance-m'), gs = document.getElementById('glance-s');
+    if (down) { gm.textContent = '지금은 소식을 못 불러왔습니다. 없는 것이 아니라 못 본 것입니다 — 잠시 뒤 새로고침해 주세요.'; gs.innerHTML = ''; }
+    else {
+      const nb = b => scope.filter(r => r.bucket === b).length;
+      const fresh = scope.filter(isNew).length, merged = scope.filter(r => r.also && r.also.length).length;
+      gm.textContent = (cur === 'all' ? '전체' : cur) + ' — 최근 9일 ' + scope.length + '건';
+      gs.innerHTML = BUCKETS.map(b => nb(b) ? `<span>${esc(b)} <b>${nb(b)}</b></span>` : '').join('')
+        + (fresh ? `<span>${seen ? '지난번 뒤로' : '오늘 들어온 것'} <b>${fresh}</b></span>` : '')
+        + (merged ? `<span>여러 곳이 같이 다룬 것 <b>${merged}</b></span>` : '');
+    }
+    /* 곁줄 ② 직무 레시피 */
     if (HOW[cur]) { how.hidden = false; document.getElementById('how-t').textContent = cur + ' — 지금 이렇게 쓴다'; document.getElementById('how-l').innerHTML = HOW[cur].map(([t, h, u]) => `<li><b>${esc(t)}</b> — ${esc(h)}${u && ok(u) ? ` · <a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${u.startsWith('/') ? '열기' : '깃허브'}</a>` : ''}</li>`).join(''); }
     else how.hidden = true;
-    const rs = scope;
-    if (!rs.length) { list.innerHTML = `<div class="empty">${cur === 'all' ? '아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.' : '이 직무로 들어온 소식은 아직 없습니다. 위 «지금 이렇게 쓴다» 는 그대로 쓸 수 있고, «제보» 가 이 칸의 첫 줄이 됩니다.'}</div>`; return; }
-    const by = {}; for (const r of rs) (by[r.at] = by[r.at] || []).push(r);
-    list.innerHTML = Object.keys(by).map(day => `<div class="day"><h3>${esc(day)}</h3>${by[day].map(r => `<div class="it">
-      <span class="s ${esc(r.src)}">${esc(SRC[r.src] || r.src)}</span>
-      <div>${isNew(r) ? '<span class="new">NEW</span>' : ''}${r.job && cur === 'all' ? `<span class="j">${esc(r.job)}</span>` : ''}<a class="t" href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>${r.note || r.by ? `<div class="n">${r.by ? '제보 ' + esc(r.by) + (r.note ? ' · ' : '') : ''}${esc(r.note || '')}</div>` : ''}</div></div>`).join('')}</div>`).join('');
+    /* 곁줄 ③ 방금 들어온 것 — 묶지 않은 시간순. 편집이 무엇을 내렸는지 숨기지 않는다 */
+    const lt = document.getElementById('latest');
+    const recent = scope.slice().sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : b.id - a.id)).slice(0, 6);
+    lt.hidden = scope.length < 6;
+    if (!lt.hidden) document.getElementById('latest-l').innerHTML = recent.map(r => `<li><a href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a><em>${esc(srcName(r.src))} · ${esc(r.bucket)}</em></li>`).join('');
+    /* 곁줄 ④ 출처 */
+    const sc = document.getElementById('srcs'), names = [...new Set(scope.map(r => srcName(r.src)))];
+    sc.hidden = !names.length;
+    if (names.length) document.getElementById('srcs-m').textContent = names.join(' · ') + ' — 3시간마다 다시 봅니다. 제목과 주소만 가져옵니다.';
+
+    if (!scope.length) {
+      list.innerHTML = `<div class="empty">${down ? '소식을 못 불러왔습니다 — 잠시 뒤 새로고침해 주세요.'
+        : cur === 'all' ? '아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.'
+        : '이 직무로 들어온 소식은 아직 없습니다. 옆의 «지금 이렇게 쓴다» 는 그대로 쓸 수 있고, 아래 «제보» 가 이 칸의 첫 줄이 됩니다.'}</div>`;
+      return;
+    }
+    const picks = pickOf(scope);
+    const pickIds = new Set(picks.map(r => r.id));
+    let html = '';
+    for (const [k, t, sub] of KINDS) {
+      let mine, body;
+      if (k === 'pick') {
+        mine = picks;
+        if (!mine.length) continue;
+        { let prev = '';
+          body = mine.map((r, i) => { const same = r.do === prev; prev = r.do;
+            return rowHtml(r, { rank: i + 1, why: true, sameDo: same }); }).join(''); }
+      } else {
+        mine = scope.filter(r => r.kind === k && !pickIds.has(r.id));
+        if (!mine.length) continue;
+        /* 시간 통 — 날짜 스무 줄 대신 통 넷. «그전» 은 한 줄짜리로 얇게(위는 두껍게, 꼬리는 얇게) */
+        body = BUCKETS.map(b => {
+          const g = mine.filter(r => r.bucket === b);
+          if (!g.length) return '';
+          /* 위는 두껍게(«그래서 뭘 하나» 까지), 꼬리는 제목만 한 줄로. 서버(newsSplit)와 같은 수를 쓴다 —
+             79줄을 전부 세 줄씩 그리면 묶어 놓고도 결국 벽이다. */
+          const full = g.slice(0, FULL), tail = g.slice(FULL);
+          /* 같은 «그래서 뭘 하나» 가 잇달아 나오면 두 번째부터 지운다.
+             한 줄은 출처·제목에서 기계가 뽑으니 깃허브 줄이 넷이면 넷 다 같은 문장이 된다 —
+             그러면 값이 아니라 채움말로 읽힌다. 처음 한 번만 보여 준다(2026-09-27 화면을 보고). */
+          let prev = '';
+          return `<h3 class="bk">${esc(b)} <span class="c">${g.length}</span></h3>`
+            + full.map(r => { const same = r.do === prev; prev = r.do; return rowHtml(r, { tight: b === '그전', sameDo: same }); }).join('')
+            + (tail.length ? `<p class="bk tail">${esc(b)} 나머지 ${tail.length}줄 — 제목만</p>` + tail.map(r => rowHtml(r, { tight: true })).join('') : '');
+        }).join('');
+      }
+      html += `<section class="grp"><h2>${esc(t)}<span class="c">${mine.length}</span></h2><p class="sub">${esc(sub)}</p>${body}</section>`;
+    }
+    list.innerHTML = html;
   }
   draw();
   try { if (rows.length) localStorage.setItem('hackon.news.seen', String(Math.max(...rows.map(r => r.id || 0)))); } catch (_) {}
