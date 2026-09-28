@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  노랑이 — 뛰는 자세. 재원 님 스케치에 가장 가까운 판입니다.
+  인스타 첫 컷·«지금 열려 있어요» 같은 자리에 씁니다.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120"
+     role="img" aria-label="노랑이 — 뛴다">
+  <title>노랑이 — 뛴다</title>
+  <g id="팔다리" fill="none" stroke="#FFB020" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path id="몸통" d="M66 58 L52 88"/>
+    <path id="팔-뒤" d="M63 66 L34 74"/>
+    <path id="팔-앞" d="M63 66 L88 46"/>
+    <path id="다리-뒤" d="M52 88 L30 100"/>
+    <path id="다리-앞" d="M52 88 L70 110"/>
+  </g>
+  <g id="손발" fill="#FFB020">
+    <rect x="22" y="70" width="13" height="11" rx="4" transform="rotate(-12 28 75)"/>
+    <rect x="84" y="36" width="13" height="11" rx="4" transform="rotate(-28 90 41)"/>
+    <rect x="20" y="96" width="13" height="11" rx="4" transform="rotate(-18 26 101)"/>
+    <rect x="66" y="107" width="13" height="11" rx="4" transform="rotate(14 72 112)"/>
+  </g>
+  <g id="머리" transform="rotate(-10 62 34)">
+    <rect x="36" y="10" width="52" height="50" rx="19" fill="#FFB020"/>
+    <rect x="49" y="27" width="7" height="17" rx="3.5" fill="#0B1020"/>
+    <rect x="68" y="27" width="7" height="17" rx="3.5" fill="#0B1020"/>
+  </g>
+</svg>

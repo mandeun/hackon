@@ -4783,9 +4783,28 @@ function followSummary(db, event) {
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 
 /* 밖으로 나가는 파일 전부. 여기 없는 이름은 404 — 새 화면 파일을 만들면 여기에 적는다 */
+/* ── 색 셋. 뜻과 «안 쓰는 곳» 은 docs/BRAND.md 에 있고, 아래 검사가 그 문서와 이 표를 대조한다.
+   여기만 고치면 문서가 어긋나고, 문서만 고치면 여기가 어긋난다 — 둘 다 고쳐야 검사가 지난다. */
+const BRAND = {
+  ink:   '#0B1020',   // 바탕 · 글자 · 노랑이의 눈
+  lime:  '#C8F53B',   // 누를 것 하나. 한 화면에 한 점. 그림·캐릭터에 안 쓴다
+  amber: '#FFB020',   // 노랑이와 브랜드 그림. UI 단추에 안 쓴다
+};
+/* 카카오 노랑에서 이만큼은 떨어져야 한다 — 안 그러면 «카카오가 만든 것» 으로 읽힌다 */
+const KAKAO_YELLOW = '#FEE500', HUE_GAP_MIN = 12;
+const hueOf = (hex) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (!d) return 0;
+  const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return Math.round(((h * 60) + 360) % 360);
+};
+
 const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg',
   /* 첫 화면 표제 사진과 링크 미리보기 그림. 빠져 있어서 둘 다 404 였다 — CSS 는 있는데 사진만 안 나왔다 */
-  'hero.jpg', 'og.png']);
+  'hero.jpg', 'og.png',
+  /* 노랑이. 평면 SVG 라 셋 합쳐 5KB 가 안 된다 — 그림 파일로 두면 색을 고칠 때마다 다시 만들어야 한다 */
+  'norangi.svg', 'norangi-run.svg', 'norangi-hi.svg']);
 /* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
 /* ── 토스 미니앱에서 오는 요청만 교차 출처를 허용한다.
    앱인토스 문서: «실제 서비스 환경 https://<appName>.apps.tossmini.com ·
@@ -6351,6 +6370,46 @@ async function selftest() {
     const line = (srcTxt.match(/^\s*const siteAdmin = .*$/m) || [''])[0];
     ok(/cookieOwner/.test(line) && !/isSiteAdmin\(db, owner\)/.test(line),
        '사이트 운영자 판정이 쿠키가 아닌 값으로 샜다: ' + line.trim());
+  }
+
+  /* ── 색 셋 — 문서와 코드와 그림 파일 셋을 서로 대조한다 ──
+     같은 사실이 세 곳에 적혀 있다(docs/BRAND.md · BRAND · SVG). 하나만 고치면 어긋나므로 검사가 붙든다. */
+  {
+    const doc = fs.readFileSync(path.join(ROOT, 'docs', 'BRAND.md'), 'utf8');
+    for (const [k, v] of Object.entries(BRAND))
+      ok(doc.includes('`' + v + '`'), `docs/BRAND.md 에 ${k} ${v} 가 없다 — 색을 고쳤으면 문서도 고친다`);
+    /* «세 색» 표 안만 본다. 그 밖에서는 카카오·탈락 시안을 비교용으로 적고 있고, 그건 우리 색이 아니다. */
+    const tbl = (doc.split('## 세 색')[1] || '').split('\n##')[0]
+      .split('\n').filter((l) => l.startsWith('|')).join('\n');   // 표 줄만. 아래 설명 문단은 카카오를 «비교용» 으로 적는다
+    const inTbl = [...tbl.matchAll(/`(#[0-9A-F]{6})`/g)].map((m) => m[1]);
+    ok(inTbl.length === 3 && inTbl.every((c) => Object.values(BRAND).includes(c)),
+       'docs/BRAND.md 의 색 표가 셋이 아니거나 코드와 다르다: ' + inTbl.join(','));
+
+    /* 카카오에서 12도 이상 */
+    const kh = hueOf(KAKAO_YELLOW);
+    for (const k of ['lime', 'amber']) {
+      const gap = Math.abs(hueOf(BRAND[k]) - kh);
+      ok(gap >= HUE_GAP_MIN, `${k}(${BRAND[k]}) 가 카카오와 ${gap}도밖에 안 떨어졌다 — ${HUE_GAP_MIN}도 이상이어야 한다`);
+    }
+    ok(Math.abs(hueOf(BRAND.lime) - hueOf(BRAND.amber)) >= HUE_GAP_MIN,
+       '라임과 앰버가 서로 붙어 있다 — 나란히 놓으면 둘 다 탁해진다');
+
+    /* 노랑이는 앰버다. 라임은 «누를 것» 전용이라 캐릭터에 들어가면 안 된다. 눈은 늘 먹. */
+    for (const f of ['norangi.svg', 'norangi-run.svg', 'norangi-hi.svg']) {
+      const svg = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      const body = svg.replace(/<!--[\s\S]*?-->/g, '');          // 주석의 색 설명은 빼고 본다
+      ok(body.includes(BRAND.amber), `${f} 가 앰버를 안 쓴다`);
+      ok(!body.includes(BRAND.lime), `${f} 에 라임이 남아 있다 — 단추 색과 캐릭터가 섞인다`);
+      /* 머리 안만 본다. «먹이 어딘가 한 군데라도 있으면 통과» 로는 한쪽 눈만 바꿔도 안 걸린다.
+         구멍 수를 세면 입을 더 그린 것(셋)과 짝눈(하나)이 같은 검사에 걸린다. */
+      const head = (body.match(/<g id="머리"[\s\S]*?<\/g>/) || [''])[0];
+      ok(head, `${f} 에 머리 모둠이 없다`);
+      const eyes = (head.match(new RegExp('fill="' + BRAND.ink + '"', 'g')) || []).length;
+      ok(eyes === 2, `${f} 의 먹 구멍이 ${eyes}개다 — 둘이어야 콘센트다 (셋이면 입, 하나면 짝눈)`);
+      ok((head.match(new RegExp('fill="' + BRAND.amber + '"', 'g')) || []).length === 1,
+         `${f} 의 머리(콘센트)가 앰버 한 덩이가 아니다`);
+      ok(STATIC_OK.has(f), `${f} 가 서빙 목록에 없다 — 404 가 된다`);
+    }
   }
 
   /* owner 칸을 가진 표가 늘면 mergeOwners 도 늘어야 한다. 표를 세어 코드와 대조한다 */

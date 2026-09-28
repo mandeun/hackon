@@ -210,6 +210,11 @@ details.more li a{display:inline-flex;align-items:center;min-height:44px}
 .sheet .x:hover{background:var(--soft)}
 .btn[disabled]{opacity:.55;cursor:default}
 
+/* 브랜드 한 줄. 앰버는 «누를 것» 이 아니라 그림 색이라, 단추처럼 보이는 바탕을 깔지 않는다 */
+.brandline{border-top:1px solid var(--hair)}
+.brandline .wrap{display:flex;align-items:center;gap:14px;padding:20px}
+.brandline img{flex:none}
+.brandline p{margin:0;font-size:14.5px;line-height:1.6}
 footer{padding:26px 0 40px;font-size:13px;color:var(--grey)}
 footer .wrap{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
 footer a{color:inherit;display:inline-flex;align-items:center;min-height:44px}
@@ -286,6 +291,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   </div>
   <div id="grid" class="evs" aria-live="polite" aria-busy="true"><div class="sk" aria-hidden="true"><i></i><i class="w2"></i><i class="w3"></i></div><div class="sk" aria-hidden="true"><i></i><i class="w2"></i><i class="w3"></i></div></div>
   <div id="empty" class="empty" hidden>
+    <img src="/norangi.svg" alt="" width="64" height="64" style="display:block;margin:0 auto 10px">
     <b>아직 열린 대회가 없습니다.</b>
     <span class="grey">첫 대회를 여실래요? 이름 하나면 됩니다.</span>
     <a class="btn s" id="empty-open" href="/app?make=1">대회 열기</a>
@@ -361,6 +367,15 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       </div>
       <p class="note">이 브라우저에 열쇠를 넣어 뒀습니다. 다른 기기에서는 운영 화면 열쇠 찾기로 들어가세요.</p>
     </div>
+  </div>
+</div>
+
+<!-- 브랜드 한 줄. 노랑이를 눈에 보이는 자리에 한 번 세운다 — 이름의 뜻이 여기서 시작한다 -->
+<div class="brandline">
+  <div class="wrap">
+    <img src="/norangi.svg" alt="노랑이" width="56" height="56">
+    <p><b>노랑이</b> — 「NO」라고 생각했던 걸 「너<b>랑</b>」 해서 이룹니다.<br>
+      <span class="grey">콘센트가 머리, 사람과 사람을 잇던 선이 팔다리입니다.</span></p>
   </div>
 </div>
 

@@ -1446,7 +1446,10 @@ function moreForm(t) {
   if (!t.role) need.push('역할');
   if (!t.found) need.push('어디서 보셨는지');
   if (!need.length) return `<div class="card" id="apply" style="text-align:center;padding:28px 20px">
-    <div style="font-size:40px;line-height:1">🎉</div>
+    ${/* 노랑이 두 손 자세. 규격서가 «채워졌습니다·고맙습니다» 자리로 정해 둔 것이다.
+          파일 모드(file://)에서는 못 불러오니 그때는 전처럼 이모지를 쓴다. */''}
+    ${LIVE ? '<img src="/norangi-hi.svg" alt="" width="72" height="72" style="display:block;margin:0 auto">'
+           : '<div style="font-size:40px;line-height:1">🎉</div>'}
     <h3 style="margin-top:12px">신청 완료</h3>
     <div class="meta">다 주셨습니다. 이제 이 대회의 <b>켜는 사람</b>입니다. 대회 3일 전에 여기서 «오시나요»를 다시 묻습니다.</div>
     <ul class="checks" style="text-align:left;margin-top:12px">
