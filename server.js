@@ -3916,6 +3916,58 @@ function publicHide(r) {
   return '';
 }
 
+/* ── 청년 혜택 — 「지금 신청할 수 있는 것」.
+   자료는 Sweet-Butters/youth-benefit-finder 가 공공 API 로 모아 둔 것을 그대로 읽는다.
+   **공공 출처만 쓴다.** 그 저장소에는 상업 공모전 사이트를 긁은 줄(위비티·콘테스트코리아·
+   씽굿·링커리어·올콘)도 섞여 있는데, 그건 이용조건을 우리가 못 확인하므로 안 싣는다.
+   목록에 없는 출처는 통과 못 한다 — 새 출처가 생기면 여기 적어야 보인다. */
+const BENEFIT_SOURCES = new Set(['vms1365', 'kosaf', 'qnet', 'volunteer', 'certi', 'bizinfo', 'kstartup']);
+const BENEFIT_URL = 'https://raw.githubusercontent.com/Sweet-Butters/youth-benefit-finder/main/data/collected/items.json';
+const BENEFIT_TTL = 6 * 60 * 60 * 1000;        // 여섯 시간. 하루에 몇 번이면 충분하다
+let benefitCache = { at: 0, rows: null, asOf: '' };
+
+/** 오늘 기준으로 아직 신청할 수 있는 것만. 마감이 안 적힌 것은 «모름»이라 남긴다(E22). */
+function liveBenefits(items, today) {
+  const out = [];
+  for (const i of items) {
+    if (!BENEFIT_SOURCES.has(i.source)) continue;
+    const end = String(i.apply_end || '');
+    if (end && end < today) continue;
+    const url = String(i.url || '');
+    if (!/^https:\/\//i.test(url)) continue;   // 주소가 없거나 https 가 아니면 못 보낸다
+    out.push({
+      type: String(i.type || ''),
+      title: plain(i.title, 80),
+      provider: plain(i.provider, 40),
+      end,                                      // '' 이면 «상시 또는 미정»
+      regions: Array.isArray(i.regions) ? i.regions.slice(0, 2).map(r => plain(r, 20)) : [],
+      url,
+      source: String(i.source || ''),
+    });
+  }
+  /* 마감이 가까운 순. 마감을 모르는 것은 맨 뒤로 — «오늘 끝남»처럼 보이면 안 된다 */
+  out.sort((a, b) => (a.end || '9999-99-99').localeCompare(b.end || '9999-99-99'));
+  return out;
+}
+
+async function benefits() {
+  const now = Date.now();
+  if (benefitCache.rows && now - benefitCache.at < BENEFIT_TTL) return benefitCache;
+  const res = await fetch(BENEFIT_URL, { headers: { 'user-agent': 'hackon.kr' }, signal: AbortSignal.timeout(25000) });
+  if (!res.ok) {
+    if (benefitCache.rows) return benefitCache;      // 못 받으면 지난 것을 그대로 준다 (E3)
+    throw new HttpError(502, '혜택 자료를 지금 못 가져옵니다');
+  }
+  const doc = await res.json();
+  const items = Array.isArray(doc) ? doc : (doc.items || []);
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = liveBenefits(items, today);
+  /* 받아 온 것이 터무니없이 적으면 덮어쓰지 않는다 — 지난 것이 낫다 (E3) */
+  if (rows.length < 200 && benefitCache.rows) return benefitCache;
+  benefitCache = { at: now, rows, asOf: today };
+  return benefitCache;
+}
+
 function openRequests(db, all = false) {
   return db.prepare("SELECT * FROM requests WHERE event='' AND status='open' ORDER BY created, id LIMIT 200").all()
     .filter(r => all || !publicHide(r))
@@ -5578,6 +5630,12 @@ function routes(db) {
         }
         if (p === '/api/requests' && req.method === 'POST')
           return json(res, 201, addRequest(db, await body(req)));          // 누구나 — 열쇠는 여기서 딱 한 번
+        if (p === '/api/benefits' && req.method === 'GET') {
+          const b = await benefits();
+          const t = String(u.searchParams.get('type') || '');
+          const rows = t ? b.rows.filter(r => r.type === t) : b.rows;
+          return json(res, 200, { asOf: b.asOf, total: rows.length, rows: rows.slice(0, 300) });
+        }
         if (p === '/api/requests' && req.method === 'GET')
           return json(res, 200, openRequests(db));                         // 후보 목록. 연락처·열쇠 없음
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/requests$/)) && req.method === 'GET')
@@ -6821,6 +6879,32 @@ async function selftest() {
     ok(Object.keys(corsFor('https://tossmini.com.evil.com')).length === 0, '비슷하게 생긴 주소도 안 연다');
     ok(Object.keys(corsFor('')).length === 0, '출처가 없으면 헤더도 없다');
     ok(corsFor('https://hackon-ask.apps.tossmini.com')['access-control-allow-origin'] !== '*', '«*» 를 쓰지 않는다');
+  }
+  {
+    /* ── 청년 혜택. **상업 사이트에서 긁은 줄이 새면 안 된다** — 그 값을 직접 넣어 본다 (E16) */
+    const today = '2026-09-28';
+    const fake = [
+      { source: 'kosaf', type: 'scholarship', title: '어떤 장학금', provider: '재단', apply_end: '2026-12-31', regions: ['서울'], url: 'https://a.example/1' },
+      { source: 'vms1365', type: 'experience', title: '봉사 자리', provider: '센터', apply_end: '2026-10-01', regions: ['all'], url: 'https://a.example/2' },
+      { source: 'wevity', type: 'contest', title: '상업 공모전', provider: '위비티', apply_end: '2026-12-31', regions: ['all'], url: 'https://a.example/3' },
+      { source: 'allcon', type: 'contest', title: '올콘 공모전', provider: '올콘', apply_end: '2026-12-31', regions: ['all'], url: 'https://a.example/4' },
+      { source: 'linkareer', type: 'contest', title: '링커리어', provider: '링커리어', apply_end: '2026-12-31', regions: ['all'], url: 'https://a.example/5' },
+      { source: 'kosaf', type: 'scholarship', title: '지난 장학금', provider: '재단', apply_end: '2026-09-01', regions: ['all'], url: 'https://a.example/6' },
+      { source: 'qnet', type: 'resource', title: '마감 모름', provider: '공단', apply_end: '', regions: ['all'], url: 'https://a.example/7' },
+      { source: 'kosaf', type: 'scholarship', title: '주소 없음', provider: '재단', apply_end: '2026-12-31', regions: ['all'], url: '' },
+      { source: 'kosaf', type: 'scholarship', title: 'http 주소', provider: '재단', apply_end: '2026-12-31', regions: ['all'], url: 'http://a.example/9' },
+    ];
+    const got = liveBenefits(fake, today);
+    const titles = got.map(x => x.title);
+    ok(!titles.some(t => /상업 공모전|올콘 공모전|링커리어/.test(t)), '상업 사이트에서 긁은 줄은 안 나간다');
+    ok(!titles.includes('지난 장학금'), '마감이 지난 것은 안 나간다');
+    ok(titles.includes('마감 모름'), '마감을 모르는 것은 남긴다 — «없음»으로 지우지 않는다');
+    ok(!titles.includes('주소 없음') && !titles.includes('http 주소'), 'https 주소가 아닌 것은 안 나간다');
+    ok(titles[0] === '봉사 자리' && titles[titles.length - 1] === '마감 모름',
+       '마감 가까운 순으로 나오고, 모르는 것은 맨 뒤다');
+    ok(got.every(x => BENEFIT_SOURCES.has(x.source)), '나가는 줄의 출처는 모두 허용 목록 안이다');
+    ok(liveBenefits([{ source: 'kosaf', type: 's', title: '<b>꺾쇠</b>', provider: 'x', apply_end: '2026-12-31', url: 'https://a.example/x' }], today)[0].title === 'b꺾쇠/b',
+       '제목의 꺾쇠는 지운다');
   }
   let rqThrew = 0; try { addRequest(db, { kind: 'sponsor', name: '', topic: 'x' }); } catch (e) { rqThrew = e.code; }
   ok(rqThrew === 400, '이름 없는 요청은 400');
