@@ -2030,6 +2030,22 @@ const SCREEN = {
   async home() {
     /* «로그인» 으로 들어온 사람에게는 목록보다 로그인이 먼저다. 셋을 같은 크기로 세운다 —
        하나만 크게 두면 나머지 둘을 쓰는 사람이 여기서 멈춘다 */
+    /* 사이트 운영자 표시. 보이지 않는 권한은 사고가 난다 — 남의 대회를 내 것인 줄 알고 고치게 된다.
+       «내가 연 대회» 칸 안에 두면 안 된다. 그 칸은 내 대회가 0개일 때 통째로 안 그려지는데,
+       열쇠를 잃어 대회가 0개로 보이는 사람이 바로 이 권한을 쓰는 사람이다. */
+    const adminBox = (AUTH && AUTH.siteAdmin) ? `
+      <div class="card" style="padding:11px 13px;border-color:#EBD3AE;background:var(--warn-l)">
+        <div class="meta"><b style="color:var(--warn)">사이트 운영자로 보고 있습니다.</b>
+          아래 «모든 대회» 에는 <b>남의 것도 함께</b> 나옵니다. 고치기 전에 «내 것» 표시를 보세요.</div>
+      </div>
+      ${my && my.all && my.all.length ? `<h2>모든 대회 <span class="pill">${my.all.length}</span></h2>
+        ${my.all.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
+          ${dateTile(e.starts)}
+          <div class="body"><h3>${esc(e.title)}</h3>
+          <div class="meta">${e.mine ? '<span class="pill ok">내 것</span>' : `<span class="pill">${esc(e.host)}</span>`}
+            ${e.listed ? '' : ' <span class="pill warn">초안</span>'}
+            · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
+        </div>`).join('')}` : ''}` : '';
     const loginBox = (WANT_LOGIN && loginOn() && !(AUTH && AUTH.loggedIn)) ? `
       <div class="card"><h3>로그인</h3>
         <div class="meta">쓰던 것으로 들어오세요. 어느 것으로 들어와도 내가 연 대회가 따라옵니다.
@@ -2093,14 +2109,14 @@ const SCREEN = {
       </details>` : ''}`;
     /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
        그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
-    if (!list.length && my && my.events.length) return loginBox + mineBox + `
+    if (!list.length && my && my.events.length) return loginBox + adminBox + mineBox + `
       <div class="card">
         <h3>다음에 할 일</h3>
         <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
       </div>` + findBox;
-    if (!list.length) return loginBox + mineBox + `<h2>아직 열린 대회가 없습니다</h2>
+    if (!list.length) return loginBox + adminBox + mineBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
-    return loginBox + mineBox + `<h2>열린 대회</h2>` +
+    return loginBox + adminBox + mineBox + `<h2>열린 대회</h2>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
         <div class="body"><h3>${esc(e.title)}</h3>
