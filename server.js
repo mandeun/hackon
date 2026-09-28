@@ -3887,6 +3887,13 @@ function hasSlur(text) {
   return SLURS.some(w => k.includes(w));
 }
 
+/* 자리 채우기 값. 누가 봐도 «시험 삼아 쳐 본 것»인 말만 정확히 맞을 때 가린다.
+   부분일치로 하면 «테스트 자동화가 번거로워요» 같은 진짜 글이 걸린다 — 전체가 이 말일 때만. */
+const PLACEHOLDERS = new Set([
+  '테스트', '테스트요', '테스트입니다', '테스트중', '시험', '실험',
+  'test', 'testing', 'asdf', 'qwer', 'aaa', 'abc', '123', '1234', 'ㅌㅅㅌ', 'ㅎㅇ', 'hello', 'hi',
+]);
+
 /** 글이 아닌 것. 뜻을 판정하지 않는다 — 모양만 본다. */
 function notWriting(text) {
   const t = String(text || '').trim();
@@ -3897,6 +3904,7 @@ function notWriting(text) {
   if (/^[ㄱ-ㅎㅏ-ㅣ\s]+$/.test(t)) return true;                   // 자음·모음만 (ㅋㅋㅋ, ㅁㄴㅇㄹ)
   if (/^(.)\1{3,}$/.test(k)) return true;                        // 같은 글자만 넷 이상
   if (/^https?:\/\/\S+$/i.test(t)) return true;                 // 주소 하나뿐
+  if (PLACEHOLDERS.has(k.toLowerCase())) return true;             // 글 전체가 자리 채우기 값
   return false;
 }
 
@@ -6795,6 +6803,14 @@ async function selftest() {
     ok(openRequests(db).some(r => r.id === 넉자.id), '네 글자라도 뜻이 있으면 실린다');
     const 두자 = addRequest(db, { kind: 'requester', name: '아무개', pain: '장부' });
     ok(openRequests(db).some(r => r.id === 두자.id), '두 글자라도 뜻이 있으면 실린다 — 길이로 안 거른다');
+
+    /* 자리 채우기 값 — **거르려던 그 값을 실제로 넣어 본다** (E16) */
+    for (const v of ['테스트', '테스트 ', 'TEST', 'asdf', 'ㅌㅅㅌ', '1234']) {
+      const 자리 = addRequest(db, { kind: 'requester', name: '아무개', pain: v });
+      ok(!openRequests(db).some(r => r.id === 자리.id), `자리 채우기 «${v}» 는 안 실린다`);
+    }
+    const 진짜 = addRequest(db, { kind: 'requester', name: '아무개', pain: '테스트 자동화가 번거로워요' });
+    ok(openRequests(db).some(r => r.id === 진짜.id), '«테스트»가 든 진짜 글은 실린다 — 전체가 그 말일 때만 가린다');
   }
   {
     /* ── 토스 미니앱 출처만 교차 출처를 연다 */
