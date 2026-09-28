@@ -4039,6 +4039,56 @@ async function benefits() {
   return benefitCache;
 }
 
+/* ── 의뢰 손질 — 사이트 운영자만 ──
+   의뢰는 **누구나** 올린다(POST /api/requests 에 열쇠가 없다). 그러면 스팸·욕설·남의 개인정보가
+   문제 은행에 그대로 걸리는데, 지금까지 그걸 내릴 길이 없었다.
+
+   «올린 것을 먼저 검사하고 통과해야 보인다» 로 바꾸지는 않았다. 그러면 사람이 붙어서 승인할
+   때까지 문제 은행이 빈 채로 있는다 — 지금 그걸 시간마다 볼 사람이 없다.
+   대신 «올라오되, 운영자가 내릴 수 있다» 로 둔다. 내린 것은 지운 것이 아니라 hidden 이다. */
+const REQ_STATUS = ['open', 'closed', 'hidden'];
+const REQ_FIELDS = { name: 40, topic: 120, pain: 300, now: 300, done: 300, contact: 80 };
+
+function adminEditRequest(db, id, b) {
+  const r = db.prepare('SELECT id FROM requests WHERE id=?').get(id);
+  if (!r) throw new HttpError(404, '없는 의뢰입니다');
+  const set = [], val = [];
+  for (const [k, max] of Object.entries(REQ_FIELDS)) {
+    if (b[k] === undefined) continue;
+    set.push(`${k}=?`); val.push(plain(b[k], max));      // 빈 값으로 지우는 것도 손질이다 — 개인정보를 빼는 길
+  }
+  if (!set.length) throw new HttpError(400, '고칠 것이 없습니다');
+  db.prepare(`UPDATE requests SET ${set.join(',')} WHERE id=?`).run(...val, id);
+  return publicRequest(db.prepare('SELECT * FROM requests WHERE id=?').get(id));
+}
+
+function setRequestStatus(db, id, status) {
+  if (!REQ_STATUS.includes(status)) throw new HttpError(400, '모르는 상태입니다');
+  const r = db.prepare('SELECT id FROM requests WHERE id=?').get(id);
+  if (!r) throw new HttpError(404, '없는 의뢰입니다');
+  db.prepare('UPDATE requests SET status=? WHERE id=?').run(status, id);
+  return { id, status };
+}
+
+/* 아주 지우기. 되돌릴 수 없어서 제목을 그대로 적어야 한다(대회 지우기와 같은 규칙).
+   딸린 풀이도 같이 지운다 — 남겨 두면 없는 문제를 가리키는 줄이 된다.
+   대회 주제로 붙어 있으면 못 지운다. 그건 먼저 떼는 것이 순서다. */
+function deleteRequest(db, id, confirm) {
+  const r = db.prepare('SELECT id, name, event FROM requests WHERE id=?').get(id);
+  if (!r) throw new HttpError(404, '없는 의뢰입니다');
+  if (r.event) throw new HttpError(409, '대회 주제로 붙어 있습니다. 그 대회에서 먼저 떼 주세요');
+  if (String(confirm || '') !== r.name) throw new HttpError(409, '지우려면 올린 이름을 그대로 적어 주세요');
+  const sol = db.prepare('SELECT COUNT(*) c FROM solutions WHERE request=?').get(id).c;
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM solutions WHERE request=?').run(id);
+    db.prepare("UPDATE teams SET request='' WHERE request=?").run(id);
+    db.prepare('DELETE FROM requests WHERE id=?').run(id);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { deleted: id, solutions: sol };
+}
+
 function openRequests(db, all = false) {
   return db.prepare("SELECT * FROM requests WHERE event='' AND status='open' ORDER BY created, id LIMIT 200").all()
     .filter(r => all || !publicHide(r))
@@ -5812,6 +5862,28 @@ function routes(db) {
           db.prepare('UPDATE requests SET event=? WHERE id=?').run(m[1], r.id);
           return json(res, 200, { picked: true });
         }
+        /* 의뢰 손질 — 사이트 운영자만. 받는 사람 열쇠(x-rkey)로는 안 된다:
+           그건 «내 의뢰 하나» 를 여는 열쇠라, 그걸로 남의 의뢰를 지우게 하면 안 된다. */
+        if (p === '/api/admin/requests' && req.method === 'GET') {
+          if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 볼 수 있습니다');
+          return json(res, 200, db.prepare(`SELECT id, kind, name, topic, pain, now, done, contact,
+                                                   event, status, created FROM requests
+                                            ORDER BY created DESC LIMIT 300`).all()
+            .map(r => ({ ...r, hide: publicHide(r) })));
+        }
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)$/)) && req.method === 'PATCH') {
+          if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 고칠 수 있습니다');
+          return json(res, 200, adminEditRequest(db, m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/status$/)) && req.method === 'POST') {
+          if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 바꿀 수 있습니다');
+          return json(res, 200, setRequestStatus(db, m[1], String((await body(req)).status || '')));
+        }
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)$/)) && req.method === 'DELETE') {
+          if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 지울 수 있습니다');
+          return json(res, 200, deleteRequest(db, m[1], (await body(req)).confirm));
+        }
+
         if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/view$/)) && req.method === 'GET') {
           if (!canReceive(db, m[1], req.headers['x-rkey'] || '')) throw new HttpError(403, '받는 사람 열쇠가 필요합니다');
           return json(res, 200, requestView(db, m[1]));
@@ -7165,6 +7237,42 @@ async function selftest() {
   let fuBad = 0; try { setFollowup(db, rq.id, { status: 'maybe' }); } catch (e) { fuBad = e.code; }
   ok(fuBad === 400, '없는 D+14 답은 400');
   ok(!('rkey' in publicRequest(db.prepare('SELECT * FROM requests WHERE id=?').get(rq.id))), '공개 요청에 열쇠 없음');
+
+  /* ── 의뢰 손질 (사이트 운영자) ── 의뢰는 누구나 올린다. 내릴 길이 없으면 문제 은행이 스팸판이 된다 */
+  {
+    const spam = addRequest(db, { name: '스팸가게', topic: '싸게 팝니다', pain: '연락처 010-1234-5678 로 주세요',
+                                  now: '지금은 손으로 하나씩 합니다', done: '자동으로 되면 됩니다', contact: 'spam@example.com' });
+    ok(openRequests(db).some(r => r.id === spam.id), '올린 의뢰는 문제 은행에 뜬다');
+    setRequestStatus(db, spam.id, 'hidden');
+    ok(!openRequests(db).some(r => r.id === spam.id), '내린 의뢰는 문제 은행에서 사라진다');
+    ok(db.prepare('SELECT status FROM requests WHERE id=?').get(spam.id).status === 'hidden',
+       '내린 것은 지운 것이 아니라 hidden 이다');
+    setRequestStatus(db, spam.id, 'open');
+    ok(openRequests(db).some(r => r.id === spam.id), '되살리면 다시 뜬다 — «승인» 은 이 길이다');
+    let badStatus = false;
+    try { setRequestStatus(db, spam.id, '아무거나'); } catch { badStatus = true; }
+    ok(badStatus, '모르는 상태로는 못 바꾼다');
+
+    adminEditRequest(db, spam.id, { pain: '', topic: '주문 정리' });
+    const fixed = db.prepare('SELECT * FROM requests WHERE id=?').get(spam.id);
+    ok(fixed.pain === '' && fixed.topic === '주문 정리', '본문을 고치고, 박힌 연락처를 빈 값으로 지울 수 있다');
+    ok(!('rkey' in adminEditRequest(db, spam.id, { name: '가게' })), '고친 결과에 받는 사람 열쇠가 안 실린다');
+
+    addSolution(db, spam.id, { name: '푼이', url: 'https://x.example/1', note: '이렇게요' });
+    let wrongName = false;
+    try { deleteRequest(db, spam.id, '다른이름'); } catch { wrongName = true; }
+    ok(wrongName, '이름이 다르면 안 지워진다 — 되돌릴 수 없는 일은 제목을 적게 한다');
+    const del = deleteRequest(db, spam.id, '가게');
+    ok(del.solutions === 1 && !db.prepare('SELECT 1 FROM requests WHERE id=?').get(spam.id), '의뢰가 지워진다');
+    ok(db.prepare('SELECT COUNT(*) c FROM solutions WHERE request=?').get(spam.id).c === 0, '딸린 풀이도 같이 지워진다');
+
+    const held = addRequest(db, { name: '붙은가게', topic: '붙은 주제', pain: '번거로운 일이 하나 있습니다',
+                                  now: '지금은 손으로', done: '되면 좋겠습니다' });
+    db.prepare('UPDATE requests SET event=? WHERE id=?').run(ev, held.id);
+    let bound = false;
+    try { deleteRequest(db, held.id, '붙은가게'); } catch { bound = true; }
+    ok(bound, '대회 주제로 붙은 의뢰는 못 지운다 — 대회 화면에 없는 주제가 남는다');
+  }
   ok(TIERS['현물'] && TIERS['현물'].length >= 2, '현물 후원 등급이 있다');
   /* 되살리기 — 사본으로 왕복. 팀·자리 id 는 새로 받되 수는 같다 */
   const rsEv = createEvent(db, { title: '되살리기검사' });

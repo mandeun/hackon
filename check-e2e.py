@@ -3170,6 +3170,20 @@ with sync_playwright() as pw:
     A(code_of("/api/visits") in (403, 200), "유입 통계 응답이 이상하다")
     ok("사이트 운영자 — 토큰이 없는 서버에는 문이 아예 없다(404), 명단은 403")
 
+    # ── 의뢰 손질은 사이트 운영자만 ──
+    # 의뢰는 누구나 올린다. 그러면 «지우기» 도 누구나 되는 것은 아닌지 여기서 못 박는다.
+    st_rq, rq0 = post("/api/requests", {"name": "손님가게", "topic": "주문 정리",
+                                        "pain": "주문을 손으로 옮겨 적는 게 번거롭습니다",
+                                        "now": "지금은 공책에 적습니다", "done": "자동으로 모이면 됩니다"})
+    A(st_rq == 201, f"의뢰가 안 올라갔다: {st_rq}")
+    rid = rq0["id"]
+    A(code_of("/api/admin/requests") == 403, "운영자가 아닌데 의뢰 전체 목록이 보인다 (연락처가 들어 있다)")
+    A(codepost(f"/api/requests/{rid}/status", {"status": "hidden"}) == 403, "아무나 의뢰를 내릴 수 있다")
+    A(post(f"/api/requests/{rid}", {"topic": "바꿔치기"}, method="PATCH")[0] == 403, "아무나 남의 의뢰를 고칠 수 있다")
+    A(delete_of(f"/api/requests/{rid}") == 403, "아무나 남의 의뢰를 지울 수 있다")
+    A(any(r["id"] == rid for r in api("/api/requests")), "막은 뒤에 의뢰가 사라졌다 — 손님 눈에는 그대로여야 한다")
+    ok("의뢰 손질 — 목록·내리기·고치기·지우기 넷 다 사이트 운영자만 (403)")
+
     b.close()
 
 A(not errs, "JS 에러: " + "; ".join(errs))
