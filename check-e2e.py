@@ -3162,6 +3162,14 @@ with sync_playwright() as pw:
       "로그인 없이도 붙이기가 통과한다 — 옮겨 갈 계정이 없는데 무엇으로 옮겼나")
     ok("내 계정에 붙이기 — 열쇠가 없으면 403, 로그인이 없으면 401")
 
+    # ── 사이트 운영자 — 평소에는 문이 아예 안 달려 있다 ──
+    # ADMIN_CLAIM 이 없는 서버에서 404 가 아니면, 누구나 두드려 볼 수 있는 문이 하나 생긴 것이다.
+    A(codepost("/api/admin/claim", {"token": "아무거나"}) == 404,
+      "ADMIN_CLAIM 이 없는데 첫 운영자 지정 문이 열려 있다")
+    A(code_of("/api/admin/people") == 403, "사이트 운영자가 아닌데 운영자 명단이 보인다")
+    A(code_of("/api/visits") in (403, 200), "유입 통계 응답이 이상하다")
+    ok("사이트 운영자 — 토큰이 없는 서버에는 문이 아예 없다(404), 명단은 403")
+
     b.close()
 
 A(not errs, "JS 에러: " + "; ".join(errs))
@@ -3421,6 +3429,27 @@ LOGIN_BASE = checklib.start(extra_env={
     "KAKAO_KEY": "test-kakao", "GOOGLE_KEY": "test-google", "NAVER_KEY": "test-naver",
     "NAVER_SECRET": "test-naver-secret",
 })
+
+
+# 토큰을 넣어 둔 서버를 따로 하나 더 띄운다 — 문이 «열려 있을 때» 도 로그인 없이는 안 열려야 한다.
+CLAIM_BASE = checklib.start(extra_env={"ADMIN_CLAIM": "테스트-토큰-1234"})
+
+
+def claim_post(token):
+    import urllib.request as _u
+    r = _u.Request(CLAIM_BASE + "/api/admin/claim", method="POST",
+                   data=json.dumps({"token": token}).encode(),
+                   headers={"content-type": "application/json"})
+    try:
+        with _u.urlopen(r) as x:
+            return x.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+A(claim_post("테스트-토큰-1234") == 401, "토큰만 맞으면 로그인 없이 사이트 운영자가 된다")
+A(claim_post("틀린토큰") == 401, "로그인 검사보다 토큰 검사가 먼저다 — 토큰 맞고 틀림이 응답으로 갈린다")
+ok("사이트 운영자 — 토큰이 맞아도 로그인 없이는 못 들어간다(401)")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
