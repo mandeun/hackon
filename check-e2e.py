@@ -359,19 +359,27 @@ with sync_playwright() as p:
     A("다산관 101호" in pg.inner_text("#grid"), f"첫 화면 카드에 모이는 곳이 없다: {pg.inner_text('#grid')[:300]}")
     ok("첫 화면 목록 — 이름만 넣은 대회는 안 뜬다. 올려야 뜨고, 뜨면 빈 안내는 사라진다")
 
-    # ── 모여 있는 곳 — 밖에서는 사이트만 가리키고 대화방은 들어온 사람에게 보여 준다 ──
-    # 주소를 안 적었으면 «없음» 이 아니라 아예 안 그려야 한다. 빈 칸을 내비에 거는 것이 제일 나쁘다.
-    A(pg.is_hidden("#room"), "대화방 주소를 안 적었는데 «모여 있는 곳» 이 떴다")
+    # ── 대화방은 그 대회 카드 안에 있다 ──
+    # 전에는 «모여 있는 곳» 이라는 절을 따로 뒀는데, 대회가 하나면 같은 대회가 한 화면에 두 번 나왔다.
+    # Luma·Nextdoor 처럼 행동을 행사 카드 안에 둔다. 주소를 안 적었으면 아예 안 그린다.
+    A(pg.query_selector("#grid .room") is None, "대화방 주소를 안 적었는데 «대화방» 이 떴다")
     A(post(f"/api/events/{ev}", {"chat": "https://open.kakao.com/o/gTestRoom"}, OK, method="PATCH")[0] == 200,
       "대화방 주소 저장 실패")
     A(api("/api/events")[0].get("chat") == "https://open.kakao.com/o/gTestRoom",
       f"첫 화면 목록이 대화방 주소를 못 받는다: {api('/api/events')[0]}")
     pg.goto(BASE + "/")
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
-    A(pg.is_visible("#room"), "대화방 주소를 적었는데 «모여 있는 곳» 이 안 뜬다")
-    A(pg.get_attribute("#room-l a", "href") == "https://open.kakao.com/o/gTestRoom",
-      "«모여 있는 곳» 이 대화방으로 안 보낸다")
-    ok("모여 있는 곳 — 주소를 적은 대회만 첫 화면에 걸린다")
+    A(pg.get_attribute("#grid .room", "href") == "https://open.kakao.com/o/gTestRoom",
+      "카드 안 «대화방» 이 대화방으로 안 보낸다")
+    # 같은 대회가 두 번 나오면 안 된다 — 카드 수와 대회 수가 같아야 한다
+    A(pg.eval_on_selector_all("#grid .ev", "els => els.length") == 1,
+      "대회는 하나인데 카드가 여럿이다 — 같은 것이 두 번 나온다")
+    # 카드 아무 데나 눌러도 대회로 가고, 대화방만 따로 눌린다 (a 안의 a 는 못 만든다)
+    A(pg.eval_on_selector("#grid .ev .t a", "a => a.getAttribute('href')").startswith("/e/"),
+      "카드 제목이 대회로 안 간다")
+    A(pg.eval_on_selector("#grid .room", "a => getComputedStyle(a).zIndex") != "auto",
+      "대화방이 펼친 링크 밑에 깔린다 — 눌러도 대회로 간다")
+    ok("대화방 — 그 대회 카드 안에. 주소를 적었을 때만, 같은 대회가 두 번 안 나온다")
 
     # ── 노랑이 — 그림 파일은 서빙 목록에 안 적으면 404 가 된다 ──
     for f in ("norangi.svg", "norangi-run.svg", "norangi-hi.svg"):
