@@ -1235,7 +1235,7 @@ function dotBoard(needs, title) {
   (needs || []).forEach(n => {
     const q = Math.max(0, +n.qty || 0);
     const f = Math.min(q, +n.filled || 0);
-    const w = Math.min(q - f, (n.pledges || []).filter(p => p.status === 'pending').length);
+    const w = Math.min(q - f, +n.pending || 0);
     total += q; on += f; wait += w;
     const k = needKind(n.kind); per[k] = per[k] || [0, 0]; per[k][0] += f; per[k][1] += q;
     for (let i = 0; i < q; i++) dots.push(i < f ? 'on' : i < f + w ? 'wait' : '');

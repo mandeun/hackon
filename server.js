@@ -1823,9 +1823,15 @@ function trashTeam(db, teamId, by) {
   db.prepare('DELETE FROM teams WHERE id=?').run(teamId);
   return Number(r.lastInsertRowid);
 }
-function untrashTeam(db, trashId) {
+/* asTeam 은 «팀 열쇠만 들고 온 참가자» 라는 뜻이다.
+   지울 때 누가 지웠는지(by)를 적어 두면서도 되살릴 때는 안 봤다. 그래서 운영자가 내린 팀이
+   자기 열쇠로 다시 들어올 수 있었고, 되살리면 휴지통 줄이 지워져 «내렸다» 는 기록까지 사라졌다.
+   자기 취소는 마감 뒤 막히는데 되살리기는 안 막혀서 마감 우회로도 됐다. 감사 09-28 8번. */
+function untrashTeam(db, trashId, asTeam = false) {
   const row = db.prepare('SELECT * FROM team_trash WHERE id=?').get(trashId);
   if (!row) throw new HttpError(404, '휴지통에 없습니다');
+  if (asTeam && row.by === 'admin')
+    throw new HttpError(403, '운영자가 내린 신청입니다. 주최자에게 말씀해 주세요');
   const d = JSON.parse(row.json);
   const ins = (table, r) => {
     const ks = Object.keys(r);
@@ -1870,11 +1876,22 @@ function visitRef(ref, host) {
   } catch { return '직접'; }
 }
 
+/* 하루·한 주소당 «어디서 왔나» 를 몇 가지까지 따로 셀 것인가.
+   오는 곳 이름은 부르는 쪽이 Referer 로 정하는 값이라, 매번 다른 주소를 적으면 줄이 끝없이 늘어난다.
+   열쇠도 로그인도 필요 없는 GET 길이고 지우는 코드도 없어서 그대로 두면 볼륨이 찬다. 감사 09-28 14번.
+   상한을 넘으면 새 이름은 «기타» 로 접는다 — 이미 세던 곳은 계속 제 이름으로 센다. */
+const REF_MAX = 200;
 function countVisit(db, p, ref, host) {
   const where = visitPath(p);
   if (!where) return;
+  let from = visitRef(ref, host);
+  const seen = db.prepare(`SELECT 1 FROM visits WHERE day=date('now') AND path=? AND ref=?`).get(where, from);
+  if (!seen) {
+    const n = db.prepare(`SELECT COUNT(*) c FROM visits WHERE day=date('now') AND path=?`).get(where).c;
+    if (n >= REF_MAX) from = '기타';
+  }
   db.prepare(`INSERT INTO visits(day,path,ref,n) VALUES(date('now'),?,?,1)
-              ON CONFLICT(day,path,ref) DO UPDATE SET n = n + 1`).run(where, visitRef(ref, host));
+              ON CONFLICT(day,path,ref) DO UPDATE SET n = n + 1`).run(where, from);
 }
 
 function visitsOf(db, days) {
@@ -2779,10 +2796,20 @@ function clientIp(req) {
   const h = req.headers['fly-client-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return h || sock;
 }
+/* 창구가 너무 많아지면 지나간 것부터 버린다. 창구 이름은 부르는 쪽이 정하는 값(IP·주소)이라
+   그냥 두면 끝없이 쌓인다 — 256MB 한 대에서는 그게 곧 죽는 길이다. 세는 값은 10분이면 의미가 없으니
+   지난 것을 버리는 데 잃는 것이 없다. */
+const TRIES_MAX = 20000;
+function sweepTries(now) {
+  for (const [k, v] of tries) if (now - v.at > 600000) tries.delete(k);
+  if (tries.size > TRIES_MAX)                       // 다 살아 있어도 넘치면 오래된 쪽부터
+    for (const k of [...tries.keys()].slice(0, tries.size - TRIES_MAX)) tries.delete(k);
+}
 function tooMany(ip, limit = 30) {
   const now = Date.now(), t = tries.get(ip) || { n: 0, at: now };
   if (now - t.at > 600000) { t.n = 0; t.at = now; }
   t.n++; tries.set(ip, t);
+  if (tries.size > TRIES_MAX) sweepTries(now);
   return t.n > limit;
 }
 /* 열쇠 없는 쓰기(신청·후원·질문·피드백·요청·whoami)는 IP+길로 10분에 WRITE_LIMIT 번(감사 7·9). 검사는 한 IP 라 넉넉히 둔다 */
@@ -3148,6 +3175,11 @@ function getEvent(db, id) {
   delete e.jkey;                     // 심사 열쇠도 안 내려보낸다 — 운영자에게만 따로 준다
   delete e.vkey;                     // 관객 투표 열쇠도 마찬가지
   delete e.judged;                   // 심사위원 상태는 운영자 화면에만 — 손님에게 «못 구함»을 보일 이유가 없다
+  delete e.pay;                      // 입금 안내(계좌번호·예금주 이름)는 «맡기 확정된 사람» 에게만 — giveView 가 열쇠를 보고 따로 준다
+  delete e.wifi;                      // 장소 와이파이는 큰 화면(tv)에만 — 벽에 거는 것과 공개 API 에 싣는 것은 다르다
+  /* 이 함수는 «지울 것» 을 적는 방식이라, events 에 칸이 새로 생기면 기본값이 «공개» 다.
+     pay 가 정확히 그래서 샜다(감사 09-28 2번) — 열쇠 없는 /api/events/:id·/board·/tv 셋으로 계좌번호가 나갔다.
+     칸을 더할 때는 여기 한 줄을 같이 적고, 아래 selftest 의 «공개 응답에 안 나갈 칸» 목록에도 적는다. */
   /* 그날의 조건은 오프닝에서 공개하는 것이다. 끝나기 전에 공개 응답에 실리면
      참가자가 미리 준비해 온다 — 그러면 «현장 조건» 이 아니다. 운영자에게만 따로 붙인다. */
   if (!closed({ due: e.due, ends: e.ends })) delete e.twist;
@@ -3378,6 +3410,16 @@ function savePair(db, event, b) {
     const t = db.prepare('SELECT event FROM teams WHERE id=?').get(id);
     if (!t || t.event !== event) throw new HttpError(404, '이 대회의 팀이 아닙니다');
   }
+  /* 누가 비교표에 오를 수 있는지는 pairTeams 가 정한다 — «안 낸 팀을 올리면 나머지가 공짜 승리를 얻는다».
+     보여 주는 쪽(nextPair·pairView)은 그 규칙을 지켰는데 저장하는 쪽은 안 봤다. 그래서 화면이 절대
+     내주지 않는 짝도 직접 보내면 그대로 쌓였고, pairScores 는 쌓인 줄을 전부 세므로 안 낸 팀이
+     1등이 될 수 있었다. 짝 비교가 꺼져 있을 때도 쌓였다가 켜는 순간 한꺼번에 살아났다. 감사 09-28 10번.
+     거르는 자리는 «쓸 때» 다 — 읽을 때 거르면 pall 을 켜고 쌓은 정상 비교까지 죽는다(7432 가 그것을 고정한다). */
+  const 올릴수있는 = new Set(pairTeams(db, event).map(t => t.id));
+  if (!올릴수있는.has(x) || !올릴수있는.has(y))
+    throw new HttpError(409, '비교표에 오르지 않은 팀입니다');
+  if (!db.prepare('SELECT pmode FROM events WHERE id=?').get(event).pmode)
+    throw new HttpError(409, '짝 비교가 켜져 있지 않습니다');
   const lo = Math.min(x, y), hi = Math.max(x, y);
   db.prepare(`INSERT INTO pairs(event,judge,a,b,winner) VALUES(?,?,?,?,?)
               ON CONFLICT(event,judge,a,b) DO UPDATE SET winner=excluded.winner, at=datetime('now')`)
@@ -3694,7 +3736,6 @@ function tv(db, event) {
     /* 빈 자리 — 로고 벽이 «장소 · 희망가 30만원 · 비었습니다» 로 판다. 돈은 주최자에게 직접 */
     open: db.prepare(`SELECT n.id, n.kind, n.label, n.price, n.qty, (SELECT COUNT(*) FROM pledges p WHERE p.need=n.id AND p.status IN ('ok','done')) AS filled FROM needs n WHERE n.event=? ORDER BY n.id`).all(event)
       .filter(n => (+n.qty || 0) - (+n.filled || 0) > 0).slice(0, 6),
-    pay: e.pay || '',
     teams: rows.length,
     done: rows.filter(r => r.url).length,
     /* 아직 안 낸 팀 이름은 마감 한 시간 전부터만 띄운다.
@@ -3702,7 +3743,8 @@ function tv(db, event) {
     urgent: !!e.due && new Date(e.due) - new Date() < 3600000,
     waiting: (e.due && new Date(e.due) - new Date() < 3600000 && !closed(e))
       ? rows.filter(r => !r.url).map(r => r.name) : [],
-    wifi: e.wifi || '',
+    /* 와이파이는 벽에 거는 화면에만 싣는다. getEvent 는 이제 이 칸을 안 내려보내므로 여기서 직접 읽는다. */
+    wifi: db.prepare('SELECT wifi FROM events WHERE id=?').get(event).wifi || '',
     notice: noticeOf(e),
     /* 순위는 마감이 지나고 심사가 시작된 뒤에만 벽에 띄운다.
        그 전에 띄우면 심사위원이 보고 점수를 맞추고, 참가자는 압박만 받는다. */
@@ -4005,6 +4047,13 @@ function restoreEvent(db, d, owner) {
   if (!owner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(owner)) throw new HttpError(403, '주최자 열쇠가 필요합니다');
   if (typeof e.title !== 'string' || !e.title) throw new HttpError(400, '사본 파일이 아닙니다');
   if (db.prepare('SELECT 1 FROM events WHERE id=?').get(e.id)) throw new HttpError(409, '같은 id 의 대회가 살아 있습니다');
+  /* 쓰던 id 를 그대로 되살리는 것은 «내가 지운 내 대회» 일 때만이다.
+     전에는 살아 있지만 않으면 아무 id 나 쓸 수 있었다. 지워진 대회 id 는 공개 목록을 두 번 보면
+     알 수 있고, team_trash·mail_log·reports·requests 는 대회 표에 묶여 있지 않아 지워도 남는다.
+     그래서 남이 지운 id 를 다시 등록하면 그 대회의 운영자가 되어, 남은 팀 휴지통을 되살려
+     참가자 연락처까지 가져갈 수 있었다. 남의 id 면 새 id 를 준다. 감사 09-28 4번. */
+  if (!db.prepare('SELECT 1 FROM event_trash WHERE event=? AND owner=?').get(e.id, owner))
+    e.id = nid();
   const cols = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
   const okey = crypto.randomBytes(5).toString('hex');   // 사본엔 운영자 열쇠가 없다. 새로 준다
   const row = { ...e, okey, owner, jkey: crypto.randomBytes(5).toString('hex'), vkey: crypto.randomBytes(5).toString('hex') };
@@ -4013,6 +4062,11 @@ function restoreEvent(db, d, owner) {
   db.prepare(`INSERT INTO events(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`).run(...keys.map(k => row[k]));
   const ins = (table, r, drop = ['id']) => {
     const tc = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+    /* 딸린 줄이 «어느 대회 것인가» 는 사본이 정하는 게 아니라 지금 되살리는 이 대회다.
+       전에는 사본의 event 칸을 그대로 넣어서, 살아 있는 남의 대회 id 를 적어 보내면
+       그 대회 안으로 줄이 꽂혔다 — 소식(공개), 가짜 팀, 설문, 자리·후원까지.
+       주최자 열쇠는 무인증 POST 한 번이면 스스로 발급되므로 문턱이 없었다. 감사 09-28 3번. */
+    if (tc.includes('event')) r = { ...r, event: e.id };
     const ks = tc.filter(c => !drop.includes(c) && r[c] !== undefined);
     for (const k of ks) if (r[k] !== null && typeof r[k] === 'object') throw new HttpError(400, '사본 파일이 아닙니다: ' + table + '.' + k);
     return Number(db.prepare(`INSERT INTO ${table}(${ks.join(',')}) VALUES(${ks.map(() => '?').join(',')})`).run(...ks.map(k => r[k])).lastInsertRowid);
@@ -4230,7 +4284,8 @@ function giveView(db, ref, k) {
   }
   return {
     gift: { ref, kind, label, name: row.name, org: row.org || '', status, at: row.created },
-    event: { id: e.id, pay: (row.status === 'ok' || row.status === 'done') ? (e.pay || '') : '', title: e.title, host: e.host, starts: e.starts, ends: e.ends, due: e.due,
+    event: { id: e.id, pay: (row.status === 'ok' || row.status === 'done')
+               ? (db.prepare('SELECT pay FROM events WHERE id=?').get(row.event).pay || '') : '', title: e.title, host: e.host, starts: e.starts, ends: e.ends, due: e.due,
              closed: isClosed, ended: !!e.ends && today() > e.ends,
              teams: o.teams, finished: o.finished, finishRate: isClosed ? o.finishRate : null },
     top: pk ? pk.top.map(t => ({ rank: t.rank, name: t.name, note: t.note, url: t.url })) : [],
@@ -4368,8 +4423,20 @@ function purgeOld(db, force = false) {
     n += db.prepare("UPDATE pledges SET contact='' WHERE event=? AND contact<>''").run(id).changes;
     n += db.prepare("UPDATE offers SET contact='' WHERE event=? AND contact<>''").run(id).changes;
     n += db.prepare("UPDATE requests SET contact='' WHERE event=? AND contact<>''").run(id).changes;
+    /* 연락처는 teams.contact 하나가 아니다. 짝의 주소(mate_contact)는 이미 쓸고 있는 표 안에 있으면서
+       빠져 있었고, 멘토·심사(supporters)와 대기자(waitlist)도 안 지워졌다. 처리방침은 «6개월» 이라고
+       한 줄로 약속하는데, 손으로 적은 이 표 목록이 그 약속보다 짧았다. 감사 09-28 13번. */
+    n += db.prepare("UPDATE teams SET mate_contact='' WHERE event=? AND mate_contact<>''").run(id).changes;
+    try { n += db.prepare("UPDATE supporters SET contact='' WHERE event=? AND contact<>''").run(id).changes; } catch {}
+    try { n += db.prepare("UPDATE waitlist SET contact='' WHERE event=? AND contact<>''").run(id).changes; } catch {}
   }
   try { n += db.prepare("UPDATE feedback SET contact='' WHERE contact<>'' AND at < date('now','-180 days')").run().changes; } catch {}
+  /* 대회 표에 안 묶인 것들 — 대회를 지워도 남으므로 날짜로만 지울 수 있다.
+     team_trash 는 사본 안에 팀 줄이 통째로(연락처와 팀 열쇠까지) 들어 있어서 특히 오래 두면 안 된다.
+     대회 휴지통과 같은 30일을 쓴다. */
+  try { n += db.prepare("DELETE FROM team_trash WHERE at < datetime('now','-30 days')").run().changes; } catch {}
+  try { n += db.prepare("UPDATE mail_log SET rcpt='' WHERE rcpt<>'' AND at < date('now','-180 days')").run().changes; } catch {}
+  try { n += db.prepare("UPDATE solutions SET contact='' WHERE contact<>'' AND at < date('now','-180 days')").run().changes; } catch {}
   /* 지운 대회 휴지통은 30일. 화면에서 «30일 뒤 지워집니다» 라고 약속한 그 30일이다.
      팀·후원자 연락처가 사본 안에 그대로 들어 있으므로 기한이 지나면 줄째로 지운다. */
   let trash = 0;
@@ -4379,15 +4446,23 @@ function purgeOld(db, force = false) {
 }
 
 /* 공개가 봐도 되는 것만 골라 붙인다. contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
-function needsOf(db, event) {
+/* 자리 판. 한 함수가 두 사람을 본다 — 운영자의 «검토할 목록» 과 손님의 «자리 판».
+   전에는 둘이 같은 것을 받아서, 아직 확인 안 한 사람과 거절당한 사람의 이름·소속·이해관계 표시가
+   열쇠 없는 GET 으로 그대로 나갔다(감사 09-28 5번). 공개 장부(ledgerOf)는 ok·done 만 싣는데
+   이 길만 안 걸렀다. 화면은 브라우저에서 걸러 그리고 있었을 뿐이라, 응답에는 다 실려 있었다.
+   거절당한 사람의 이름이 남의 대회 판에 계속 걸려 있는 것이 특히 나쁘다.
+   손님에게는 «검토 중 N명» 이라는 수만 준다 — 그 수는 화면이 실제로 쓰고 있어서 없애면 기능이 준다. */
+function needsOf(db, event, admin = false) {
   const pl = db.prepare('SELECT id, need, name, org, status, coi FROM pledges WHERE event=? ORDER BY id')
     .all(event);
+  const 보임 = p => admin || p.status === 'ok' || p.status === 'done';
   return db.prepare('SELECT * FROM needs WHERE event=? ORDER BY id').all(event)
     .map(n => ({
       id: n.id, kind: n.kind, label: n.label, qty: n.qty, note: n.note,
       amount: +n.amount || 0, price: +n.price || 0, held: !!n.held, auto: !!n.auto,
       filled: pl.filter(p => p.need === n.id && (p.status === 'ok' || p.status === 'done')).length,
-      pledges: pl.filter(p => p.need === n.id)
+      pending: pl.filter(p => p.need === n.id && p.status === 'pending').length,
+      pledges: pl.filter(p => p.need === n.id && 보임(p))
                  .map(p => ({ id: p.id, name: p.name, org: p.org, status: p.status, coi: !!p.coi })),
     }));
 }
@@ -4489,7 +4564,7 @@ function pledgesOf(db, event) {
 function needsSummary(db, event) {
   const kinds = [];
   for (const n of needsOf(db, event)) {
-    const pending = n.pledges.filter(p => p.status === 'pending').length;
+    const pending = n.pending;
     const k = kinds.find(x => x.kind === n.kind);
     if (k) { k.qty += n.qty; k.filled += n.filled; k.pending += pending; }
     else kinds.push({ kind: n.kind, qty: n.qty, filled: n.filled, pending });
@@ -4666,7 +4741,15 @@ function routes(db) {
         /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 받아 브라우저가 x-jkey 로 실어 보낸다. */
         const jkey = req.headers['x-jkey'] || '';
 
-        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + clientIp(req) + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
+        /* 상한은 «열쇠를 안 낸 쓰기» 가 아니라 «모든 쓰기» 에 건다.
+           전에는 x-okey·x-jkey 가 **있기만 하면** 건너뛰었는데, 그 값이 맞는지는 여기서 안 본다.
+           그래서 아무 글자나 `x-okey: x` 로 붙이면 상한이 통째로 꺼졌다 — 열쇠 없는 쓰기 길
+           (신청·후원·제안·요청·피드백·신고·제보·whoami) 전부가 무제한이 되고, whoami 는 한 번에
+           메일 한 통이라 남의 주소로 메일을 쏟을 수 있었다. 틀린 열쇠를 세는 카운터도 x-owner 만 보므로
+           열쇠 추측도 공짜였다. 감사 09-28 1번.
+           운영자·심사위원이 손해 보지 않는다: 창구는 IP + 주소꼴(`/api/teams/#/score`)이라
+           10분에 WRITE_LIMIT(300)번이고, 한 사람이 그만큼 누를 일은 없다. */
+        if (req.method !== 'GET' && tooMany('w:' + clientIp(req) + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
           throw new HttpError(429, '요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
 
         if (p === '/api/events' && req.method === 'POST') {
@@ -5022,8 +5105,10 @@ function routes(db) {
             const e = getEvent(db, m[1]);
             e.admin = isAdmin(db, m[1], key, owner, siteAdmin);
             /* 심사 열쇠는 운영자에게만. 심사위원에게 보낼 링크를 이걸로 만든다. */
-            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged, twist FROM events WHERE id=?').get(m[1]);
+            if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged, twist, pay, wifi FROM events WHERE id=?').get(m[1]);
                            e.jkey = kk.jkey; e.vkey = kk.vkey; e.judged = kk.judged; e.twist = kk.twist;
+                           /* 입금 안내·와이파이는 운영자 편집 칸이 읽는다. 손님 응답에서는 getEvent 가 지운다. */
+                           e.pay = kk.pay || ''; e.wifi = kk.wifi || '';
               /* 이 대회가 «지금 로그인한 계정» 것인가. 열쇠로 들어온 사람은 고칠 수는 있어도
                  «내 대회» 목록에는 안 뜬다 — 그 차이를 화면이 알아야 붙이기를 권할 수 있다.
                  로그인을 안 했으면 «아니다» 가 아니라 «모른다» 라서 칸을 아예 안 보낸다. */
@@ -5393,7 +5478,8 @@ function routes(db) {
         }
         /* ── 빈자리 판 · 공개 장부 · 2주 확인 (PLAN.md §API) ── */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/needs$/))) {
-          if (req.method === 'GET') return json(res, 200, needsOf(db, m[1]));
+          /* 운영자에게는 검토할 목록을, 손님에게는 확인된 것만. 같은 길이라 여기서 가른다. */
+          if (req.method === 'GET') return json(res, 200, needsOf(db, m[1], isAdmin(db, m[1], key, owner, siteAdmin)));
           if (req.method === 'POST') {
             needAdmin(db, m[1], key, owner, siteAdmin);
             return json(res, 201, addNeed(db, m[1], await body(req)));
@@ -5426,14 +5512,18 @@ function routes(db) {
           if (bd.held !== undefined) { set.push('held=?'); val.push(bd.held ? 1 : 0); }
           if (!set.length) throw new HttpError(400, '고칠 것이 없습니다');
           db.prepare(`UPDATE needs SET ${set.join(',')} WHERE id=?`).run(...val, +m[1]);
-          return json(res, 200, needsOf(db, n.event).find(x => x.id === +m[1]));
+          return json(res, 200, needsOf(db, n.event, true).find(x => x.id === +m[1]));
         }
         if ((m = p.match(/^\/api\/needs\/(\d+)$/)) && req.method === 'DELETE') {
           const n = db.prepare('SELECT event FROM needs WHERE id=?').get(+m[1]);
           if (!n) throw new HttpError(404, '없는 자리입니다');
           needAdmin(db, n.event, key, owner, siteAdmin);
-          if (db.prepare('SELECT 1 FROM pledges WHERE need=? LIMIT 1').get(+m[1]))
+          /* 막는 말이 «먼저 거절하세요» 인데, 거절해도 줄은 남으므로 다시 막혔다 — 안내한 길이 막다른 길이었다.
+             맡겠다는 사람은 무열쇠로 누구나 붙일 수 있으니, 아무나 붙여 두면 운영자가 제 자리를 영영 못 지웠다.
+             이제 거절한 줄은 막는 이유로 안 세고, 자리를 지울 때 같이 치운다. 감사 09-28 6번. */
+          if (db.prepare("SELECT 1 FROM pledges WHERE need=? AND status<>'no' LIMIT 1").get(+m[1]))
             throw new HttpError(409, '맡겠다는 사람이 있는 자리는 지울 수 없습니다. 먼저 거절하세요');
+          db.prepare("DELETE FROM pledges WHERE need=? AND status='no'").run(+m[1]);
           db.prepare('DELETE FROM needs WHERE id=?').run(+m[1]);
           return json(res, 200, { ok: true });
         }
@@ -5445,7 +5535,7 @@ function routes(db) {
           needAdmin(db, n.event, key, owner, siteAdmin);
           const b = await body(req);
           /* 이미 찬 자리에 또 올리면 점판이 «3/2» 가 되고 «확인된 심사 자리 수»가 부풀어 넛지 계산이 오염된다 */
-          const cur = needsOf(db, n.event).find(x => x.id === +m[1]);
+          const cur = needsOf(db, n.event, true).find(x => x.id === +m[1]);
           if (cur && cur.filled >= cur.qty) throw new HttpError(409, '이 자리는 이미 다 찼습니다. 자리 수를 늘리거나 다른 자리에 올리세요');
           const pl = addPledge(db, +m[1], n.event, { name: b.name, org: b.org, note: '앱 밖에서 구함' });
           return json(res, 201, setPledge(db, pl.id, { status: 'ok' }));
@@ -5516,15 +5606,16 @@ function routes(db) {
           const row = db.prepare('SELECT id, event, tkey FROM team_trash WHERE id=?').get(+m[1]);
           if (!row) throw new HttpError(404, '휴지통에 없습니다');
           const tk = String(req.headers['x-tkey'] || '');
-          if (!tk || tk !== row.tkey) needAdmin(db, row.event, key, owner, siteAdmin);
-          return json(res, 200, untrashTeam(db, row.id));
+          const 팀으로 = !!tk && tk === row.tkey;
+          if (!팀으로) needAdmin(db, row.event, key, owner, siteAdmin);
+          return json(res, 200, untrashTeam(db, row.id, 팀으로));
         }
         /* 참가자가 «신청 취소»를 되돌린다. 팀 열쇠만 있으면 된다 — 휴지통 번호는 몰라도 된다. */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/trash\/mine$/)) && req.method === 'POST') {
           const tk = String(req.headers['x-tkey'] || (await body(req)).tkey || '');
           const row = tk ? db.prepare('SELECT id FROM team_trash WHERE event=? AND tkey=? ORDER BY id DESC').get(m[1], tk) : null;
           if (!row) throw new HttpError(404, '취소된 신청이 없습니다');
-          return json(res, 200, untrashTeam(db, row.id));
+          return json(res, 200, untrashTeam(db, row.id, true));
         }
         /* 팀 링크로 들어온 브라우저가 «내 팀»을 되찾는다. 열쇠가 맞을 때만 팀 id 를 준다 */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/claim$/)) && req.method === 'POST') {
@@ -5883,6 +5974,24 @@ async function selftest() {
   ok(/^[0-9a-f]{10}$/.test(okey), '운영자 열쇠가 발급된다');
   ok(/^[0-9a-f]{12}$/.test(evR.owner), '주최자 열쇠도 같이 발급된다');
   ok(!('okey' in getEvent(db, ev)), '열쇠는 안 내려보낸다');
+  /* 손님 응답에 «절대 실리면 안 되는 칸» 을 한 줄로 못 박는다(감사 09-28 2번).
+     getEvent 은 SELECT * 에서 «지울 것» 을 빼는 방식이라, events 에 칸을 더하면 기본값이 공개다.
+     입금 안내(pay)가 정확히 그래서 열쇠 없는 세 길로 계좌번호를 내보내고 있었다.
+     새 칸을 더하면 getEvent 의 delete 와 이 목록에 같이 적는다. */
+  {
+    editEvent(db, ev, { pay: '테스트은행 0000-0000 아무개', wifi: '테스트망 / 0000' });
+    const 비밀칸 = ['okey', 'owner', 'jkey', 'vkey', 'judged', 'pay', 'wifi'];
+    const 손님 = getEvent(db, ev);
+    ok(비밀칸.every(k => !(k in 손님)), '손님용 대회 응답에 감춰야 할 칸이 남아 있다');
+    const 큰화면 = JSON.stringify(tv(db, ev));
+    ok(!큰화면.includes('0000-0000'), '큰 화면 응답에 입금 안내가 실린다');
+    ok(tv(db, ev).wifi === '테스트망 / 0000', '큰 화면에 와이파이가 안 실린다');   // 벽에 거는 것은 그대로 둔다
+    ok(!JSON.stringify(board(db, ev, false)).includes('0000-0000'), '열쇠 없는 순위표에 입금 안내가 실린다');
+    /* 반대쪽 — 다 지워 버리는 수정은 통과하면 안 된다. 운영자와 확정된 후원자는 그대로 봐야 한다. */
+    ok(db.prepare('SELECT pay FROM events WHERE id=?').get(ev).pay === '테스트은행 0000-0000 아무개',
+       '입금 안내가 저장 자체가 안 된다');
+    editEvent(db, ev, { pay: '', wifi: '' });
+  }
   ok(board(db, ev, true).rows.length === 0, '빈 대회');
   ok(isAdmin(db, ev, okey) && !isAdmin(db, ev, 'x'), '열쇠가 맞아야 운영자다');
   ok(isAdmin(db, ev, '', evR.owner), '주최자 열쇠로도 열린다');
@@ -6198,7 +6307,9 @@ async function selftest() {
       ok(ghLogin('https://github.com/karpathy/nanoGPT') === 'karpathy' && ghLogin('https://github.com/torvalds') === 'torvalds' && ghLogin('https://gitlab.com/x') === '' && ghLogin('javascript:1') === '', '깃허브 링크에서 아이디만 뽑는다');
       const nd = addNeed(db, es.id, { kind: 'judge', label: '심사', qty: 1 });
       const pc = addPledge(db, nd.id, es.id, { name: '심사 김', contact: 'j@x.test', coi: true });
-      ok(needsOf(db, es.id).find(n => n.id === nd.id).pledges[0].coi === true, '심사 맡는 분의 이해관계 확인이 남는다');
+      ok(needsOf(db, es.id, true).find(n => n.id === nd.id).pledges[0].coi === true, '심사 맡는 분의 이해관계 확인이 남는다');
+      ok(needsOf(db, es.id).find(n => n.id === nd.id).pledges.length === 0,
+         '아직 확인 안 한 사람의 이해관계 표시가 손님에게 나간다');
       db.prepare("INSERT INTO sponsors(event,name,kind,amount,note,logo,link) VALUES(?,?,?,?,?,?,?)").run(es.id, '파일로고', '현물', 0, '', '', 'https://example.com');
       const sid = db.prepare('SELECT id FROM sponsors WHERE name=?').get('파일로고').id;
       db.prepare('INSERT INTO sponsor_logos(sponsor,mime,data) VALUES(?,?,?)').run(sid, 'image/png', Buffer.from([137, 80, 78, 71]));
@@ -6919,6 +7030,74 @@ async function selftest() {
        && db.prepare('SELECT 1 FROM event_trash WHERE id=?').get(keep),
        '30일 지난 휴지통 줄만 지워지고 어제 것은 남는다 (' + pg2.trash + '줄)');
     db.prepare('DELETE FROM event_trash WHERE id=?').run(keep);
+
+    /* ── 되살리기가 남의 것을 못 건드린다 (감사 09-28 3·4·8번) ── */
+    /* 3 — 사본이 «어느 대회 것» 이라고 적어 보내도, 딸린 줄은 지금 되살리는 대회로 간다.
+           주최자 열쇠는 대회 하나만 열면 스스로 생기므로 남의 열쇠가 필요 없다. */
+    const 피해 = createEvent(db, { title: '피해대회' });
+    const 남 = createEvent(db, { title: '공격자대회' });
+    const 소식전 = db.prepare('SELECT COUNT(*) c FROM notices WHERE event=?').get(피해.id).c;
+    const 끼움 = restoreEvent(db, {
+      event: { id: 'zz9a0001', title: '되살린것', host: '아무개', starts: '2026-10-01', ends: '2026-10-01' },
+      teams: [{ id: 1, event: 피해.id, name: '끼어든팀', contact: 'x@zz.test' }],
+      notices: [{ id: 1, event: 피해.id, text: '끼어든 소식' }],
+    }, 남.owner);
+    ok(db.prepare('SELECT COUNT(*) c FROM notices WHERE event=?').get(피해.id).c === 소식전,
+       '사본이 적어 보낸 대회로 소식이 꽂힌다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(피해.id).c === 0,
+       '사본이 적어 보낸 대회로 팀이 꽂힌다');
+    ok(db.prepare('SELECT COUNT(*) c FROM teams WHERE event=?').get(끼움.id).c === 1,
+       '딸린 줄이 되살린 대회로 안 따라온다');
+
+    /* 4 — 남이 지운 대회 id 는 못 가져간다. 내가 지운 내 것은 그 id 그대로 살아난다. */
+    const 뺏길 = createEvent(db, { title: '뺏길대회' });
+    const 뺏길id = 뺏길.id, 뺏길주인 = 뺏길.owner;
+    await deleteEvent(db, 뺏길id, { confirm: '뺏길대회' });
+    const 뺏기 = restoreEvent(db, { event: { id: 뺏길id, title: '내가먼저', host: '아무개', starts: '2026-10-01', ends: '2026-10-01' } }, 남.owner);
+    ok(뺏기.id !== 뺏길id, '남이 지운 대회 id 를 그대로 다시 등록할 수 있다');
+    ok(!isAdmin(db, 뺏길id, '', 남.owner), '남이 지운 대회의 운영자가 된다');
+    const 되찾음 = untrashEvent(db, db.prepare('SELECT id FROM event_trash WHERE event=?').get(뺏길id).id, 뺏길주인);
+    ok(되찾음.id === 뺏길id, '내가 지운 내 대회가 같은 id 로 안 돌아온다');
+
+    /* 8 — 운영자가 내린 팀은 팀 열쇠로 못 되살린다. 운영자는 그대로 되살릴 수 있다. */
+    const 내림대회 = createEvent(db, { title: '내림검사' });
+    const 내릴팀 = joinTeam(db, 내림대회.id, { name: '내릴팀', email: 'kick@x.test', agree: true });
+    const 내림 = trashTeam(db, 내릴팀, 'admin');
+    let 되살림막힘 = 0;
+    try { untrashTeam(db, 내림, true); } catch (e) { 되살림막힘 = e.code; }
+    ok(되살림막힘 === 403, '운영자가 내린 팀이 제 열쇠로 다시 들어온다');
+    ok(db.prepare('SELECT 1 FROM team_trash WHERE id=?').get(내림), '막혔는데 «내렸다» 는 기록이 사라진다');
+    ok(untrashTeam(db, 내림, false).id === 내릴팀, '운영자가 되살리는 길까지 막혔다');
+    const 자진 = joinTeam(db, 내림대회.id, { name: '자진팀', email: 'self@x.test', agree: true });
+    const 자진내림 = trashTeam(db, 자진, 'team');
+    ok(untrashTeam(db, 자진내림, true).id === 자진, '스스로 취소한 팀이 되돌리지 못한다');
+
+    /* ── 6개월 뒤에는 어느 표에도 안 남는다 (감사 09-28 13번) ──
+       표 이름을 손으로 적으면 그 목록이 곧 약속보다 짧아진다. 그래서 DB 를 통째로 훑어
+       «그 주소가 아직 어딘가 있나» 를 묻는다. 표가 새로 생겨도 이 단언은 계속 맞는다. */
+    const 어딘가 = 값 => db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
+      .some(t => db.prepare(`PRAGMA table_info(${t.name})`).all()
+        .filter(c => /TEXT/i.test(c.type || ''))
+        .some(c => {
+          try { return !!db.prepare(`SELECT 1 FROM ${t.name} WHERE ${c.name} LIKE ? LIMIT 1`).get('%' + 값 + '%'); }
+          catch { return false; }
+        }));
+    const 옛대회 = createEvent(db, { title: '보관기한검사' });
+    const 옛팀 = joinTeam(db, 옛대회.id, { name: '옛팀', email: 'gone@purge.test', agree: true });
+    db.prepare("UPDATE teams SET mate_contact='mate@purge.test' WHERE id=?").run(옛팀);
+    try { db.prepare("INSERT INTO supporters(event,name,role,contact) VALUES(?,?,?,?)")
+      .run(옛대회.id, '멘토', 'mentor', 'mentor@purge.test'); } catch {}
+    try { db.prepare("INSERT INTO waitlist(event,name,contact) VALUES(?,?,?)")
+      .run(옛대회.id, '대기자', 'wait@purge.test'); } catch {}
+    const 버릴팀 = joinTeam(db, 옛대회.id, { name: '버릴팀', email: 'trashed@purge.test', agree: true });
+    const 버림 = trashTeam(db, 버릴팀, 'team');
+    db.prepare("UPDATE team_trash SET at = datetime('now','-31 days') WHERE id=?").run(버림);
+    ok(어딘가('gone@purge.test') && 어딘가('mate@purge.test') && 어딘가('trashed@purge.test'),
+       '검사용 연락처가 애초에 저장이 안 됐다');
+    db.prepare("UPDATE events SET ends = date('now','-200 days') WHERE id=?").run(옛대회.id);
+    purgeOld(db, true);
+    for (const 주소 of ['gone@purge.test', 'mate@purge.test', 'mentor@purge.test', 'wait@purge.test', 'trashed@purge.test'])
+      ok(!어딘가(주소), '6개월 지난 연락처가 아직 어딘가 남아 있다: ' + 주소);
   }
   ok(privacyPage().includes('개인정보 처리방침') && privacyPage().includes('6개월') && !privacyPage().includes('undefined'), '개인정보 처리방침 페이지가 있다');
   const dl = ledgerOf(db, dEv0 = createEvent(db, { title: '장부표시' }).id);
@@ -7027,6 +7206,20 @@ async function selftest() {
     let gOtherIp = true;
     try { applyGuard('10.0.0.8', gEv); } catch (e) { gOtherIp = false; }
     ok(gOtherIp, '다른 사람 신청까지 같이 막힌다');
+
+    /* 쓰기 상한은 «열쇠 칸이 비었을 때만» 이 아니라 언제나 걸려야 한다(감사 09-28 1번).
+       전에는 맞는지 안 보고 x-okey 가 있기만 하면 건너뛰어서, 아무 글자나 붙이면 상한이 꺼졌다.
+       창구 이름에 열쇠가 안 들어가므로, 같은 IP·같은 주소면 열쇠를 들고 있든 아니든 같은 창구다. */
+    const wIp = '10.0.0.9', wKey = 'w:' + wIp + ':/api/feedback';
+    for (let i = 0; i < WRITE_LIMIT; i++) tooMany(wKey, WRITE_LIMIT);
+    ok(tooMany(wKey, WRITE_LIMIT), '같은 IP 가 같은 주소로 계속 써도 안 막힌다');
+
+    /* 창구가 끝없이 쌓이면 안 된다 — 이름은 부르는 쪽이 정한다(감사 09-28 14번). */
+    const before = tries.size;
+    for (let i = 0; i < 300; i++) tries.set('old:' + i, { n: 1, at: Date.now() - 700000 });
+    sweepTries(Date.now());
+    ok(tries.size < before + 300, '지나간 창구가 안 버려지고 쌓인다');
+    ok(!tries.has('old:0') && !tries.has('old:299'), '10분 지난 창구가 그대로 남는다');
   }
   {
     /* 내 열쇠 찾기 — 있는 연락처와 없는 연락처의 응답이 한 글자도 달라선 안 된다(감사 9).
@@ -7513,13 +7706,19 @@ async function selftest() {
   ok(pg1.status === 'pending', '신청은 pending 으로 시작한다');
   ok(db.prepare('SELECT contact FROM pledges WHERE id=?').get(pg1.id).contact === 'kim@x.test',
      '연락처는 저장된다 - 운영자가 본다');
-  const pubN = needsOf(db, nbEv.id).find(x => x.id === n1.id);
-  ok(pubN.pledges.length === 1 && pubN.pledges[0].name === '김실무'
-     && pubN.pledges[0].org === '어느회사' && pubN.pledges[0].status === 'pending',
+  const admN = needsOf(db, nbEv.id, true).find(x => x.id === n1.id);
+  ok(admN.pledges.length === 1 && admN.pledges[0].name === '김실무'
+     && admN.pledges[0].org === '어느회사' && admN.pledges[0].status === 'pending',
      '신청이 자리에 붙는다');
-  ok(!('contact' in pubN.pledges[0])
-     && !JSON.stringify(needsOf(db, nbEv.id)).includes('kim@x.test'),
-     '공개 needs 응답에 연락처가 안 실린다');
+  ok(!('contact' in admN.pledges[0])
+     && !JSON.stringify(needsOf(db, nbEv.id, true)).includes('kim@x.test'),
+     '운영자 needs 응답에도 연락처가 안 실린다');
+  /* 손님에게는 아직 확인 안 한 사람의 «이름» 이 가면 안 된다 — 거절당한 사람도 마찬가지다.
+     공개 장부(ledgerOf)가 ok·done 만 싣는 것과 같은 선이다. 감사 09-28 5번. */
+  const pubN = needsOf(db, nbEv.id).find(x => x.id === n1.id);
+  ok(pubN.pledges.length === 0, '검토 중인 신청자 이름이 손님 응답으로 나간다');
+  ok(!JSON.stringify(needsOf(db, nbEv.id)).includes('김실무'), '검토 중인 신청자 이름이 손님 응답으로 나간다');
+  ok(pubN.pending === 1, '검토 중인 건수는 손님에게도 남아야 한다');   // 화면이 실제로 쓰는 수
   ok(pubN.filled === 0, 'pending 는 아직 채운 것이 아니다');
   ok(!JSON.stringify(ledgerOf(db, nbEv.id)).includes('김실무'), 'pending 는 장부에도 안 나온다');
 
@@ -7539,6 +7738,7 @@ async function selftest() {
   let 이상한상태 = false;
   try { setPledge(db, pg1.id, { status: 'maybe' }); } catch { 이상한상태 = true; }
   ok(이상한상태, '상태는 정해진 넷 중 하나다');
+
 
   /* 2주 확인 - 팀 열쇠나 신청 때 적은 연락처로만 쓴다 */
   let 막힘 = false;
@@ -7585,7 +7785,7 @@ async function selftest() {
   /* 자리 점판 — 숫자를 박지 않고 needs 목록에서 직접 세어 비교한다 */
   const 점판 = needsSummary(db, nbEv.id);
   const 직접 = { total: 0, filled: 0, pending: 0 }, 직접종류 = {};
-  for (const n of needsOf(db, nbEv.id)) {
+  for (const n of needsOf(db, nbEv.id, true)) {          // 운영자 쪽이 원본이라 여기서 직접 센다
     const pen = n.pledges.filter(p => p.status === 'pending').length;
     직접.total += n.qty; 직접.filled += n.filled; 직접.pending += pen;
     const k = 직접종류[n.kind] || (직접종류[n.kind] = { qty: 0, filled: 0, pending: 0 });
@@ -7681,6 +7881,18 @@ async function selftest() {
     const of = addOffer(db, qe.id, { kind: 'snack', name: '커피집', contact: 'c@x.y' });
     setOffer(db, of.id, { status: 'ok' });
     ok(giveView(db, of.ref, of.pkey).gift.status === 'ok', '제안이 확인되면 같은 열쇠로 확정 상태가 보인다');
+    /* 입금 안내는 «확정된 사람에게만» 이다. 손님 응답에서 지우는 것(감사 09-28 2번)과
+       이 길이 서로 어긋나면 안 된다 — 다 지워 버리는 수정은 여기서 빨개진다. */
+    {
+      editEvent(db, qe.id, { pay: '테스트은행 1111-2222 아무개' });
+      ok(giveView(db, pl.ref, pl.pkey).event.pay === '', '아직 확정 안 된 후원자에게 입금 안내가 보인다');
+      setPledge(db, pl.id, { status: 'ok' });
+      ok(giveView(db, pl.ref, pl.pkey).event.pay === '테스트은행 1111-2222 아무개',
+         '확정된 후원자에게 입금 안내가 안 보인다');
+      ok(!JSON.stringify(getEvent(db, qe.id)).includes('1111-2222'), '손님 응답으로 입금 안내가 샌다');
+      editEvent(db, qe.id, { pay: '' });
+      setPledge(db, pl.id, { status: 'pending' });
+    }
     /* 달력·CSV */
     const ics = icsOf(getEvent(db, qe.id), 'https://x.test');
     ok(ics.includes('DTSTART;VALUE=DATE:20990101') && ics.includes('DTEND;VALUE=DATE:20990102') && !ics.includes('+09:00'), '종일 일정은 날짜만 — 시간대 없음');
@@ -7832,6 +8044,25 @@ async function selftest() {
     ok(board(db, fe.id, true).rows.find(r => r.id === f1).pscore === null, '아직 안 붙은 팀은 모름이다');
     setPmode(db, fe.id, { on: 1, all: 0 });
     ok(pairView(db, fe.id, '심사', true).teams === 1, '«제출 없이도»를 끄면 다시 제출한 팀만 오른다');
+
+    /* 보여 주는 쪽이 지키는 규칙을 저장하는 쪽도 지켜야 한다(감사 09-28 10번).
+       화면은 안 낸 팀을 절대 안 내주는데, 같은 요청을 직접 보내면 그대로 쌓였고
+       pairScores 는 쌓인 줄을 전부 센다. 이미 쌓아 둔 줄은 그대로 세는 것이 맞다 —
+       위의 «제출 안 한 팀도 비교 점수를 받는다» 가 그것을 고정한다. 막는 자리는 «쓸 때» 다. */
+    let 막힘 = 0;
+    try { savePair(db, fe.id, { judge: '심사', a: f1, b: f2, winner: f1 }); } catch (e) { 막힘 = e.code; }
+    ok(막힘 === 409, '비교표에 안 오른 팀을 직접 보내면 그대로 저장된다');
+    ok(board(db, fe.id, true).rows.find(r => r.id === f2).pscore === 100,
+       '전에 pall 로 쌓아 둔 비교까지 같이 죽었다');
+    /* 짝 비교가 꺼져 있으면 쌓아 둘 수도 없다 — 켜는 순간 한꺼번에 살아나면 안 된다.
+       여기서는 «자격» 이 아니라 «꺼짐» 때문에 막혀야 하므로, 두 팀 다 제출시켜 자격을 먼저 채운다. */
+    submit(db, f2, { url: 'https://example.com/f2' });
+    submit(db, f3, { url: 'https://example.com/f3' });
+    setPmode(db, fe.id, { on: 0 });
+    let 꺼짐 = 0;
+    try { savePair(db, fe.id, { judge: '심사', a: f2, b: f3, winner: f2 }); } catch (e) { 꺼짐 = e.code; }
+    ok(꺼짐 === 409, '짝 비교가 꺼져 있는데도 비교가 저장된다');
+    setPmode(db, fe.id, { on: 1, all: 1 });
   }
   {
     /* 유입 — 화면만 센다. 그림·스크립트까지 세면 숫자가 의미를 잃는다 */
@@ -7850,6 +8081,13 @@ async function selftest() {
     ok(!JSON.stringify(vs).includes('q='), '유입 기록에 주소 뒤에 붙은 것이 안 남는다');
     ok(visitsOf(db, 999).length === 1 && visitsOf(db, -5).length === 1, '며칠치인지는 1~90 로 막는다');
 
+    /* 오는 곳 이름은 Referer 라 부르는 쪽이 정한다. 매번 다른 이름을 적어도 줄이 끝없이
+       늘어나면 안 된다 — 열쇠도 로그인도 없는 GET 길이고 지우는 코드가 없다(감사 09-28 14번). */
+    for (let i = 0; i < REF_MAX + 50; i++) countVisit(db, '/app', 'https://r' + i + '.test/', 'hackon.kr');
+    const refs = db.prepare(`SELECT COUNT(*) c FROM visits WHERE day=date('now') AND path='/app'`).get().c;
+    ok(refs <= REF_MAX + 1, '오는 곳 이름을 바꿔 가며 부르면 줄이 끝없이 는다');   // 이름 REF_MAX 개 + «기타» 한 줄
+    ok(db.prepare(`SELECT n FROM visits WHERE day=date('now') AND path='/app' AND ref='기타'`).get(),
+       '상한을 넘은 곳이 «기타» 로 안 접힌다');
   }
   /* 티어 — 완주가 바탕. 앉아만 있으면 새싹, 완주 하나면 브론즈, 수상이 있어야 실버가 빨라진다 */
   ok(rankOf(0, 0, 0, 0).name === '새싹' && rankOf(1, 0, 0, 0).name === '브론즈', '티어 새싹·브론즈');

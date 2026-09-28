@@ -49,6 +49,19 @@ jobs:
       # 커밋 범위」만 본다(src/gitleaks.js 의 --log-opts). 우리가 보려는 건 역사
       # 전체라서 바이너리를 직접 받아 `gitleaks git --log-opts=--all` 로 돌린다.
       # 받은 파일은 같은 릴리스의 checksums.txt 로 대조한다.
+      # 추적 중인 심링크는 없어야 한다. .gitignore 의 `node_modules/` 는 슬래시 때문에
+      # «디렉터리» 만 걸러서, 같은 이름의 심링크는 그대로 커밋됐다(a1234cb).
+      # 들어간 값이 이 맥의 절대경로라 다른 사람·CI·이미지에서는 깨진 링크다.
+      # 슬래시를 뗐지만, 다음에 또 들어오는 것을 막는 자리는 여기다.
+      - name: 추적 중인 심링크 없음
+        run: |
+          links=$(git ls-files -s | awk '$1=="120000"{print $4}')
+          if [ -n "$links" ]; then
+            echo "저장소에 심링크가 들어왔습니다 — 경로는 사람마다 다릅니다:"
+            echo "$links"
+            exit 1
+          fi
+
       - name: gitleaks — 저장소 전체 역사
         env:
           GITLEAKS_VERSION: 8.30.1
