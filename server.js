@@ -3983,6 +3983,25 @@ const PLACEHOLDERS = new Set([
   '테스트', '테스트요', '테스트입니다', '테스트중', '시험', '실험',
   'test', 'testing', 'asdf', 'qwer', 'aaa', 'abc', '123', '1234', 'ㅌㅅㅌ', 'ㅎㅇ', 'hello', 'hi',
 ]);
+/* 혼자서는 아무 뜻도 없는 말. 자리 채우기 뒤에 붙어 목록을 통과시키던 것들이다 —
+   라이브 문제 은행에 «테스트 요청» 이 그렇게 실려 있었다(2026-09-28 확인).
+   **길이로 거르지 않는다**(P3). «테스트» 와 «요청» 을 걷어내고도 남는 글자가
+   하나라도 있으면 통과시킨다 — «테스트 자동화가 손으로만 됩니다» 는 그대로 실린다. */
+const FILLER = new Set([
+  '요청', '입니다', '이다', '중', '용', '글', '게시물', '샘플', '더미', '데이터',
+  '임', '예시', '확인', '해봄', '해봅니다', '올려봄', '올립니다', 'sample', 'dummy', 'demo', 'foo', 'bar',
+]);
+/* 자리 채우기 말과 빈 말만으로 이뤄졌나.
+   **긴 것부터 지워 나가는 방식은 틀린다** — «테스트요청» 에서 «테스트요» 가 먼저 먹혀
+   «청» 이 남고, 그러면 통과해 버린다. 나눠 읽기는 되돌아갈 수 있어야 한다.
+   그래서 «이 말들만 이어 붙인 글인가» 를 정규식 하나로 묻는다 — 정규식이 알아서 되돌아간다. */
+const FILLER_RE = new RegExp('^(?:' +
+  [...PLACEHOLDERS, ...FILLER].map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')+$');
+function onlyFiller(k) {
+  const s = String(k || '').toLowerCase();
+  if (!s) return false;                       // 빈 글은 위에서 이미 걸렀다
+  return FILLER_RE.test(s);
+}
 
 /** 글이 아닌 것. 뜻을 판정하지 않는다 — 모양만 본다. */
 function notWriting(text) {
@@ -3995,6 +4014,7 @@ function notWriting(text) {
   if (/^(.)\1{3,}$/.test(k)) return true;                        // 같은 글자만 넷 이상
   if (/^https?:\/\/\S+$/i.test(t)) return true;                 // 주소 하나뿐
   if (PLACEHOLDERS.has(k.toLowerCase())) return true;             // 글 전체가 자리 채우기 값
+  if (onlyFiller(k)) return true;                                 // 자리 채우기 + 빈 말로만 이뤄진 글
   return false;
 }
 
@@ -7277,6 +7297,17 @@ async function selftest() {
 
     const 주소 = addRequest(db, { kind: 'requester', name: '아무개', pain: 'https://example.com/spam' });
     ok(!openRequests(db).some(r => r.id === 주소.id), '주소 하나뿐인 글은 안 실린다');
+
+    /* 라이브에서 실제로 새어 있던 값 그대로 넣는다(2026-09-28 /api/requests 확인) */
+    const 테스트요청 = addRequest(db, { kind: 'requester', name: '테스터', pain: '테스트 요청' });
+    ok(!openRequests(db).some(r => r.id === 테스트요청.id), '«테스트 요청» 은 공개 목록에 안 실린다');
+    ok(openRequests(db, true).some(r => r.id === 테스트요청.id), '«테스트 요청» 도 운영자에게는 보인다');
+
+    /* 반대쪽 — 이 줄이 없으면 위 규칙은 멀쩡한 의뢰까지 지우는 그물이 된다.
+       «테스트» 하나짜리 반례는 아래 자리 채우기 묶음에 이미 있다(진짜). 여기서는
+       **자리 채우기 말이 둘 이상 겹쳐도** 뒤에 글이 있으면 실리는지를 본다 */
+    const 샘플업무 = addRequest(db, { kind: 'requester', name: '아무개', pain: '샘플 데이터를 고객마다 손으로 만들어 보냅니다' });
+    ok(openRequests(db).some(r => r.id === 샘플업무.id), '«샘플 데이터» 로 시작해도 뒤에 글이 있으면 실린다');
 
     const 멀쩡 = addRequest(db, { kind: 'requester', name: '시장 2층 김씨', pain: '주문을 손으로 적는데 나중에 못 찾겠어요' });
     ok(openRequests(db).some(r => r.id === 멀쩡.id), '멀쩡한 글은 그대로 실린다 — 너무 많이 거르지 않는다');

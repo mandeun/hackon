@@ -2038,7 +2038,13 @@ with sync_playwright() as p:
     pg.evaluate("localStorage.removeItem('hackon.judge')")
     # 발표 타이머 — 진행 순서의 «발표» 줄이 지금이면 큰 화면이 다음 줄까지 센다
     now = datetime.now(); hm = lambda dt: dt.strftime("%H:%M")
-    post(f"/api/events/{FE}", {"plan": [{"at": hm(now - timedelta(minutes=2)), "what": "발표"}, {"at": hm(now + timedelta(minutes=8)), "what": "시상"}]}, FK, method="PATCH")
+    # 진행표는 «시:분» 만 담는다 — 날짜가 없다. 그래서 now-2분 이 어제로 넘어가면
+    # 화면은 그 줄을 «아직 안 온 줄» 로 읽고 발표 타이머가 안 뜬다(2026-09-29 00:00 에 실제로 터졌다).
+    # 오늘 안으로 가둔다. 자정 직후엔 «지금»(00:00) 이 곧 이미 시작한 줄이다.
+    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    past = max(now - timedelta(minutes=2), day0)
+    fut = min(now + timedelta(minutes=8), now.replace(hour=23, minute=59, second=0, microsecond=0))
+    post(f"/api/events/{FE}", {"plan": [{"at": hm(past), "what": "발표"}, {"at": hm(fut), "what": "시상"}]}, FK, method="PATCH")
     visit(f"/tv/{FE}"); pg.wait_for_timeout(1300)
     A(pg.query_selector("#tv-pitch") is not None and "분" in pg.inner_text("#tv-pitch"), f"발표 타이머가 큰 화면에 없다: {pg.inner_text('.tvbig')[:60] if pg.query_selector('.tvbig') else '?'}")
     ok("접근성 critical·serious 0 (다섯 화면) · 발표 타이머")
