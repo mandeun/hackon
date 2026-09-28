@@ -2031,6 +2031,15 @@ with sync_playwright() as p:
     last = None
     for i in range(301): last = raw("/api/zz-rate-probe", {"x": i})[0]
     A(last == 429, f"301번째 쓰기가 429 가 아니다: {last}")
+    # 7-b — 쓰레기 열쇠 헤더를 붙여도 상한이 꺼지면 안 된다 (감사 09-28 1번)
+    #       전에는 x-okey 가 «있기만 하면» 맞는지 안 보고 건너뛰어서, 아무 글자나 붙이면 무제한이었다.
+    #       창구가 IP+주소라 이 검사는 위와 다른 주소를 써야 한다.
+    last = None
+    for i in range(301): last = raw("/api/zz-rate-probe-okey", {"x": i}, headers={"x-okey": "not-a-real-key"})[0]
+    A(last == 429, f"틀린 x-okey 를 붙이면 쓰기 상한이 꺼진다: {last}")
+    last = None
+    for i in range(301): last = raw("/api/zz-rate-probe-jkey", {"x": i}, headers={"x-jkey": "not-a-real-key"})[0]
+    A(last == 429, f"틀린 x-jkey 를 붙이면 쓰기 상한이 꺼진다: {last}")
     # c — 한 대회에 같은 IP 가 팀을 계속 만들면 429 (APPLY_LIMIT, 검사 서버는 20)
     _, ae = post("/api/events", {"title": "신청상한검사"}); AE = ae["id"]
     acodes = [post(f"/api/events/{AE}/teams", {"name": f"막기{i}", "email": f"cap{i}@x.io", "agree": True})[0]

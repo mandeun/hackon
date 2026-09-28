@@ -1673,11 +1673,22 @@ function visitRef(ref, host) {
   } catch { return '직접'; }
 }
 
+/* 하루·한 주소당 «어디서 왔나» 를 몇 가지까지 따로 셀 것인가.
+   오는 곳 이름은 부르는 쪽이 Referer 로 정하는 값이라, 매번 다른 주소를 적으면 줄이 끝없이 늘어난다.
+   열쇠도 로그인도 필요 없는 GET 길이고 지우는 코드도 없어서 그대로 두면 볼륨이 찬다. 감사 09-28 14번.
+   상한을 넘으면 새 이름은 «기타» 로 접는다 — 이미 세던 곳은 계속 제 이름으로 센다. */
+const REF_MAX = 200;
 function countVisit(db, p, ref, host) {
   const where = visitPath(p);
   if (!where) return;
+  let from = visitRef(ref, host);
+  const seen = db.prepare(`SELECT 1 FROM visits WHERE day=date('now') AND path=? AND ref=?`).get(where, from);
+  if (!seen) {
+    const n = db.prepare(`SELECT COUNT(*) c FROM visits WHERE day=date('now') AND path=?`).get(where).c;
+    if (n >= REF_MAX) from = '기타';
+  }
   db.prepare(`INSERT INTO visits(day,path,ref,n) VALUES(date('now'),?,?,1)
-              ON CONFLICT(day,path,ref) DO UPDATE SET n = n + 1`).run(where, visitRef(ref, host));
+              ON CONFLICT(day,path,ref) DO UPDATE SET n = n + 1`).run(where, from);
 }
 
 function visitsOf(db, days) {
@@ -2570,10 +2581,20 @@ function clientIp(req) {
   const h = req.headers['fly-client-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return h || sock;
 }
+/* 창구가 너무 많아지면 지나간 것부터 버린다. 창구 이름은 부르는 쪽이 정하는 값(IP·주소)이라
+   그냥 두면 끝없이 쌓인다 — 256MB 한 대에서는 그게 곧 죽는 길이다. 세는 값은 10분이면 의미가 없으니
+   지난 것을 버리는 데 잃는 것이 없다. */
+const TRIES_MAX = 20000;
+function sweepTries(now) {
+  for (const [k, v] of tries) if (now - v.at > 600000) tries.delete(k);
+  if (tries.size > TRIES_MAX)                       // 다 살아 있어도 넘치면 오래된 쪽부터
+    for (const k of [...tries.keys()].slice(0, tries.size - TRIES_MAX)) tries.delete(k);
+}
 function tooMany(ip, limit = 30) {
   const now = Date.now(), t = tries.get(ip) || { n: 0, at: now };
   if (now - t.at > 600000) { t.n = 0; t.at = now; }
   t.n++; tries.set(ip, t);
+  if (tries.size > TRIES_MAX) sweepTries(now);
   return t.n > limit;
 }
 /* 열쇠 없는 쓰기(신청·후원·질문·피드백·요청·whoami)는 IP+길로 10분에 WRITE_LIMIT 번(감사 7·9). 검사는 한 IP 라 넉넉히 둔다 */
@@ -4437,7 +4458,15 @@ function routes(db) {
         /* 심사 열쇠. 심사 화면 링크(/j/<id>?k=…)로 받아 브라우저가 x-jkey 로 실어 보낸다. */
         const jkey = req.headers['x-jkey'] || '';
 
-        if (req.method !== 'GET' && !key && !jkey && tooMany('w:' + clientIp(req) + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
+        /* 상한은 «열쇠를 안 낸 쓰기» 가 아니라 «모든 쓰기» 에 건다.
+           전에는 x-okey·x-jkey 가 **있기만 하면** 건너뛰었는데, 그 값이 맞는지는 여기서 안 본다.
+           그래서 아무 글자나 `x-okey: x` 로 붙이면 상한이 통째로 꺼졌다 — 열쇠 없는 쓰기 길
+           (신청·후원·제안·요청·피드백·신고·제보·whoami) 전부가 무제한이 되고, whoami 는 한 번에
+           메일 한 통이라 남의 주소로 메일을 쏟을 수 있었다. 틀린 열쇠를 세는 카운터도 x-owner 만 보므로
+           열쇠 추측도 공짜였다. 감사 09-28 1번.
+           운영자·심사위원이 손해 보지 않는다: 창구는 IP + 주소꼴(`/api/teams/#/score`)이라
+           10분에 WRITE_LIMIT(300)번이고, 한 사람이 그만큼 누를 일은 없다. */
+        if (req.method !== 'GET' && tooMany('w:' + clientIp(req) + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
           throw new HttpError(429, '요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
 
         if (p === '/api/events' && req.method === 'POST') {
@@ -6709,6 +6738,20 @@ async function selftest() {
     let gOtherIp = true;
     try { applyGuard('10.0.0.8', gEv); } catch (e) { gOtherIp = false; }
     ok(gOtherIp, '다른 사람 신청까지 같이 막힌다');
+
+    /* 쓰기 상한은 «열쇠 칸이 비었을 때만» 이 아니라 언제나 걸려야 한다(감사 09-28 1번).
+       전에는 맞는지 안 보고 x-okey 가 있기만 하면 건너뛰어서, 아무 글자나 붙이면 상한이 꺼졌다.
+       창구 이름에 열쇠가 안 들어가므로, 같은 IP·같은 주소면 열쇠를 들고 있든 아니든 같은 창구다. */
+    const wIp = '10.0.0.9', wKey = 'w:' + wIp + ':/api/feedback';
+    for (let i = 0; i < WRITE_LIMIT; i++) tooMany(wKey, WRITE_LIMIT);
+    ok(tooMany(wKey, WRITE_LIMIT), '같은 IP 가 같은 주소로 계속 써도 안 막힌다');
+
+    /* 창구가 끝없이 쌓이면 안 된다 — 이름은 부르는 쪽이 정한다(감사 09-28 14번). */
+    const before = tries.size;
+    for (let i = 0; i < 300; i++) tries.set('old:' + i, { n: 1, at: Date.now() - 700000 });
+    sweepTries(Date.now());
+    ok(tries.size < before + 300, '지나간 창구가 안 버려지고 쌓인다');
+    ok(!tries.has('old:0') && !tries.has('old:299'), '10분 지난 창구가 그대로 남는다');
   }
   {
     /* 내 열쇠 찾기 — 있는 연락처와 없는 연락처의 응답이 한 글자도 달라선 안 된다(감사 9).
@@ -7532,6 +7575,13 @@ async function selftest() {
     ok(!JSON.stringify(vs).includes('q='), '유입 기록에 주소 뒤에 붙은 것이 안 남는다');
     ok(visitsOf(db, 999).length === 1 && visitsOf(db, -5).length === 1, '며칠치인지는 1~90 로 막는다');
 
+    /* 오는 곳 이름은 Referer 라 부르는 쪽이 정한다. 매번 다른 이름을 적어도 줄이 끝없이
+       늘어나면 안 된다 — 열쇠도 로그인도 없는 GET 길이고 지우는 코드가 없다(감사 09-28 14번). */
+    for (let i = 0; i < REF_MAX + 50; i++) countVisit(db, '/app', 'https://r' + i + '.test/', 'hackon.kr');
+    const refs = db.prepare(`SELECT COUNT(*) c FROM visits WHERE day=date('now') AND path='/app'`).get().c;
+    ok(refs <= REF_MAX + 1, '오는 곳 이름을 바꿔 가며 부르면 줄이 끝없이 는다');   // 이름 REF_MAX 개 + «기타» 한 줄
+    ok(db.prepare(`SELECT n FROM visits WHERE day=date('now') AND path='/app' AND ref='기타'`).get(),
+       '상한을 넘은 곳이 «기타» 로 안 접힌다');
   }
   /* 티어 — 완주가 바탕. 앉아만 있으면 새싹, 완주 하나면 브론즈, 수상이 있어야 실버가 빨라진다 */
   ok(rankOf(0, 0, 0, 0).name === '새싹' && rankOf(1, 0, 0, 0).name === '브론즈', '티어 새싹·브론즈');
