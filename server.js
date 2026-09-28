@@ -2859,6 +2859,18 @@ const needAdmin = (db, event, key, owner) => {
 /** 이 사람이 연 대회들과 누적 성적.
     "우리 동아리 해커톤은 끝난 뒤에도 팀의 82퍼센트가 약속된 피드백을 받았다" —
     주최자가 다음 모집에 쓸 수 있는 것은 참가자 수가 아니라 이 숫자다. */
+/** 대회의 주인을 옮긴다. 라우트가 «누구로 옮길지» 를 정하고, 여기서는 옮기기만 한다.
+    옛 주인은 안 지운다 — 다른 대회를 갖고 있을 수 있다. 같은 주인이면 아무것도 안 하고 0 을 돌려준다. */
+function adoptEvent(db, event, toOwner) {
+  const row = db.prepare('SELECT owner FROM events WHERE id=?').get(event);
+  if (!row) throw new HttpError(404, '없는 대회입니다');
+  if (!toOwner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(toOwner))
+    throw new HttpError(400, '옮겨 갈 계정이 없습니다');
+  if (row.owner === toOwner) return { owner: toOwner, moved: 0 };
+  db.prepare('UPDATE events SET owner=? WHERE id=?').run(toOwner, event);
+  return { owner: toOwner, moved: 1 };
+}
+
 function mine(db, owner) {
   const o = db.prepare('SELECT * FROM owners WHERE id=?').get(owner);
   if (!o) throw new HttpError(404, '없는 열쇠입니다');
@@ -4750,7 +4762,11 @@ function routes(db) {
             e.admin = isAdmin(db, m[1], key, owner);
             /* 심사 열쇠는 운영자에게만. 심사위원에게 보낼 링크를 이걸로 만든다. */
             if (e.admin) { const kk = db.prepare('SELECT jkey, vkey, judged, twist FROM events WHERE id=?').get(m[1]);
-                           e.jkey = kk.jkey; e.vkey = kk.vkey; e.judged = kk.judged; e.twist = kk.twist; }
+                           e.jkey = kk.jkey; e.vkey = kk.vkey; e.judged = kk.judged; e.twist = kk.twist;
+              /* 이 대회가 «지금 로그인한 계정» 것인가. 열쇠로 들어온 사람은 고칠 수는 있어도
+                 «내 대회» 목록에는 안 뜬다 — 그 차이를 화면이 알아야 붙이기를 권할 수 있다.
+                 로그인을 안 했으면 «아니다» 가 아니라 «모른다» 라서 칸을 아예 안 보낸다. */
+              if (cookieOwner) e.owned = db.prepare('SELECT owner FROM events WHERE id=?').get(m[1]).owner === cookieOwner ? 1 : 0; }
             return json(res, 200, e);
           }
           if (req.method === 'DELETE') {
@@ -4889,6 +4905,20 @@ function routes(db) {
           if (b.notice) db.prepare('INSERT INTO notices(event, text) VALUES(?,?)').run(m[1], plain(b.notice, 200));
           return json(res, 200, { ok: true });
         }
+        /* ── 이 대회를 내 로그인 계정에 붙인다 ──
+           대회를 열 때만 주인이 정해진다. 열쇠로만 열어 둔 대회는 나중에 로그인해도 «내 대회» 에 안 뜨고,
+           기기를 바꾸면 그대로 잃는다. 로그인할 때 자동으로 끌어오는 길(absorb)은 «로그인이 아직 안 붙은
+           계정» 만 끌어오기 때문에, 이미 로그인을 쓰던 사람에게는 안 걸린다. 그래서 손으로 붙이는 길을 둔다.
+
+           운영 열쇠가 있어야 하고(needAdmin), 옮겨 갈 곳은 **쿠키로 로그인한 계정**이어야 한다.
+           x-owner 헤더는 안 쓴다 — 그건 브라우저가 들고 있는 값이라, 그걸 받으면 열쇠 하나로
+           아무 계정에나 대회를 밀어 넣을 수 있다. */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/adopt$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner);
+          if (!cookieOwner) throw new HttpError(401, '먼저 로그인해 주세요. 로그인한 계정으로 옮깁니다');
+          return json(res, 200, adoptEvent(db, m[1], cookieOwner));
+        }
+
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/list$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner);
           const b = await body(req);
@@ -5656,6 +5686,25 @@ async function selftest() {
     ok(db.prepare('SELECT owner FROM events WHERE id=?').get(pv2.id).owner === a1.owner,
        '합칠 때 대회가 따라온다 — 방금 만든 대회를 잃지 않는다');
     ok(!db.prepare('SELECT 1 FROM owners WHERE id=?').get(pv2.owner), '합친 뒤 빈 계정은 남지 않는다');
+    /* ⑤ 손으로 붙이기 — «로그인할 때 자동으로» 가 안 걸리는 경우가 이 사람들이다.
+       이미 로그인을 쓰던 사람이 나중에 열쇠로 남의(또는 옛 기기의) 대회를 열면 absorb 가 안 돈다.
+       그때 «내 계정에 붙이기» 가 유일한 길이다. */
+    {
+      const kv = createEvent(db, { title: '열쇠로만 연 대회', host: 'ㄷ' });
+      ok(!mine(db, a1.owner).events.some(e => e.id === kv.id), '붙이기 전에는 «내 대회» 에 없다');
+      const r1 = adoptEvent(db, kv.id, a1.owner);
+      ok(r1.moved === 1 && r1.owner === a1.owner, '붙이면 주인이 옮겨진다');
+      ok(mine(db, a1.owner).events.some(e => e.id === kv.id), '붙인 뒤에는 «내 대회» 에 뜬다');
+      ok(adoptEvent(db, kv.id, a1.owner).moved === 0, '두 번 눌러도 한 번만 옮긴다');
+      ok(db.prepare('SELECT 1 FROM owners WHERE id=?').get(kv.owner), '옛 주인 계정을 지우지 않는다');
+      let noOwner = false;
+      try { adoptEvent(db, kv.id, 'ffffffffffff'); } catch { noOwner = true; }
+      ok(noOwner, '없는 계정으로는 못 옮긴다');
+      let noEvent = false;
+      try { adoptEvent(db, 'zzzzzzzz', a1.owner); } catch { noEvent = true; }
+      ok(noEvent, '없는 대회는 못 옮긴다');
+    }
+
     /* 이미 로그인이 붙은 계정은 «열쇠를 들고 왔다»고 삼키지 않는다 */
     const c1 = loginAs(db, 'google', { uid: 'v1', nick: '다른이', email: 'v1@example.com', trust: true });
     const c2 = loginAs(db, 'naver', { uid: 'v2', email: 'v1@example.com', trust: true }, { pre: a1.owner });
