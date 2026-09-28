@@ -30,6 +30,10 @@ main{max-width:720px;margin:0 auto;padding:10px 20px 60px}
 .jobs{display:flex;gap:6px;flex-wrap:wrap;margin-top:18px}
 .chip{border:1.5px solid var(--hair);background:#fff;border-radius:999px;padding:8px 13px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;color:var(--grey)}
 .chip[aria-pressed=true]{background:var(--ink);color:var(--on);border-color:var(--ink)}
+/* 칩에 건수를 붙인다 — 누르기 전에 빈 탭인지 보인다. 0 은 «모름»이 아니라 «없음»이라 숫자로 적는다 */
+.chip .n{margin-left:5px;font-size:12px;font-weight:700;opacity:.55;font-variant-numeric:tabular-nums}
+/* 0 은 «소식이 없다»는 뜻일 뿐이다 — 어느 직무든 레시피(«지금 이렇게 쓴다»)는 있으니 죽은 탭처럼 흐리지 않는다 */
+.chip[data-n="0"]{border-style:dashed}
 .card{background:#fff;border:1px solid var(--hair);border-radius:16px;padding:16px;margin-top:18px}
 .card h2{font-size:17px;margin:0 0 6px} .card .m{font-size:13px;color:var(--grey);line-height:1.55}
 .how li{margin:8px 0;font-size:14.5px;line-height:1.5} .how b{font-weight:800} .how a{color:var(--moss)}
@@ -67,14 +71,14 @@ input,select{width:100%;min-height:44px;border:1.5px solid var(--hair);border-ra
   <div id="list"><div class="empty">모으는 중…</div></div>
   <div class="card" id="tip">
     <h2>제보 — 이 직무에서 이거 써 보니 좋더라</h2>
-    <div class="m">도구·깃허브·기사·내 결과물 무엇이든. 제목과 주소면 됩니다. 카카오 로그인한 사람만, 하루 다섯 건.</div>
+    <div class="m">도구·깃허브·기사·내 결과물 무엇이든. 제목과 주소면 됩니다. 로그인한 사람만, 하루 다섯 건.</div>
     <div id="tip-in" hidden>
       <div class="row"><div><label>직무</label><select id="t-job"></select></div><div><label>제목</label><input id="t-title" placeholder="예: 인스타 릴스 자막을 3분에 뽑는 도구"></div></div>
       <label>주소</label><input id="t-url" placeholder="https://...">
       <label>한 줄 (선택)</label><input id="t-note" placeholder="어떻게 쓰면 좋은지">
       <div style="margin-top:12px"><button class="btn s" id="t-go">올리기</button> <span class="m" id="t-msg"></span></div>
     </div>
-    <div id="tip-login" hidden style="margin-top:10px"><a class="kko" href="/auth/kakao">카카오로 로그인하고 제보</a></div>
+    <div id="tip-login" hidden style="margin-top:10px"></div>
   </div>
   <p class="foot">우승작은 끝난 대회의 1위 중 «쇼케이스 공개»에 동의한 팀만 실립니다. 기사·모델·논문은 제목과 주소만 가져오며 원문 저작권은 각 출처에 있습니다. 출처: Hugging Face(모델·논문·앱·데이터) · AI타임스 · GeekNews · Hacker News · Product Hunt · 요즘IT · 깃허브 · 제보. 문의 hi@mandeun.com</p>
 </main>
@@ -96,7 +100,16 @@ const HOW = {
   const jobsEl = document.getElementById('jobs'), list = document.getElementById('list'), how = document.getElementById('how');
   let d; try { d = await (await fetch('/api/news')).json(); } catch { d = { src: {}, jobs: Object.keys(HOW), rows: [] }; }
   const SRC = d.src || {}, JOBS = d.jobs || Object.keys(HOW), rows = d.rows || [];
-  jobsEl.innerHTML = ['all', ...JOBS].map(k => `<button class="chip" data-k="${esc(k)}" aria-pressed="${k === cur}">${k === 'all' ? '전체' : esc(k)}</button>`).join('');
+  /* 직무별 건수. 세는 규칙은 draw() 의 scope 와 반드시 같다 — «우리 우승작»(src=hackon)은 어느 직무에서나 보인다.
+     둘이 어긋나면 칩엔 3 이라 적혀 있는데 눌러 보니 0 줄인 화면이 된다. */
+  function jobCounts(rows, jobs) {
+    const c = { all: rows.length };
+    for (const j of jobs) c[j] = rows.filter(r => r.job === j || r.src === 'hackon').length;
+    return c;
+  }
+  window.jobCounts = jobCounts;   /* check-e2e.py 가 부른다 */
+  const CNT = jobCounts(rows, JOBS);
+  jobsEl.innerHTML = ['all', ...JOBS].map(k => `<button class="chip" data-k="${esc(k)}" data-n="${CNT[k] || 0}" aria-pressed="${k === cur}">${k === 'all' ? '전체' : esc(k)}<span class="n">${CNT[k] || 0}</span></button>`).join('');
   jobsEl.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; cur = b.dataset.k; [...jobsEl.children].forEach(c => c.setAttribute('aria-pressed', c.dataset.k === cur)); history.replaceState(null, '', cur === 'all' ? '/news' : '/news?job=' + encodeURIComponent(cur)); draw(); };
   /* 지난번 본 것 뒤로 새로 들어온 것 — 이 브라우저 기준(localStorage). 처음이면 오늘 것 */
   let seen = 0; try { seen = +localStorage.getItem('hackon.news.seen') || 0; } catch (_) {}
@@ -116,7 +129,7 @@ const HOW = {
     if (HOW[cur]) { how.hidden = false; document.getElementById('how-t').textContent = cur + ' — 지금 이렇게 쓴다'; document.getElementById('how-l').innerHTML = HOW[cur].map(([t, h, u]) => `<li><b>${esc(t)}</b> — ${esc(h)}${u && ok(u) ? ` · <a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${u.startsWith('/') ? '열기' : '깃허브'}</a>` : ''}</li>`).join(''); }
     else how.hidden = true;
     const rs = scope;
-    if (!rs.length) { list.innerHTML = `<div class="empty">${cur === 'all' ? '아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.' : '이 직무로 분류된 소식이 아직 없습니다. 아래 «제보» 가 첫 줄이 됩니다.'}</div>`; return; }
+    if (!rs.length) { list.innerHTML = `<div class="empty">${cur === 'all' ? '아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.' : '이 직무로 들어온 소식은 아직 없습니다. 위 «지금 이렇게 쓴다» 는 그대로 쓸 수 있고, «제보» 가 이 칸의 첫 줄이 됩니다.'}</div>`; return; }
     const by = {}; for (const r of rs) (by[r.at] = by[r.at] || []).push(r);
     list.innerHTML = Object.keys(by).map(day => `<div class="day"><h3>${esc(day)}</h3>${by[day].map(r => `<div class="it">
       <span class="s ${esc(r.src)}">${esc(SRC[r.src] || r.src)}</span>
@@ -126,7 +139,16 @@ const HOW = {
   try { if (rows.length) localStorage.setItem('hackon.news.seen', String(Math.max(...rows.map(r => r.id || 0)))); } catch (_) {}
   /* 제보 — 로그인한 사람만 칸이 열린다 */
   const sel = document.getElementById('t-job'); sel.innerHTML = JOBS.map(j => `<option>${esc(j)}</option>`).join('');
-  if (d.loggedIn) document.getElementById('tip-in').hidden = false; else document.getElementById('tip-login').hidden = false;
+  if (d.loggedIn) { document.getElementById('tip-in').hidden = false; }
+  else {
+    /* 단추는 서버가 켜 둔 로그인만 그린다 — 여기에 목록을 적으면 키를 뺀 공급자가 죽은 단추로 남는다 */
+    const box = document.getElementById('tip-login');
+    const ps = (d.providers || []);
+    if (ps.length) {
+      box.innerHTML = ps.map((x, i) => `<a class="kko" href="/auth/${esc(x.id)}" style="margin:0 6px 6px 0${i ? ';background:#fff;color:#191919;border:1px solid #DDE1E6' : ''}">${esc(x.label)}로 로그인하고 제보</a>`).join('');
+      box.hidden = false;
+    }
+  }
   document.getElementById('t-go').onclick = async () => {
     const msg = document.getElementById('t-msg'); msg.textContent = '';
     const body = { job: sel.value, title: document.getElementById('t-title').value.trim(), url: document.getElementById('t-url').value.trim(), note: document.getElementById('t-note').value.trim() };
