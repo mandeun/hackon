@@ -1673,10 +1673,17 @@ with sync_playwright() as p:
     A(cp.query_selector("#rs-file") is None, "열쇠 없는 첫 화면에 사본 첨부 칸이 그대로 있다")
     A("사본 파일" not in cp.inner_text("#view"), "첫 화면에 «사본 파일» 안내가 남아 있다")
     A(cp.query_selector('nav button[data-t="mine"]') is not None, "아래 탭에 «내 대회» 가 없다")
-    # 아래 탭은 넷이다. 순위·후원 보고는 «한 대회 안»의 화면이라 대회 화면에서 연다.
-    # 390px 에서 여섯 개는 글자가 줄바꿈되고, 첫 방문자가 못 쓰는 탭이 둘이었다.
+    # 아래 탭은 다섯이다. 순위·후원 보고는 «한 대회 안»의 화면이라 여전히 대회 화면에서 연다 —
+    # 여섯에서 넷으로 줄인 그 규칙은 그대로다.
+    # «혜택»(2026-09-28 추가)은 그 규칙에 걸리지 않는다. 한 대회 안이 아니라 대회를
+    # 가로지르는 화면이고(«자리»와 같은 층), 열쇠가 없는 첫 방문자도 바로 쓸 수 있다 —
+    # 넷으로 줄일 때 뺀 탭들은 «첫 방문자가 못 쓰는» 것이었다는 점에서 성질이 다르다.
+    # 붙인 근거는 수요다: 국가장학금 2147 · 청년 지원금 407 대 해커톤 62
+    # (앵커 차례상=100, docs/수요측정_20260928.md).
+    # 여섯이 안 되는 이유였던 «390px 에서 줄바꿈» 은 아래 혜택 블록이 폭·높이로 잰다.
     navs = cp.eval_on_selector_all('nav button', 'bs => bs.map(b => b.dataset.t)')
-    A(navs == ["home", "find", "make", "mine"], f"아래 탭이 넷(대회·구하기·열기·내 대회)이 아니다: {navs}")
+    A(navs == ["home", "find", "make", "benefit", "mine"],
+      f"아래 탭이 다섯(대회·자리·열기·혜택·내 대회)이 아니다: {navs}")
     cp.click('nav button[data-t="mine"]'); cp.wait_for_selector("#view a.ev", timeout=8000)
     mtxt = cp.inner_text("#view")
     for must in ("참여한 대회", "맡은 심사", "내가 준 것", "내가 낸 것"):
@@ -1698,9 +1705,10 @@ with sync_playwright() as p:
             r.selectNodeContents(t);
             return [b.textContent.trim(), r.getClientRects().length];
         })""")
-    A(len(navw) == 4, f"아래 탭이 넷이 아니다: {navw}")
+    A([n for n, _ in navw] == ["대회", "자리", "열기", "혜택", "내 대회"],
+      f"아래 탭이 다섯(대회·자리·열기·혜택·내 대회)이 아니다: {navw}")
     A(all(lines == 1 for _, lines in navw), f"390px 에서 탭 이름이 두 줄로 접힌다: {navw}")
-    ok("«내 대회» — 역할 다섯이 한 화면에·지워진 열쇠는 «지워짐»·열쇠는 주소에 안 실림·탭 넷이 390px 에 들어감")
+    ok("«내 대회» — 역할 다섯이 한 화면에·지워진 열쇠는 «지워짐»·열쇠는 주소에 안 실림·탭 다섯이 390px 에 들어감")
     cctx.close()
     # 받는 사람 열쇠 새로 — 옛 열쇠는 죽고 새 열쇠로 열린다
     old_rk = RK
@@ -3582,5 +3590,59 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 ok("화면이 단추 셋을 같은 크기로 그린다 — 접힌 것 없음, «로그인» 을 누르면 실제로 뜬다")
+# ── 혜택 탭. 자료는 밖에서 받아 오므로 «목록이 있다»를 단언하지 않는다 —
+# 대신 ① 탭이 있고 눌러서 그려지는가 ② 기본 갈래가 장학금인가
+# ③ 모르는 값을 «없음»으로 그리지 않는가(순수 함수로 못박는다) 를 본다.
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 390, "height": 900})
+    pg = ctx.new_page()
+    pg.goto(f"{BASE}/app", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+
+    A(pg.locator("nav button[data-t='benefit']").count() == 1, "아래 탭에 «혜택» 이 없다")
+    A(pg.inner_text("nav button[data-t='benefit']").strip().endswith("혜택"),
+      "탭 이름이 «혜택» 이 아니다: " + pg.inner_text("nav button[data-t='benefit']"))
+    # 390px 에서 탭 다섯이 다 보여야 한다 — 하나가 잘리면 넷으로 줄인 뜻이 없어진다
+    tabs = pg.eval_on_selector_all("nav button", "els => els.map(e => e.getBoundingClientRect())")
+    A(len(tabs) == 5, f"아래 탭이 다섯이 아니다: {len(tabs)}")
+    A(all(t["width"] > 40 for t in tabs), f"탭 하나가 너무 좁다: {[round(t['width']) for t in tabs]}")
+    A(max(t["right"] for t in tabs) <= 391, f"탭이 화면 밖으로 넘친다: {max(t['right'] for t in tabs)}")
+    # 줄바꿈과 이름은 «내 대회» 블록이 Range 사각형 수로 이미 잰다 — 두 곳에 안 적는다
+
+    pg.click("nav button[data-t='benefit']")
+    # data-ready 는 이미 '1' 이라 그걸 기다리면 그냥 지나간다 — 이 화면의 표식을 기다린다.
+    # 자료를 밖에서 받아 오므로 넉넉히 준다.
+    pg.wait_for_selector("#ben-h", timeout=40000)
+    pg.wait_for_selector("#ben-segs, #ben-off", timeout=40000)
+    body = pg.inner_text("body")
+    A("혜택" in body, "혜택 화면이 안 그려졌다")
+    # 자료를 받았으면 갈래가 뜨고, 못 받았으면 «못 가져왔습니다» 가 뜬다. 둘 중 하나여야 한다
+    got = pg.locator("#ben-segs").count() == 1
+    A(got or pg.locator("#ben-off").count() == 1,
+      "자료도 없고 못 가져왔다는 말도 없다 — 빈 화면이다")
+    if got:
+        A(pg.inner_text("#ben-segs button.on").strip() == "장학금",
+          "기본 갈래가 장학금이 아니다: " + pg.inner_text("#ben-segs button.on"))
+        A("기관 공고가 우선" in body, "기관 공고가 우선이라는 말이 없다")
+        # 갈래를 눌러 실제로 바뀌는가
+        pg.click("#ben-segs button[data-bseg='support']")
+        pg.wait_for_function(
+            "() => { const b = document.querySelector('#ben-segs button.on');"
+            " return b && b.textContent.trim() === '지원금'; }", timeout=40000)
+        A(pg.inner_text("#ben-segs button.on").strip() == "지원금",
+          "갈래를 눌렀는데 안 바뀐다")
+
+    # 순수 함수 — 여기가 «모름을 없음으로 그리지 않는다» 를 지키는 자리다
+    A(pg.evaluate("benWhere([])") == "", "지역을 모를 때 뭔가를 적고 있다")
+    A(pg.evaluate("benWhere(['all'])") == "전국", "자료가 전국이라 적은 것을 안 쓰고 있다")
+    A(pg.evaluate("benWhere(['seoul','busan'])") == "서울·부산", "지역 이름을 한글로 안 바꾼다")
+    A("외 1곳" in pg.evaluate("benWhere(['seoul','busan','daegu','jeju'])"), "넷 이상을 줄여 적지 않는다")
+    A(pg.evaluate("benDday('')") == "", "마감을 모를 때 날짜를 지어낸다")
+    A(pg.evaluate("benDday('2000-01-01')") == "지남", "지난 것을 열려 있는 것처럼 그린다")
+    ctx.close()
+    b.close()
+ok("혜택 탭 — 탭 다섯이 390px 에 들어가고, 기본 갈래가 장학금이며, 모르는 값을 «없음» 으로 안 그린다")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
