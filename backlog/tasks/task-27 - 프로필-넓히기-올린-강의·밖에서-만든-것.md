@@ -1,7 +1,7 @@
 ---
 id: TASK-27
 title: 프로필 넓히기 — 올린 강의 · 밖에서 만든 것
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 15:30'
 labels:
@@ -49,8 +49,9 @@ ordinal: 27000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 확인 전 «밖에서 만든 것» 이 남의 GET /api/people/:id 응답에 없다 — 단위 검사, 필터를 지워 빨간 줄 확인
-- [ ] #2 `javascript:` 주소는 확인을 받아도 공개되지 않는다
-- [ ] #3 강의·밖에서 만든 것을 넣어도 tier 가 그대로다 — 단위 검사
-- [ ] #4 팀 열쇠 없이 POST 하면 403
+- [x] #1 확인 전 «밖에서 만든 것» 이 남의 GET /api/people/:id 응답에 없다 — 단위 검사, 필터를 지워 빨간 줄 확인
+- [x] #2 `javascript:` 주소는 확인을 받아도 공개되지 않는다
+- [x] #3 강의·밖에서 만든 것을 넣어도 tier 가 그대로다 — 단위 검사
+- [x] #4 팀 열쇠 없이 POST 하면 403
+검사: node server.js --test 985가지 · python3 check-e2e.py 152단계 (2026-09-29), 새 단언은 전부 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

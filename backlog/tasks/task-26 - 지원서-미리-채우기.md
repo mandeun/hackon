@@ -1,7 +1,7 @@
 ---
 id: TASK-26
 title: 지원서 미리 채우기 — 두 번째 신청부터 다시 안 쓰게
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 15:30'
 labels:
@@ -31,7 +31,8 @@ ordinal: 26000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 두 번째 대회 신청 화면에 지난 이름·역할이 채워져 있다 — e2e
-- [ ] #2 localStorage 에 연락처 칸이 없다 — e2e 단언, 연락처를 일부러 저장하게 바꿔 빨간 줄 확인
-- [ ] #3 «지우기» 를 누르면 다음 신청 화면이 비어 있다
+- [x] #1 두 번째 대회 신청 화면에 지난 이름·역할이 채워져 있다 — e2e
+- [x] #2 localStorage 에 연락처 칸이 없다 — e2e 단언, 연락처를 일부러 저장하게 바꿔 빨간 줄 확인
+- [x] #3 «지우기» 를 누르면 다음 신청 화면이 비어 있다
+검사: node server.js --test 985가지 · python3 check-e2e.py 152단계 (2026-09-29), 새 단언은 전부 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

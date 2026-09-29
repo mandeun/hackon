@@ -1,7 +1,7 @@
 ---
 id: TASK-25
 title: 강의 페이지 /learn
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 15:30'
 labels:
@@ -47,8 +47,9 @@ ordinal: 25000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 11자 규칙에 안 맞는 id(`javascript:`, 긴 주소, iframe 태그)는 400 — 단위 검사, 규칙을 깨뜨려 빨간 줄 확인
-- [ ] #2 쿠키 없는 POST /api/lectures 는 403 — 단위 검사, 깨뜨려 확인
-- [ ] #3 /learn 이 열리고 영상 칸이 youtube-nocookie 주소를 가리킨다 — e2e
-- [ ] #4 강의가 0건일 때와 목록을 못 불러왔을 때를 다른 문구로 그린다(있음/없음/모름)
+- [x] #1 11자 규칙에 안 맞는 id(`javascript:`, 긴 주소, iframe 태그)는 400 — 단위 검사, 규칙을 깨뜨려 빨간 줄 확인
+- [x] #2 쿠키 없는 POST /api/lectures 는 403 — 단위 검사, 깨뜨려 확인
+- [x] #3 /learn 이 열리고 영상 칸이 youtube-nocookie 주소를 가리킨다 — e2e
+- [x] #4 강의가 0건일 때와 목록을 못 불러왔을 때를 다른 문구로 그린다(있음/없음/모름)
+검사: node server.js --test 985가지 · python3 check-e2e.py 152단계 (2026-09-29), 새 단언은 전부 깨뜨려 빨간 줄 확인
 <!-- AC:END -->
