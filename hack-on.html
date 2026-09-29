@@ -1773,6 +1773,12 @@ function stars(name, val) {
   </div>`;
 }
 
+/* 아직 안 낸 첫 주. 다 냈으면 마지막 주(고쳐 내기) */
+function nextWeek(done, weeks) {
+  for (let w = 1; w <= weeks; w++) if (!(done || []).includes(w)) return w;
+  return weeks;
+}
+
 /* 같이 한 사람 매너 평가 칸. 대회가 시작되기 전이면 아예 안 그린다(열쇠가 있어도 할 것이 없다).
    칭찬은 누를 것을 준다. 불편했던 일은 접어 두고, 공개되지 않는다고 칸 안에 적는다. */
 function peersCard(pe) {
@@ -2394,7 +2400,7 @@ const SCREEN = {
       <div class="meta" id="f-tplnote" style="margin:-2px 0 8px"></div>
       <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 불편 하나 없애기"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
       ${rq ? `<label>어떻게 받을까요</label>
-      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button></div>
+      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button><button type="button" class="pick" data-how="프로젝트">프로젝트 · 몇 주 동안</button></div>
       <div class="meta" style="margin:-2px 0 8px">«온라인으로 결과물만»은 모이지 않습니다. 일주일 동안 각자 만들어 내고, 올린 분이 받아서 «됐다»를 답합니다.</div>` : ''}
       ${(() => { const ids = Object.keys(localStorage).filter(k => k.startsWith('hackon.okey.')).map(k => k.slice(12)); if (!ids.length || !LIVE) return '';
         return `<details class="more" id="f-fromwrap" style="margin-top:8px"><summary>지난 대회에서 가져오기 <span class="when">기준표·주제·진행 순서·자리</span></summary>
@@ -2673,6 +2679,8 @@ const SCREEN = {
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const qas = LIVE ? await api(`/events/${cur}/questions`).catch(() => []) : [];
     const e = d.event;
+    /* 선발형 프로젝트 — 지원자 카드. 연락처 없이 기록만(수락하면 명단에 연락처가 붙는다) */
+    const apps = (LIVE && e.pick) ? await api(`/events/${cur}/applicants`).then(r => r.rows).catch(() => null) : [];
     /* 운영자 board 에는 심사·투표 열쇠가 딸려 온다. 적어 두면 링크·창 열기가 늘 된다. */
     if (e.jkey) try { localStorage.setItem('hackon.jkey.' + cur, e.jkey); } catch (_) {}
     if (e.vkey) try { localStorage.setItem('hackon.vkey.' + cur, e.vkey); } catch (_) {}
@@ -2928,9 +2936,15 @@ const SCREEN = {
         <div class="row">
           <div><label>종류</label><select id="e-kind">
             <option value=""${e.kind ? '' : ' selected'}>해커톤</option>
-            <option value="모임"${e.kind === '모임' ? ' selected' : ''}>모임·수업 (제출·심사 없음)</option></select></div>
+            <option value="모임"${e.kind === '모임' ? ' selected' : ''}>모임·수업 (제출·심사 없음)</option>
+            <option value="프로젝트"${e.kind === '프로젝트' ? ' selected' : ''}>프로젝트 (몇 주)</option></select></div>
           <div><label>예약금(원)</label><input id="e-deposit" type="number" min="0" max="1000000" step="1000" value="${+e.deposit || 0}"></div>
         </div>
+        ${e.kind === '프로젝트' ? `<div class="row">
+          <div><label>주 수</label><input id="e-weeks" type="number" min="1" max="16" value="${+e.weeks || 4}"></div>
+          <div><label>정기 모임</label><input id="e-meet" maxlength="40" value="${esc(e.meet || '')}" placeholder="예) 매주 화 20시 · 디스코드"></div>
+        </div>
+        <label class="ck"><input type="checkbox" id="e-pick"${e.pick ? ' checked' : ''}><span>선발형 — 신청을 «지원» 으로 받고 리더가 수락합니다</span></label>` : ''}
         <div class="meta">노쇼를 줄이려고 받는 돈입니다. <b>HACK:ON 은 돈을 받지 않습니다</b> — 주최자가 따로 받고,
           등록 데스크에서 팀마다 «받음·돌려줌·안 돌려줌» 만 표시합니다. 상태는 그 팀과 운영자만 봅니다.</div>
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
@@ -3229,6 +3243,33 @@ const SCREEN = {
       ${(d.trash || []).length ? `<details style="margin-top:8px"><summary>지운 팀 ${d.trash.length} <span class="when">되살릴 수 있습니다</span></summary><div class="in">
         ${d.trash.map(t => `<div class="shrow" style="margin-top:6px;align-items:center"><span>${esc(t.name)} <span class="meta">${esc(String(t.at).slice(0, 16))}${t.by === 'team' ? ' · 본인이 취소' : ''}</span></span><button class="btn sec sm" data-untrash="${t.id}">되살리기</button></div>`).join('')}</div></details>` : ''}
       <p class="sub" style="margin-top:12px">팀을 누르면 제출·심사 화면이 열립니다. <b>☆</b> 추천작 · <b>🔗</b> 팀을 잃은 참가자에게 주는 링크(본인 확인 뒤) · <b>✏️</b> 이름 고치기 · <b>🗑</b> 지우기(휴지통에서 되살릴 수 있습니다).</p>
+      ${e.pick ? `<details id="sec-apps" open><summary>지원자 ${apps && apps.length ? `<span class="pill warn">${apps.filter(a => a.pick === 'applied').length} 대기</span>` : ''} <span class="when">선발형</span></summary><div class="in">
+        <div class="meta">완주·안 온 횟수·매너는 HACK:ON 대회 기록에서만 나옵니다. 기록이 없으면 «처음» — 나쁜 게 아닙니다. 거절은 공개 기록에 안 남습니다.</div>
+        ${apps === null ? '<div class="meta">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !apps.length ? '<div class="meta" style="margin-top:8px">아직 지원자가 없습니다.</div>'
+          : apps.map(a => { const r = a.record;
+              const facts = !r || !r.events ? ['처음 오는 분'] : [
+                `대회 ${r.events}번 · 완주 ${r.finished}`, `완주율 ${r.finishRate === null ? '—' : r.finishRate + '%'}`,
+                `안 온 횟수 ${r.noshow}`, r.manner && r.manner.show ? `매너 ${r.manner.score}` : `매너 ${r.manner && r.manner.n ? r.manner.n + '건(3건부터 숫자)' : '평가 없음'}`];
+              return `<div class="card applicant" data-app="${a.id}" style="margin-top:10px">
+                <b>${esc(a.name)}</b> ${a.role ? `<span class="pill">${esc(a.role)}</span>` : ''}
+                <span class="pill ${a.pick === 'accepted' ? 'ok' : a.pick === 'rejected' ? 'warn' : ''}">${{ applied: '대기', accepted: '수락', rejected: '거절' }[a.pick]}</span>
+                <div class="meta" style="margin-top:4px">${facts.map(esc).join(' · ')}${r && r.tier ? ' · 티어 ' + esc(r.tier) : ''}</div>
+                ${r && r.praise && r.praise.top.length ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${r.praise.top.map(x => `<span class="pill ok">${esc(x.tag)}</span>`).join('')}</div>` : ''}
+                ${a.apply ? `<div class="meta" style="margin-top:6px">«${esc(a.apply)}»</div>` : ''}
+                ${r ? `<div class="meta" style="margin-top:4px"><a href="/p/${esc(r.id)}" target="_blank" rel="noopener">프로필 전체 ›</a>${r.outside ? ' · 밖에서 만든 것 ' + r.outside : ''}${r.lectures ? ' · 강의 ' + r.lectures : ''}</div>` : ''}
+                <div style="margin-top:8px"><button class="btn sm" data-apick="${a.id}" data-st="accepted">수락</button>
+                  <button class="btn sec sm" data-apick="${a.id}" data-st="rejected">거절</button></div>
+              </div>`; }).join('')}
+      </div></details>` : ''}
+      ${e.kind === '프로젝트' && e.weeks ? `<details id="sec-weeks" open><summary>주차 체크인 <span class="when">매주</span></summary><div class="in">
+        <div class="meta">누르면 왔음, 다시 누르면 취소. 빠진 주는 그 사람 프로필의 «안 온 횟수» 로 쌓입니다. ✓ 는 그 주 제출.</div>
+        <div style="overflow-x:auto"><table><tr><th>팀</th>${Array.from({ length: e.weeks }, (_, i) => `<th>${i + 1}주</th>`).join('')}</tr>
+        ${d.rows.filter(r => r.pick !== 'applied' && r.pick !== 'rejected').map(r => `<tr><td>${esc(r.name)}</td>${Array.from({ length: e.weeks }, (_, i) => {
+          const w = i + 1, on = (r.attend || []).includes(w), sub = (r.weeksDone || []).includes(w);
+          return `<td><button class="btn ${on ? '' : 'sec'} sm" data-att="${r.id}:${w}" aria-label="${esc(r.name)} ${w}주 체크인" style="padding:4px 8px">${on ? '●' : '○'}${sub ? '✓' : ''}</button></td>`; }).join('')}</tr>`).join('')}
+        </table></div>
+      </div></details>` : ''}
       <details id="sec-desk"${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
         ${(() => {
           /* 신청 N · 확정 M 두 칸. 아직 아무도 «오시나요»에 답하지 않았으면 M 은 «모름»이다 —
@@ -3311,6 +3352,8 @@ const SCREEN = {
     const ended = statusOf(e).k === '끝남';
     /* 모임·수업 — 제출·심사·순위·마감 칸을 안 그린다. 신청·참석 확인·체크인·서로 평가만 */
     const meet = e.kind === '모임';
+    /* 프로젝트 — 몇 주. 주차 제출이 결과물 제출을 대신하고, 마지막 주 제출이 완주다 */
+    const proj = e.kind === '프로젝트' && +e.weeks > 0;
     /* 아래 바닥 단추. 화면을 그린 뒤 render() 가 붙인다. */
     CTA = ended ? null
         : !mine ? { text: '참가 신청하기', to: 'apply' }
@@ -3337,6 +3380,7 @@ const SCREEN = {
           ${e.twist ? `<li><span class="ic" aria-hidden="true">🎲</span><span><span class="k">그날의 조건</span><span class="v">${esc(e.twist)} <a href="/conditions" class="hint">역대 조건›</a></span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span class="hint">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
+          ${proj ? `<li id="proj-line"><span class="ic" aria-hidden="true">🗓️</span><span><span class="k">기간</span><span class="v">${+e.weeks}주${e.meet ? ' · ' + esc(e.meet) : ''}${e.pick ? ' · 선발형 — 리더가 지원서를 보고 수락합니다' : ''}</span></span></li>` : ''}
           ${+e.deposit ? `<li id="dep-line"><span class="ic" aria-hidden="true">🎟️</span><span><span class="k">예약금</span><span class="v">${won(e.deposit)} — 오시면 돌려드립니다. 받는 방법은 주최자가 따로 안내합니다</span></span></li>` : ''}
           ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span class="hint">· 카톡 방에 한 번</span></span></span></li>
@@ -3380,7 +3424,7 @@ const SCREEN = {
         !ended
           ? (mine
               ? moreForm(mine)
-              : `<div class="card" id="apply"><h3>참가 신청</h3>
+              : `<div class="card" id="apply"><h3>${e.pick ? '지원하기' : '참가 신청'}</h3>
                    ${cancelLine(e)}
                    ${applyForm()}</div>`)
           : ''}
@@ -3417,13 +3461,23 @@ const SCREEN = {
               </div></div>` : ''}
             <div class="shrow" style="margin-top:6px"><button class="btn sm" id="cf-yes">올 거예요</button><button class="btn sec sm" id="cf-no">못 가요</button></div>`}</div>` : ''}
           <div class="meta">1. <b>내 팀 링크</b>를 나에게만 보내 두세요 — 폰을 바꿔도 이걸로 돌아옵니다.<br>
-            2. ${meet ? `당일(${esc(e.starts)}) 등록 데스크에서 체크인합니다. 끝나면 같이 한 분들을 평가할 수 있습니다.`
+            2. ${proj ? `매주 여기서 그 주 결과물 주소를 냅니다. <b>${+e.weeks}주차 제출이 완주</b>입니다.`
+                 : meet ? `당일(${esc(e.starts)}) 등록 데스크에서 체크인합니다. 끝나면 같이 한 분들을 평가할 수 있습니다.`
                  : `${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : `당일(${esc(e.starts)}) 마감 전에`} 여기서 결과물 주소를 냅니다.`}</div>
+          ${mine.pick ? `<div class="meta" id="pick-mine" style="margin-top:6px">선발 <span class="pill ${mine.pick === 'accepted' ? 'ok' : mine.pick === 'rejected' ? 'warn' : ''}">${
+            { applied: '리더가 보는 중', accepted: '함께합니다', rejected: '이번에는 함께하지 못합니다' }[mine.pick] || ''}</span></div>` : ''}
+          ${proj && mine.pick !== 'applied' && mine.pick !== 'rejected' ? `<div id="wk-box" style="margin-top:10px">
+            <div class="meta">낸 주 ${(mine.weeksDone || []).length ? (mine.weeksDone || []).map(w => w + '주').join(' · ') : '아직 없음'}</div>
+            <div class="row"><div><label>주차</label><select id="wk-n">${Array.from({ length: +e.weeks }, (_, i) =>
+              `<option value="${i + 1}"${i + 1 === nextWeek(mine.weeksDone, +e.weeks) ? ' selected' : ''}>${i + 1}주${i + 1 === +e.weeks ? ' (마지막)' : ''}</option>`).join('')}</select></div>
+              <div><label>결과물 주소</label><input id="wk-url" placeholder="https://…"></div></div>
+            <input id="wk-note" maxlength="200" placeholder="이번 주에 한 것 한 줄 (선택)" style="margin-top:6px">
+            <div style="height:8px"></div><button class="btn sm" id="wk-go" data-team="${esc(mine.id)}">이번 주 내기</button></div>` : ''}
           ${+e.deposit ? `<div class="meta" id="dep-mine" style="margin-top:6px">예약금 <b>${won(e.deposit)}</b> ·
             ${mine.deposit ? `<span class="pill ${mine.deposit === '안 돌려줌' ? 'warn' : 'ok'}">${esc(mine.deposit)}</span>` : '<span class="pill">주최자 확인 전</span>'}</div>` : ''}
           ${cancelLine(e)}
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
-          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${meet ? '' : `<button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button>`}<a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${meet || proj ? '' : `<button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button>`}<a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
           <div class="card" id="pairbox" style="margin-top:12px">
             <b>같이 올 사람 있으세요</b>
             <div class="meta">둘이 오면 자리를 하나만 더 씁니다. 한 분이 못 오게 되어도
@@ -5107,6 +5161,9 @@ function wire() {
         pay: $('#e-pay') ? $('#e-pay').value.trim() : undefined,
         cancel_rule: $('#e-cancel') ? $('#e-cancel').value.trim() : undefined,
         kind: $('#e-kind') ? $('#e-kind').value : undefined,
+        weeks: $('#e-weeks') ? $('#e-weeks').value : undefined,
+        meet: $('#e-meet') ? $('#e-meet').value.trim() : undefined,
+        pick: $('#e-pick') ? $('#e-pick').checked : undefined,
         deposit: $('#e-deposit') ? $('#e-deposit').value : undefined,
         twist: $('#e-twist') ? $('#e-twist').value.trim() : undefined,
         host: $('#e-host') ? $('#e-host').value.trim() : undefined,
@@ -5152,6 +5209,7 @@ function wire() {
     if (fromSel && fromSel.value) { b.from = fromSel.value; b.fromKey = okeyOf(fromSel.value); }   // 지난 대회에서 가져오기
     if (MAKE_REQ) b.req = MAKE_REQ;   // 의뢰에서 들어왔으면 첫 주제로 붙인다
     if ($('#f-kind') && $('#f-kind').value === '모임·수업') b.kind = '모임';   // 제출·심사·순위를 끈 모임
+    if ($('#f-kind') && $('#f-kind').value === '프로젝트') { b.kind = '프로젝트'; b.weeks = 4; }   // 주 수·선발형은 만든 뒤 설정에서
     /* 유형과 심사 기준은 고르는 것이라 손이 안 간다. 그래서 첫 화면에 같이 둔다. */
     if (!b.title) return flash('대회 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
@@ -5201,7 +5259,8 @@ function wire() {
       const K = { '당일': '첫 대회는 이걸 권합니다.',
                   '무박2일': '야식과 잘 자리를 미리 정해 두세요.',
                   '온라인 1주': '각자 만들고 마지막 날에만 모입니다.',
-                  '모임·수업': '당근 모임·교육 봉사처럼 짧게 모입니다. 참석 확인·체크인·서로 평가만 씁니다.' };
+                  '모임·수업': '당근 모임·교육 봉사처럼 짧게 모입니다. 참석 확인·체크인·서로 평가만 씁니다.',
+                  '프로젝트': '4주가 기본입니다. 매주 체크인하고 주차마다 결과물을 냅니다 — 마지막 주 제출이 완주입니다.' };
       fkindnote.textContent = K[fkind.value] || '';
     };
     fkind.onchange = note;
@@ -5330,6 +5389,26 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
 
+  /* 주차 제출 — 팀 열쇠로 */
+  const wkgo = $('#wk-go');
+  if (wkgo) wkgo.onclick = async () => {
+    const tid = wkgo.dataset.team;
+    try { const r = await api(`/teams/${tid}/week`, { method: 'POST', tkey: tkeyOf(tid),
+            body: { week: +$('#wk-n').value, url: $('#wk-url').value.trim(), note: $('#wk-note').value.trim() } });
+          flash(r.final ? '마지막 주를 냈습니다 — 완주입니다' : `${r.week}주를 냈습니다`); }
+    catch (e) { flash(e.message, true); }
+  };
+  /* 선발·주차 체크인 — 운영자 열쇠로. 다시 그린다(표가 작다) */
+  document.querySelectorAll('[data-apick]').forEach(b => b.onclick = async () => {
+    try { await api(`/teams/${b.dataset.apick}/pick`, { method: 'POST', body: { state: b.dataset.st } });
+          flash(b.dataset.st === 'accepted' ? '수락했습니다 — 명단에 연락처가 붙었습니다' : '거절했습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-att]').forEach(b => b.onclick = async () => {
+    const [tid, w] = b.dataset.att.split(':');
+    try { const r = await api(`/teams/${tid}/attend`, { method: 'POST', body: { week: +w } }); flash(`${w}주 ${r.came ? '왔음' : '취소'}`); }
+    catch (e) { flash(e.message, true); }
+  });
   /* 예약금 상태 — 등록 데스크에서 고른다. 화면을 다시 그리지 않는다(표를 내려가며 차례로 고른다) */
   document.querySelectorAll('[data-dep]').forEach(sel => sel.onchange = async () => {
     try { await api(`/teams/${sel.dataset.dep}/deposit`, { method: 'POST', body: { state: sel.value } });
