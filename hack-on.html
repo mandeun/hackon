@@ -3559,6 +3559,70 @@ const SCREEN = {
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/problems">문제 은행</a> · <a href="/news">해커온뉴스</a></p>`;
   },
 
+  /* 강의 — 영상은 유튜브에 두고 여기서는 묶고 이어 준다(TASK-25).
+     iframe 주소는 서버가 id 로 만든 것만 쓴다. 화면에서 주소를 조립하지 않는다. */
+  async learn() {
+    let rows = null;
+    if (LIVE) { try { rows = (await api('/lectures')).rows; } catch { rows = null; } } else rows = [];
+    const pick = new URLSearchParams(location.search).get('v');
+    const now = rows && (rows.find(r => String(r.id) === pick) || null);
+    const who = r => r.person ? `<a href="/p/${esc(r.person)}">${esc(r.teacher || '강사')}</a>` : esc(r.teacher || '');
+    const len = r => r.minutes ? `${r.minutes}분` : '';
+    /* 묶음별로. 묶음 없는 것은 끝에 «낱개» 로 — 서버가 이미 그 순서로 준다 */
+    const groups = [];
+    for (const r of rows || []) {
+      const g = r.series || '낱개';
+      if (!groups.length || groups[groups.length - 1].name !== g) groups.push({ name: g, rows: [] });
+      groups[groups.length - 1].rows.push(r);
+    }
+    const adminBox = (AUTH && AUTH.siteAdmin) ? `<div class="card" id="lec-add">
+        <h3>강의 올리기 <span class="pill warn">사이트 운영자</span></h3>
+        <div class="meta">유튜브에 <b>일부공개</b>로 올린 뒤 주소를 붙이세요. 영상 파일은 hackon 서버에 두지 않습니다.</div>
+        <label>제목</label><input id="la-title" maxlength="80" placeholder="예: 클로드 설치부터 첫 대화까지">
+        <label>유튜브 주소</label><input id="la-yt" placeholder="https://youtu.be/…">
+        <div class="row">
+          <div><label>묶음</label><input id="la-series" maxlength="40" placeholder="예: AI 시작하기"></div>
+          <div><label>길이(분)</label><input id="la-min" type="number" min="0" max="600" placeholder="모르면 비움"></div>
+        </div>
+        <div class="row">
+          <div><label>강사 프로필 주소</label><input id="la-person" placeholder="https://hackon.kr/p/… (없으면 비움)"></div>
+          <div><label>강사 이름</label><input id="la-teacher" maxlength="20" placeholder="프로필이 없을 때"></div>
+        </div>
+        <label>한 줄 소개</label><input id="la-note" maxlength="200" placeholder="무엇을 할 수 있게 되나">
+        <div style="height:10px"></div><button class="btn sm" id="la-go">올리기</button>
+      </div>` : '';
+    return `<section class="hero"><div class="top"><span class="pill">강의</span></div>
+        <h2>따라 하면 되는 강의</h2>
+        <p class="sub" style="margin-bottom:0">대회에 나오기 전에 필요한 것부터. 설치, 첫 자동화, 발표까지 짧게 끊어 올립니다.</p>
+      </section>
+      ${now ? `<div class="card" id="lec-now" style="padding:0;overflow:hidden">
+          <iframe src="${esc(now.embed)}" title="${esc(now.title)}" style="display:block;width:100%;aspect-ratio:16/9;border:0"
+            allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"
+            referrerpolicy="strict-origin-when-cross-origin"></iframe>
+          <div style="padding:14px 16px">
+            <h3 style="margin:0 0 4px">${esc(now.title)}</h3>
+            <div class="meta">${[who(now), len(now), now.series ? esc(now.series) : ''].filter(Boolean).join(' · ')}</div>
+            ${now.note ? `<div class="meta" style="margin-top:6px">${esc(now.note)}</div>` : ''}
+          </div>
+        </div>` : ''}
+      ${rows === null
+        ? `<div class="card"><h3>강의 목록을 불러오지 못했습니다</h3>
+            <div class="meta">있는지 없는지 지금은 모릅니다. 잠시 뒤에 다시 열어 주세요.</div></div>`
+        : !rows.length
+        ? `<div class="card"><h3>아직 올라온 강의가 없습니다</h3>
+            <div class="meta">첫 강의를 준비하고 있습니다. 대회 소식은 <a href="/">첫 화면</a>에서 보세요.</div></div>`
+        : groups.map(g => `<h3 style="margin:18px 4px 8px">${esc(g.name)} <span class="pill">${g.rows.length}</span></h3>
+            ${g.rows.map(r => `<a class="card lec" href="/learn?v=${r.id}" data-lec="${r.id}"
+                style="display:flex;gap:12px;align-items:center;text-decoration:none;color:inherit${String(r.id) === pick ? ';border-color:var(--acc)' : ''}">
+              <img src="${esc(r.thumb)}" alt="" loading="lazy" style="width:112px;aspect-ratio:16/9;object-fit:cover;border-radius:10px;flex:none">
+              <div style="min-width:0"><b>${esc(r.title)}</b>
+                <div class="meta">${[esc(r.teacher || ''), len(r)].filter(Boolean).join(' · ')}</div></div>
+            </a>
+            ${(AUTH && AUTH.siteAdmin) ? `<button class="btn sec sm" data-lec-del="${r.id}" style="margin:-4px 0 10px">이 강의 내리기</button>` : ''}`).join('')}`).join('')}
+      ${adminBox}
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/problems">문제 은행</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
   /* 문제 은행 — 사장님·후원자가 올린 «풀어 달라는 문제» 전부. 대회로 열든, 지금 혼자 풀든. */
   async problems() {
     const rows = LIVE ? await api('/requests').catch(() => []) : [];
@@ -6195,6 +6259,7 @@ const GIV = location.pathname.match(/^\/give(?:\/([a-z0-9]+))?$/);
 const ASKP = location.pathname === '/ask';
 const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 — 구하기 «사람» 갈래에서 보내는 곳
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
+const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const CND = location.pathname === '/conditions';  // 그날의 조건 아카이브
 const RNK = location.pathname === '/rank';       // 기여 순위 — 백준 랭킹처럼   // «받는 사람» — 후원자·의뢰자가 주제·문제를 올리는 세 화면
 const RCV = location.pathname.match(/^\/r\/([a-z0-9]+)$/);   // 받는 화면 /r/<id>?k=<열쇠>
@@ -6228,6 +6293,7 @@ if (TVM) {
   setInterval(() => render(), 10000);
 }
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RNK) { tab = 'rank'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CND) { tab = 'conds'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 /* 심사위원 입구. 밖에서 바로 들어오는 주소라 아래 탭을 숨기고 손님 차림으로 연다 */
@@ -6273,6 +6339,34 @@ document.addEventListener('click', async ev => {
   try { if (navigator.share) { await navigator.share({ title: b.dataset.title, text, url }); return; } } catch (_) { return; }
   try { await navigator.clipboard.writeText(text); flash('복사했습니다. 톡방에 붙여 넣으세요'); } catch (_) { flash(url); }
 });
+/* 강의 — 목록을 누르면 주소만 바꾸고 다시 그린다(새로 받지 않아도 되지만 목록이 짧아 그냥 다시 받는다).
+   올리기·내리기는 사이트 운영자 화면에만 단추가 있고, 서버가 쿠키로 다시 확인한다. */
+document.addEventListener('click', async ev => {
+  if (tab !== 'learn') return;
+  const a = ev.target.closest('[data-lec]');
+  if (a && !ev.metaKey && !ev.ctrlKey) {
+    ev.preventDefault();
+    history.pushState(null, '', '/learn?v=' + a.dataset.lec);
+    await render(); scrollTo({ top: 0, behavior: 'smooth' }); return;
+  }
+  const del = ev.target.closest('[data-lec-del]');
+  if (del) {
+    if (!confirm('이 강의를 목록에서 내립니다. 유튜브 영상은 그대로 남습니다.')) return;
+    try { await api(`/lectures/${del.dataset.lecDel}/delete`, { method: 'POST', body: {} }); flash('내렸습니다'); render(); }
+    catch (e) { flash(e.message, true); }
+    return;
+  }
+  if (ev.target.id === 'la-go') {
+    const v = id => ($('#' + id) || {}).value || '';
+    try {
+      const r = await api('/lectures', { method: 'POST', body: { title: v('la-title'), yt: v('la-yt'), series: v('la-series'),
+        minutes: v('la-min'), person: v('la-person'), teacher: v('la-teacher'), note: v('la-note') } });
+      history.pushState(null, '', '/learn?v=' + r.id);
+      flash('올렸습니다'); render();
+    } catch (e) { flash(e.message, true); }
+  }
+});
+addEventListener('popstate', () => { if (tab === 'learn') render(); });
 /* 문제 은행 «풀었습니다» — 화면 어디서 눌러도 이 하나가 받는다 */
 document.addEventListener('click', async ev => {
   const b = ev.target.closest('[data-solve]'); if (b) { const box = document.getElementById('sol-' + b.dataset.solve); if (box) { box.hidden = !box.hidden; } return; }

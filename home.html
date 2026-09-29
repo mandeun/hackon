@@ -255,6 +255,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a href="#list">대회 찾기</a>
       <a href="#give">협찬·돕기</a>
       <a href="/problems">문제 은행</a>
+      <a id="nav-learn" href="/learn" hidden>강의</a>
       <a id="nav-rank" href="/rank" hidden>순위</a>
       <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
       <a href="/news">해커온뉴스</a>
@@ -510,6 +511,11 @@ fetch('/api/requests').then(function(r){ return r.json(); }).then(function(list)
 /* 그날의 조건. 둘부터 목록이라 그때 문을 연다 — 하나는 아카이브가 아니다. */
 fetch('/api/conditions').then(function(r){ return r.json(); }).then(function(d){
   if (d && d.enough) document.getElementById('nav-conds').hidden = false;
+}).catch(function(){});
+
+/* 강의 입구. 한 편이라도 올라왔을 때만 연다 — 순위 입구와 같은 이유다 */
+fetch('/api/lectures').then(function(r){ return r.json(); }).then(function(d){
+  if (d && d.rows && d.rows.length) document.getElementById('nav-learn').hidden = false;
 }).catch(function(){});
 
 /* 순위 입구. 이름을 정한 사람이 하나라도 있을 때만 연다 —

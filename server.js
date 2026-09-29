@@ -531,6 +531,62 @@ function shrink(vals) {
   };
 }
 
+/* ── 강의 ─────────────────────────────────────────────
+   유튜브 주소 꼴은 여럿이다(watch?v= · youtu.be/ · embed/ · shorts/ · live/). 사람이 붙여 넣는 것은
+   주소라 받아 주되, **남기는 것은 11자 id 하나**다. 화면이 iframe 주소를 서버에서 받아 그대로 쓰므로
+   여기서 id 가 아니면 저장 자체를 안 한다 — 저장된 한 줄이 보는 사람 전부에게 나간다. */
+const YT_ID = /^[A-Za-z0-9_-]{11}$/;
+function ytId(v) {
+  const s = String(v || '').trim();
+  if (YT_ID.test(s)) return s;
+  let u;
+  try { u = new URL(s); } catch { return ''; }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return '';
+  const h = u.hostname.replace(/^(www\.|m\.|music\.)/, '');
+  let id = '';
+  if (h === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+  else if (h === 'youtube.com' || h === 'youtube-nocookie.com') {
+    id = u.searchParams.get('v') || '';
+    const m = u.pathname.match(/^\/(embed|shorts|live|v)\/([^/]+)/);
+    if (!id && m) id = m[2];
+  }
+  return YT_ID.test(id) ? id : '';
+}
+const lectureOut = r => ({
+  id: r.id, title: r.title, yt: r.yt, minutes: r.minutes || 0, series: r.series, ord: r.ord, note: r.note,
+  person: r.person, teacher: r.handle || r.teacher || '',
+  /* 주소는 서버가 id 로 만든다. nocookie 쪽 — 누르기 전에는 추적 쿠키를 안 심는다 */
+  embed: `https://www.youtube-nocookie.com/embed/${r.yt}`,
+  thumb: `https://i.ytimg.com/vi/${r.yt}/hqdefault.jpg`,
+});
+function lectures(db, person) {
+  const rows = db.prepare(`SELECT l.*, p.handle FROM lectures l LEFT JOIN people p ON p.id = l.person
+                           ${person ? 'WHERE l.person = ?' : ''}
+                           ORDER BY l.series = '', l.series, l.ord, l.id`).all(...(person ? [person] : []));
+  return rows.map(lectureOut);
+}
+function addLecture(db, b, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 강의를 올릴 수 있습니다');
+  const title = String(b.title || '').trim().slice(0, 80);
+  if (!title) throw new HttpError(400, '제목을 넣어 주세요');
+  const yt = ytId(b.yt || b.url);
+  if (!yt) throw new HttpError(400, '유튜브 주소나 11자 영상 id 가 아닙니다');
+  /* 강사는 프로필 주소(/p/<id>)나 id 로 받는다. 없는 사람이면 이름 칸으로만 둔다 — 남의 id 를 지어내 붙이지 못하게 */
+  const pm = String(b.person || '').match(/([0-9a-f]{12})\s*$/);
+  const person = pm && db.prepare('SELECT 1 FROM people WHERE id=?').get(pm[1]) ? pm[1] : '';
+  if (b.person && !person) throw new HttpError(404, '그 프로필을 찾지 못했습니다 — 주소를 다시 확인해 주세요');
+  const r = db.prepare(`INSERT INTO lectures(title,yt,person,teacher,minutes,series,ord,note) VALUES(?,?,?,?,?,?,?,?)`)
+    .run(title, yt, person, String(b.teacher || '').trim().slice(0, 20),
+         Math.min(600, Math.max(0, Math.round(+b.minutes || 0))),
+         String(b.series || '').trim().slice(0, 40), Math.round(+b.ord || 0), String(b.note || '').trim().slice(0, 200));
+  return lectureOut(db.prepare('SELECT l.*, p.handle FROM lectures l LEFT JOIN people p ON p.id=l.person WHERE l.id=?').get(r.lastInsertRowid));
+}
+function delLecture(db, id, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 지울 수 있습니다');
+  if (!db.prepare('DELETE FROM lectures WHERE id=?').run(+id).changes) throw new HttpError(404, '없는 강의입니다');
+  return { ok: true };
+}
+
 /** 한 사람의 이력. 연락처는 한 칸도 안 나간다.
     실력과 매너를 따로 낸다 - 섞으면 '싫은 사람' 이 '못하는 사람' 이 된다. */
 function profile(db, pid) {
@@ -1922,6 +1978,7 @@ function visitsOf(db, days) {
 function sitemap(db) {
   const base = CANON();
   const urls = ['/', '/manual'].concat(
+    db.prepare('SELECT 1 FROM lectures LIMIT 1').get() ? ['/learn'] : [],
     db.prepare("SELECT id FROM events WHERE listed=1 AND ends >= date('now') ORDER BY ends").all()
       .map((r) => '/e/' + r.id));
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -2045,6 +2102,22 @@ function open(file) {
       manner INTEGER NOT NULL DEFAULT 0,   -- 1~5
       at     TEXT NOT NULL DEFAULT (date('now')),
       UNIQUE(event, giver, target)
+    );
+
+    /* 강의. 영상은 서버에 안 둔다 — 유튜브 id 만 적는다(Fly 도쿄 내보내기는 GB 당 $0.04 이고,
+       보는 동안 꺼져 있어야 할 기계가 깨어 있다). 올리는 것은 사이트 운영자만.
+       강사가 스스로 올리게 두면 남의 이름으로 강의를 걸 수 있다. */
+    CREATE TABLE IF NOT EXISTS lectures(
+      id      INTEGER PRIMARY KEY,
+      title   TEXT NOT NULL,
+      yt      TEXT NOT NULL,                  -- 유튜브 id 11자. 주소·iframe 은 안 받는다
+      person  TEXT NOT NULL DEFAULT '',       -- 강사 people.id. 비면 강사 미상
+      teacher TEXT NOT NULL DEFAULT '',       -- 프로필이 없는 강사의 이름
+      minutes INTEGER NOT NULL DEFAULT 0,     -- 0 이면 모름
+      series  TEXT NOT NULL DEFAULT '',       -- 묶음 이름. 비면 «낱개»
+      ord     INTEGER NOT NULL DEFAULT 0,
+      note    TEXT NOT NULL DEFAULT '',
+      at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     /* 참가자가 대회를 평가한다. 주최자 평판이 여기서 나온다.
@@ -5205,6 +5278,11 @@ function routes(db) {
             .run(m[1], 'image/png', buf);
           return json(res, 200, { ok: true, url: `${mailSite()}/og/p/${m[1]}.png` });
         }
+        /* 강의. 읽기는 누구나, 쓰기는 쿠키로 로그인한 사이트 운영자만(siteAdmin). */
+        if (p === '/api/lectures' && req.method === 'GET') return json(res, 200, { rows: lectures(db) });
+        if (p === '/api/lectures' && req.method === 'POST') return json(res, 200, addLecture(db, await body(req), { siteAdmin }));
+        if ((m = p.match(/^\/api\/lectures\/(\d+)\/delete$/)) && req.method === 'POST')
+          return json(res, 200, delLecture(db, m[1], { siteAdmin }));
         /* 내 열쇠 찾기. 기록이 있으면 프로필 주소를 메일로 보낸다 — 응답만 봐서는 있는지 없는지 모른다(감사 9). */
         if (p === '/api/whoami' && req.method === 'POST') {
           const w = whoami(db, (await body(req)).contact);
@@ -6185,7 +6263,7 @@ function routes(db) {
                || p.match(/^\/v\/[a-z0-9]+$/)
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
-               || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge'
+               || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -7697,6 +7775,30 @@ async function selftest() {
   const prof2 = profile(db, idA);
   ok(prof2.skill.n === 1 && prof2.manner.n === 1, '실력과 매너를 따로 센다');
   ok(prof2.skill.score !== prof2.manner.score, '실력과 매너가 섞이지 않는다');
+
+  /* ── 강의 (TASK-25) ── 남기는 것은 11자 id 하나. 화면은 서버가 만든 주소만 iframe 에 넣는다 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    ok(ytId('dQw4w9WgXcQ') === 'dQw4w9WgXcQ', '강의: id 그대로 받는다');
+    ok(ytId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=3') === 'dQw4w9WgXcQ', '강의: watch 주소에서 id 를 뽑는다');
+    ok(ytId('https://youtu.be/dQw4w9WgXcQ?si=x') === 'dQw4w9WgXcQ', '강의: 짧은 주소에서 id 를 뽑는다');
+    ok(ytId('https://youtube.com/shorts/dQw4w9WgXcQ') === 'dQw4w9WgXcQ', '강의: shorts 주소에서 id 를 뽑는다');
+    for (const bad of ['javascript:alert(1)', '<iframe src="https://evil.test"></iframe>', 'dQw4w9WgXcQQ',
+                       'https://evil.test/watch?v=dQw4w9WgXcQ', 'https://youtube.com/watch?v=<script>', '"onerror=x'])
+      ok(ytId(bad) === '', '강의: id 가 아닌 것을 받았다 — ' + bad);
+    ok(raises(() => addLecture(db, { title: 't', yt: 'dQw4w9WgXcQ' }, {}), 403), '강의: 사이트 운영자가 아니면 못 올린다');
+    ok(raises(() => addLecture(db, { title: 't', yt: 'javascript:alert(1)' }, { siteAdmin: true }), 400), '강의: id 가 아니면 400');
+    ok(raises(() => addLecture(db, { title: 't', yt: 'dQw4w9WgXcQ', person: 'ffffffffffff' }, { siteAdmin: true }), 404),
+       '강의: 없는 프로필에 강의를 못 붙인다');
+    const L = addLecture(db, { title: '설치 강의', url: 'https://youtu.be/dQw4w9WgXcQ', person: 'https://hackon.kr/p/' + idA,
+                               minutes: 12, series: 'AI 시작하기' }, { siteAdmin: true });
+    ok(L.embed === 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ', '강의: 재생 주소는 서버가 nocookie 로 만든다');
+    ok(L.person === idA && lectures(db, idA).length === 1, '강의: 프로필 주소로 강사를 잇는다');
+    ok(lectures(db).length === 1 && !JSON.stringify(lectures(db)).includes('x.test'), '강의 목록에 연락처가 안 나간다');
+    ok(raises(() => delLecture(db, L.id, {}), 403), '강의: 운영자가 아니면 못 지운다');
+    delLecture(db, L.id, { siteAdmin: true });
+    ok(lectures(db).length === 0, '강의: 지워진다');
+  }
 
   // 대회 평판
   db.prepare('INSERT INTO event_ratings(event,giver,run,worth,note) VALUES(?,?,?,?,?)')

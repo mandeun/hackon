@@ -3614,5 +3614,61 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 ok("화면이 단추 셋을 같은 크기로 그린다 — 접힌 것 없음, «로그인» 을 누르면 실제로 뜬다")
+
+# ── 강의 /learn (TASK-25) ────────────────────────────────────
+# 올리기는 쿠키 로그인한 사이트 운영자만이라 검사에서는 DB 에 직접 넣는다(로그인 흉내를 서버에 두지 않는다).
+import sqlite3 as _sq
+import tempfile as _tf
+_ldir = _tf.mkdtemp(prefix="hackon-learn-")
+_ldb = os.path.join(_ldir, "learn.db")
+LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+
+
+def lpost(path, payload):
+    r = urllib.request.Request(LEARN_BASE + path, method="POST", data=json.dumps(payload).encode(),
+                               headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(r, timeout=10) as res:
+            return res.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+A(lpost("/api/lectures", {"title": "몰래", "yt": "dQw4w9WgXcQ"}) == 403, "로그인 없이 강의가 올라간다")
+A(lpost("/api/lectures/1/delete", {}) == 403, "로그인 없이 강의를 내릴 수 있다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("learn: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/learn", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A("아직 올라온 강의가 없습니다" in pg.inner_text("body"), "강의 0건일 때 «없음» 문구가 안 나온다")
+    A("불러오지 못했습니다" not in pg.inner_text("body"), "강의 0건을 «모름» 으로 그린다")
+    pg.goto(f"{LEARN_BASE}/", wait_until="networkidle")
+    A(pg.locator("#nav-learn").is_hidden(), "강의가 없는데 첫 화면에 강의 입구가 열려 있다")
+    con = _sq.connect(_ldb)
+    con.execute("INSERT INTO lectures(title,yt,teacher,minutes,series,ord) VALUES(?,?,?,?,?,?)",
+                ("설치부터 첫 대화까지", "dQw4w9WgXcQ", "정회광", 12, "AI 시작하기", 1))
+    con.execute("INSERT INTO lectures(title,yt,teacher,minutes,series,ord) VALUES(?,?,?,?,?,?)",
+                ("<img src=x onerror=alert(1)>", "aaaaaaaaaaa", "", 0, "", 0))
+    con.commit(); con.close()
+    pg.goto(f"{LEARN_BASE}/", wait_until="networkidle")
+    pg.wait_for_timeout(500)
+    A(pg.locator("#nav-learn").is_visible(), "강의가 있는데 첫 화면에 강의 입구가 안 열린다")
+    pg.goto(f"{LEARN_BASE}/learn", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    body_t = pg.inner_text("body")
+    A("AI 시작하기" in body_t and "낱개" in body_t, "강의가 묶음별로 안 나온다")
+    A(pg.locator("img[src='x']").count() == 0, "강의 제목의 태그가 그대로 살아난다")
+    pg.click("[data-lec]:has-text('설치부터')")
+    pg.wait_for_selector("#lec-now iframe", timeout=10000)
+    src = pg.get_attribute("#lec-now iframe", "src")
+    A(src == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ", f"재생 주소가 서버가 만든 nocookie 가 아니다: {src}")
+    A(pg.url.endswith("/learn?v=1"), f"누른 강의가 주소에 안 남는다: {pg.url}")
+    A(pg.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "폰 폭에서 가로 스크롤이 생긴다")
+    ctx.close()
+    b.close()
+ok("강의 — 0건은 «없음», 태그는 글자로, 재생은 nocookie, 쓰기는 로그인한 운영자만")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
