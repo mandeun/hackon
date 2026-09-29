@@ -2381,7 +2381,7 @@ const SCREEN = {
       <div class="meta" id="f-tplnote" style="margin:-2px 0 8px"></div>
       <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 불편 하나 없애기"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
       ${rq ? `<label>어떻게 받을까요</label>
-      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button></div>
+      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button></div>
       <div class="meta" style="margin:-2px 0 8px">«온라인으로 결과물만»은 모이지 않습니다. 일주일 동안 각자 만들어 내고, 올린 분이 받아서 «됐다»를 답합니다.</div>` : ''}
       ${(() => { const ids = Object.keys(localStorage).filter(k => k.startsWith('hackon.okey.')).map(k => k.slice(12)); if (!ids.length || !LIVE) return '';
         return `<details class="more" id="f-fromwrap" style="margin-top:8px"><summary>지난 대회에서 가져오기 <span class="when">기준표·주제·진행 순서·자리</span></summary>
@@ -2912,6 +2912,14 @@ const SCREEN = {
         <label>취소 규칙 <span class="pill">공개 페이지와 신청 뒤 카드에 한 줄로</span></label>
         <input id="e-cancel" value="${esc(e.cancel_rule || '')}" maxlength="120" placeholder="${esc(CANCEL_RULE)}">
         <div class="meta">비워 두면 «${esc(CANCEL_RULE)}» 로 보입니다.</div>
+        <div class="row">
+          <div><label>종류</label><select id="e-kind">
+            <option value=""${e.kind ? '' : ' selected'}>해커톤</option>
+            <option value="모임"${e.kind === '모임' ? ' selected' : ''}>모임·수업 (제출·심사 없음)</option></select></div>
+          <div><label>예약금(원)</label><input id="e-deposit" type="number" min="0" max="1000000" step="1000" value="${+e.deposit || 0}"></div>
+        </div>
+        <div class="meta">노쇼를 줄이려고 받는 돈입니다. <b>HACK:ON 은 돈을 받지 않습니다</b> — 주최자가 따로 받고,
+          등록 데스크에서 팀마다 «받음·돌려줌·안 돌려줌» 만 표시합니다. 상태는 그 팀과 운영자만 봅니다.</div>
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
         <label>진행 순서 <span class="pill">현장 화면과 공개 페이지가 같이 씁니다</span></label>
         <div class="plan" id="e-plan"></div>
@@ -3218,11 +3226,13 @@ const SCREEN = {
           return `<div class="meta" id="desk-count">신청 <b>${d.rows.length}</b>팀 · 확정 <b>${asked ? yes + '팀' : '모름'}</b>${
             asked ? ' — 간식·자리는 확정 수로 잡습니다.' : ' — 아직 아무도 답하지 않았습니다. 3일 전부터 묻고, 절반쯤 오는 게 정상입니다.'}</div>`;
         })()}
-        <table><tr><th>팀</th><th>연락처</th><th>촬영</th><th></th></tr>
+        <table><tr><th>팀</th><th>연락처</th><th>촬영</th>${+e.deposit ? '<th>예약금</th>' : ''}<th></th></tr>
         ${d.rows.map(r => `<tr>
           <td>${esc(r.name)}</td>
           <td class="meta">${esc(r.contact || '—')}</td>
           <td>${r.photo ? '<span class="pill ok">동의</span>' : '<span class="pill">비동의</span>'}</td>
+          ${+e.deposit ? `<td><select data-dep="${r.id}" aria-label="예약금 상태">
+            ${['', '받음', '돌려줌', '안 돌려줌'].map(v => `<option value="${v}"${(r.deposit || '') === v ? ' selected' : ''}>${v || '—'}</option>`).join('')}</select></td>` : ''}
           <td>${r.confirmed === 'no' ? '<span class="pill warn">못 옴</span> ' : r.confirmed ? '<span class="pill ok">온다</span> ' : '<span class="pill">?</span> '}<button class="btn ${r.came ? 'sec' : ''} sm" data-came="${r.id}">${
             r.came ? '왔음' : '체크인'}</button></td>
         </tr>`).join('')}</table>
@@ -3264,7 +3274,9 @@ const SCREEN = {
 
   /* 공개 화면 — 로그인 없이 링크만으로 보는 읽기 전용. 협찬사와 참가자에게 뿌리는 주소다. */
   async pub() {
-    const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board, closed:false };
+    /* 팀 열쇠를 같이 보낸다 — 서버가 «내 팀» 줄에만 예약금 상태를 남긴다(남의 것은 지운다) */
+    const myTk = tkeyOf(localStorage.getItem('hackon.team.' + cur) || '');
+    const d = LIVE ? await api(`/events/${cur}/board`, myTk ? { tkey: myTk } : undefined) : { event: DEMO.event, rows: DEMO.board, closed:false };
     const o = LIVE ? await api(`/events/${cur}/outcomes`) : DEMO.outcomes;
     const e = d.event;
     const done = d.rows.filter(r => r.done);
@@ -3284,6 +3296,8 @@ const SCREEN = {
     const reqs = LIVE ? await api(`/events/${cur}/requests`).catch(() => []) : [];
     const qas = LIVE ? await api(`/events/${cur}/questions`).catch(() => []) : [];
     const ended = statusOf(e).k === '끝남';
+    /* 모임·수업 — 제출·심사·순위·마감 칸을 안 그린다. 신청·참석 확인·체크인·서로 평가만 */
+    const meet = e.kind === '모임';
     /* 아래 바닥 단추. 화면을 그린 뒤 render() 가 붙인다. */
     CTA = ended ? null
         : !mine ? { text: '참가 신청하기', to: 'apply' }
@@ -3310,13 +3324,14 @@ const SCREEN = {
           ${e.twist ? `<li><span class="ic" aria-hidden="true">🎲</span><span><span class="k">그날의 조건</span><span class="v">${esc(e.twist)} <a href="/conditions" class="hint">역대 조건›</a></span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span class="hint">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
+          ${+e.deposit ? `<li id="dep-line"><span class="ic" aria-hidden="true">🎟️</span><span><span class="k">예약금</span><span class="v">${won(e.deposit)} — 오시면 돌려드립니다. 받는 방법은 주최자가 따로 안내합니다</span></span></li>` : ''}
           ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span class="hint">· 카톡 방에 한 번</span></span></span></li>
           <li><span class="ic" aria-hidden="true">🗓️</span><span><span class="k">내 달력에</span><span class="v"><a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 캘린더에 넣기</a></span></span></li>
           ${e.chat ? `<li><span class="ic" aria-hidden="true">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
           ${e.safety ? `<li><span class="ic" aria-hidden="true">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
         </ul>
-        ${dueBox(e)}
+        ${meet ? '' : dueBox(e)}
          ${ended ? `<p class="meta" id="ended-line" style="margin:12px 0 0"><b>끝난 대회입니다.</b> <a href="/e/${esc(e.id)}/report">결과 보고서 보기</a></p>`
                  : `<div class="gsteps" id="how3" style="margin:12px 0 0"><span class="on">① 신청</span><span class="sep">→</span><span>② 그날 와서 만들기</span><span class="sep">→</span><span>③ 제출</span></div>`}
       </section>
@@ -3389,10 +3404,13 @@ const SCREEN = {
               </div></div>` : ''}
             <div class="shrow" style="margin-top:6px"><button class="btn sm" id="cf-yes">올 거예요</button><button class="btn sec sm" id="cf-no">못 가요</button></div>`}</div>` : ''}
           <div class="meta">1. <b>내 팀 링크</b>를 나에게만 보내 두세요 — 폰을 바꿔도 이걸로 돌아옵니다.<br>
-            2. ${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : `당일(${esc(e.starts)}) 마감 전에`} 여기서 결과물 주소를 냅니다.</div>
+            2. ${meet ? `당일(${esc(e.starts)}) 등록 데스크에서 체크인합니다. 끝나면 같이 한 분들을 평가할 수 있습니다.`
+                 : `${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : `당일(${esc(e.starts)}) 마감 전에`} 여기서 결과물 주소를 냅니다.`}</div>
+          ${+e.deposit ? `<div class="meta" id="dep-mine" style="margin-top:6px">예약금 <b>${won(e.deposit)}</b> ·
+            ${mine.deposit ? `<span class="pill ${mine.deposit === '안 돌려줌' ? 'warn' : 'ok'}">${esc(mine.deposit)}</span>` : '<span class="pill">주최자 확인 전</span>'}</div>` : ''}
           ${cancelLine(e)}
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
-          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button><a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${meet ? '' : `<button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button>`}<a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
           <div class="card" id="pairbox" style="margin-top:12px">
             <b>같이 올 사람 있으세요</b>
             <div class="meta">둘이 오면 자리를 하나만 더 씁니다. 한 분이 못 오게 되어도
@@ -3410,13 +3428,13 @@ const SCREEN = {
       ${(e.plan || []).length ? `<div class="card"><h3>진행 순서</h3>${timeline(e.plan)}</div>` : ''}
 
 
-      ${showStats ? `<div class="stat">
+      ${showStats && !meet ? `<div class="stat">
         <div><b>${o.finishRate}%</b><span>완주율</span></div>
         <div><b>${o.interview}</b><span>면접 연결</span></div>
         <div><b>${o.adoption}</b><span>도입 검토</span></div>
       </div>` : ''}
 
-      ${d.closed && !(e.vmode ? d.rows.some(r => r.votes) : e.pmode ? d.rows.some(r => r.pairs) : d.rows.some(r => +r.score > 0))
+      ${meet ? '' : d.closed && !(e.vmode ? d.rows.some(r => r.votes) : e.pmode ? d.rows.some(r => r.pairs) : d.rows.some(r => +r.score > 0))
         ? `<h3>순위</h3><p class="sub">심사 점수가 없어 순위를 매기지 않았습니다.</p>`
       : d.closed ? `<h3>순위${e.vmode ? ' <span class="pill">관객 평가</span>' : e.pmode ? ' <span class="pill">짝 비교</span>' : ''}</h3>
         ${e.vmode ? '<p class="sub">심사위원 대신 관객·참가자가 준 별점 평균으로 매겼습니다.</p>'
@@ -3437,7 +3455,7 @@ const SCREEN = {
         /* 마감 전에는 무엇을 만들고 있는지만 보이고 링크는 안 보인다.
            서버가 아예 안 내려보낸다 - 화면에서만 감추면 소용이 없다. */
         const made = d.rows.filter(r => r.done || r.hidden || r.note);
-        if (!made.length) return '';
+        if (meet || !made.length) return '';
         return `<h3>${d.closed ? '제출작' : '무엇을 만들고 있나'}</h3>
           ${d.closed ? '' : `<p class="sub">링크는 <b>마감 뒤</b>에 한꺼번에 열립니다.
             먼저 낸 팀이 손해를 보지 않게 하기 위해서입니다.</p>`}
@@ -4981,6 +4999,8 @@ function wire() {
         safety: $('#e-safety') ? $('#e-safety').value.trim() : undefined,
         pay: $('#e-pay') ? $('#e-pay').value.trim() : undefined,
         cancel_rule: $('#e-cancel') ? $('#e-cancel').value.trim() : undefined,
+        kind: $('#e-kind') ? $('#e-kind').value : undefined,
+        deposit: $('#e-deposit') ? $('#e-deposit').value : undefined,
         twist: $('#e-twist') ? $('#e-twist').value.trim() : undefined,
         host: $('#e-host') ? $('#e-host').value.trim() : undefined,
         topic: $('#e-topic').value, due: $('#e-due').value, plan } });
@@ -5024,6 +5044,7 @@ function wire() {
     const fromSel = $('#f-from');
     if (fromSel && fromSel.value) { b.from = fromSel.value; b.fromKey = okeyOf(fromSel.value); }   // 지난 대회에서 가져오기
     if (MAKE_REQ) b.req = MAKE_REQ;   // 의뢰에서 들어왔으면 첫 주제로 붙인다
+    if ($('#f-kind') && $('#f-kind').value === '모임·수업') b.kind = '모임';   // 제출·심사·순위를 끈 모임
     /* 유형과 심사 기준은 고르는 것이라 손이 안 간다. 그래서 첫 화면에 같이 둔다. */
     if (!b.title) return flash('대회 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
@@ -5039,7 +5060,9 @@ function wire() {
          고치는 것과 처음부터 쓰는 것은 완전히 다른 일이다. */
       const kind = $('#f-kind') ? $('#f-kind').value : '당일';
       try {
-        const dr = await api(`/draft?start=10:00&end=19:30&teams=6&kind=${encodeURIComponent(kind)}`);
+        const dr = kind === '모임·수업'
+          ? await api(`/draft?start=19:00&end=21:00&teams=0&kind=${encodeURIComponent(kind)}`)
+          : await api(`/draft?start=10:00&end=19:30&teams=6&kind=${encodeURIComponent(kind)}`);
         await api(`/events/${cur}`, { method: 'PATCH', body: { plan: dr.rows } });
       } catch {}
       tab = 'board';
@@ -5070,7 +5093,8 @@ function wire() {
     const note = () => {
       const K = { '당일': '첫 대회는 이걸 권합니다.',
                   '무박2일': '야식과 잘 자리를 미리 정해 두세요.',
-                  '온라인 1주': '각자 만들고 마지막 날에만 모입니다.' };
+                  '온라인 1주': '각자 만들고 마지막 날에만 모입니다.',
+                  '모임·수업': '당근 모임·교육 봉사처럼 짧게 모입니다. 참석 확인·체크인·서로 평가만 씁니다.' };
       fkindnote.textContent = K[fkind.value] || '';
     };
     fkind.onchange = note;
@@ -5199,6 +5223,12 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
 
+  /* 예약금 상태 — 등록 데스크에서 고른다. 화면을 다시 그리지 않는다(표를 내려가며 차례로 고른다) */
+  document.querySelectorAll('[data-dep]').forEach(sel => sel.onchange = async () => {
+    try { await api(`/teams/${sel.dataset.dep}/deposit`, { method: 'POST', body: { state: sel.value } });
+          flash('예약금: ' + (sel.value || '표시 지움'), true); }
+    catch (e) { flash(e.message, true); }
+  });
   document.querySelectorAll('[data-came]').forEach(b => b.onclick = async () => {
     try { const r = await api(`/teams/${b.dataset.came}/checkin`, { method: 'POST', body: {} });
           flash(r.came ? '체크인했습니다' : '체크인을 취소했습니다'); }

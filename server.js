@@ -135,7 +135,31 @@ const KINDS = {
   '당일': { hours: 9, what: '아침에 모여 저녁에 시상까지. 첫 대회는 이걸 권합니다' },
   '무박2일': { hours: 24, what: '밤을 새웁니다. 야식과 잘 자리를 미리 정해 두세요' },
   '온라인 1주': { hours: 0, what: '각자 만들고 마지막 날에만 모여 발표합니다' },
+  /* 해커톤이 아닌 것 — 당근 모임·교육 봉사·스터디 한 회. 제출·심사·순위가 없고
+     신청 → D-3·D-1 참석 재확인 → 체크인 → 서로 평가만 쓴다. 안 온 것은 그대로 «안 온 횟수» 에 쌓인다 */
+  '모임·수업': { hours: 2, what: '짧게 모여 배우거나 이야기합니다. 제출·심사·순위가 없습니다' },
 };
+/* events.kind 에 남기는 값. 빈 값이 해커톤이다(예전 대회는 전부 빈 값) */
+const EVENT_KINDS = ['', '모임'];
+const kindOf = v => (v === '모임' || v === '모임·수업') ? '모임' : '';
+/* 예약금 상태. HACK:ON 은 돈을 안 만진다 — 주최자가 따로 받고 여기엔 표시만 한다.
+   토스 미니앱으로 받으려면 토스페이·인앱결제가 필요하고 둘 다 사업자등록이 있어야 한다(2026-09 정책표). */
+const DEPOSIT_STATES = ['받음', '돌려줌', '안 돌려줌'];
+
+/** 모임·수업 진행표. 발표·심사가 없으니 앞뒤만 잡고 가운데는 본 순서 하나다.
+    끝 10분은 «서로 평가» — 매너 기록이 여기서 쌓인다. */
+function draftMeetup(start, end) {
+  let a = mins(start), z = mins(end);
+  if (a === null) a = 19 * 60;
+  if (z === null || z <= a) z = a + 120;
+  const rows = [
+    { at: hhmm(a), what: '등록 · 체크인' },
+    { at: hhmm(a + 10), what: '시작 인사 · 오늘 할 것' },
+    { at: hhmm(a + 20), what: '본 순서' },
+    { at: hhmm(Math.max(a + 30, z - 10)), what: '마무리 · 서로 평가' },
+  ];
+  return { rows, teams: 0, tight: z - a < 60, kind: '모임·수업' };
+}
 
 /** 시작·끝·팀 수를 넣으면 진행표 초안이 나온다.
     앞에서부터 채우고 뒤(발표·심사·시상)는 끝에서 거꾸로 잡는다 -
@@ -144,6 +168,7 @@ function draftPlan(start, end, teams, kind) {
   const R = PLAN_RULE;
   if (kind === '무박2일') return draftOvernight(start, teams);
   if (kind === '온라인 1주') return draftOnline(teams);
+  if (kindOf(kind) === '모임') return draftMeetup(start, end);
   let a = mins(start), z = mins(end);
   if (a === null) a = 10 * 60;
   if (z === null || z <= a) z = a + 9 * 60;
@@ -2601,7 +2626,13 @@ function open(file) {
      surveys — 끝난 뒤 설문 3문항(추천 0~10·좋았던 것·고칠 것). 팀 열쇠로만, 팀당 하나
      questions — 대회 안 묻고 답하기. 팀 열쇠로 묻고 운영자만 답한다. 익명 없음, 커뮤니티 아님 */
   try { db.exec("ALTER TABLE events ADD COLUMN safety TEXT NOT NULL DEFAULT ''"); } catch {}
-  try { db.exec("ALTER TABLE events ADD COLUMN pay TEXT NOT NULL DEFAULT ''"); } catch {}      // 입금 안내 한 줄 — 맡기 확정된 사람에게만 보인다. 앱은 돈을 안 만진다
+  try { db.exec("ALTER TABLE events ADD COLUMN pay TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 대회 종류 — 빈 값 해커톤, '모임' 은 제출·심사·순위를 끈 모임·수업 */
+  try { db.exec("ALTER TABLE events ADD COLUMN kind TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 예약금(원). 0 이면 안 받는다. 공개해도 되는 조건이다 — 받는 계좌는 여기 없다 */
+  try { db.exec('ALTER TABLE events ADD COLUMN deposit INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* 팀별 예약금 상태 — 운영자와 그 팀에게만. 공개 응답(board)에서 지운다 */
+  try { db.exec("ALTER TABLE teams ADD COLUMN deposit TEXT NOT NULL DEFAULT ''"); } catch {}      // 입금 안내 한 줄 — 맡기 확정된 사람에게만 보인다. 앱은 돈을 안 만진다
   /* 2026-09-27 취소 규칙(스페이스클라우드·이벤터스: 규칙은 주최자가 정하고 상세 페이지에 박는다).
      cancel_rule — 한 줄. 비면 빈 문자열 그대로 둔다. 기본 문장은 «보여 줄 때»만 쓴다(화면이 갖고 있다) —
      기본값을 DB 에 써 두면 주최자가 안 정한 것과 «이 문장으로 정한 것» 을 나중에 가를 수 없다. */
@@ -3182,6 +3213,8 @@ function editEvent(db, id, b) {
   /* «문제가 생기면 이 사람에게». 참가자 화면에 그대로 나가는 공개 연락 한 줄이다 — 운영자가 스스로 적는다 */
   if (b.safety !== undefined) { set.push('safety=?'); val.push(plain(b.safety, 120)); }
   if (b.pay !== undefined) { set.push('pay=?'); val.push(plain(b.pay, 120)); }
+  if (b.kind !== undefined) { set.push('kind=?'); val.push(kindOf(b.kind)); }
+  if (b.deposit !== undefined) { set.push('deposit=?'); val.push(Math.min(1000000, Math.max(0, Math.floor(+b.deposit || 0)))); }
   /* 그날의 조건. 현장에서 공개한 제약을 운영자가 적어 둔다 — 아카이브의 원본이 이것뿐이다 */
   if (b.twist !== undefined) { set.push('twist=?'); val.push(plain(b.twist, 120)); }
   /* 취소 규칙 한 줄. 공개 페이지와 신청 뒤 카드에 접지 않고 그대로 나간다 */
@@ -3316,6 +3349,8 @@ function createEvent(db, b) {
     db.prepare("UPDATE owners SET name=? WHERE id=? AND name=''").run(b.host, owner);
   }
   db.prepare('UPDATE events SET owner=? WHERE id=?').run(owner, id);
+  db.prepare('UPDATE events SET kind=?, deposit=? WHERE id=?')
+    .run(kindOf(b.kind), Math.min(1000000, Math.max(0, Math.floor(+b.deposit || 0))), id);
   db.prepare('UPDATE events SET okey=?, jkey=?, vkey=?, plan=? WHERE id=?')
     .run(okey, jkey, vkey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
   /* 예산을 «주었을 때만» 산식을 돌린다. 이름 하나로 여는 길은 전과 똑같이 현장 대회·자리 없음이다.
@@ -3438,6 +3473,13 @@ function record(db, event) {
   };
 }
 
+/** 예약금 상태 한 칸. 부르기 전에 라우터가 운영자 열쇠를 본다(needAdmin). 빈 값이면 지운다 */
+function setDeposit(db, tid, state) {
+  const st = String(state || '');
+  if (st && !DEPOSIT_STATES.includes(st)) throw new HttpError(400, '받음·돌려줌·안 돌려줌 중 하나입니다');
+  if (!db.prepare('UPDATE teams SET deposit=? WHERE id=?').run(st, tid).changes) throw new HttpError(404, '없는 팀입니다');
+  return { deposit: st };
+}
 function getEvent(db, id) {
   const e = db.prepare('SELECT * FROM events WHERE id=?').get(id);
   if (!e) throw new HttpError(404, '없는 대회입니다');
@@ -3808,7 +3850,7 @@ function board(db, event, admin = false, mine = 0) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
-           t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring,
+           t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring, t.deposit,
            s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
@@ -3889,6 +3931,8 @@ function board(db, event, admin = false, mine = 0) {
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
                   delete row.photo; delete row.came; delete row.apply;
                   delete row.show_at; }
+    /* 예약금 상태는 돈 이야기다 — 운영자와 그 팀 자신에게만 */
+    if (!admin && !(mine && String(t.id) === String(mine))) delete row.deposit;
     return row;
   });
   /* 관객 평가 모드면 표 평균으로, 짝 비교 모드면 BT 점수로 줄 세운다. 아니면 심사 점수로.
@@ -5248,7 +5292,7 @@ function routes(db) {
             if (rq) { db.prepare('UPDATE requests SET event=? WHERE id=?').run(made.id, rq.id); made.req = rq.id; }
           }
           if (src) {
-            editEvent(db, made.id, { mode: src.mode, chat: src.chat, safety: src.safety, wifi: src.wifi });
+            editEvent(db, made.id, { mode: src.mode, chat: src.chat, safety: src.safety, wifi: src.wifi, kind: src.kind, deposit: src.deposit });
             for (const n of db.prepare('SELECT kind, label, qty, note, price FROM needs WHERE event=? ORDER BY id').all(src.id))
               db.prepare('INSERT INTO needs(event,kind,label,qty,note,price) VALUES(?,?,?,?,?,?)').run(made.id, n.kind, n.label, n.qty, n.note, n.price);
             made.copied = src.id;
@@ -5868,6 +5912,12 @@ function routes(db) {
           const came = t.came ? '' : new Date().toISOString();
           db.prepare('UPDATE teams SET came=? WHERE id=?').run(came, +m[1]);
           return json(res, 200, { came });
+        }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/deposit$/)) && req.method === 'POST') {
+          const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          needAdmin(db, t.event, key, owner, siteAdmin);
+          return json(res, 200, setDeposit(db, +m[1], (await body(req)).state));
         }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/confirm$/)) && req.method === 'POST') {
           /* 참석 재확인. 그 팀(팀 열쇠)만 누른다. going:false 면 «못 가요» — 주최자가 당일이 아니라 미리 안다. */
@@ -7967,6 +8017,31 @@ async function selftest() {
   ok(prof2.skill.n === 1 && prof2.manner.n === 1, '실력과 매너를 따로 센다');
   ok(prof2.skill.score !== prof2.manner.score, '실력과 매너가 섞이지 않는다');
 
+  /* ── 모임·수업과 예약금 (TASK-28) ── 돈은 안 만진다. 상태 표시는 운영자와 그 팀만 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const gEv = createEvent(db, { title: '모임시험', kind: '모임·수업', deposit: 10000, starts: '2020-03-01' });
+    ok(getEvent(db, gEv.id).kind === '모임' && getEvent(db, gEv.id).deposit === 10000, '모임: 종류와 예약금이 남는다');
+    ok(getEvent(db, createEvent(db, { title: 'x', kind: '<script>' }).id).kind === '', '모임: 모르는 종류는 해커톤(빈 값)으로');
+    ok(getEvent(db, createEvent(db, { title: 'y', deposit: 99999999 }).id).deposit === 1000000, '모임: 예약금은 백만 원까지');
+    const mp = draftPlan('19:00', '21:00', 0, '모임·수업');
+    ok(mp.rows.length >= 3 && mp.rows.some(r => /서로 평가/.test(r.what)) && !mp.rows.some(r => /심사|발표/.test(r.what)),
+       '모임: 진행표에 심사·발표가 없고 서로 평가가 있다');
+    const g1 = joinTeam(db, gEv.id, { name: '하나', contact: 'g1@x.test', agree: true });
+    const g2 = joinTeam(db, gEv.id, { name: '둘', contact: 'g2@x.test', agree: true });
+    ok(raises(() => setDeposit(db, g1, '몰래'), 400), '예약금: 정한 셋 밖의 값은 400');
+    setDeposit(db, g1, '받음'); setDeposit(db, g2, '안 돌려줌');
+    const pubRows = board(db, gEv.id, false).rows;
+    ok(pubRows.every(r => !('deposit' in r)), '예약금: 손님용 순위표에 예약금 상태가 실린다');
+    const mineRows = board(db, gEv.id, false, g1).rows;
+    ok(mineRows.find(r => r.id === g1).deposit === '받음' && !('deposit' in mineRows.find(r => r.id === g2)),
+       '예약금: 내 팀 것만 보이고 남의 팀 것은 안 보인다');
+    ok(board(db, gEv.id, true).rows.find(r => r.id === g2).deposit === '안 돌려줌', '예약금: 운영자는 다 본다');
+    ok(!JSON.stringify(getEvent(db, gEv.id)).includes('안 돌려줌'), '예약금: 대회 공개 응답에 팀 상태가 없다');
+    setDeposit(db, g1, '');
+    ok(board(db, gEv.id, true).rows.find(r => r.id === g1).deposit === '', '예약금: 빈 값으로 지운다');
+  }
+
   /* ── 매너 평가 ── 칭찬 태그는 공개, 비매너 알림은 사이트 운영자만. 시작 전·안 온 사람은 막는다 */
   {
     const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
@@ -8127,7 +8202,7 @@ async function selftest() {
   db.prepare('DELETE FROM events WHERE id=?').run(rbEv.id);
 
   // 대회 유형
-  ok(Object.keys(KINDS).length === 3, '대회 유형이 셋이다');
+  ok(Object.keys(KINDS).length === 4, '대회 유형이 넷이다 (당일·무박2일·온라인 1주·모임·수업)');
   const on = draftPlan('10:00', '19:30', 6, '무박2일');
   ok(on.kind === '무박2일' && on.rows.some(r => r.what.includes('야식')),
      '무박 2일 초안에는 야식이 있다');
