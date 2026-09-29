@@ -4024,5 +4024,56 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 ok("프로젝트 — 지원자 카드(연락처 없음·기록 없음은 «처음»), 수락해야 연락처, 주차 체크인, 주차 제출, 거절은 비공개")
+
+# ── 교육 — 수료 확인·수업 실적·강의 판매처 (TASK-29~30) ────────────────
+_today = datetime.now().strftime("%Y-%m-%d")
+_cl = lpostj("/api/events", {"title": "청소년 AI 수업", "host": "꿈드림", "kind": "모임", "starts": _today, "ends": _today})
+CL, CLK = _cl["id"], _cl["okey"]
+_c1 = lpostj(f"/api/events/{CL}/teams", {"name": "수강생", "email": "cl1@example.com", "contact": "cl1@example.com", "agree": True})
+_cl0 = lpostj("/api/events", {"title": "아무도 체크인 안 한 수업", "host": "센터", "kind": "모임", "starts": _today, "ends": _today})["id"]
+lpostj(f"/api/events/{_cl0}/teams", {"name": "결석", "email": "cl0@example.com", "contact": "cl0@example.com", "agree": True})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("edu: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/e/{CL}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.team.{CL}', '{_c1['id']}'); localStorage.setItem('hackon.tkey.{_c1['id']}', '{_c1['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#cert-go", timeout=10000)
+    pg.click("#cert-go"); pg.wait_for_timeout(600)
+    A(pg.query_selector("#cert-link") is None, "체크인 안 했는데 수료 확인이 나온다")
+    _r = urllib.request.Request(LEARN_BASE + f"/api/teams/{_c1['id']}/checkin", method="POST", data=b"{}",
+                                headers={"content-type": "application/json", "x-okey": CLK})
+    urllib.request.urlopen(_r, timeout=10).read()
+    pg.reload(wait_until="networkidle"); pg.wait_for_selector("#cert-go", timeout=10000)
+    pg.click("#cert-go"); pg.wait_for_selector("#cert-link", timeout=10000)
+    _curl = pg.inner_text("#cert-link")
+    A("/c/" in _curl, f"수료 확인 주소가 안 나온다: {_curl}")
+    pg.goto(_curl, wait_until="networkidle"); pg.wait_for_selector("#cert", timeout=10000)
+    _ct = pg.inner_text("#cert")
+    A("청소년 AI 수업" in _ct and "꿈드림" in _ct and "수강생" in _ct, f"수료 확인에 수업·기관·이름이 없다: {_ct}")
+    A("자격증" not in pg.inner_text("body") and "인증" not in pg.inner_text("body"), "수료 확인 화면에 «자격증»·«인증» 이 있다")
+    A("cl1@example.com" not in pg.content(), "수료 확인에 연락처가 실린다")
+    pg.goto(f"{LEARN_BASE}/e/{CL}/report", wait_until="networkidle"); pg.wait_for_selector("#meet-stat", timeout=10000)
+    A(pg.inner_text("#meet-stat").split("\n")[:4] == ["1", "신청", "1", "온 사람"], f"수업 실적 숫자가 틀리다: {pg.inner_text('#meet-stat')}")
+    pg.goto(f"{LEARN_BASE}/e/{_cl0}/report", wait_until="networkidle"); pg.wait_for_selector("#meet-stat", timeout=10000)
+    A("모름" in pg.inner_text("#meet-stat"), "체크인을 안 찍은 수업의 «온 사람» 을 0 으로 그린다")
+    ctx.close()
+    b.close()
+checklib.stop(LEARN_BASE)   # 강의 올리기는 쿠키 로그인한 운영자만 — 바깥에서 넣고 새로 띄운다
+con = _sq.connect(_ldb)
+con.execute("INSERT INTO lectures(title,yt,buy) VALUES(?,?,?)", ("자동 답장 전체판", "eeeeeeeeeee", "https://www.inflearn.com/course/auto"))
+_lid = con.execute("SELECT MAX(id) FROM lectures").fetchone()[0]
+con.commit(); con.close()
+LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_page()
+    pg.goto(f"{LEARN_BASE}/learn?v={_lid}", wait_until="networkidle"); pg.wait_for_selector("#lec-buy", timeout=10000)
+    A(pg.get_attribute("#lec-buy", "href") == "https://www.inflearn.com/course/auto" and pg.get_attribute("#lec-buy", "rel") == "noopener noreferrer",
+      "강의 판매처 단추가 틀리다")
+    b.close()
+ok("교육 — 수료 확인은 체크인한 사람만·금지어 없음·연락처 없음, 수업 실적(모름 구분), 강의 판매처 링크")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

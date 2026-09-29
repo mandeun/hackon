@@ -3473,6 +3473,8 @@ const SCREEN = {
               <div><label>결과물 주소</label><input id="wk-url" placeholder="https://…"></div></div>
             <input id="wk-note" maxlength="200" placeholder="이번 주에 한 것 한 줄 (선택)" style="margin-top:6px">
             <div style="height:8px"></div><button class="btn sm" id="wk-go" data-team="${esc(mine.id)}">이번 주 내기</button></div>` : ''}
+          ${(meet || proj) ? `<div style="margin-top:8px"><button class="btn sec sm" id="cert-go" data-team="${esc(mine.id)}">수료 확인 받기</button>
+            <span class="meta">${meet ? '그날 체크인하면 받습니다' : '마지막 주를 내면 받습니다'}</span><div id="cert-out"></div></div>` : ''}
           ${+e.deposit ? `<div class="meta" id="dep-mine" style="margin-top:6px">예약금 <b>${won(e.deposit)}</b> ·
             ${mine.deposit ? `<span class="pill ${mine.deposit === '안 돌려줌' ? 'warn' : 'ok'}">${esc(mine.deposit)}</span>` : '<span class="pill">주최자 확인 전</span>'}</div>` : ''}
           ${cancelLine(e)}
@@ -3756,6 +3758,7 @@ const SCREEN = {
           <div><label>강사 이름</label><input id="la-teacher" maxlength="20" placeholder="프로필이 없을 때"></div>
         </div>
         <label>한 줄 소개</label><input id="la-note" maxlength="200" placeholder="무엇을 할 수 있게 되나">
+        <label>전체 강의 판매처 (선택)</label><input id="la-buy" placeholder="https://www.inflearn.com/course/… — 내 링크로 팔리면 90%">
         <div style="height:10px"></div><button class="btn sm" id="la-go">올리기</button>
       </div>` : '';
     return `<section class="hero"><div class="top"><span class="pill">강의</span></div>
@@ -3770,6 +3773,8 @@ const SCREEN = {
             <h3 style="margin:0 0 4px">${esc(now.title)}</h3>
             <div class="meta">${[who(now), len(now), now.series ? esc(now.series) : ''].filter(Boolean).join(' · ')}</div>
             ${now.note ? `<div class="meta" style="margin-top:6px">${esc(now.note)}</div>` : ''}
+            ${now.buy ? `<div style="margin-top:10px"><a class="btn sm" id="lec-buy" href="${esc(now.buy)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">전체 강의 보기 ›</a>
+              <span class="meta">판매처에서 결제합니다 — HACK:ON 은 돈을 받지 않습니다</span></div>` : ''}
           </div>
         </div>` : ''}
       ${rows === null
@@ -3788,6 +3793,25 @@ const SCREEN = {
             ${(AUTH && AUTH.siteAdmin) ? `<button class="btn sec sm" data-lec-del="${r.id}" style="margin:-4px 0 10px">이 강의 내리기</button>` : ''}`).join('')}`).join('')}
       ${adminBox}
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/problems">문제 은행</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
+  /* 수료 확인 — 이 주소가 곧 확인이다. «자격증»·«인증» 은 쓰지 않는다(자격기본법 제17조) */
+  async cert() {
+    let c;
+    try { c = await api(`/cert/${CRT[1]}`); }
+    catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없는 번호입니다' : '불러오지 못했습니다'}</h3>
+      <div class="meta">주소를 다시 확인해 주세요.</div></div>`; }
+    const when = c.starts === c.ends ? esc(c.starts) : `${esc(c.starts)} ~ ${esc(c.ends)}`;
+    return `<div class="card" id="cert" style="text-align:center;padding:28px 20px;border:2px solid var(--acc)">
+        <div class="meta">HACK:ON 수료 확인</div>
+        <h2 style="margin:10px 0 4px">${esc(c.name)}</h2>
+        <div style="font-size:17px;font-weight:700">${esc(c.course)}</div>
+        <div class="meta" style="margin-top:6px">${esc(c.kind)} · ${when} · ${esc(c.host)}</div>
+        <div style="margin:14px auto 0;max-width:140px">${qrTag(location.href)}</div>
+        <div class="meta" style="margin-top:10px">이 주소(번호 ${esc(c.code)})가 곧 확인입니다. HACK:ON 이 체크인·제출 기록으로 발급했습니다.</div>
+        ${c.person ? `<div class="meta" style="margin-top:6px"><a href="/p/${esc(c.person)}">이 사람의 다른 기록 ›</a></div>` : ''}
+      </div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/learn">강의</a></p>`;
   },
 
   /* 마켓 목록 — 해커톤에서 실제로 돌아간 것, 운영진이 확인한 것만. 돈은 판매자 계정으로 간다 */
@@ -4484,6 +4508,18 @@ const SCREEN = {
   /* 결과 보고서 — 협찬사에게 보내는 물건. 인쇄하면 그대로 PDF 가 된다.
      빈칸이 생기지 않게 앞의 세 기능(마감·신청·사후지원)을 먼저 만들었다. */
   async report() {
+    /* 모임·수업 — 기관에 내는 실적. 순위·협찬 보고서가 아니라 «언제·어디서·몇 명이 왔나» */
+    const ms = LIVE ? await api(`/events/${cur}/meetstats`).catch(() => null) : null;
+    if (ms && ms.kind === '모임') return `<div class="noprint" style="margin-bottom:14px"><button class="btn sm" id="b-print">인쇄 · PDF 로 저장</button></div>
+      <h2>${esc(ms.title)} 실적</h2>
+      <p class="sub">${esc(ms.host)} · ${esc(ms.starts)}${ms.ends !== ms.starts ? ' ~ ' + esc(ms.ends) : ''}</p>
+      <div class="stat" id="meet-stat">
+        <div><b>${ms.applied}</b><span>신청</span></div>
+        <div><b>${ms.came === null ? '모름' : ms.came}</b><span>온 사람</span>${ms.came === null ? '<em>체크인을 안 찍었습니다</em>' : ''}</div>
+        <div><b>${ms.certs}</b><span>수료 확인 발급</span></div>
+        <div><b>${ms.rated}</b><span>서로 평가</span></div>
+      </div>
+      <p class="sub">숫자는 등록 데스크 체크인과 참가자가 직접 남긴 기록에서만 나옵니다. 사진은 얼굴이 안 나온 것만, 14세 미만은 보호자 동의를 받은 것만 붙입니다.</p>`;
     const d = await api(`/events/${cur}/board`);
     const o = await api(`/events/${cur}/outcomes`);
     const sup = LIVE ? await api(`/events/${cur}/support`) : { rows:[] };
@@ -5389,6 +5425,15 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
 
+  /* 수료 확인 받기 — 팀 열쇠로. 받을 수 없으면 서버가 이유를 준다 */
+  const certgo = $('#cert-go');
+  if (certgo) certgo.onclick = async () => {
+    try { const r = await api(`/teams/${certgo.dataset.team}/cert`, { method: 'POST', tkey: tkeyOf(certgo.dataset.team), body: {} });
+          const url = `${location.origin}/c/${r.code}`;
+          $('#cert-out').innerHTML = `<div class="shrow" style="margin-top:6px"><div class="share" id="cert-link">${esc(url)}</div>
+            <a class="btn sm" href="/c/${esc(r.code)}" style="text-decoration:none">열기</a></div>`; }
+    catch (e) { flash(e.message, true); }
+  };
   /* 주차 제출 — 팀 열쇠로 */
   const wkgo = $('#wk-go');
   if (wkgo) wkgo.onclick = async () => {
@@ -6665,6 +6710,7 @@ const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
 const MIT = location.pathname.match(/^\/m\/(\d+)$/);   // 마켓 상세 /m/<번호>
+const CRT = location.pathname.match(/^\/c\/([0-9a-f]{12})$/);   // 수료 확인 /c/<번호>
 const CND = location.pathname === '/conditions';  // 그날의 조건 아카이브
 const RNK = location.pathname === '/rank';       // 기여 순위 — 백준 랭킹처럼   // «받는 사람» — 후원자·의뢰자가 주제·문제를 올리는 세 화면
 const RCV = location.pathname.match(/^\/r\/([a-z0-9]+)$/);   // 받는 화면 /r/<id>?k=<열쇠>
@@ -6699,6 +6745,7 @@ if (TVM) {
 }
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MKT || MIT) { tab = MIT ? 'mitem' : 'market'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RNK) { tab = 'rank'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CND) { tab = 'conds'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
@@ -6766,7 +6813,7 @@ document.addEventListener('click', async ev => {
     const v = id => ($('#' + id) || {}).value || '';
     try {
       const r = await api('/lectures', { method: 'POST', body: { title: v('la-title'), yt: v('la-yt'), series: v('la-series'),
-        minutes: v('la-min'), person: v('la-person'), teacher: v('la-teacher'), note: v('la-note') } });
+        minutes: v('la-min'), person: v('la-person'), teacher: v('la-teacher'), note: v('la-note'), buy: v('la-buy') } });
       history.pushState(null, '', '/learn?v=' + r.id);
       flash('올렸습니다'); render();
     } catch (e) { flash(e.message, true); }
