@@ -629,6 +629,50 @@ function mannerReports(db, { siteAdmin } = {}) {
                                              WHERE m.target=? ORDER BY m.at DESC LIMIT 10`).all(r.target) }));
 }
 
+/* ── 밖에서 만든 것 ──────────────────────────────────── */
+/* 이 열쇠가 이 사람 것인가. 신청자 팀 열쇠이거나 짝 열쇠여야 한다 */
+function ownsPerson(db, pid, tkey) {
+  const tk = String(tkey || '');
+  if (!tk || !pid) return false;
+  return !!db.prepare("SELECT 1 FROM teams WHERE (tkey=? AND tkey<>'' AND person=?) OR (mate_key=? AND mate_key<>'' AND mate=?)")
+    .get(tk, pid, tk, pid);
+}
+const OUTSIDE_MAX = 20;
+function outsideOf(db, pid, { self, admin } = {}) {
+  const all = self || admin;
+  return db.prepare(`SELECT id, title, url, role, ok, at FROM outside WHERE person=? ${all ? '' : 'AND ok=1'} ORDER BY at DESC`).all(pid)
+    /* 저장할 때 거른 주소도 한 번 더 — 걸러지기 전에 들어간 줄이 있을 수 있다 */
+    .filter(r => webUrl(r.url))
+    .map(r => ({ id: r.id, title: r.title, url: r.url, role: r.role, ok: !!r.ok, ...(all ? {} : { ok: undefined }) }));
+}
+function addOutside(db, pid, tkey, b) {
+  if (!ownsPerson(db, pid, tkey)) throw new HttpError(403, '본인 확인이 안 됩니다 — 신청한 브라우저에서 올려 주세요');
+  const title = String(b.title || '').trim().slice(0, 60);
+  const url = webUrl(b.url);
+  if (!title) throw new HttpError(400, '무엇을 만들었는지 이름을 넣어 주세요');
+  if (!url) throw new HttpError(400, 'https:// 로 시작하는 주소를 넣어 주세요');
+  if (db.prepare('SELECT COUNT(*) c FROM outside WHERE person=?').get(pid).c >= OUTSIDE_MAX)
+    throw new HttpError(409, `한 사람당 ${OUTSIDE_MAX}개까지입니다`);
+  db.prepare('INSERT INTO outside(person,title,url,role) VALUES(?,?,?,?)').run(pid, title, url, String(b.role || '').trim().slice(0, 30));
+  return { rows: outsideOf(db, pid, { self: true }) };
+}
+function delOutside(db, pid, tkey, id) {
+  if (!ownsPerson(db, pid, tkey)) throw new HttpError(403, '본인만 지울 수 있습니다');
+  db.prepare('DELETE FROM outside WHERE id=? AND person=?').run(+id, pid);
+  return { rows: outsideOf(db, pid, { self: true }) };
+}
+function reviewOutside(db, id, ok, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 확인할 수 있습니다');
+  if (ok) { if (!db.prepare('UPDATE outside SET ok=1 WHERE id=?').run(+id).changes) throw new HttpError(404, '없는 항목입니다'); }
+  else db.prepare('DELETE FROM outside WHERE id=?').run(+id);
+  return { ok: true };
+}
+function outsidePending(db, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 볼 수 있습니다');
+  return db.prepare(`SELECT o.id, o.person, p.handle, o.title, o.url, o.role, o.at FROM outside o
+                     LEFT JOIN people p ON p.id=o.person WHERE o.ok=0 ORDER BY o.at LIMIT 200`).all();
+}
+
 /* ── 강의 ─────────────────────────────────────────────
    유튜브 주소 꼴은 여럿이다(watch?v= · youtu.be/ · embed/ · shorts/ · live/). 사람이 붙여 넣는 것은
    주소라 받아 주되, **남기는 것은 11자 id 하나**다. 화면이 iframe 주소를 서버에서 받아 그대로 쓰므로
@@ -726,6 +770,10 @@ function profile(db, pid) {
     manner: shrink(rt.map(r => r.manner)),
     /* 받은 칭찬 태그. 비매너 알림은 여기 절대 안 싣는다 — 사이트 운영자 화면에만 있다 */
     praise: praiseOf(db, pid),
+    /* 올린 강의. 스스로 «가르칠 수 있음» 을 고른 사람에게 근거가 된다 — 화면이 «강의 N개로 확인» 을 붙인다 */
+    lectures: lectures(db, pid).map(l => ({ id: l.id, title: l.title, minutes: l.minutes, series: l.series })),
+    /* 밖에서 만든 것 — 운영자가 확인한 것만. 확인 전 것은 본인 열쇠로 따로 읽는다(outsideOf) */
+    outside: outsideOf(db, pid, {}),
     /* 배치 중 - 몇 번 안 나온 사람은 등급을 안 붙인다. */
     placed: past.length >= 2,
     /* 만든 것. 주소가 «공개» 로 나가는 문 셋은 쇼케이스와 똑같다 —
@@ -772,8 +820,8 @@ function seasonLeft(season, now) {
 /* 기여(XP) — 비트코인의 채굴처럼, 남을 위해 한 일이 곧 내 기록이 된다.
    완주·참가·동료 평가 주기·문제 올리기·풀이 보내기·판정하기·자리 맡기. 전부 «연락처 해시 = 사람» 하나에 모인다.
    ponytail: 사람 수만큼 전체 표를 훑는다(pidOf 는 HMAC 이라 SQL 로 못 잇는다). 수천 명 넘으면 solutions·requests·pledges 에 pid 열을 둔다 */
-const XP = { made: 10, came: 3, rated: 2, ratedEvent: 2, solved: 5, asked: 3, judged: 3, pledged: 5 };
-const XP_LABEL = { made: '완주', came: '참가', rated: '동료 평가 주기', ratedEvent: '대회 평가 주기', solved: '문제 풀이', asked: '문제 올리기', judged: '풀이 판정', pledged: '자리 맡기(확정)' };
+const XP = { made: 10, came: 3, rated: 2, ratedEvent: 2, solved: 5, asked: 3, judged: 3, pledged: 5, taught: 5 };
+const XP_LABEL = { made: '완주', came: '참가', rated: '동료 평가 주기', ratedEvent: '대회 평가 주기', solved: '문제 풀이', asked: '문제 올리기', judged: '풀이 판정', pledged: '자리 맡기(확정)', taught: '강의 올림' };
 function xpOf(db, pid, season) {
   /* season 이 있으면 그 분기에 일어난 것만 센다. 빈 문자열이면 통산이다.
      줄마다 «언제» 를 같이 읽어 온다 — 시각이 없으면 시즌에 못 넣는다(0 이 아니라 모름이다). */
@@ -791,6 +839,8 @@ function xpOf(db, pid, season) {
     asked: mine(db.prepare("SELECT contact, created AS at FROM requests WHERE contact<>''").all()),
     judged: mine(db.prepare("SELECT r.contact, v.at FROM verdicts v JOIN requests r ON r.id = v.request WHERE r.contact<>''").all()),
     pledged: mine(db.prepare("SELECT contact, created AS at FROM pledges WHERE status IN ('ok','done') AND contact<>''").all()),
+    /* 강의 — 운영자가 이 사람 이름으로 올린 것만. 본인이 스스로 올리는 길은 없다 */
+    taught: db.prepare('SELECT at FROM lectures WHERE person=?').all(pid).filter(r => at(r.at)).length,
   };
   const items = Object.keys(XP).filter(k => n[k] > 0).map(k => ({ key: k, label: XP_LABEL[k], count: n[k], xp: n[k] * XP[k] }));
   return { total: items.reduce((a, x) => a + x.xp, 0), items, season: season || '' };
@@ -2216,6 +2266,19 @@ function open(file) {
       note   TEXT NOT NULL DEFAULT '',
       at     TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(event, giver, target)
+    );
+
+    /* 밖에서 만든 것 — 해커톤 밖의 결과물(진로 사이트·스터디 프로젝트). 본인이 팀 열쇠로 올리고
+       사이트 운영자가 확인(ok=1)해야 공개 프로필에 실린다. 확인 전에는 본인에게만 보인다.
+       대회 기록(티어·완주)과 섞지 않는다 — 스스로 올린 주장이라서다. */
+    CREATE TABLE IF NOT EXISTS outside(
+      id     INTEGER PRIMARY KEY,
+      person TEXT NOT NULL,
+      title  TEXT NOT NULL,
+      url    TEXT NOT NULL,
+      role   TEXT NOT NULL DEFAULT '',
+      ok     INTEGER NOT NULL DEFAULT 0,
+      at     TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     /* 강의. 영상은 서버에 안 둔다 — 유튜브 id 만 적는다(Fly 도쿄 내보내기는 GB 당 $0.04 이고,
@@ -5488,6 +5551,18 @@ function routes(db) {
         /* 같이 있었던 사람 — 매너 평가 칸을 그리려고. 팀(또는 짝) 열쇠로만 */
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/peers$/)) && req.method === 'GET')
           return json(res, 200, peersOf(db, m[1], req.headers['x-tkey'] || ''));
+        /* 밖에서 만든 것 — 본인(팀·짝 열쇠)이 올리고 지운다. 확인은 사이트 운영자 */
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/outside$/)) && req.method === 'GET') {
+          const self = ownsPerson(db, m[1], req.headers['x-tkey'] || '');
+          return json(res, 200, { self, rows: outsideOf(db, m[1], { self, admin: siteAdmin }) });
+        }
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/outside$/)) && req.method === 'POST')
+          return json(res, 200, addOutside(db, m[1], req.headers['x-tkey'] || '', await body(req)));
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/outside\/(\d+)\/delete$/)) && req.method === 'POST')
+          return json(res, 200, delOutside(db, m[1], req.headers['x-tkey'] || '', m[2]));
+        if (p === '/api/admin/outside' && req.method === 'GET') return json(res, 200, { rows: outsidePending(db, { siteAdmin }) });
+        if ((m = p.match(/^\/api\/admin\/outside\/(\d+)$/)) && req.method === 'POST')
+          return json(res, 200, reviewOutside(db, m[1], !!(await body(req)).ok, { siteAdmin }));
         if (p === '/api/admin/manner' && req.method === 'GET')
           return json(res, 200, { rows: mannerReports(db, { siteAdmin }) });
         if (p === '/api/admin/people' && req.method === 'GET') {
@@ -7963,8 +8038,34 @@ async function selftest() {
     ok(L.person === idA && lectures(db, idA).length === 1, '강의: 프로필 주소로 강사를 잇는다');
     ok(lectures(db).length === 1 && !JSON.stringify(lectures(db)).includes('x.test'), '강의 목록에 연락처가 안 나간다');
     ok(raises(() => delLecture(db, L.id, {}), 403), '강의: 운영자가 아니면 못 지운다');
+    /* 프로필에 강의가 붙고 기여(XP)에 «강의 올림» 이 든다. 티어는 그대로다 — 대회 기록만으로 오른다 */
+    const tierBefore = JSON.stringify(profile(db, idA).tier);
+    const pa = profile(db, idA);
+    ok(pa.lectures.length === 1 && pa.lectures[0].title === '설치 강의', '프로필: 올린 강의가 실린다');
+    ok(pa.xp.items.some(x => x.key === 'taught' && x.count === 1), '프로필: 강의가 기여에 «강의 올림» 으로 든다');
     delLecture(db, L.id, { siteAdmin: true });
     ok(lectures(db).length === 0, '강의: 지워진다');
+
+    /* 밖에서 만든 것 (TASK-27) */
+    const tkA = db.prepare('SELECT tkey FROM teams WHERE id=?').get(pA).tkey;
+    ok(raises(() => addOutside(db, idA, 'zzzz', { title: 'x', url: 'https://a.test' }), 403), '밖: 남의 열쇠로 못 올린다');
+    ok(raises(() => addOutside(db, idA, tkA, { title: 'x', url: 'javascript:alert(1)' }), 400), '밖: javascript: 주소는 못 올린다');
+    const tkB = db.prepare('SELECT tkey FROM teams WHERE id=?').get(pB).tkey;
+    ok(raises(() => addOutside(db, idA, tkB, { title: 'x', url: 'https://a.test' }), 403), '밖: 다른 사람 팀 열쇠로 남의 프로필에 못 올린다');
+    const o1 = addOutside(db, idA, tkA, { title: '진로 사이트', url: 'https://jinro.example', role: '기획' });
+    ok(o1.rows.length === 1 && o1.rows[0].ok === false, '밖: 올리면 확인 전 상태');
+    ok(profile(db, idA).outside.length === 0, '밖: 확인 전에는 공개 프로필에 안 실린다');
+    ok(outsideOf(db, idA, { self: true }).length === 1, '밖: 본인에게는 확인 전 것도 보인다');
+    ok(raises(() => reviewOutside(db, o1.rows[0].id, true, {}), 403), '밖: 운영자가 아니면 확인 못 한다');
+    ok(outsidePending(db, { siteAdmin: true }).length === 1, '밖: 운영자 대기 목록에 뜬다');
+    reviewOutside(db, o1.rows[0].id, true, { siteAdmin: true });
+    ok(profile(db, idA).outside.length === 1 && profile(db, idA).outside[0].url === 'https://jinro.example', '밖: 확인하면 공개된다');
+    ok(JSON.stringify(profile(db, idA).tier) === tierBefore, '밖·강의: 티어는 그대로다');
+    db.prepare("INSERT INTO outside(person,title,url,ok) VALUES(?,?,?,1)").run(idA, '옛 줄', 'javascript:alert(1)');
+    ok(!JSON.stringify(profile(db, idA).outside).includes('javascript:'), '밖: 걸러지기 전 줄도 공개할 때 다시 거른다');
+    delOutside(db, idA, tkA, o1.rows[0].id);
+    ok(profile(db, idA).outside.length === 0, '밖: 본인이 지운다');
+    db.prepare("DELETE FROM outside WHERE person=?").run(idA);
   }
 
   // 대회 평판

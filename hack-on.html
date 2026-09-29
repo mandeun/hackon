@@ -1543,6 +1543,7 @@ let P_LOGO_DATA = '';   // 협찬사 로고 파일(줄인 data: 주소). 넣고 
    저장할 때마다 '안 본 팀 먼저' 로 순서가 다시 매겨지기 때문이다. */
 let jTeam = null, jAll = false;
 let curPerson = null;
+let OWN_TK = '';   // 프로필 화면에서 «이 사람 본인» 으로 확인된 팀 열쇠. 밖에서 만든 것을 올리고 지울 때 쓴다
 let TVWALL = false;   // 큰 화면 로고 벽 고정(L 키)
 document.addEventListener('keydown', e => { if (TVM && (e.key === 'l' || e.key === 'L')) { TVWALL = !TVWALL; render(); } });
 /* 지금 화면에 그릴 진행표. 카드로 그리기 때문에 문자열이 아니라 그대로 들고 있는다. */
@@ -2100,6 +2101,7 @@ const SCREEN = {
     if (LIVE && my) { try { trash = await api('/mine/trash'); } catch { trash = null; } }
     /* 비매너 알림 — 사이트 운영자만. 못 받으면(null) «모름» 으로 그린다 */
     const mrep = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/manner').then(r => r.rows).catch(() => null) : [];
+    const opend = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/outside').then(r => r.rows).catch(() => null) : [];
     const claimBox = (AUTH && AUTH.claimable) ? `
       <div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
         <h3 style="color:var(--warn)">첫 사이트 운영자 앉히기</h3>
@@ -2125,6 +2127,15 @@ const SCREEN = {
             ${e.listed ? '' : ' <span class="pill warn">초안</span>'}
             · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
         </div>`).join('')}` : ''}
+      <div class="card" id="outside-admin"><h3>밖에서 만든 것 — 확인 대기 ${opend && opend.length ? `<span class="pill warn">${opend.length}</span>` : ''}</h3>
+        <div class="meta">참가자가 프로필에 올린 대회 밖 결과물입니다. 열어 보고 본인 것이 맞아 보이면 공개합니다.</div>
+        ${opend === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !opend.length ? '<div class="meta" style="margin-top:8px">기다리는 것이 없습니다.</div>'
+          : opend.map(o => `<div style="margin-top:10px"><b>${esc(o.title)}</b> <span class="meta">${esc(o.handle || o.person)}${o.role ? ' · ' + esc(o.role) : ''}</span>
+              <div><a href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">${esc(o.url)}</a></div>
+              <button class="btn sm" data-oa="${o.id}" data-ok="1">공개</button>
+              <button class="btn sec sm" data-oa="${o.id}" data-ok="0">돌려보내기</button></div>`).join('')}
+      </div>
       <div class="card" id="manner-admin"><h3>매너 알림 ${mrep && mrep.length ? `<span class="pill warn">${mrep.length}명</span>` : ''}</h3>
         <div class="meta">참가자가 «불편했던 일» 로 남긴 것입니다. 공개 화면 어디에도 안 나갑니다.
           서로 다른 3명 이상이 남긴 사람은 맨 위에 <span class="pill warn">확인 필요</span> 로 뜹니다.</div>
@@ -4115,8 +4126,16 @@ const SCREEN = {
        완주는 했는데 동의가 없어 주소가 안 온 것은 따로 세어 «아직 안 걸린 것» 으로 알려 준다. */
     const made   = (d.history || []).filter(h => h.url);
     const hidden = (d.history || []).filter(h => h.made && !h.url);
+    /* 이 브라우저가 이 사람 본인인가 — 든 팀 열쇠를 차례로 대 본다. 본인이면 확인 전 «밖에서 만든 것» 까지 받는다 */
+    let own = null; OWN_TK = '';
+    if (LIVE) for (const k of keyIds('hackon.tkey.').map(tkeyOf).filter(Boolean)) {
+      try { const r = await api(`/people/${curPerson}/outside`, { tkey: k }); if (r.self) { own = r.rows; OWN_TK = k; break; } } catch (_) {}
+    }
+    const lecs = d.lectures || [], outs = own || d.outside || [];
+    /* «가르칠 수 있음» 은 스스로 고른 값이다. 올린 강의가 있으면 그 옆에 근거를 붙인다 */
+    const lv = d.level ? esc(d.level) + (d.level === '가르칠 수 있음' && lecs.length ? ` <span class="pill ok">강의 ${lecs.length}개로 확인</span>` : '') : '';
     return `<h2>${esc(d.handle || '이름 없음')}</h2>
-      <p class="sub">${d.level ? esc(d.level) + ' · ' : ''}${
+      <p class="sub">${lv ? lv + ' · ' : ''}${
         d.placed ? `대회 ${d.events}번` : `대회 ${d.events}번 · 아직 배치 중`}</p>
       <div class="card" id="tier" style="text-align:center;padding:22px 16px;border:2px solid ${TC}">
         <div class="meta">HACK:ON 티어</div>
@@ -4141,6 +4160,26 @@ const SCREEN = {
         </div>`).join('')}
         <div class="meta" style="margin-top:10px">«모름» 은 아직 한 번도 안 열어 봤다는 뜻입니다.
           하루 한 번 확인하고, 확인이 절반도 안 된 날은 지난 것을 그대로 둡니다.</div>
+      </div>` : ''}
+      ${lecs.length ? `<div class="card" id="p-lec">
+        <h3>올린 강의 <span class="pill">${lecs.length}</span></h3>
+        ${lecs.map(l => `<div style="margin-top:8px"><a href="/learn?v=${l.id}">${esc(l.title)}</a>
+          <span class="meta">${[l.series ? esc(l.series) : '', l.minutes ? l.minutes + '분' : ''].filter(Boolean).join(' · ')}</span></div>`).join('')}
+      </div>` : ''}
+      ${(outs.length || own) ? `<div class="card" id="p-out">
+        <h3>밖에서 만든 것 ${outs.length ? `<span class="pill">${outs.length}</span>` : ''}</h3>
+        <div class="meta">대회 밖의 결과물입니다. 본인이 올리고 운영진이 확인한 것만 공개됩니다 — 티어·완주에는 안 들어갑니다.</div>
+        ${outs.map(o => `<div class="seat" style="margin-top:10px;padding:10px 12px;border:1px solid var(--rule);border-radius:12px">
+          <b>${esc(o.title)}</b>${o.role ? ` <span class="meta">${esc(o.role)}</span>` : ''}
+          ${own ? (o.ok ? ' <span class="pill ok">공개됨</span>' : ' <span class="pill warn">확인 기다리는 중 · 나만 보임</span>') : ''}
+          <div><a href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">열어 보기 ›</a>
+          ${own ? ` <button class="btn sec sm" data-ou-del="${o.id}" style="margin-left:6px">지우기</button>` : ''}</div>
+        </div>`).join('')}
+        ${own ? `<div style="margin-top:12px">
+          <div class="row"><div><label>무엇을</label><input id="ou-title" maxlength="60" placeholder="예: 청소년 진로 찾기 사이트"></div>
+            <div><label>맡은 일</label><input id="ou-role" maxlength="30" placeholder="예: 기획·개발"></div></div>
+          <label>주소</label><input id="ou-url" placeholder="https://…">
+          <div style="height:8px"></div><button class="btn sm" id="ou-go">올리기</button></div>` : ''}
       </div>` : ''}
       ${hidden.length ? `<div class="card">
         <h3>아직 안 걸린 것 <span class="pill">${hidden.length}</span></h3>
@@ -6075,6 +6114,25 @@ function wire() {
   };
 
   /* 프로필 고치기. 연락처를 아는 사람만 된다 - 그게 본인 확인이다. */
+  /* 밖에서 만든 것 — 본인 열쇠(OWN_TK)로만. 서버가 다시 확인한다 */
+  const ougo = $('#ou-go');
+  if (ougo) ougo.onclick = async () => {
+    try {
+      await api(`/people/${curPerson}/outside`, { method: 'POST', tkey: OWN_TK,
+        body: { title: $('#ou-title').value.trim(), url: $('#ou-url').value.trim(), role: $('#ou-role').value.trim() } });
+      flash('올렸습니다. 운영진이 확인하면 공개됩니다');
+    } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-ou-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('이 항목을 지웁니다')) return;
+    try { await api(`/people/${curPerson}/outside/${b.dataset.ouDel}/delete`, { method: 'POST', tkey: OWN_TK, body: {} }); flash('지웠습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  /* 사이트 운영자 — 밖에서 만든 것 확인 */
+  document.querySelectorAll('[data-oa]').forEach(b => b.onclick = async () => {
+    try { await api(`/admin/outside/${b.dataset.oa}`, { method: 'POST', body: { ok: b.dataset.ok === '1' } }); flash(b.dataset.ok === '1' ? '공개했습니다' : '돌려보냈습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
   const pfs = $('#pf-save');
   if (pfs) pfs.onclick = async () => {
     const c = $('#pf-c').value.trim();
