@@ -1404,14 +1404,38 @@ function foundFromLink() {
   const f = new URLSearchParams(location.search).get('f') || '';
   return FOUND.includes(f) ? f : '';
 }
+/* 지난 신청 내용(TASK-26). 두 번째 대회부터는 다시 안 쓰게 한다.
+   **이 브라우저에만** 둔다 — «이메일을 넣으면 지난 신청을 불러오는» 서버 길을 만들면
+   남의 이메일만 알아도 그 사람의 소개·링크를 꺼내 볼 수 있다(감사 10 과 같은 이유).
+   연락처는 여기 안 넣는다. 이메일 칸은 원래 있던 hackon.contact 에서만 채운다.
+   사생활 모드에서는 localStorage 가 던진다 — 그때는 조용히 빈 것으로 간다. */
+const LAST_KEYS = ['name', 'role', 'solo', 'link', 'bring'];
+function lastApp() {
+  try { const o = JSON.parse(localStorage.getItem('hackon.lastapp') || '{}');
+        return o && typeof o === 'object' ? o : {}; } catch (_) { return {}; }
+}
+function saveLastApp(part) {
+  const o = lastApp();
+  for (const k of LAST_KEYS) if (part[k] !== undefined && part[k] !== '') o[k] = String(part[k]).slice(0, 200);
+  try { localStorage.setItem('hackon.lastapp', JSON.stringify(o)); } catch (_) {}
+}
+function forgetLastApp() {
+  try { localStorage.removeItem('hackon.lastapp'); localStorage.removeItem('hackon.contact'); } catch (_) {}
+}
+const lastEmail = () => { const c = myContact(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c) ? c : ''; };
+
 /* 처음에는 이름과 이메일만 받는다. 역할·유입 경로는 신청한 뒤에 묻는다.
    이메일은 확정 안내와 후원사 크레딧이 전부 그리로 가서 처음부터 받는다.
    후원사 제공은 수집 동의와 별개의 체크다(제3자 제공). */
 function applyForm() {
-  return `<label>팀 이름 <span class="pill">필수</span></label>
-    <input id="t-name" placeholder="혼자 오시면 본인 이름을 적으세요">
+  const L = lastApp(), em = lastEmail();
+  return `${(L.name || em) ? `<div class="meta" id="t-last" style="margin-bottom:8px">
+      <span class="pill ok">지난 신청 내용으로 채웠습니다</span>
+      <button type="button" class="btn sec sm" id="t-forget" style="margin-left:6px">이 기기에서 지우기</button></div>` : ''}
+    <label>팀 이름 <span class="pill">필수</span></label>
+    <input id="t-name" placeholder="혼자 오시면 본인 이름을 적으세요" value="${esc(L.name || '')}">
     <label>이메일 <span class="pill">필수</span></label>
-    <input id="t-email" type="email" placeholder="팀 링크를 잃었을 때 되찾는 열쇠입니다">
+    <input id="t-email" type="email" placeholder="팀 링크를 잃었을 때 되찾는 열쇠입니다" value="${esc(em)}">
     <div class="agree">
       <div class="meta"><b>개인정보 수집·이용 안내</b><br>
         수집 항목 · 이름(팀 이름) · 이메일 · 참가 정보<br>
@@ -1441,6 +1465,7 @@ function applyForm() {
 /* 신청을 마친 사람에게만 보이는 두 번째 칸. 여기서 진짜 정보를 받는다. */
 let PUB_SPONSORS = [];   // 공개 페이지가 그릴 때 채운다 — 신청 완료 카드에 «함께하는 곳»으로 보인다
 function moreForm(t) {
+  const L = lastApp();   // 지난 대회에서 남긴 역할·링크·가져올 것(TASK-26)
   const need = [];
   if (!t.contact) need.push('연락처');
   if (!t.role) need.push('역할');
@@ -1468,10 +1493,10 @@ function moreForm(t) {
     ${!t.role ? `<div class="row">
       <div><label>주로 하는 것</label>
         <select id="m-role"><option value="">고르기</option>
-          <option>만들기</option><option>기획</option><option>디자인</option></select></div>
+          ${['만들기', '기획', '디자인'].map(r => `<option${L.role === r ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
       <div><label>혼자 오시나요</label>
         <select id="m-solo"><option value="">팀이 있습니다</option>
-          <option value="1">혼자 옵니다</option></select></div>
+          <option value="1"${L.solo === '1' ? ' selected' : ''}>혼자 옵니다</option></select></div>
     </div>` : ''}
     <div class="row">
       <div><label>지금 몇 명이신가요</label>
@@ -1489,11 +1514,11 @@ function moreForm(t) {
     ${!t.note ? `<label>하고 싶은 것 (선택)</label>
       <textarea id="m-note" rows="2" placeholder="어떤 불편을 풀고 싶은지 한 줄"></textarea>` : ''}
     ${!t.link ? `<label>만든 것 링크 (선택)</label>
-      <input id="m-link" placeholder="깃허브·포트폴리오·전에 만든 것. 없으면 비워 두세요 — 처음인 분도 팀이 생깁니다">` : ''}
+      <input id="m-link" value="${esc(L.link || '')}" placeholder="깃허브·포트폴리오·전에 만든 것. 없으면 비워 두세요 — 처음인 분도 팀이 생깁니다">` : ''}
     ${/* 기여 선언(기여형 설계 §2-2). 첫 칸(이름·이메일)에는 안 넣는다 — 문간에 발 담그기를
            깨면 신청 자체가 준다. 신청을 마친 사람에게 여기서 묻는다. */''}
     <label>가져올 것 <span class="pill ok">선택 · 여러 개</span></label>
-    <div class="gchips" id="m-bring">${(() => { const on = String(t.bring || '').split(',').filter(Boolean);
+    <div class="gchips" id="m-bring">${(() => { const on = String(t.bring || L.bring || '').split(',').filter(Boolean);
       return BRING_KINDS.map(([k, v]) =>
         `<button type="button" class="pick${on.includes(k) ? ' on' : ''}" data-bring="${k}">${v}</button>`).join(''); })()}</div>
     <div class="meta" style="margin:-2px 0 10px">아무것도 안 고르셔도 됩니다 — <b>그냥 오시는 것(시간)</b>도 기여입니다.
@@ -4842,6 +4867,9 @@ function wire() {
          나중에 자기 팀 자리를 고칠 때 이게 본인 확인이 된다. 서버로는 그때만 간다. */
       const mc = $('#m-contact');
       if (mc && mc.value.trim()) localStorage.setItem('hackon.contact', mc.value.trim());
+      /* 다음 대회에서 다시 안 쓰게 — 연락처·하고 싶은 것(대회마다 다르다)은 빼고 남긴다 */
+      saveLastApp({ role: g('#m-role'), solo: $('#m-solo') ? $('#m-solo').value : undefined, link: g('#m-link'),
+        bring: $('#m-bring') ? [...document.querySelectorAll('#m-bring .pick.on')].map(x => x.dataset.bring).join(',') : undefined });
       flash(r.filled ? '고맙습니다. 저장했습니다' : '이미 다 주셨습니다');
     } catch (e) { flash(e.message, true); }
   };
@@ -4959,6 +4987,14 @@ function wire() {
   }
 
 
+  const tforget = $('#t-forget');
+  if (tforget) tforget.onclick = () => {
+    forgetLastApp();
+    if ($('#t-name')) $('#t-name').value = '';
+    if ($('#t-email')) $('#t-email').value = '';
+    if ($('#t-last')) $('#t-last').remove();
+    flash('이 기기에 남은 지난 신청 내용을 지웠습니다', true);   // true — 다시 그리지 않는다(방금 비운 칸을 되살리지 않게)
+  };
   const join = $('#t-join');
   if (join) join.onclick = async () => {
     const name = $('#t-name').value.trim();
@@ -4980,6 +5016,7 @@ function wire() {
       /* 팀 열쇠. 이 브라우저가 그 팀 사람이라는 증거다 - 서버가 여기서 한 번만 준다.
          대회 열쇠(hackon.okey.*)와 같은 방식이다. */
       if (r.tkey) localStorage.setItem('hackon.tkey.' + r.id, r.tkey);
+      saveLastApp({ name });
       flash('신청됐습니다. 조금만 더 여쭙겠습니다');
     } catch (e) { flash(e.message, true); }
   };

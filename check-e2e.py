@@ -3670,5 +3670,62 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 ok("강의 — 0건은 «없음», 태그는 글자로, 재생은 nocookie, 쓰기는 로그인한 운영자만")
+
+# ── 지원서 미리 채우기 (TASK-26) ─────────────────────────────
+# 두 번째 대회부터는 이름·역할·링크를 다시 안 쓴다. 남기는 곳은 이 브라우저뿐이고, 연락처는 새 칸에 안 들어간다.
+def lpostj(path, payload):
+    r = urllib.request.Request(LEARN_BASE + path, method="POST", data=json.dumps(payload).encode(),
+                               headers={"content-type": "application/json"})
+    with urllib.request.urlopen(r, timeout=10) as res:
+        return json.loads(res.read())
+
+
+_soon = (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d")
+EV1 = lpostj("/api/events", {"title": "첫째 대회", "host": "검사", "starts": _soon})["id"]
+EV2 = lpostj("/api/events", {"title": "둘째 대회", "host": "검사", "starts": _soon})["id"]
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("lastapp: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/e/{EV1}", wait_until="networkidle")
+    pg.wait_for_selector("#t-name", timeout=10000)
+    A(pg.query_selector("#t-last") is None, "처음 온 사람에게 «지난 신청 내용» 이 뜬다")
+    pg.fill("#t-name", "지난팀"); pg.fill("#t-email", "last@example.com"); pg.check("#t-agree")
+    pg.click("#t-join")
+    pg.wait_for_selector("#m-save", timeout=10000)
+    pg.select_option("#m-role", "기획")
+    if pg.query_selector("#m-contact"): pg.fill("#m-contact", "last@example.com")
+    pg.fill("#m-link", "https://last.example/me")
+    pg.click("#m-save")
+    pg.wait_for_timeout(800)
+    stored = pg.evaluate("localStorage.getItem('hackon.lastapp') || ''")
+    A("지난팀" in stored and "기획" in stored and "last.example" in stored, f"지난 신청 내용이 안 남는다: {stored}")
+    A("@" not in stored and "last@" not in stored, f"새 저장 칸에 연락처가 들어갔다: {stored}")
+    pg.goto(f"{LEARN_BASE}/e/{EV2}", wait_until="networkidle")
+    pg.wait_for_selector("#t-name", timeout=10000)
+    A(pg.input_value("#t-name") == "지난팀", "두 번째 대회에서 팀 이름이 안 채워진다")
+    A(pg.input_value("#t-email") == "last@example.com", "두 번째 대회에서 이메일이 안 채워진다")
+    A(pg.query_selector("#t-last") is not None, "채웠다는 안내가 없다 — 모르고 남의 이름으로 낼 수 있다")
+    pg.check("#t-agree"); pg.click("#t-join")
+    pg.wait_for_selector("#m-save", timeout=10000)
+    A(pg.eval_on_selector("#m-role", "e => e.value") == "기획", "두 번째 칸의 역할이 안 채워진다")
+    A(pg.input_value("#m-link") == "https://last.example/me", "두 번째 칸의 링크가 안 채워진다")
+    # 지우기 — 공용 PC 에서 다음 사람에게 안 남게
+    ctx2 = b.new_context(viewport={"width": 412, "height": 900})
+    pg2 = ctx2.new_page()
+    pg2.goto(f"{LEARN_BASE}/e/{EV1}", wait_until="networkidle")
+    pg2.evaluate("localStorage.setItem('hackon.lastapp', JSON.stringify({name:'남의팀'})); localStorage.setItem('hackon.contact','other@example.com')")
+    pg2.reload(wait_until="networkidle")
+    pg2.wait_for_selector("#t-forget", timeout=10000)
+    pg2.click("#t-forget")
+    pg2.wait_for_timeout(300)
+    A(pg2.input_value("#t-name") == "" and pg2.input_value("#t-email") == "", "지우기를 눌러도 칸이 남아 있다")
+    A(pg2.evaluate("localStorage.getItem('hackon.lastapp')") is None
+      and pg2.evaluate("localStorage.getItem('hackon.contact')") is None, "지우기를 눌러도 기기에 남아 있다")
+    ctx2.close()
+    ctx.close()
+    b.close()
+ok("지원서 미리 채우기 — 두 번째 대회에서 이름·이메일·역할·링크가 채워지고, 새 칸에 연락처 없음, 지우기 동작")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
