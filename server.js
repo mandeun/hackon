@@ -531,6 +531,104 @@ function shrink(vals) {
   };
 }
 
+/* ── 매너 평가 ─────────────────────────────────────────
+   점수(1~5)만 있으면 «왜» 가 안 남는다. 칭찬은 누를 것을 준다 — 빈 칸을 주면 아무도 안 쓴다.
+   비매너는 공개하지 않는다. 한 사람의 나쁜 날이 공개 이력으로 박히면 다음 대회에 못 나온다.
+   운영자가 한 건씩 읽고, 같은 사람에게 셋 이상 쌓이면 먼저 보이게만 한다. */
+const MANNER_TAGS = ['시간 약속을 지켜요', '끝까지 함께해요', '설명을 잘해줘요', '친절해요', '연락이 빨라요'];
+const BAD_KINDS = ['약속을 안 지켰어요', '무례했어요', '중간에 사라졌어요', '기타'];
+const FLAG_AT = 3;
+
+/* 이 대회에서 «나» 는 누구인가. 팀 열쇠면 신청자, 짝 열쇠면 짝이다. */
+function raterOf(db, event, tkey) {
+  const tk = String(tkey || '');
+  if (!tk) return null;
+  const a = db.prepare("SELECT id, person, came FROM teams WHERE event=? AND tkey=? AND tkey<>''").get(event, tk);
+  if (a && a.person) return { person: a.person, team: a.id, came: a.came };
+  const b = db.prepare("SELECT id, mate, came FROM teams WHERE event=? AND mate_key=? AND mate_key<>''").get(event, tk);
+  if (b && b.mate) return { person: b.mate, team: b.id, came: b.came };
+  return null;
+}
+/* 평가할 수 있나. 대회가 시작돼야 한다(시작 전 평가는 소문이다).
+   체크인을 한 번이라도 찍은 대회면 «온 사람» 끼리만 — 안 온 사람이 온 사람을 평가하거나
+   안 온 사람이 평가받는 일을 막는다. 체크인을 안 쓴 대회는 누가 왔는지 모르니 신청자 전부다. */
+function mannerGate(db, event) {
+  const e = db.prepare('SELECT starts FROM events WHERE id=?').get(event);
+  if (!e) throw new HttpError(404, '없는 대회입니다');
+  const started = !!e.starts && today() >= String(e.starts).slice(0, 10);
+  const useCame = !!db.prepare("SELECT 1 FROM teams WHERE event=? AND came<>''").get(event);
+  return { started, useCame };
+}
+/* 같이 있었던 사람 목록. 연락처는 안 나간다 — 보여 줄 이름(handle)이 없으면 팀 이름이다. */
+function peersOf(db, event, tkey) {
+  const me = raterOf(db, event, tkey);
+  if (!me) throw new HttpError(403, '이 대회에 참가한 분만 볼 수 있습니다 — 신청한 브라우저에서');
+  const g = mannerGate(db, event);
+  const rows = [];
+  for (const t of db.prepare('SELECT id, name, person, mate, mate_name, came FROM teams WHERE event=? ORDER BY id').all(event)) {
+    for (const [pid, label] of [[t.person, t.name], [t.mate, t.mate_name || t.name]]) {
+      if (!pid || pid === me.person || rows.some(r => r.id === pid)) continue;
+      if (g.useCame && !t.came) continue;
+      const h = db.prepare('SELECT handle FROM people WHERE id=?').get(pid);
+      const mine = db.prepare('SELECT skill, manner, tags FROM ratings WHERE event=? AND giver=? AND target=?').get(event, me.person, pid);
+      const bad = db.prepare('SELECT kind FROM manner_reports WHERE event=? AND giver=? AND target=?').get(event, me.person, pid);
+      rows.push({ id: pid, name: (h && h.handle) || label, team: t.name,
+                  mine: { skill: mine ? mine.skill : 0, manner: mine ? mine.manner : 0,
+                          tags: mine && mine.tags ? mine.tags.split(',') : [], bad: bad ? bad.kind : '' } });
+    }
+  }
+  const can = g.started && (!g.useCame || !!me.came);
+  return { can, why: !g.started ? '대회가 시작된 뒤에 열립니다'
+                   : (g.useCame && !me.came) ? '체크인한 분만 평가할 수 있습니다' : '',
+           rows: can ? rows : [], tags: MANNER_TAGS, bad: BAD_KINDS };
+}
+function ratePerson(db, event, tkey, b) {
+  const me = raterOf(db, event, tkey);
+  if (!me) throw new HttpError(403, '이 대회에 참가한 분만 평가할 수 있습니다 — 신청한 브라우저에서');
+  const target = String(b.target || '');
+  if (target === me.person) throw new HttpError(400, '본인은 평가할 수 없습니다');
+  const tt = db.prepare('SELECT came FROM teams WHERE event=? AND (person=? OR (mate<>\'\' AND mate=?))').get(event, target, target);
+  if (!tt) throw new HttpError(404, '이 대회에 없는 분입니다');
+  const g = mannerGate(db, event);
+  if (!g.started) throw new HttpError(409, '대회가 시작된 뒤에 평가할 수 있습니다');
+  if (g.useCame && (!me.came || !tt.came)) throw new HttpError(403, '체크인한 분끼리만 평가할 수 있습니다');
+  const s = v => Math.min(5, Math.max(0, Math.round(+v || 0)));
+  const tags = [...new Set((Array.isArray(b.tags) ? b.tags : []).filter(x => MANNER_TAGS.includes(x)))].join(',');
+  db.prepare(`INSERT INTO ratings(event,giver,target,skill,manner,tags) VALUES(?,?,?,?,?,?)
+              ON CONFLICT(event,giver,target) DO UPDATE SET skill=excluded.skill, manner=excluded.manner, tags=excluded.tags`)
+    .run(event, me.person, target, s(b.skill), s(b.manner), tags);
+  /* 비매너 알림은 따로. 빈 값을 보내면 거둔다 — 마음이 바뀔 수 있다 */
+  if (b.bad !== undefined) {
+    if (BAD_KINDS.includes(b.bad))
+      db.prepare(`INSERT INTO manner_reports(event,giver,target,kind,note) VALUES(?,?,?,?,?)
+                  ON CONFLICT(event,giver,target) DO UPDATE SET kind=excluded.kind, note=excluded.note, at=datetime('now')`)
+        .run(event, me.person, target, b.bad, String(b.badNote || '').slice(0, 300));
+    else db.prepare('DELETE FROM manner_reports WHERE event=? AND giver=? AND target=?').run(event, me.person, target);
+  }
+  return { ok: true };
+}
+/* 받은 칭찬. 세 건(서로 다른 대회·사람) 미만이면 무엇을 받았는지만 말하고 숫자는 안 붙인다 — shrink 와 같은 이유 */
+function praiseOf(db, pid) {
+  const rows = db.prepare("SELECT tags FROM ratings WHERE target=? AND tags<>''").all(pid);
+  const cnt = {};
+  for (const r of rows) for (const t of r.tags.split(',')) if (MANNER_TAGS.includes(t)) cnt[t] = (cnt[t] || 0) + 1;
+  const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([tag, n]) => ({ tag, n }));
+  return { n: rows.length, show: rows.length >= SHOW_MIN, top };
+}
+/* 사이트 운영자용 — 알림이 쌓인 사람. 누가 보냈는지는 여기서도 id 만(연락처는 없다). */
+function mannerReports(db, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 볼 수 있습니다');
+  const rows = db.prepare(`SELECT r.target, p.handle, COUNT(*) n, COUNT(DISTINCT r.giver) givers,
+                                  GROUP_CONCAT(r.kind, '|') kinds, MAX(r.at) last
+                           FROM manner_reports r LEFT JOIN people p ON p.id = r.target
+                           GROUP BY r.target ORDER BY givers DESC, last DESC LIMIT 200`).all();
+  return rows.map(r => ({ target: r.target, handle: r.handle || '', n: r.n, givers: r.givers,
+                          kinds: [...new Set(String(r.kinds || '').split('|'))], last: r.last,
+                          flagged: r.givers >= FLAG_AT,
+                          notes: db.prepare(`SELECT m.kind, m.note, m.at, e.title FROM manner_reports m JOIN events e ON e.id=m.event
+                                             WHERE m.target=? ORDER BY m.at DESC LIMIT 10`).all(r.target) }));
+}
+
 /* ── 강의 ─────────────────────────────────────────────
    유튜브 주소 꼴은 여럿이다(watch?v= · youtu.be/ · embed/ · shorts/ · live/). 사람이 붙여 넣는 것은
    주소라 받아 주되, **남기는 것은 11자 id 하나**다. 화면이 iframe 주소를 서버에서 받아 그대로 쓰므로
@@ -620,11 +718,14 @@ function profile(db, pid) {
     season: seasonNow(), xpSeason: xpOf(db, pid, seasonNow()),
     /* 완주 - 왔고 결과물을 냈나. 이게 이 사람의 실력에 대한 가장 단단한 증거다. */
     finished: made,
-    finishRate: came ? Math.round(made / came * 1000) / 10 : 0,
+    /* 온 대회가 없으면 완주율은 «모름» 이다. 0 을 주면 모집 화면에서 «안 하는 사람» 으로 읽힌다(E22) */
+    finishRate: came ? Math.round(made / came * 1000) / 10 : null,
     /* 매너는 실력과 따로 센다. 신청하고 안 온 것은 못해서가 아니다. */
     noshow: past.length - came,
     skill: shrink(rt.map(r => r.skill)),
     manner: shrink(rt.map(r => r.manner)),
+    /* 받은 칭찬 태그. 비매너 알림은 여기 절대 안 싣는다 — 사이트 운영자 화면에만 있다 */
+    praise: praiseOf(db, pid),
     /* 배치 중 - 몇 번 안 나온 사람은 등급을 안 붙인다. */
     placed: past.length >= 2,
     /* 만든 것. 주소가 «공개» 로 나가는 문 셋은 쇼케이스와 똑같다 —
@@ -2104,6 +2205,19 @@ function open(file) {
       UNIQUE(event, giver, target)
     );
 
+    /* 비매너 알림. 공개 화면 어디에도 안 나간다 — 사이트 운영자만 본다.
+       점수(ratings.manner)와 따로 둔다: 점수는 모여서 보이고, 이것은 한 건씩 사람이 읽고 판단한다. */
+    CREATE TABLE IF NOT EXISTS manner_reports(
+      id     INTEGER PRIMARY KEY,
+      event  TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      giver  TEXT NOT NULL,
+      target TEXT NOT NULL,
+      kind   TEXT NOT NULL,
+      note   TEXT NOT NULL DEFAULT '',
+      at     TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(event, giver, target)
+    );
+
     /* 강의. 영상은 서버에 안 둔다 — 유튜브 id 만 적는다(Fly 도쿄 내보내기는 GB 당 $0.04 이고,
        보는 동안 꺼져 있어야 할 기계가 깨어 있다). 올리는 것은 사이트 운영자만.
        강사가 스스로 올리게 두면 남의 이름으로 강의를 걸 수 있다. */
@@ -2329,6 +2443,8 @@ function open(file) {
   /* 예전 배포판에서 share 로만 동의를 남긴 참가자도 크레딧 명단(sponsor_ok)에 들어가게 옮긴다. */
   try { db.exec("UPDATE teams SET sponsor_ok=1 WHERE share<>'' AND sponsor_ok=0"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN tkey TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 매너 칭찬 태그(쉼표로). 점수와 같은 줄에 둔다 — 한 번 평가에 한 줄 */
+  try { db.exec("ALTER TABLE ratings ADD COLUMN tags TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE events ADD COLUMN wifi TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 모이는 곳. «언제» 는 있는데 «어디» 를 적을 칸이 아예 없었다 — 대역 셋이 여기서 멈췄다(대역시험 4). */
   try { db.exec("ALTER TABLE events ADD COLUMN place TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -5304,18 +5420,13 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/rate$/)) && req.method === 'POST') {
           const b = await body(req);
           const tkr = req.headers['x-tkey'] || '';
+          /* 사람 평가는 ratePerson 한 곳에서 — 자격(시작·체크인)·태그·비매너 알림을 거기서 본다 */
+          if (b.target) return json(res, 200, ratePerson(db, m[1], tkr, b));
           const meRow = tkr ? db.prepare('SELECT person FROM teams WHERE event=? AND tkey=?').get(m[1], tkr) : null;
           const me2 = meRow && meRow.person;
           if (!me2) throw new HttpError(403, '이 대회에 참가한 분만 평가할 수 있습니다 — 신청한 브라우저에서');
           const g = v => Math.min(5, Math.max(0, +v || 0));
-          if (b.target) {
-            if (b.target === me2) throw new HttpError(400, '본인은 평가할 수 없습니다');
-            if (!db.prepare('SELECT 1 FROM teams WHERE event=? AND person=?').get(m[1], b.target))
-              throw new HttpError(404, '이 대회에 없는 분입니다');
-            db.prepare(`INSERT INTO ratings(event,giver,target,skill,manner) VALUES(?,?,?,?,?)
-                        ON CONFLICT(event,giver,target) DO UPDATE SET skill=?, manner=?`)
-              .run(m[1], me2, b.target, g(b.skill), g(b.manner), g(b.skill), g(b.manner));
-          } else {
+          {
             db.prepare(`INSERT INTO event_ratings(event,giver,run,worth,note) VALUES(?,?,?,?,?)
                         ON CONFLICT(event,giver) DO UPDATE SET run=?, worth=?, note=?`)
               .run(m[1], me2, g(b.run), g(b.worth), String(b.note || '').slice(0, 200),
@@ -5374,6 +5485,11 @@ function routes(db) {
         }
 
         /* 사이트 운영자 명단. 운영자만 보고 늘린다. 자기 자신은 못 뺀다 — 마지막 한 명이 나가면 아무도 못 들어온다. */
+        /* 같이 있었던 사람 — 매너 평가 칸을 그리려고. 팀(또는 짝) 열쇠로만 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/peers$/)) && req.method === 'GET')
+          return json(res, 200, peersOf(db, m[1], req.headers['x-tkey'] || ''));
+        if (p === '/api/admin/manner' && req.method === 'GET')
+          return json(res, 200, { rows: mannerReports(db, { siteAdmin }) });
         if (p === '/api/admin/people' && req.method === 'GET') {
           if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 볼 수 있습니다');
           return json(res, 200, db.prepare(`SELECT s.owner, o.name, s.at FROM site_admins s
@@ -7775,6 +7891,57 @@ async function selftest() {
   const prof2 = profile(db, idA);
   ok(prof2.skill.n === 1 && prof2.manner.n === 1, '실력과 매너를 따로 센다');
   ok(prof2.skill.score !== prof2.manner.score, '실력과 매너가 섞이지 않는다');
+
+  /* ── 매너 평가 ── 칭찬 태그는 공개, 비매너 알림은 사이트 운영자만. 시작 전·안 온 사람은 막는다 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const mEv = createEvent(db, { title: '매너시험', starts: '2020-02-01', ends: '2020-02-01' });
+    const jt = (ev, b) => db.prepare('SELECT id, tkey FROM teams WHERE id=?').get(joinTeam(db, ev, b));
+    const mX = jt(mEv.id, { name: '엑스', contact: 'mx@x.test', agree: true });
+    const mY = jt(mEv.id, { name: '와이', contact: 'my@x.test', agree: true });
+    const mZ = jt(mEv.id, { name: '제트', contact: 'mz@x.test', agree: true });
+    const [iX, iY, iZ] = ['mx@x.test', 'my@x.test', 'mz@x.test'].map(c => pidOf(db, c));
+    ok(mX.tkey && mY.tkey, '매너: 신청하면 팀 열쇠가 나온다');
+    ok(raises(() => peersOf(db, mEv.id, 'zzzz'), 403), '매너: 열쇠 없이는 같이 한 사람 목록을 못 본다');
+    const pe = peersOf(db, mEv.id, mX.tkey);
+    ok(pe.can && pe.rows.length === 2 && !pe.rows.some(r => r.id === iX), '매너: 나를 뺀 같은 대회 사람이 나온다');
+    ok(!JSON.stringify(pe).includes('x.test'), '매너: 목록에 연락처가 안 나간다');
+    ok(raises(() => ratePerson(db, mEv.id, mX.tkey, { target: iX, manner: 5 }), 400), '매너: 본인은 평가 못 한다');
+    ok(raises(() => ratePerson(db, mEv.id, mX.tkey, { target: 'ffffffffffff', manner: 5 }), 404), '매너: 대회에 없는 사람은 못 한다');
+    ratePerson(db, mEv.id, mX.tkey, { target: iY, skill: 4, manner: 5, tags: ['친절해요', '없는 태그', '친절해요'],
+                                      bad: '무례했어요', badNote: '비밀 메모 777' });
+    const rt = db.prepare('SELECT tags FROM ratings WHERE event=? AND giver=? AND target=?').get(mEv.id, iX, iY);
+    ok(rt.tags === '친절해요', '매너: 목록에 없는 태그는 버리고 겹친 것은 하나로 (' + rt.tags + ')');
+    const pY = profile(db, iY);
+    ok(pY.praise.n === 1 && pY.praise.top[0].tag === '친절해요' && pY.praise.show === false, '매너: 칭찬 한 건은 숫자 없이');
+    ok(!JSON.stringify(pY).includes('비밀 메모 777') && !JSON.stringify(pY).includes('무례했어요'),
+       '매너: 비매너 알림이 공개 프로필에 샌다');
+    ok(raises(() => mannerReports(db, {}), 403), '매너: 알림 목록은 사이트 운영자만');
+    const mr = mannerReports(db, { siteAdmin: true });
+    ok(mr.length === 1 && mr[0].target === iY && mr[0].flagged === false && mr[0].notes[0].note === '비밀 메모 777',
+       '매너: 운영자는 알림을 읽는다(한 명이면 확인 필요 아님)');
+    ratePerson(db, mEv.id, mZ.tkey, { target: iY, manner: 1, bad: '무례했어요' });
+    ratePerson(db, mEv.id, mY.tkey, { target: iX, manner: 4 });
+    const mW = jt(mEv.id, { name: '더블유', contact: 'mw@x.test', agree: true });
+    ratePerson(db, mEv.id, mW.tkey, { target: iY, manner: 2, bad: '중간에 사라졌어요' });
+    ok(mannerReports(db, { siteAdmin: true })[0].flagged === true, '매너: 서로 다른 셋이 남기면 확인 필요로 뜬다');
+    ratePerson(db, mEv.id, mX.tkey, { target: iY, manner: 5, bad: '' });
+    ok(!db.prepare('SELECT 1 FROM manner_reports WHERE event=? AND giver=? AND target=?').get(mEv.id, iX, iY),
+       '매너: 알림을 비우면 거둬진다');
+    /* 체크인을 쓴 대회 — 온 사람끼리만 */
+    db.prepare("UPDATE teams SET came=datetime('now') WHERE id IN (?, ?)").run(mX.id, mY.id);
+    ok(raises(() => ratePerson(db, mEv.id, mX.tkey, { target: iZ, manner: 5 }), 403), '매너: 체크인한 대회에서 안 온 사람을 평가한다');
+    ok(raises(() => ratePerson(db, mEv.id, mZ.tkey, { target: iX, manner: 5 }), 403), '매너: 안 온 사람이 평가한다');
+    ok(peersOf(db, mEv.id, mX.tkey).rows.length === 1, '매너: 체크인한 대회에서는 온 사람만 목록에');
+    ok(peersOf(db, mEv.id, mZ.tkey).can === false, '매너: 안 온 사람에게는 칸이 안 열린다');
+    /* 시작 전 */
+    const fEv = createEvent(db, { title: '앞으로', starts: '2099-01-01', ends: '2099-01-01' });
+    const fA = jt(fEv.id, { name: '미래가', contact: 'fa@x.test', agree: true });
+    joinTeam(db, fEv.id, { name: '미래나', contact: 'fb@x.test', agree: true });
+    ok(raises(() => ratePerson(db, fEv.id, fA.tkey, { target: pidOf(db, 'fb@x.test'), manner: 1 }), 409), '매너: 시작 전에 평가가 된다');
+    ok(peersOf(db, fEv.id, fA.tkey).can === false && peersOf(db, fEv.id, fA.tkey).rows.length === 0, '매너: 시작 전에는 목록을 안 준다');
+    ok(profile(db, pidOf(db, 'fa@x.test')).finishRate === null, '완주율: 온 대회가 없으면 0 이 아니라 모름(null)');
+  }
 
   /* ── 강의 (TASK-25) ── 남기는 것은 11자 id 하나. 화면은 서버가 만든 주소만 iframe 에 넣는다 */
   {

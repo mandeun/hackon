@@ -1772,6 +1772,34 @@ function stars(name, val) {
   </div>`;
 }
 
+/* 같이 한 사람 매너 평가 칸. 대회가 시작되기 전이면 아예 안 그린다(열쇠가 있어도 할 것이 없다).
+   칭찬은 누를 것을 준다. 불편했던 일은 접어 두고, 공개되지 않는다고 칸 안에 적는다. */
+function peersCard(pe) {
+  if (!pe || (!pe.can && !/체크인/.test(pe.why || ''))) return '';
+  if (!pe.can) return `<div class="card" id="peers"><h3>같이 한 분들</h3><div class="meta">${esc(pe.why)}</div></div>`;
+  if (!pe.rows.length) return `<div class="card" id="peers"><h3>같이 한 분들</h3>
+    <div class="meta">평가할 분이 아직 없습니다. 다른 팀이 체크인하면 여기에 나옵니다.</div></div>`;
+  return `<div class="card" id="peers"><h3>같이 한 분들 <span class="pill">${pe.rows.length}</span></h3>
+    <div class="meta"><b>안 하셔도 됩니다.</b> 누가 줬는지는 안 보이고, 세 건이 모여야 숫자가 뜹니다.
+      실력과 매너는 따로 셉니다 — 잘 못해도 좋은 동료일 수 있습니다.</div>
+    ${pe.rows.map(r => `<div class="peer" data-peer="${esc(r.id)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--rule)">
+      <b>${esc(r.name)}</b>${r.team && r.team !== r.name ? ` <span class="meta">${esc(r.team)}</span>` : ''}
+      <div class="row" style="margin-top:6px">
+        <div><label>실력</label>${stars('sk-' + r.id, r.mine.skill)}</div>
+        <div><label>매너</label>${stars('mn-' + r.id, r.mine.manner)}</div>
+      </div>
+      <label>이런 점이 좋았어요 <span class="pill ok">여러 개</span></label>
+      <div class="gchips">${pe.tags.map(t => `<button type="button" class="pick${r.mine.tags.includes(t) ? ' on' : ''}" data-ptag="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      <details style="margin-top:8px"${r.mine.bad ? ' open' : ''}><summary class="meta">불편했던 일 알리기 — 공개되지 않고 운영진만 봅니다</summary>
+        <select data-pbad style="margin-top:6px"><option value="">없음</option>
+          ${pe.bad.map(k => `<option${r.mine.bad === k ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>
+        <input data-pbadnote maxlength="300" placeholder="무슨 일이 있었는지 한 줄 (선택)" style="margin-top:6px">
+      </details>
+      <button class="btn sec sm" data-peer-go="${esc(r.id)}" style="margin-top:10px">${r.mine.manner || r.mine.skill ? '고치기' : '남기기'}</button>
+    </div>`).join('')}
+  </div>`;
+}
+
 /** 평가 결과 한 줄. 세 건 미만이면 숫자 대신 건수만. */
 function repLine(label, r) {
   if (!r || !r.n) return `${label} <span class="pill">아직 없음</span>`;
@@ -2063,6 +2091,15 @@ const SCREEN = {
        열쇠를 잃어 대회가 0개로 보이는 사람이 바로 이 권한을 쓰는 사람이다. */
     /* 첫 운영자 앉히기. 서버가 «문이 열려 있고 아직 아무도 없다» 고 할 때만 그린다.
        한 번 들어오면 영영 사라진다. 로그인부터 해야 한다 — 옮겨 갈 계정이 있어야 옮긴다. */
+    /* 목록·내 대회를 먼저 받는다. 아래 adminBox 가 my 를 읽는데, 예전에는 let my 가 그보다 뒤에 있어
+       사이트 운영자로 첫 화면을 열면 «초기화 전에 접근» 으로 화면 전체가 오류가 됐다. */
+    const list = LIVE ? await api('/events') : DEMO.events;
+    let my = null, trash = null;
+    if (LIVE && myKey()) { try { my = await api('/mine'); } catch { my = null; } }
+    /* 지운 대회. 주최자 열쇠가 있을 때만 묻는다 — 없으면 물어볼 것도 없다 */
+    if (LIVE && my) { try { trash = await api('/mine/trash'); } catch { trash = null; } }
+    /* 비매너 알림 — 사이트 운영자만. 못 받으면(null) «모름» 으로 그린다 */
+    const mrep = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/manner').then(r => r.rows).catch(() => null) : [];
     const claimBox = (AUTH && AUTH.claimable) ? `
       <div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
         <h3 style="color:var(--warn)">첫 사이트 운영자 앉히기</h3>
@@ -2087,18 +2124,24 @@ const SCREEN = {
           <div class="meta">${e.mine ? '<span class="pill ok">내 것</span>' : `<span class="pill">${esc(e.host)}</span>`}
             ${e.listed ? '' : ' <span class="pill warn">초안</span>'}
             · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
-        </div>`).join('')}` : ''}` : '';
+        </div>`).join('')}` : ''}
+      <div class="card" id="manner-admin"><h3>매너 알림 ${mrep && mrep.length ? `<span class="pill warn">${mrep.length}명</span>` : ''}</h3>
+        <div class="meta">참가자가 «불편했던 일» 로 남긴 것입니다. 공개 화면 어디에도 안 나갑니다.
+          서로 다른 3명 이상이 남긴 사람은 맨 위에 <span class="pill warn">확인 필요</span> 로 뜹니다.</div>
+        ${mrep === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !mrep.length ? '<div class="meta" style="margin-top:8px">남은 알림이 없습니다.</div>'
+          : mrep.map(r => `<details style="margin-top:10px"><summary><b>${esc(r.handle || r.target)}</b>
+              ${r.flagged ? '<span class="pill warn">확인 필요</span>' : ''} <span class="meta">${r.givers}명 · ${r.n}건</span></summary>
+              ${r.notes.map(x => `<div class="meta" style="margin-top:6px">${esc(x.title)} · ${esc(x.kind)}${x.note ? ' — ' + esc(x.note) : ''}
+                <span class="hint">${esc(String(x.at).slice(0, 10))}</span></div>`).join('')}
+              <div style="margin-top:6px"><a href="/p/${esc(r.target)}">프로필 보기 ›</a></div></details>`).join('')}
+      </div>` : '';
     const loginBox = (WANT_LOGIN && loginOn() && !(AUTH && AUTH.loggedIn)) ? `
       <div class="card"><h3>로그인</h3>
         <div class="meta">쓰던 것으로 들어오세요. 어느 것으로 들어와도 내가 연 대회가 따라옵니다.
           비밀번호는 없습니다.</div>
         ${loginBtns()}
       </div>` : '';
-    const list = LIVE ? await api('/events') : DEMO.events;
-    let my = null, trash = null;
-    if (LIVE && myKey()) { try { my = await api('/mine'); } catch { my = null; } }
-    /* 지운 대회. 주최자 열쇠가 있을 때만 묻는다 — 없으면 물어볼 것도 없다 */
-    if (LIVE && my) { try { trash = await api('/mine/trash'); } catch { trash = null; } }
     const mineBox = my && my.events.length ? `
       <h2>내가 연 대회</h2>
 
@@ -3222,6 +3265,8 @@ const SCREEN = {
     PUB_SPONSORS = e.sponsors || [];
     const rec = LIVE ? await api(`/events/${cur}/record`).catch(() => null) : null;
     const hrep = LIVE ? await api(`/events/${cur}/rep`).catch(() => null) : null;
+    /* 같이 있었던 사람 — 매너 평가 칸. 신청한 브라우저(팀 열쇠)에서만 온다. 못 받으면 칸을 안 그린다 */
+    const peers = (LIVE && myId && tkeyOf(myId)) ? await api(`/events/${cur}/peers`, { tkey: tkeyOf(myId) }).catch(() => null) : null;
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : (DEMO.needs || []);
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : (DEMO.ledger || []);
     const notes = LIVE ? await api(`/events/${cur}/notices`).catch(() => []) : [];
@@ -3480,6 +3525,7 @@ const SCREEN = {
         <div style="height:14px"></div>
         <button class="btn" id="rv-go">남기기</button>
       </div>` : ''}
+      ${peersCard(peers)}
 
       ${rec && rec.events ? `<div class="card">
         <h3>이 주최자가 지난번에</h3>
@@ -4140,7 +4186,7 @@ const SCREEN = {
 
       <div class="stat">
         <div><b>${d.finished}</b><span>완주</span></div>
-        <div><b>${d.events ? d.finishRate + '%' : '—'}</b><span>완주율</span></div>
+        <div><b>${d.finishRate === null || d.finishRate === undefined ? '—' : d.finishRate + '%'}</b><span>완주율</span></div>
         <div><b>${d.noshow}</b><span>안 온 횟수</span></div>
       </div>
       <p class="sub">완주율은 <b>온 대회</b> 기준입니다.
@@ -4149,7 +4195,13 @@ const SCREEN = {
       <div class="card">
         <h3>다른 참가자가 준 평가</h3>
         <div class="meta">${repLine('실력', d.skill)}<br>${repLine('매너', d.manner)}</div>
-        <div class="meta" style="margin-top:7px">누가 줬는지는 안 보이고, 같은 대회에 있던 분만 남깁니다.</div>
+        ${(() => { const pr = d.praise || { n: 0, top: [] };
+          if (!pr.n) return '<div class="meta" style="margin-top:8px">받은 칭찬 <span class="pill">아직 없음</span></div>';
+          return `<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap" id="praise">
+            ${pr.top.map(x => `<span class="pill ok">${esc(x.tag)}${pr.show ? ' ' + x.n : ''}</span>`).join('')}</div>
+            ${pr.show ? '' : `<div class="meta" style="margin-top:4px">칭찬 ${pr.n}건 · 3건부터 숫자를 붙입니다</div>`}`; })()}
+        <div class="meta" style="margin-top:7px">누가 줬는지는 안 보이고, 같은 대회에 있던 분만 남깁니다.
+          불편했던 일은 공개되지 않고 운영진만 읽습니다.</div>
       </div>
 
       ${d.history.length ? `<h3 style="margin-top:16px">나온 대회</h3>
@@ -5739,6 +5791,23 @@ function wire() {
     const el = document.querySelector(`[data-star="${name}"]`);
     return el ? +el.dataset.v : 0;
   };
+
+  /* 같이 한 사람 매너 평가. 칭찬 칩은 눌러서 켜고 끈다. 화면을 다시 그리지 않는다 — 옆 사람 것을 쓰던 중일 수 있다 */
+  document.querySelectorAll('[data-ptag]').forEach(b => b.onclick = () => b.classList.toggle('on'));
+  document.querySelectorAll('[data-peer-go]').forEach(b => b.onclick = async () => {
+    const box = b.closest('[data-peer]'); const id = b.dataset.peerGo;
+    const sk = starOf('sk-' + id), mn = starOf('mn-' + id);
+    const tags = [...box.querySelectorAll('[data-ptag].on')].map(x => x.dataset.ptag);
+    const bad = box.querySelector('[data-pbad]').value;
+    if (!sk && !mn && !tags.length && !bad) return flash('별이나 칭찬을 하나라도 골라 주세요', true);
+    try {
+      await api(`/events/${cur}/rate`, { method: 'POST', tkey: tkeyOf(localStorage.getItem('hackon.team.' + cur) || ''),
+        body: { target: id, skill: sk, manner: mn, tags, bad, badNote: box.querySelector('[data-pbadnote]').value.trim() } });
+      b.textContent = '고치기';
+      flash('남겼습니다', true);   // true — 다시 그리지 않는다. 다음 사람 칸을 쓰는 중일 수 있다
+      const t = $('#toast'); if (t) t.innerHTML = '<div class="ok-msg" style="margin:0">남겼습니다</div>';
+    } catch (e) { flash(e.message, true); }
+  });
 
   /* 대회 평가. 필수가 아니다 - 안 해도 아무 일도 안 생긴다. */
   const rvgo = $('#rv-go');

@@ -3727,5 +3727,55 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 ok("지원서 미리 채우기 — 두 번째 대회에서 이름·이메일·역할·링크가 채워지고, 새 칸에 연락처 없음, 지우기 동작")
+
+# ── 매너 평가 ────────────────────────────────────────────────
+# 서버에는 사람 평가 길이 있었는데 그걸 부르는 화면이 없었다. 이제 대회 화면에서 같이 한 사람을 평가한다.
+_past = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+MEV = lpostj("/api/events", {"title": "매너 대회", "host": "검사", "starts": _past, "ends": _past})["id"]
+_ma = lpostj(f"/api/events/{MEV}/teams", {"name": "평가하는팀", "email": "ma@example.com", "contact": "ma@example.com", "agree": True})
+_mb = lpostj(f"/api/events/{MEV}/teams", {"name": "받는팀", "email": "mb@example.com", "contact": "mb@example.com", "agree": True})
+A(_ma.get("tkey") and _mb.get("tkey"), f"신청 응답에 팀 열쇠가 없다: {_ma}")
+A(lpost("/api/admin/manner", {}) in (403, 404), "로그인 없이 매너 알림 목록 길이 열린다")
+_ar = urllib.request.Request(LEARN_BASE + "/api/admin/manner")
+try:
+    urllib.request.urlopen(_ar, timeout=10); _code = 200
+except urllib.error.HTTPError as e:
+    _code = e.code
+A(_code == 403, f"로그인 없이 매너 알림을 읽는다: {_code}")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("manner: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/e/{MEV}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.team.{MEV}', '{_ma['id']}'); localStorage.setItem('hackon.tkey.{_ma['id']}', '{_ma['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#peers", timeout=10000)
+    A("받는팀" in pg.inner_text("#peers") and "평가하는팀" not in pg.inner_text("#peers"), "같이 한 사람 목록이 틀렸다(나를 빼고 상대만)")
+    A("mb@example.com" not in pg.content(), "평가 칸에 상대 연락처가 실린다")
+    pg.click("#peers [data-star^='mn-'] button[data-i='5']")
+    pg.click("#peers [data-ptag='친절해요']")
+    pg.click("#peers [data-peer-go]")
+    pg.wait_for_timeout(800)
+    # 받은 사람 프로필에 칭찬이 뜬다 — 사람 id 는 공개 목록에서 얻는다
+    pid = pg.eval_on_selector("#peers [data-peer]", "e => e.dataset.peer")
+    pg.goto(f"{LEARN_BASE}/p/{pid}", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A(pg.locator("#praise .pill", has_text="친절해요").count() == 1, "받은 칭찬이 프로필에 안 뜬다")
+    A("3건부터 숫자" in pg.inner_text("body"), "칭찬 한 건에 숫자가 붙는다")
+    # 비매너 알림 — 공개 프로필에 안 뜬다
+    pg.goto(f"{LEARN_BASE}/e/{MEV}", wait_until="networkidle")
+    pg.wait_for_selector("#peers", timeout=10000)
+    pg.eval_on_selector("#peers details", "d => d.open = true")
+    pg.select_option("#peers [data-pbad]", "무례했어요")
+    pg.fill("#peers [data-pbadnote]", "공개되면안되는메모")
+    pg.click("#peers [data-peer-go]")
+    pg.wait_for_timeout(800)
+    pg.goto(f"{LEARN_BASE}/p/{pid}", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A("공개되면안되는메모" not in pg.content() and "무례했어요" not in pg.content(), "비매너 알림이 공개 프로필에 보인다")
+    ctx.close()
+    b.close()
+ok("매너 평가 — 대회 화면에서 같이 한 사람만, 칭찬은 프로필에, 비매너 알림은 비공개, 알림 목록은 운영자만")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
