@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const os = require('node:os');
+const zlib = require('node:zlib');
 const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = __dirname;
@@ -696,6 +697,190 @@ function outsidePending(db, { siteAdmin } = {}) {
   if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 볼 수 있습니다');
   return db.prepare(`SELECT o.id, o.person, p.handle, o.title, o.url, o.role, o.at FROM outside o
                      LEFT JOIN people p ON p.id=o.person WHERE o.ok=0 ORDER BY o.at LIMIT 200`).all();
+}
+
+/* ── 마켓 ─────────────────────────────────────────────
+   조사(2026-09-29): Polar·Lemon Squeezy·Paddle 은 «남의 상품을 대신 파는 마켓플레이스» 를 금지한다.
+   그래서 HACK:ON 계정으로 대신 팔지 않는다 — 판매자가 자기 판매처 계정을 열고 우리는 링크만 건다.
+   한국 개인 정산이 확인된 곳은 Gumroad(한국 계좌)·크몽(사업자 전 가능). 허용 판매처는 이 목록뿐이다. */
+const MARKET_HOSTS = ['gumroad.com', 'polar.sh', 'lemonsqueezy.com', 'kmong.com'];
+const LICENSES = ['MIT', '개인용', '상업용'];
+const PRICE_MIN = 1000, PRICE_MAX = 10000000;
+/* 판매처 주소 — https 이고 허용 판매처(그 하위 도메인 포함)일 때만 */
+function buyUrl(v) {
+  const s = webUrl(v);
+  if (!s) return '';
+  let u; try { u = new URL(s); } catch { return ''; }
+  if (u.protocol !== 'https:' || u.username || u.password) return '';
+  const h = u.hostname.toLowerCase();
+  return MARKET_HOSTS.some(d => h === d || h.endsWith('.' + d)) ? u.href : '';
+}
+/* 공개 저장소 — 지금은 github.com/<소유자>/<이름> 만. 비밀키 검사를 할 수 있는 곳만 받는다 */
+function repoUrl(v) {
+  const m = String(v || '').trim().match(/^https:\/\/github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/);
+  return m ? { url: `https://github.com/${m[1]}/${m[2]}`, owner: m[1], name: m[2] } : null;
+}
+/* 팔 수 있는 것 — 쇼케이스 동의(show)가 켜지고 마감이 지난 내 제출작, 운영자가 확인한 «밖에서 만든 것» */
+function sellableOf(db, pid) {
+  const subs = db.prepare(`SELECT t.id, t.name, e.title AS ev, e.due, e.ends, s.url FROM teams t
+                           JOIN events e ON e.id = t.event JOIN submissions s ON s.team = t.id
+                           WHERE (t.person=? OR (t.mate<>'' AND t.mate=?)) AND s.show=1 AND s.url<>''`).all(pid, pid)
+    .filter(r => closed({ due: r.due, ends: r.ends }) && webUrl(r.url))
+    .map(r => ({ source: 'submission', ref: r.id, title: r.name, from: r.ev, demo: webUrl(r.url) }));
+  const outs = db.prepare('SELECT id, title, url FROM outside WHERE person=? AND ok=1').all(pid)
+    .filter(r => webUrl(r.url)).map(r => ({ source: 'outside', ref: r.id, title: r.title, from: '밖에서 만든 것', demo: webUrl(r.url) }));
+  return [...subs, ...outs];
+}
+function addListing(db, pid, tkey, b) {
+  if (!ownsPerson(db, pid, tkey)) throw new HttpError(403, '본인 확인이 안 됩니다 — 신청한 브라우저에서 올려 주세요');
+  const it = sellableOf(db, pid).find(x => x.source === b.source && x.ref === +b.ref);
+  if (!it) throw new HttpError(403, '팔 수 있는 것이 아닙니다 — 쇼케이스 동의를 켠 제출작이나 운영진이 확인한 «밖에서 만든 것» 만 됩니다');
+  const price = Math.round(+b.price || 0);
+  if (!(price >= PRICE_MIN && price <= PRICE_MAX)) throw new HttpError(400, `값은 ${PRICE_MIN.toLocaleString()}원에서 ${PRICE_MAX.toLocaleString()}원 사이입니다`);
+  if (!LICENSES.includes(b.license)) throw new HttpError(400, '라이선스를 고르세요 — MIT · 개인용 · 상업용');
+  const buy = buyUrl(b.buy_url);
+  if (!buy) throw new HttpError(400, '판매 주소는 Gumroad · Polar · Lemon Squeezy · 크몽 의 https 주소만 됩니다');
+  const rp = b.repo ? repoUrl(b.repo) : null;
+  if (b.repo && !rp) throw new HttpError(400, '저장소는 https://github.com/<소유자>/<이름> 꼴만 됩니다');
+  if (db.prepare("SELECT COUNT(*) c FROM listings WHERE person=? AND off=''").get(pid).c >= 20) throw new HttpError(409, '한 사람당 20개까지입니다');
+  const r = db.prepare('INSERT INTO listings(person,source,ref,title,price,license,refund,buy_url,repo) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(pid, it.source, it.ref, String(b.title || it.title).trim().slice(0, 60) || it.title, price, b.license,
+         String(b.refund || '').trim().slice(0, 200), buy, rp ? rp.url : '');
+  return { id: Number(r.lastInsertRowid), rows: myListings(db, pid) };
+}
+function myListings(db, pid) {
+  return db.prepare('SELECT id, title, price, license, buy_url, repo, scan, ok, off, at FROM listings WHERE person=? ORDER BY id DESC').all(pid);
+}
+/* 데모 주소와 «며칠째 살아 있나». 제출작은 쇼케이스와 같은 liveness·ageOf 를 쓴다 — 따로 세면 어긋난다 */
+function demoOf(db, l) {
+  if (l.source === 'submission') {
+    const r = db.prepare(`SELECT s.url, s.show, e.due, e.ends, lv.state FROM teams t JOIN events e ON e.id=t.event
+                          JOIN submissions s ON s.team=t.id LEFT JOIN liveness lv ON lv.team=t.id WHERE t.id=?`).get(l.ref);
+    if (!r || !r.show || !closed({ due: r.due, ends: r.ends }) || !webUrl(r.url)) return null;
+    const st = (r.state === 1 || r.state === 0) ? r.state : null;
+    return { url: webUrl(r.url), open: openLabel(st), age: ageOf(r.ends, st), from: 'hackathon' };
+  }
+  const o = db.prepare('SELECT url, ok FROM outside WHERE id=?').get(l.ref);
+  return o && o.ok && webUrl(o.url) ? { url: webUrl(o.url), open: '모름', age: null, from: 'outside' } : null;
+}
+/* 판매자 신뢰 띠 — 새로 세지 않고 profile() 을 그대로. 연락처는 한 칸도 없다 */
+function sellerOf(db, pid) {
+  const p = profile(db, pid);
+  return { id: p.id, handle: p.handle || '', finished: p.finished, events: p.events, noshow: p.noshow,
+           manner: p.manner, skill: p.skill, praise: p.praise, tier: p.tier.name };
+}
+function publicListing(db, l) {
+  const demo = demoOf(db, l);
+  if (!demo) return null;   // 시연이 안 되는 것은 안 판다 — 시연이 «시험 사용» 이다(전자상거래법 17조⑥)
+  const buy = buyUrl(l.buy_url);
+  if (!buy) return null;
+  return { id: l.id, title: l.title, price: l.price, license: l.license, refund: l.refund, buy_url: buy,
+           repo: l.repo, scan: l.scan, demo, seller: sellerOf(db, l.person) };
+}
+function marketList(db) {
+  return db.prepare("SELECT * FROM listings WHERE ok=1 AND off='' ORDER BY id DESC LIMIT 100").all()
+    .map(l => publicListing(db, l)).filter(Boolean);
+}
+function marketItem(db, id) {
+  const l = db.prepare("SELECT * FROM listings WHERE id=? AND ok=1 AND off=''").get(+id);
+  const out = l && publicListing(db, l);
+  if (!out) throw new HttpError(404, '없거나 내려간 상품입니다');
+  return out;
+}
+function reportListing(db, id, reason) {
+  if (!db.prepare("SELECT 1 FROM listings WHERE id=? AND ok=1").get(+id)) throw new HttpError(404, '없는 상품입니다');
+  const r = String(reason || '').trim().slice(0, 300);
+  if (r.length < 2) throw new HttpError(400, '무엇이 문제인지 한 줄 적어 주세요');
+  db.prepare('INSERT INTO market_reports(listing, reason) VALUES(?,?)').run(+id, r);
+  return { ok: true };
+}
+function marketAdmin(db, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 볼 수 있습니다');
+  return db.prepare(`SELECT l.*, p.handle, (SELECT COUNT(*) FROM market_reports r WHERE r.listing=l.id) AS reports
+                     FROM listings l LEFT JOIN people p ON p.id=l.person
+                     WHERE l.ok=0 OR l.off<>'' OR EXISTS(SELECT 1 FROM market_reports r WHERE r.listing=l.id)
+                     ORDER BY l.ok, l.id DESC LIMIT 200`).all()
+    .map(l => ({ ...l, reasons: db.prepare('SELECT reason, at FROM market_reports WHERE listing=? ORDER BY id DESC LIMIT 10').all(l.id) }));
+}
+function reviewListing(db, id, b, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 할 수 있습니다');
+  const l = db.prepare('SELECT * FROM listings WHERE id=?').get(+id);
+  if (!l) throw new HttpError(404, '없는 상품입니다');
+  if (b.off !== undefined) {
+    db.prepare('UPDATE listings SET off=? WHERE id=?').run(String(b.off || '').trim().slice(0, 200), l.id);
+  }
+  if (b.ok) {
+    /* 비밀키가 걸린 것은 공개 못 한다. 검사를 «못 함»(모름)이면 운영자가 판단한다 */
+    if (l.scan === '걸림') throw new HttpError(409, '저장소에서 비밀키가 걸렸습니다 — 판매자가 지운 뒤 다시 검사하세요');
+    db.prepare('UPDATE listings SET ok=1 WHERE id=?').run(l.id);
+  }
+  return { ok: true };
+}
+
+/* ── 간이 비밀키 검사 (TASK-38) ─────────────────────────
+   gitleaks 전체가 아니라 흔한 규칙 몇 개만 서버 안에서 돈다 — 컨테이너에 바이너리를 더 넣지 않으려고.
+   받는 것은 공개 github 저장소 tar.gz 하나, 크기·시간 상한이 있다. 상한을 넘거나 못 받으면 «못 함»(모름)이다. */
+const SECRET_RULES = [
+  ['AWS 접근 키', /\b(AKIA|ASIA)[0-9A-Z]{16}\b/],
+  ['GitHub 토큰', /\bgh[pousr]_[A-Za-z0-9]{36,}\b/],
+  ['OpenAI 키', /\bsk-(proj-)?[A-Za-z0-9_-]{32,}\b/],
+  ['Anthropic 키', /\bsk-ant-[A-Za-z0-9_-]{32,}\b/],
+  ['Google API 키', /\bAIza[0-9A-Za-z_-]{35}\b/],
+  ['Slack 토큰', /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/],
+  ['Stripe 비밀 키', /\b(sk|rk)_live_[A-Za-z0-9]{20,}\b/],
+  ['개인 키', /-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/],
+];
+const SCAN_MAX = 50 * 1024 * 1024;
+/* 파일 목록 [{name, text}] 에서 걸린 것. 값은 돌려주지 않는다 — 규칙 이름과 파일만 */
+function scanTexts(files) {
+  const hits = [];
+  for (const f of files) {
+    if (/(^|\/)(node_modules|\.git)\//.test(f.name)) continue;
+    for (const [label, re] of SECRET_RULES) if (re.test(f.text)) hits.push({ file: f.name, rule: label });
+  }
+  return hits;
+}
+/* tar(ustar) 를 풀어 텍스트 파일만. 512 바이트 머리글 + 내용 — 바깥 라이브러리 없이 */
+function untarTexts(buf) {
+  const out = [];
+  for (let off = 0; off + 512 <= buf.length;) {
+    const h = buf.subarray(off, off + 512);
+    if (h.every(x => x === 0)) break;
+    const name = h.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
+    const prefix = h.subarray(345, 500).toString('utf8').replace(/\0.*$/s, '');
+    const size = parseInt(h.subarray(124, 136).toString('utf8').replace(/\0.*$/s, '').trim() || '0', 8) || 0;
+    const type = String.fromCharCode(h[156] || 48);
+    const body = buf.subarray(off + 512, off + 512 + size);
+    if ((type === '0' || type === '\0') && size > 0 && size < 2 * 1024 * 1024 && !body.subarray(0, 8000).includes(0))
+      out.push({ name: prefix ? prefix + '/' + name : name, text: body.toString('utf8') });
+    off += 512 + Math.ceil(size / 512) * 512;
+  }
+  return out;
+}
+async function scanListing(db, id, { siteAdmin } = {}, fetcher = fetch) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 할 수 있습니다');
+  const l = db.prepare('SELECT id, repo FROM listings WHERE id=?').get(+id);
+  if (!l) throw new HttpError(404, '없는 상품입니다');
+  const rp = repoUrl(l.repo);
+  if (!rp) { db.prepare("UPDATE listings SET scan='못 함' WHERE id=?").run(l.id); return { scan: '못 함', why: '저장소가 없습니다' }; }
+  let files;
+  try {
+    const ctl = AbortSignal.timeout(60000);
+    const r = await fetcher(`https://codeload.github.com/${rp.owner}/${rp.name}/tar.gz/HEAD`, { signal: ctl, headers: { 'user-agent': 'hackon-scan' } });
+    if (!r.ok) throw new Error('받기 ' + r.status);
+    const gz = Buffer.from(await r.arrayBuffer());
+    if (gz.length > SCAN_MAX) throw new Error('너무 큽니다');
+    files = untarTexts(zlib.gunzipSync(gz, { maxOutputLength: SCAN_MAX }));
+  } catch (e) {
+    db.prepare("UPDATE listings SET scan='못 함' WHERE id=?").run(l.id);
+    return { scan: '못 함', why: String(e.message || e).slice(0, 80) };
+  }
+  const hits = scanTexts(files);
+  const scan = hits.length ? '걸림' : '통과';
+  db.prepare('UPDATE listings SET scan=? WHERE id=?').run(scan, l.id);
+  /* 걸리면 공개도 끈다 — 이미 공개된 것이라도 */
+  if (hits.length) db.prepare("UPDATE listings SET ok=0 WHERE id=?").run(l.id);
+  return { scan, files: files.length, hits: hits.slice(0, 20) };
 }
 
 /* ── 강의 ─────────────────────────────────────────────
@@ -2155,6 +2340,7 @@ function sitemap(db) {
   const base = CANON();
   const urls = ['/', '/manual'].concat(
     db.prepare('SELECT 1 FROM lectures LIMIT 1').get() ? ['/learn'] : [],
+    db.prepare("SELECT 1 FROM listings WHERE ok=1 AND off='' LIMIT 1").get() ? ['/market'] : [],
     db.prepare("SELECT id FROM events WHERE listed=1 AND ends >= date('now') ORDER BY ends").all()
       .map((r) => '/e/' + r.id));
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -2304,6 +2490,32 @@ function open(file) {
       role   TEXT NOT NULL DEFAULT '',
       ok     INTEGER NOT NULL DEFAULT 0,
       at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    /* 마켓 — 바이브코딩 결과물을 시연하고 정해진 값에 판다(TASK-35~39).
+       **HACK:ON 은 돈을 만지지 않는다.** 구매 버튼은 판매자 본인의 판매처 계정(buy_url)으로 간다.
+       ok=1(사이트 운영자 확인) 이고 off 가 빈 값일 때만 공개된다. */
+    CREATE TABLE IF NOT EXISTS listings(
+      id      INTEGER PRIMARY KEY,
+      person  TEXT NOT NULL,
+      source  TEXT NOT NULL,                 -- submission | outside
+      ref     INTEGER NOT NULL,              -- teams.id 또는 outside.id
+      title   TEXT NOT NULL,
+      price   INTEGER NOT NULL,              -- 원
+      license TEXT NOT NULL,                 -- MIT | 개인용 | 상업용
+      refund  TEXT NOT NULL DEFAULT '',
+      buy_url TEXT NOT NULL,
+      repo    TEXT NOT NULL DEFAULT '',      -- 공개 저장소(선택). 비밀키 검사 대상
+      scan    TEXT NOT NULL DEFAULT '',      -- '' 안 함 | 통과 | 걸림 | 못 함
+      ok      INTEGER NOT NULL DEFAULT 0,
+      off     TEXT NOT NULL DEFAULT '',      -- 내린 이유. 비면 살아 있음
+      at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS market_reports(
+      id      INTEGER PRIMARY KEY,
+      listing INTEGER NOT NULL,
+      reason  TEXT NOT NULL,
+      at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     /* 강의. 영상은 서버에 안 둔다 — 유튜브 id 만 적는다(Fly 도쿄 내보내기는 GB 당 $0.04 이고,
@@ -5607,6 +5819,22 @@ function routes(db) {
         if (p === '/api/admin/outside' && req.method === 'GET') return json(res, 200, { rows: outsidePending(db, { siteAdmin }) });
         if ((m = p.match(/^\/api\/admin\/outside\/(\d+)$/)) && req.method === 'POST')
           return json(res, 200, reviewOutside(db, m[1], !!(await body(req)).ok, { siteAdmin }));
+        /* 마켓 — 읽기는 누구나, 판매 등록은 본인(팀·짝 열쇠), 확인·내리기·검사는 사이트 운영자 */
+        if (p === '/api/market' && req.method === 'GET') return json(res, 200, { rows: marketList(db) });
+        if ((m = p.match(/^\/api\/market\/(\d+)$/)) && req.method === 'GET') return json(res, 200, marketItem(db, m[1]));
+        if ((m = p.match(/^\/api\/market\/(\d+)\/report$/)) && req.method === 'POST')
+          return json(res, 200, reportListing(db, m[1], (await body(req)).reason));
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/listings$/)) && req.method === 'GET') {
+          if (!ownsPerson(db, m[1], req.headers['x-tkey'] || '')) throw new HttpError(403, '본인만 볼 수 있습니다');
+          return json(res, 200, { rows: myListings(db, m[1]), sellable: sellableOf(db, m[1]) });
+        }
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/listings$/)) && req.method === 'POST')
+          return json(res, 200, addListing(db, m[1], req.headers['x-tkey'] || '', await body(req)));
+        if (p === '/api/admin/market' && req.method === 'GET') return json(res, 200, { rows: marketAdmin(db, { siteAdmin }) });
+        if ((m = p.match(/^\/api\/admin\/market\/(\d+)$/)) && req.method === 'POST')
+          return json(res, 200, reviewListing(db, m[1], await body(req), { siteAdmin }));
+        if ((m = p.match(/^\/api\/admin\/market\/(\d+)\/scan$/)) && req.method === 'POST')
+          return json(res, 200, await scanListing(db, m[1], { siteAdmin }));
         if (p === '/api/admin/manner' && req.method === 'GET')
           return json(res, 200, { rows: mannerReports(db, { siteAdmin }) });
         if (p === '/api/admin/people' && req.method === 'GET') {
@@ -6505,6 +6733,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
+               || p === '/market' || p.match(/^\/m\/\d+$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -8016,6 +8245,74 @@ async function selftest() {
   const prof2 = profile(db, idA);
   ok(prof2.skill.n === 1 && prof2.manner.n === 1, '실력과 매너를 따로 센다');
   ok(prof2.skill.score !== prof2.manner.score, '실력과 매너가 섞이지 않는다');
+
+  /* ── 마켓 (TASK-35~39) ── 돈은 판매자 계정으로. 공개는 운영자 확인 뒤, 시연이 되는 것만 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    ok(buyUrl('https://gumroad.com/l/x') && buyUrl('https://me.gumroad.com/l/x') && buyUrl('https://kmong.com/gig/1'), '마켓: 허용 판매처를 받는다');
+    for (const bad of ['https://evilgumroad.com/x', 'http://gumroad.com/x', 'javascript:alert(1)', 'https://a:b@gumroad.com/x', 'https://gumroad.com.evil.test/x'])
+      ok(buyUrl(bad) === '', '마켓: 허용 밖 판매 주소를 받았다 — ' + bad);
+    ok(repoUrl('https://github.com/mandeun/hackon').name === 'hackon' && repoUrl('https://gitlab.com/a/b') === null && repoUrl('https://github.com/a/b/../../x') === null,
+       '마켓: 저장소는 github 소유자/이름 꼴만');
+    const kEv = createEvent(db, { title: '마켓시험', starts: '2020-04-01', ends: '2020-04-01' });
+    const kT = joinTeam(db, kEv.id, { name: '파는팀', contact: 'seller@x.test', agree: true });
+    const kTk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(kT).tkey;
+    const kP = pidOf(db, 'seller@x.test');
+    db.prepare("INSERT INTO submissions(team,url,note,show) VALUES(?,?,?,1)").run(kT, 'https://demo.example/app', '시연');
+    const good = { source: 'submission', ref: kT, price: 9900, license: 'MIT', buy_url: 'https://me.gumroad.com/l/app', refund: '받은 뒤 7일' };
+    ok(raises(() => addListing(db, kP, 'zzzz', good), 403), '마켓: 남의 열쇠로 못 올린다');
+    ok(raises(() => addListing(db, kP, kTk, { ...good, ref: 999999 }), 403), '마켓: 내 것이 아닌 것은 못 판다');
+    ok(raises(() => addListing(db, kP, kTk, { ...good, price: 10 }), 400), '마켓: 값이 너무 작으면 400');
+    ok(raises(() => addListing(db, kP, kTk, { ...good, license: '' }), 400), '마켓: 라이선스를 안 고르면 400');
+    ok(raises(() => addListing(db, kP, kTk, { ...good, buy_url: 'https://evil.test/pay' }), 400), '마켓: 허용 밖 판매처는 400');
+    const L1 = addListing(db, kP, kTk, good);
+    ok(marketList(db).length === 0, '마켓: 운영자 확인 전에는 공개되지 않는다');
+    ok(raises(() => reviewListing(db, L1.id, { ok: true }, {}), 403), '마켓: 운영자가 아니면 공개 못 한다');
+    reviewListing(db, L1.id, { ok: true }, { siteAdmin: true });
+    const pub = marketList(db);
+    ok(pub.length === 1 && pub[0].demo.url === 'https://demo.example/app' && pub[0].buy_url === 'https://me.gumroad.com/l/app', '마켓: 확인하면 시연 주소와 판매 주소가 공개된다');
+    ok(!JSON.stringify(pub).includes('seller@x.test') && !JSON.stringify(marketItem(db, L1.id)).includes('x.test'), '마켓: 판매자 연락처가 안 나간다');
+    ok(pub[0].seller.finished === 1 && pub[0].seller.praise, '마켓: 판매자 신뢰 띠가 프로필에서 온다');
+    db.prepare('UPDATE submissions SET show=0 WHERE team=?').run(kT);
+    ok(marketList(db).length === 0, '마켓: 쇼케이스 동의를 끄면 시연도 판매도 내려간다');
+    db.prepare('UPDATE submissions SET show=1 WHERE team=?').run(kT);
+    ok(raises(() => reportListing(db, L1.id, ''), 400) && raises(() => reportListing(db, 999999, '사기'), 404), '마켓: 빈 신고·없는 상품 신고는 막는다');
+    reportListing(db, L1.id, '데모가 광고와 다릅니다');
+    ok(marketAdmin(db, { siteAdmin: true }).some(r => r.id === L1.id && r.reports === 1), '마켓: 신고가 운영자 화면에 뜬다');
+    ok(raises(() => marketAdmin(db, {}), 403), '마켓: 운영자 목록은 운영자만');
+    reviewListing(db, L1.id, { off: '신고 확인 — 데모가 다름' }, { siteAdmin: true });
+    ok(marketList(db).length === 0 && raises(() => marketItem(db, L1.id), 404), '마켓: 내리면 목록·상세에서 빠진다');
+    ok(myListings(db, kP)[0].off === '신고 확인 — 데모가 다름', '마켓: 판매자에게는 내린 이유가 보인다');
+
+    /* 간이 비밀키 검사 */
+    const fakeKey = 'AKIA' + 'ABCDEFGHIJKLMNOP';
+    ok(scanTexts([{ name: 'src/app.js', text: `const k = "${fakeKey}"` }]).length === 1, '검사: AWS 키꼴을 잡는다');
+    ok(scanTexts([{ name: 'src/app.js', text: 'const k = process.env.KEY' }]).length === 0, '검사: 환경변수 이름은 안 잡는다');
+    const mkTar = files => {
+      const parts = [];
+      for (const [name, text] of files) {
+        const body = Buffer.from(text); const h = Buffer.alloc(512);
+        h.write(name, 0); h.write(body.length.toString(8).padStart(11, '0') + '\0', 124); h.write('0', 156); h.write('ustar\0', 257);
+        parts.push(h, body, Buffer.alloc((512 - body.length % 512) % 512));
+      }
+      parts.push(Buffer.alloc(1024));
+      return zlib.gzipSync(Buffer.concat(parts));
+    };
+    ok(untarTexts(zlib.gunzipSync(mkTar([['a/x.txt', 'hello'], ['a/y.js', 'world']]))).map(f => f.name).join() === 'a/x.txt,a/y.js', '검사: tar 를 푼다');
+    const L2 = addListing(db, kP, kTk, { ...good, repo: 'https://github.com/demo/app' });
+    reviewListing(db, L2.id, { ok: true }, { siteAdmin: true });
+    const fetchWith = gz => async () => ({ ok: true, arrayBuffer: async () => gz });
+    const s1 = await scanListing(db, L2.id, { siteAdmin: true }, fetchWith(mkTar([['app/.env', `KEY=${fakeKey}`]])));
+    ok(s1.scan === '걸림' && !JSON.stringify(s1).includes(fakeKey), '검사: 키가 있으면 걸림, 값은 안 돌려준다');
+    ok(db.prepare('SELECT ok FROM listings WHERE id=?').get(L2.id).ok === 0, '검사: 걸리면 공개를 끈다');
+    ok(raises(() => reviewListing(db, L2.id, { ok: true }, { siteAdmin: true }), 409), '검사: 걸린 것은 운영자도 공개 못 한다');
+    const s2 = await scanListing(db, L2.id, { siteAdmin: true }, async () => { throw new Error('망 끊김'); });
+    ok(s2.scan === '못 함', '검사: 못 받으면 «못 함»(모름) — 통과로 치지 않는다');
+    const s3 = await scanListing(db, L2.id, { siteAdmin: true }, fetchWith(mkTar([['app/main.js', 'console.log(1)']])));
+    ok(s3.scan === '통과', '검사: 깨끗하면 통과');
+    let c403 = 0; try { await scanListing(db, L2.id, {}, fetchWith(mkTar([]))); } catch (e) { c403 = e.code; }
+    ok(c403 === 403, '검사: 운영자만 돌린다');
+  }
 
   /* ── 모임·수업과 예약금 (TASK-28) ── 돈은 안 만진다. 상태 표시는 운영자와 그 팀만 */
   {

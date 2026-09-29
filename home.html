@@ -256,6 +256,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a href="#give">협찬·돕기</a>
       <a href="/problems">문제 은행</a>
       <a id="nav-learn" href="/learn" hidden>강의</a>
+      <a id="nav-market" href="/market" hidden>마켓</a>
       <a id="nav-rank" href="/rank" hidden>순위</a>
       <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
       <a href="/news">해커온뉴스</a>
@@ -516,6 +517,11 @@ fetch('/api/conditions').then(function(r){ return r.json(); }).then(function(d){
 /* 강의 입구. 한 편이라도 올라왔을 때만 연다 — 순위 입구와 같은 이유다 */
 fetch('/api/lectures').then(function(r){ return r.json(); }).then(function(d){
   if (d && d.rows && d.rows.length) document.getElementById('nav-learn').hidden = false;
+}).catch(function(){});
+
+/* 마켓 입구 — 공개된 것이 하나라도 있을 때만 */
+fetch('/api/market').then(function(r){ return r.json(); }).then(function(d){
+  if (d && d.rows && d.rows.length) document.getElementById('nav-market').hidden = false;
 }).catch(function(){});
 
 /* 순위 입구. 이름을 정한 사람이 하나라도 있을 때만 연다 —
