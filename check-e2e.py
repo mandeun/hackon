@@ -2119,7 +2119,11 @@ with sync_playwright() as p:
     # 14 — 심사 링크의 열쇠가 주소창에서 사라진다 · 19 — 미리보기 iframe 에 allow-same-origin 없음
     visit(f"/j/{SE}?k={SJ}")
     A(pg.evaluate("location.search") == "", "심사 링크를 열었는데 주소창에 열쇠가 남아 있다")
-    A("allow-same-origin" not in pg.content(), "미리보기 iframe 이 같은 출처 권한을 가진다")
+    # 화면 파일 전체(스크립트 속 틀 포함)에서 allow-same-origin 을 가진 iframe 은 마켓 시연 하나뿐이어야 한다.
+    # 마켓 시연은 «바깥 출처일 때만» 그리고 그 판정은 마켓 절(같은 출처면 iframe 없음)이 따로 지킨다.
+    # 심사 미리보기는 제출 주소가 우리 출처일 수 있어 끝까지 빼 둔다.
+    _ifr = [t for t in re.findall(r"<iframe[^>]*>", pg.content(), re.S) if "allow-same-origin" in t]
+    A(all('id="mk-demo-frame"' in t for t in _ifr), f"미리보기 iframe 이 같은 출처 권한을 가진다: {[t[:120] for t in _ifr]}")
     ok("보안 감사 반영 — 죽지 않음·사본에 열쇠 없음·소스 404·도배 429·한 대회 신청 상한·CSV·헤더·길이·쿼리 열쇠 403·id·음수·주소창 열쇠")
     # ── 2026-09-26 짝 비교 심사 — 두 팀 중 나은 쪽만 고른다 ──
     _, pe = post("/api/events", {"title": "짝비교검사"}); PE, PK, PJ = pe["id"], pe["okey"], pe["jkey"]

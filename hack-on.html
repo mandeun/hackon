@@ -3859,7 +3859,7 @@ const SCREEN = {
       </section>
       <div class="card" id="mk-demo" style="padding:0;overflow:hidden">
         ${same ? `<div style="padding:16px"><div class="meta">이 시연은 새 창에서 엽니다.</div></div>`
-          : `<iframe src="${esc(d.demo.url)}" title="${esc(d.title)} 시연" style="display:block;width:100%;height:520px;border:0"
+          : `<iframe id="mk-demo-frame" src="${esc(d.demo.url)}" title="${esc(d.title)} 시연" style="display:block;width:100%;height:520px;border:0"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="no-referrer" loading="lazy"></iframe>`}
         <div style="padding:10px 16px"><a href="${esc(d.demo.url)}" target="_blank" rel="noopener noreferrer">새 창으로 써 보기 ›</a>
           <span class="meta"> · 지금 ${esc(d.demo.open)}</span></div>
