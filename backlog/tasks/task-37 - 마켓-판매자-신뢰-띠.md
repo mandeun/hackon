@@ -1,7 +1,7 @@
 ---
 id: TASK-37
 title: 마켓 — 판매자 신뢰 띠(완주·매너·살아 있는 날)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 19:00'
 labels:
@@ -21,6 +21,7 @@ ordinal: 37000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 신뢰 띠에 연락처가 없다
-- [ ] #2 평가 3건 미만이면 숫자를 안 붙인다
+- [x] #1 신뢰 띠에 연락처가 없다
+- [ ] #2 평가 3건 미만이면 숫자를 안 붙인다 — 신뢰 띠의 3건 기준은 profile().manner.show 를 그대로 쓰지만 마켓 쪽 검사는 없음
+검사: node server.js --test · python3 check-e2e.py (2026-09-29), 체크한 항목은 지키는 코드를 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

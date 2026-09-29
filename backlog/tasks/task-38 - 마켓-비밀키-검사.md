@@ -1,7 +1,7 @@
 ---
 id: TASK-38
 title: 마켓 — 판매 저장소 비밀키 검사(gitleaks)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 19:00'
 labels:
@@ -21,6 +21,7 @@ ordinal: 38000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 테스트 저장소에 가짜 키를 넣으면 판매 링크가 꺼진다
-- [ ] #2 상한을 넘으면 «검사 못 함»(모름)으로 남고 판매는 운영자 판단
+- [x] #1 테스트 저장소에 가짜 키를 넣으면 판매 링크가 꺼진다
+- [ ] #2 상한을 넘으면 «검사 못 함»(모름)으로 남고 판매는 운영자 판단 — 못 받으면 «못 함» 은 검사함, 50MB·60초 상한 자체는 검사 없음
+검사: node server.js --test · python3 check-e2e.py (2026-09-29), 체크한 항목은 지키는 코드를 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

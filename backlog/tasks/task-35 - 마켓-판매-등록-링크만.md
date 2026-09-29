@@ -1,7 +1,7 @@
 ---
 id: TASK-35
 title: 마켓 — 판매 등록(돈은 판매자 본인 계정으로)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 19:00'
 labels:
@@ -26,7 +26,8 @@ ordinal: 35000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 허용 목록 밖 도메인·javascript: 주소는 저장 안 됨 — 단위 검사, 깨뜨려 확인
-- [ ] #2 라이선스를 안 고르면 400
-- [ ] #3 쇼케이스 동의 없는 제출작은 판매 등록 불가
+- [x] #1 허용 목록 밖 도메인·javascript: 주소는 저장 안 됨 — 단위 검사, 깨뜨려 확인
+- [x] #2 라이선스를 안 고르면 400
+- [x] #3 쇼케이스 동의 없는 제출작은 판매 등록 불가
+검사: node server.js --test · python3 check-e2e.py (2026-09-29), 체크한 항목은 지키는 코드를 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

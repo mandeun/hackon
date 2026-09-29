@@ -1,7 +1,7 @@
 ---
 id: TASK-30
 title: 교육 — 강의 판매는 외부 링크(인프런)로
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 18:00'
 labels:
@@ -25,6 +25,7 @@ ordinal: 30000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 buy 주소가 https 가 아니면 저장 안 됨 — 단위 검사
-- [ ] #2 buy 가 없는 강의에는 단추가 없다
+- [x] #1 buy 주소가 https 가 아니면 저장 안 됨 — 단위 검사
+- [ ] #2 buy 가 없는 강의에는 단추가 없다 — 판매처 없는 강의에 단추가 없는지는 검사 없음
+검사: node server.js --test · python3 check-e2e.py (2026-09-29), 체크한 항목은 지키는 코드를 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

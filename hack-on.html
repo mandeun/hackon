@@ -1773,6 +1773,12 @@ function stars(name, val) {
   </div>`;
 }
 
+/* 아직 안 낸 첫 주. 다 냈으면 마지막 주(고쳐 내기) */
+function nextWeek(done, weeks) {
+  for (let w = 1; w <= weeks; w++) if (!(done || []).includes(w)) return w;
+  return weeks;
+}
+
 /* 같이 한 사람 매너 평가 칸. 대회가 시작되기 전이면 아예 안 그린다(열쇠가 있어도 할 것이 없다).
    칭찬은 누를 것을 준다. 불편했던 일은 접어 두고, 공개되지 않는다고 칸 안에 적는다. */
 function peersCard(pe) {
@@ -2102,6 +2108,7 @@ const SCREEN = {
     /* 비매너 알림 — 사이트 운영자만. 못 받으면(null) «모름» 으로 그린다 */
     const mrep = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/manner').then(r => r.rows).catch(() => null) : [];
     const opend = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/outside').then(r => r.rows).catch(() => null) : [];
+    const mkadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/market').then(r => r.rows).catch(() => null) : [];
     const claimBox = (AUTH && AUTH.claimable) ? `
       <div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
         <h3 style="color:var(--warn)">첫 사이트 운영자 앉히기</h3>
@@ -2127,6 +2134,18 @@ const SCREEN = {
             ${e.listed ? '' : ' <span class="pill warn">초안</span>'}
             · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
         </div>`).join('')}` : ''}
+      <div class="card" id="market-admin"><h3>마켓 — 확인·신고 ${mkadm && mkadm.length ? `<span class="pill warn">${mkadm.length}</span>` : ''}</h3>
+        <div class="meta">공개 전에 시연을 열어 보고, 판매 주소가 그 사람 판매처인지 봅니다. 저장소가 있으면 먼저 «검사».</div>
+        ${mkadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !mkadm.length ? '<div class="meta" style="margin-top:8px">기다리는 것이 없습니다.</div>'
+          : mkadm.map(l => `<div style="margin-top:10px"><b>${esc(l.title)}</b> <span class="meta">${esc(l.handle || l.person)} · ${won(l.price)} · ${esc(l.license)}
+              ${l.ok ? ' · 공개 중' : ' · 확인 전'}${l.off ? ' · 내려감(' + esc(l.off) + ')' : ''}${l.scan ? ' · 검사 ' + esc(l.scan) : ''}</span>
+              <div><a href="${esc(l.buy_url)}" target="_blank" rel="noopener noreferrer">${esc(l.buy_url)}</a></div>
+              ${l.reasons.map(x => `<div class="meta">신고: ${esc(x.reason)}</div>`).join('')}
+              ${!l.ok ? `<button class="btn sm" data-mka="${l.id}" data-act="ok">공개</button>` : ''}
+              ${!l.off ? `<button class="btn sec sm" data-mka="${l.id}" data-act="off">내리기</button>` : ''}
+              ${l.repo ? `<button class="btn sec sm" data-mks="${l.id}">비밀키 검사</button>` : ''}</div>`).join('')}
+      </div>
       <div class="card" id="outside-admin"><h3>밖에서 만든 것 — 확인 대기 ${opend && opend.length ? `<span class="pill warn">${opend.length}</span>` : ''}</h3>
         <div class="meta">참가자가 프로필에 올린 대회 밖 결과물입니다. 열어 보고 본인 것이 맞아 보이면 공개합니다.</div>
         ${opend === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
@@ -2381,7 +2400,7 @@ const SCREEN = {
       <div class="meta" id="f-tplnote" style="margin:-2px 0 8px"></div>
       <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 불편 하나 없애기"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
       ${rq ? `<label>어떻게 받을까요</label>
-      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button></div>
+      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button><button type="button" class="pick" data-how="프로젝트">프로젝트 · 몇 주 동안</button></div>
       <div class="meta" style="margin:-2px 0 8px">«온라인으로 결과물만»은 모이지 않습니다. 일주일 동안 각자 만들어 내고, 올린 분이 받아서 «됐다»를 답합니다.</div>` : ''}
       ${(() => { const ids = Object.keys(localStorage).filter(k => k.startsWith('hackon.okey.')).map(k => k.slice(12)); if (!ids.length || !LIVE) return '';
         return `<details class="more" id="f-fromwrap" style="margin-top:8px"><summary>지난 대회에서 가져오기 <span class="when">기준표·주제·진행 순서·자리</span></summary>
@@ -2660,6 +2679,8 @@ const SCREEN = {
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const qas = LIVE ? await api(`/events/${cur}/questions`).catch(() => []) : [];
     const e = d.event;
+    /* 선발형 프로젝트 — 지원자 카드. 연락처 없이 기록만(수락하면 명단에 연락처가 붙는다) */
+    const apps = (LIVE && e.pick) ? await api(`/events/${cur}/applicants`).then(r => r.rows).catch(() => null) : [];
     /* 운영자 board 에는 심사·투표 열쇠가 딸려 온다. 적어 두면 링크·창 열기가 늘 된다. */
     if (e.jkey) try { localStorage.setItem('hackon.jkey.' + cur, e.jkey); } catch (_) {}
     if (e.vkey) try { localStorage.setItem('hackon.vkey.' + cur, e.vkey); } catch (_) {}
@@ -2915,9 +2936,15 @@ const SCREEN = {
         <div class="row">
           <div><label>종류</label><select id="e-kind">
             <option value=""${e.kind ? '' : ' selected'}>해커톤</option>
-            <option value="모임"${e.kind === '모임' ? ' selected' : ''}>모임·수업 (제출·심사 없음)</option></select></div>
+            <option value="모임"${e.kind === '모임' ? ' selected' : ''}>모임·수업 (제출·심사 없음)</option>
+            <option value="프로젝트"${e.kind === '프로젝트' ? ' selected' : ''}>프로젝트 (몇 주)</option></select></div>
           <div><label>예약금(원)</label><input id="e-deposit" type="number" min="0" max="1000000" step="1000" value="${+e.deposit || 0}"></div>
         </div>
+        ${e.kind === '프로젝트' ? `<div class="row">
+          <div><label>주 수</label><input id="e-weeks" type="number" min="1" max="16" value="${+e.weeks || 4}"></div>
+          <div><label>정기 모임</label><input id="e-meet" maxlength="40" value="${esc(e.meet || '')}" placeholder="예) 매주 화 20시 · 디스코드"></div>
+        </div>
+        <label class="ck"><input type="checkbox" id="e-pick"${e.pick ? ' checked' : ''}><span>선발형 — 신청을 «지원» 으로 받고 리더가 수락합니다</span></label>` : ''}
         <div class="meta">노쇼를 줄이려고 받는 돈입니다. <b>HACK:ON 은 돈을 받지 않습니다</b> — 주최자가 따로 받고,
           등록 데스크에서 팀마다 «받음·돌려줌·안 돌려줌» 만 표시합니다. 상태는 그 팀과 운영자만 봅니다.</div>
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
@@ -3216,6 +3243,33 @@ const SCREEN = {
       ${(d.trash || []).length ? `<details style="margin-top:8px"><summary>지운 팀 ${d.trash.length} <span class="when">되살릴 수 있습니다</span></summary><div class="in">
         ${d.trash.map(t => `<div class="shrow" style="margin-top:6px;align-items:center"><span>${esc(t.name)} <span class="meta">${esc(String(t.at).slice(0, 16))}${t.by === 'team' ? ' · 본인이 취소' : ''}</span></span><button class="btn sec sm" data-untrash="${t.id}">되살리기</button></div>`).join('')}</div></details>` : ''}
       <p class="sub" style="margin-top:12px">팀을 누르면 제출·심사 화면이 열립니다. <b>☆</b> 추천작 · <b>🔗</b> 팀을 잃은 참가자에게 주는 링크(본인 확인 뒤) · <b>✏️</b> 이름 고치기 · <b>🗑</b> 지우기(휴지통에서 되살릴 수 있습니다).</p>
+      ${e.pick ? `<details id="sec-apps" open><summary>지원자 ${apps && apps.length ? `<span class="pill warn">${apps.filter(a => a.pick === 'applied').length} 대기</span>` : ''} <span class="when">선발형</span></summary><div class="in">
+        <div class="meta">완주·안 온 횟수·매너는 HACK:ON 대회 기록에서만 나옵니다. 기록이 없으면 «처음» — 나쁜 게 아닙니다. 거절은 공개 기록에 안 남습니다.</div>
+        ${apps === null ? '<div class="meta">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !apps.length ? '<div class="meta" style="margin-top:8px">아직 지원자가 없습니다.</div>'
+          : apps.map(a => { const r = a.record;
+              const facts = !r || !r.events ? ['처음 오는 분'] : [
+                `대회 ${r.events}번 · 완주 ${r.finished}`, `완주율 ${r.finishRate === null ? '—' : r.finishRate + '%'}`,
+                `안 온 횟수 ${r.noshow}`, r.manner && r.manner.show ? `매너 ${r.manner.score}` : `매너 ${r.manner && r.manner.n ? r.manner.n + '건(3건부터 숫자)' : '평가 없음'}`];
+              return `<div class="card applicant" data-app="${a.id}" style="margin-top:10px">
+                <b>${esc(a.name)}</b> ${a.role ? `<span class="pill">${esc(a.role)}</span>` : ''}
+                <span class="pill ${a.pick === 'accepted' ? 'ok' : a.pick === 'rejected' ? 'warn' : ''}">${{ applied: '대기', accepted: '수락', rejected: '거절' }[a.pick]}</span>
+                <div class="meta" style="margin-top:4px">${facts.map(esc).join(' · ')}${r && r.tier ? ' · 티어 ' + esc(r.tier) : ''}</div>
+                ${r && r.praise && r.praise.top.length ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${r.praise.top.map(x => `<span class="pill ok">${esc(x.tag)}</span>`).join('')}</div>` : ''}
+                ${a.apply ? `<div class="meta" style="margin-top:6px">«${esc(a.apply)}»</div>` : ''}
+                ${r ? `<div class="meta" style="margin-top:4px"><a href="/p/${esc(r.id)}" target="_blank" rel="noopener">프로필 전체 ›</a>${r.outside ? ' · 밖에서 만든 것 ' + r.outside : ''}${r.lectures ? ' · 강의 ' + r.lectures : ''}</div>` : ''}
+                <div style="margin-top:8px"><button class="btn sm" data-apick="${a.id}" data-st="accepted">수락</button>
+                  <button class="btn sec sm" data-apick="${a.id}" data-st="rejected">거절</button></div>
+              </div>`; }).join('')}
+      </div></details>` : ''}
+      ${e.kind === '프로젝트' && e.weeks ? `<details id="sec-weeks" open><summary>주차 체크인 <span class="when">매주</span></summary><div class="in">
+        <div class="meta">누르면 왔음, 다시 누르면 취소. 빠진 주는 그 사람 프로필의 «안 온 횟수» 로 쌓입니다. ✓ 는 그 주 제출.</div>
+        <div style="overflow-x:auto"><table><tr><th>팀</th>${Array.from({ length: e.weeks }, (_, i) => `<th>${i + 1}주</th>`).join('')}</tr>
+        ${d.rows.filter(r => r.pick !== 'applied' && r.pick !== 'rejected').map(r => `<tr><td>${esc(r.name)}</td>${Array.from({ length: e.weeks }, (_, i) => {
+          const w = i + 1, on = (r.attend || []).includes(w), sub = (r.weeksDone || []).includes(w);
+          return `<td><button class="btn ${on ? '' : 'sec'} sm" data-att="${r.id}:${w}" aria-label="${esc(r.name)} ${w}주 체크인" style="padding:4px 8px">${on ? '●' : '○'}${sub ? '✓' : ''}</button></td>`; }).join('')}</tr>`).join('')}
+        </table></div>
+      </div></details>` : ''}
       <details id="sec-desk"${폄('등록')}><summary>등록 데스크 <span class="when">당일 아침</span></summary><div class="in">
         ${(() => {
           /* 신청 N · 확정 M 두 칸. 아직 아무도 «오시나요»에 답하지 않았으면 M 은 «모름»이다 —
@@ -3298,6 +3352,8 @@ const SCREEN = {
     const ended = statusOf(e).k === '끝남';
     /* 모임·수업 — 제출·심사·순위·마감 칸을 안 그린다. 신청·참석 확인·체크인·서로 평가만 */
     const meet = e.kind === '모임';
+    /* 프로젝트 — 몇 주. 주차 제출이 결과물 제출을 대신하고, 마지막 주 제출이 완주다 */
+    const proj = e.kind === '프로젝트' && +e.weeks > 0;
     /* 아래 바닥 단추. 화면을 그린 뒤 render() 가 붙인다. */
     CTA = ended ? null
         : !mine ? { text: '참가 신청하기', to: 'apply' }
@@ -3324,6 +3380,7 @@ const SCREEN = {
           ${e.twist ? `<li><span class="ic" aria-hidden="true">🎲</span><span><span class="k">그날의 조건</span><span class="v">${esc(e.twist)} <a href="/conditions" class="hint">역대 조건›</a></span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">🙋</span><span><span class="k">신청</span><span class="v">참가 ${e.teams}팀${
             e.cap ? ` <span class="hint">· 정원 ${e.cap}명 · ${e.seatsLeft ? `남은 자리 ${e.seatsLeft}팀` : `정원이 찼습니다${e.waiting ? ` · 대기 ${e.waiting}명` : ''} — 신청하면 대기, 자리가 나면 메일로 팀 링크`}</span>` : ''}</span></span></li>
+          ${proj ? `<li id="proj-line"><span class="ic" aria-hidden="true">🗓️</span><span><span class="k">기간</span><span class="v">${+e.weeks}주${e.meet ? ' · ' + esc(e.meet) : ''}${e.pick ? ' · 선발형 — 리더가 지원서를 보고 수락합니다' : ''}</span></span></li>` : ''}
           ${+e.deposit ? `<li id="dep-line"><span class="ic" aria-hidden="true">🎟️</span><span><span class="k">예약금</span><span class="v">${won(e.deposit)} — 오시면 돌려드립니다. 받는 방법은 주최자가 따로 안내합니다</span></span></li>` : ''}
           ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
           <li><span class="ic" aria-hidden="true">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span class="hint">· 카톡 방에 한 번</span></span></span></li>
@@ -3367,7 +3424,7 @@ const SCREEN = {
         !ended
           ? (mine
               ? moreForm(mine)
-              : `<div class="card" id="apply"><h3>참가 신청</h3>
+              : `<div class="card" id="apply"><h3>${e.pick ? '지원하기' : '참가 신청'}</h3>
                    ${cancelLine(e)}
                    ${applyForm()}</div>`)
           : ''}
@@ -3404,13 +3461,25 @@ const SCREEN = {
               </div></div>` : ''}
             <div class="shrow" style="margin-top:6px"><button class="btn sm" id="cf-yes">올 거예요</button><button class="btn sec sm" id="cf-no">못 가요</button></div>`}</div>` : ''}
           <div class="meta">1. <b>내 팀 링크</b>를 나에게만 보내 두세요 — 폰을 바꿔도 이걸로 돌아옵니다.<br>
-            2. ${meet ? `당일(${esc(e.starts)}) 등록 데스크에서 체크인합니다. 끝나면 같이 한 분들을 평가할 수 있습니다.`
+            2. ${proj ? `매주 여기서 그 주 결과물 주소를 냅니다. <b>${+e.weeks}주차 제출이 완주</b>입니다.`
+                 : meet ? `당일(${esc(e.starts)}) 등록 데스크에서 체크인합니다. 끝나면 같이 한 분들을 평가할 수 있습니다.`
                  : `${e.due ? `<b>${esc(e.due.replace('T', ' '))}</b> 까지` : `당일(${esc(e.starts)}) 마감 전에`} 여기서 결과물 주소를 냅니다.`}</div>
+          ${mine.pick ? `<div class="meta" id="pick-mine" style="margin-top:6px">선발 <span class="pill ${mine.pick === 'accepted' ? 'ok' : mine.pick === 'rejected' ? 'warn' : ''}">${
+            { applied: '리더가 보는 중', accepted: '함께합니다', rejected: '이번에는 함께하지 못합니다' }[mine.pick] || ''}</span></div>` : ''}
+          ${proj && mine.pick !== 'applied' && mine.pick !== 'rejected' ? `<div id="wk-box" style="margin-top:10px">
+            <div class="meta">낸 주 ${(mine.weeksDone || []).length ? (mine.weeksDone || []).map(w => w + '주').join(' · ') : '아직 없음'}</div>
+            <div class="row"><div><label>주차</label><select id="wk-n">${Array.from({ length: +e.weeks }, (_, i) =>
+              `<option value="${i + 1}"${i + 1 === nextWeek(mine.weeksDone, +e.weeks) ? ' selected' : ''}>${i + 1}주${i + 1 === +e.weeks ? ' (마지막)' : ''}</option>`).join('')}</select></div>
+              <div><label>결과물 주소</label><input id="wk-url" placeholder="https://…"></div></div>
+            <input id="wk-note" maxlength="200" placeholder="이번 주에 한 것 한 줄 (선택)" style="margin-top:6px">
+            <div style="height:8px"></div><button class="btn sm" id="wk-go" data-team="${esc(mine.id)}">이번 주 내기</button></div>` : ''}
+          ${(meet || proj) ? `<div style="margin-top:8px"><button class="btn sec sm" id="cert-go" data-team="${esc(mine.id)}">수료 확인 받기</button>
+            <span class="meta">${meet ? '그날 체크인하면 받습니다' : '마지막 주를 내면 받습니다'}</span><div id="cert-out"></div></div>` : ''}
           ${+e.deposit ? `<div class="meta" id="dep-mine" style="margin-top:6px">예약금 <b>${won(e.deposit)}</b> ·
             ${mine.deposit ? `<span class="pill ${mine.deposit === '안 돌려줌' ? 'warn' : 'ok'}">${esc(mine.deposit)}</span>` : '<span class="pill">주최자 확인 전</span>'}</div>` : ''}
           ${cancelLine(e)}
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
-          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${meet ? '' : `<button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button>`}<a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${meet || proj ? '' : `<button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button>`}<a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
           <div class="card" id="pairbox" style="margin-top:12px">
             <b>같이 올 사람 있으세요</b>
             <div class="meta">둘이 오면 자리를 하나만 더 씁니다. 한 분이 못 오게 되어도
@@ -3689,6 +3758,7 @@ const SCREEN = {
           <div><label>강사 이름</label><input id="la-teacher" maxlength="20" placeholder="프로필이 없을 때"></div>
         </div>
         <label>한 줄 소개</label><input id="la-note" maxlength="200" placeholder="무엇을 할 수 있게 되나">
+        <label>전체 강의 판매처 (선택)</label><input id="la-buy" placeholder="https://www.inflearn.com/course/… — 내 링크로 팔리면 90%">
         <div style="height:10px"></div><button class="btn sm" id="la-go">올리기</button>
       </div>` : '';
     return `<section class="hero"><div class="top"><span class="pill">강의</span></div>
@@ -3703,6 +3773,8 @@ const SCREEN = {
             <h3 style="margin:0 0 4px">${esc(now.title)}</h3>
             <div class="meta">${[who(now), len(now), now.series ? esc(now.series) : ''].filter(Boolean).join(' · ')}</div>
             ${now.note ? `<div class="meta" style="margin-top:6px">${esc(now.note)}</div>` : ''}
+            ${now.buy ? `<div style="margin-top:10px"><a class="btn sm" id="lec-buy" href="${esc(now.buy)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">전체 강의 보기 ›</a>
+              <span class="meta">판매처에서 결제합니다 — HACK:ON 은 돈을 받지 않습니다</span></div>` : ''}
           </div>
         </div>` : ''}
       ${rows === null
@@ -3721,6 +3793,99 @@ const SCREEN = {
             ${(AUTH && AUTH.siteAdmin) ? `<button class="btn sec sm" data-lec-del="${r.id}" style="margin:-4px 0 10px">이 강의 내리기</button>` : ''}`).join('')}`).join('')}
       ${adminBox}
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/problems">문제 은행</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
+  /* 수료 확인 — 이 주소가 곧 확인이다. «자격증»·«인증» 은 쓰지 않는다(자격기본법 제17조) */
+  async cert() {
+    let c;
+    try { c = await api(`/cert/${CRT[1]}`); }
+    catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없는 번호입니다' : '불러오지 못했습니다'}</h3>
+      <div class="meta">주소를 다시 확인해 주세요.</div></div>`; }
+    const when = c.starts === c.ends ? esc(c.starts) : `${esc(c.starts)} ~ ${esc(c.ends)}`;
+    return `<div class="card" id="cert" style="text-align:center;padding:28px 20px;border:2px solid var(--acc)">
+        <div class="meta">HACK:ON 수료 확인</div>
+        <h2 style="margin:10px 0 4px">${esc(c.name)}</h2>
+        <div style="font-size:17px;font-weight:700">${esc(c.course)}</div>
+        <div class="meta" style="margin-top:6px">${esc(c.kind)} · ${when} · ${esc(c.host)}</div>
+        <div style="margin:14px auto 0;max-width:140px">${qrTag(location.href)}</div>
+        <div class="meta" style="margin-top:10px">이 주소(번호 ${esc(c.code)})가 곧 확인입니다. HACK:ON 이 체크인·제출 기록으로 발급했습니다.</div>
+        ${c.person ? `<div class="meta" style="margin-top:6px"><a href="/p/${esc(c.person)}">이 사람의 다른 기록 ›</a></div>` : ''}
+      </div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/learn">강의</a></p>`;
+  },
+
+  /* 마켓 목록 — 해커톤에서 실제로 돌아간 것, 운영진이 확인한 것만. 돈은 판매자 계정으로 간다 */
+  async market() {
+    let rows = null;
+    if (LIVE) { try { rows = (await api('/market')).rows; } catch { rows = null; } } else rows = [];
+    return `<section class="hero"><div class="top"><span class="pill">마켓</span></div>
+        <h2>돌아가는 걸 보고 사세요</h2>
+        <p class="sub" style="margin-bottom:0">바이브코딩으로 만든 앱·코드를 <b>그 자리에서 써 보고</b> 삽니다.
+          만든 사람의 완주·동료 평가가 같이 붙습니다. 결제는 만든 사람의 판매처에서 합니다.</p>
+      </section>
+      ${rows === null ? `<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다. 잠시 뒤에 다시 열어 주세요.</div></div>`
+        : !rows.length ? `<div class="card"><h3>아직 올라온 것이 없습니다</h3>
+            <div class="meta">대회에서 만든 것을 팔고 싶다면 <b>내 프로필</b>의 «팔기» 에서 올리세요. 운영진이 확인한 뒤 여기에 뜹니다.</div></div>`
+        : rows.map(r => `<a class="card mk" href="/m/${r.id}" style="display:block;text-decoration:none;color:inherit">
+            <div class="top"><span class="pill">${esc(r.license)}</span>${r.demo.from === 'hackathon' ? '<span class="pill ok">대회에서 만든 것</span>' : ''}
+              ${r.demo.open === '열림' ? '<span class="pill ok">● 열림</span>' : ''}</div>
+            <h3 style="margin:6px 0 2px">${esc(r.title)}</h3>
+            <div class="meta">${esc(r.seller.handle || '이름 없음')} · 완주 ${r.seller.finished}</div>
+            <div style="font-size:20px;font-weight:800;margin-top:6px">${won(r.price)}</div>
+          </a>`).join('')}
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/learn">강의</a></p>`;
+  },
+
+  /* 마켓 상세 — 위에서부터 시연 → 값·라이선스·환불 → 고지 → 사러 가기 → 신고.
+     고지는 버튼 바로 위에 둔다(전자상거래법 20조① — 통신판매 당사자가 아님을 미리 알린다).
+     시연은 바깥 출처일 때만 iframe 으로. 같은 출처면 sandbox 가 풀리니 새 창으로만 연다. */
+  async mitem() {
+    const id = MIT ? MIT[1] : '';
+    let d;
+    try { d = await api(`/market/${id}`); }
+    catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없거나 내려간 상품입니다' : '불러오지 못했습니다'}</h3>
+      <div class="meta"><a href="/market">마켓으로</a></div></div>`; }
+    let same = true; try { same = new URL(d.demo.url).host === location.host; } catch (_) {}
+    const sl = d.seller;
+    const trust = [
+      sl.events ? `대회 ${sl.events}번 · 완주 ${sl.finished}` : '처음 파는 분',
+      sl.manner && sl.manner.show ? `매너 ${sl.manner.score}` : '',
+      sl.skill && sl.skill.show ? `동료 실력 ${sl.skill.score}` : '',
+      d.demo.age ? `데모 ${d.demo.age.days}일째 열림` : '',
+    ].filter(Boolean);
+    return `<section class="hero"><div class="top"><span class="pill">마켓</span><span class="pill">${esc(d.license)}</span></div>
+        <h2>${esc(d.title)}</h2>
+        <p class="sub" style="margin-bottom:0"><a href="/p/${esc(sl.id)}">${esc(sl.handle || '만든 사람')}</a> · 티어 ${esc(sl.tier)}</p>
+      </section>
+      <div class="card" id="mk-demo" style="padding:0;overflow:hidden">
+        ${same ? `<div style="padding:16px"><div class="meta">이 시연은 새 창에서 엽니다.</div></div>`
+          : `<iframe id="mk-demo-frame" src="${esc(d.demo.url)}" title="${esc(d.title)} 시연" style="display:block;width:100%;height:520px;border:0"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="no-referrer" loading="lazy"></iframe>`}
+        <div style="padding:10px 16px"><a href="${esc(d.demo.url)}" target="_blank" rel="noopener noreferrer">새 창으로 써 보기 ›</a>
+          <span class="meta"> · 지금 ${esc(d.demo.open)}</span></div>
+      </div>
+      <div class="card" id="mk-trust"><h3>만든 사람</h3>
+        <div class="meta">${trust.map(esc).join(' · ')}</div>
+        ${sl.praise && sl.praise.top && sl.praise.top.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          ${sl.praise.top.map(x => `<span class="pill ok">${esc(x.tag)}</span>`).join('')}</div>` : ''}
+        <div class="meta" style="margin-top:6px">숫자는 HACK:ON 대회 기록과 같이 한 사람들의 평가에서만 나옵니다. 세 건이 안 되면 숫자를 안 붙입니다.</div>
+      </div>
+      <div class="card" id="mk-buy">
+        <div style="font-size:26px;font-weight:900">${won(d.price)}</div>
+        <div class="meta" style="margin-top:4px"><b>라이선스</b> ${esc(d.license)}${d.license === 'MIT' ? ' — 고쳐 쓰고 다시 팔아도 됩니다(저작권 표시 유지)'
+          : d.license === '개인용' ? ' — 나 혼자 쓰는 데만' : ' — 내 사업·고객 일에 써도 됩니다'}</div>
+        <div class="meta"><b>환불</b> ${esc(d.refund || '판매처 정책을 따릅니다')}</div>
+        ${d.repo ? `<div class="meta"><b>저장소 비밀키 검사</b> ${d.scan === '통과' ? '<span class="pill ok">통과</span>' : '<span class="pill">안 함</span>'}</div>` : ''}
+        <div class="notice" id="mk-notice" style="margin-top:12px">HACK:ON 은 통신판매 당사자가 아닙니다. 계약·결제·환불은 만든 사람과 판매처가 합니다.
+          디지털 상품은 받은 뒤에는 환불이 제한될 수 있으니, 사기 전에 위에서 먼저 써 보세요.</div>
+        <div style="height:10px"></div>
+        <a class="btn" id="mk-go" href="${esc(d.buy_url)}" target="_blank" rel="noopener noreferrer" style="display:block;text-align:center;text-decoration:none">판매처에서 사기 ›</a>
+      </div>
+      <details class="card" id="mk-report"><summary class="meta">문제가 있나요 — 운영진에게 알리기</summary>
+        <input id="mk-rp" maxlength="300" placeholder="예) 시연과 받은 것이 다릅니다" style="margin-top:8px">
+        <div style="height:8px"></div><button class="btn sec sm" id="mk-rp-go">알리기</button>
+      </details>
+      <p class="meta" style="margin:14px 4px"><a href="/market">마켓으로</a> · <a href="/">처음으로</a></p>`;
   },
 
   /* 문제 은행 — 사장님·후원자가 올린 «풀어 달라는 문제» 전부. 대회로 열든, 지금 혼자 풀든. */
@@ -4150,6 +4315,12 @@ const SCREEN = {
       try { const r = await api(`/people/${curPerson}/outside`, { tkey: k }); if (r.self) { own = r.rows; OWN_TK = k; break; } } catch (_) {}
     }
     const lecs = d.lectures || [], outs = own || d.outside || [];
+    /* 팔기 — 본인에게만. 팔 수 있는 것(쇼케이스 동의 켠 제출작·확인된 밖에서 만든 것)과 내가 올린 것 */
+    let sell = null;
+    if (OWN_TK) { try { sell = await api(`/people/${curPerson}/listings`, { tkey: OWN_TK }); } catch (_) { sell = null; } }
+    const lstate = l => l.off ? `<span class="pill warn">내려감 · ${esc(l.off)}</span>`
+      : l.scan === '걸림' ? '<span class="pill warn">저장소에서 비밀키가 걸렸습니다 — 지우고 다시 알려 주세요</span>'
+      : l.ok ? `<a class="pill ok" href="/m/${l.id}">공개 중 ›</a>` : '<span class="pill">운영진 확인 기다리는 중</span>';
     /* «가르칠 수 있음» 은 스스로 고른 값이다. 올린 강의가 있으면 그 옆에 근거를 붙인다 */
     const lv = d.level ? esc(d.level) + (d.level === '가르칠 수 있음' && lecs.length ? ` <span class="pill ok">강의 ${lecs.length}개로 확인</span>` : '') : '';
     return `<h2>${esc(d.handle || '이름 없음')}</h2>
@@ -4198,6 +4369,20 @@ const SCREEN = {
             <div><label>맡은 일</label><input id="ou-role" maxlength="30" placeholder="예: 기획·개발"></div></div>
           <label>주소</label><input id="ou-url" placeholder="https://…">
           <div style="height:8px"></div><button class="btn sm" id="ou-go">올리기</button></div>` : ''}
+      </div>` : ''}
+      ${sell ? `<div class="card" id="p-sell"><h3>팔기 <span class="pill">나만 보임</span></h3>
+        <div class="meta">돌아가는 것을 시연하고 정한 값에 팝니다. <b>돈은 HACK:ON 을 거치지 않습니다</b> —
+          Gumroad·Polar·Lemon Squeezy·크몽 중 내 판매처에 상품을 먼저 만들고 그 주소를 붙이세요. 운영진이 확인하면 마켓에 뜹니다.</div>
+        ${sell.rows.map(l => `<div style="margin-top:8px"><b>${esc(l.title)}</b> <span class="meta">${won(l.price)} · ${esc(l.license)}</span> ${lstate(l)}</div>`).join('')}
+        ${sell.sellable.length ? `<div style="margin-top:12px">
+          <label>무엇을</label><select id="mk-src">${sell.sellable.map(x => `<option value="${esc(x.source)}:${x.ref}">${esc(x.title)} — ${esc(x.from)}</option>`).join('')}</select>
+          <div class="row"><div><label>값(원)</label><input id="mk-price" type="number" min="1000" step="100" placeholder="예: 9900"></div>
+            <div><label>라이선스</label><select id="mk-lic"><option value="">고르기</option><option>MIT</option><option>개인용</option><option>상업용</option></select></div></div>
+          <label>판매 주소</label><input id="mk-buy" placeholder="https://내이름.gumroad.com/l/…">
+          <label>환불 (선택)</label><input id="mk-ref" maxlength="200" placeholder="예) 받은 뒤 7일 안에, 실행이 안 되면 환불">
+          <label>공개 저장소 (선택)</label><input id="mk-repo" placeholder="https://github.com/…  — 올리면 비밀키 검사를 합니다">
+          <div style="height:8px"></div><button class="btn sm" id="mk-add">올리기</button></div>`
+          : '<div class="meta" style="margin-top:8px">팔 수 있는 것이 아직 없습니다 — 대회 제출작의 «첫 화면에 걸어도 됩니다» 를 켜거나, 아래 «밖에서 만든 것» 이 운영진 확인을 받으면 여기에 뜹니다.</div>'}
       </div>` : ''}
       ${hidden.length ? `<div class="card">
         <h3>아직 안 걸린 것 <span class="pill">${hidden.length}</span></h3>
@@ -4323,6 +4508,18 @@ const SCREEN = {
   /* 결과 보고서 — 협찬사에게 보내는 물건. 인쇄하면 그대로 PDF 가 된다.
      빈칸이 생기지 않게 앞의 세 기능(마감·신청·사후지원)을 먼저 만들었다. */
   async report() {
+    /* 모임·수업 — 기관에 내는 실적. 순위·협찬 보고서가 아니라 «언제·어디서·몇 명이 왔나» */
+    const ms = LIVE ? await api(`/events/${cur}/meetstats`).catch(() => null) : null;
+    if (ms && ms.kind === '모임') return `<div class="noprint" style="margin-bottom:14px"><button class="btn sm" id="b-print">인쇄 · PDF 로 저장</button></div>
+      <h2>${esc(ms.title)} 실적</h2>
+      <p class="sub">${esc(ms.host)} · ${esc(ms.starts)}${ms.ends !== ms.starts ? ' ~ ' + esc(ms.ends) : ''}</p>
+      <div class="stat" id="meet-stat">
+        <div><b>${ms.applied}</b><span>신청</span></div>
+        <div><b>${ms.came === null ? '모름' : ms.came}</b><span>온 사람</span>${ms.came === null ? '<em>체크인을 안 찍었습니다</em>' : ''}</div>
+        <div><b>${ms.certs}</b><span>수료 확인 발급</span></div>
+        <div><b>${ms.rated}</b><span>서로 평가</span></div>
+      </div>
+      <p class="sub">숫자는 등록 데스크 체크인과 참가자가 직접 남긴 기록에서만 나옵니다. 사진은 얼굴이 안 나온 것만, 14세 미만은 보호자 동의를 받은 것만 붙입니다.</p>`;
     const d = await api(`/events/${cur}/board`);
     const o = await api(`/events/${cur}/outcomes`);
     const sup = LIVE ? await api(`/events/${cur}/support`) : { rows:[] };
@@ -5000,6 +5197,9 @@ function wire() {
         pay: $('#e-pay') ? $('#e-pay').value.trim() : undefined,
         cancel_rule: $('#e-cancel') ? $('#e-cancel').value.trim() : undefined,
         kind: $('#e-kind') ? $('#e-kind').value : undefined,
+        weeks: $('#e-weeks') ? $('#e-weeks').value : undefined,
+        meet: $('#e-meet') ? $('#e-meet').value.trim() : undefined,
+        pick: $('#e-pick') ? $('#e-pick').checked : undefined,
         deposit: $('#e-deposit') ? $('#e-deposit').value : undefined,
         twist: $('#e-twist') ? $('#e-twist').value.trim() : undefined,
         host: $('#e-host') ? $('#e-host').value.trim() : undefined,
@@ -5045,6 +5245,7 @@ function wire() {
     if (fromSel && fromSel.value) { b.from = fromSel.value; b.fromKey = okeyOf(fromSel.value); }   // 지난 대회에서 가져오기
     if (MAKE_REQ) b.req = MAKE_REQ;   // 의뢰에서 들어왔으면 첫 주제로 붙인다
     if ($('#f-kind') && $('#f-kind').value === '모임·수업') b.kind = '모임';   // 제출·심사·순위를 끈 모임
+    if ($('#f-kind') && $('#f-kind').value === '프로젝트') { b.kind = '프로젝트'; b.weeks = 4; }   // 주 수·선발형은 만든 뒤 설정에서
     /* 유형과 심사 기준은 고르는 것이라 손이 안 간다. 그래서 첫 화면에 같이 둔다. */
     if (!b.title) return flash('대회 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
@@ -5094,7 +5295,8 @@ function wire() {
       const K = { '당일': '첫 대회는 이걸 권합니다.',
                   '무박2일': '야식과 잘 자리를 미리 정해 두세요.',
                   '온라인 1주': '각자 만들고 마지막 날에만 모입니다.',
-                  '모임·수업': '당근 모임·교육 봉사처럼 짧게 모입니다. 참석 확인·체크인·서로 평가만 씁니다.' };
+                  '모임·수업': '당근 모임·교육 봉사처럼 짧게 모입니다. 참석 확인·체크인·서로 평가만 씁니다.',
+                  '프로젝트': '4주가 기본입니다. 매주 체크인하고 주차마다 결과물을 냅니다 — 마지막 주 제출이 완주입니다.' };
       fkindnote.textContent = K[fkind.value] || '';
     };
     fkind.onchange = note;
@@ -5223,6 +5425,35 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
 
+  /* 수료 확인 받기 — 팀 열쇠로. 받을 수 없으면 서버가 이유를 준다 */
+  const certgo = $('#cert-go');
+  if (certgo) certgo.onclick = async () => {
+    try { const r = await api(`/teams/${certgo.dataset.team}/cert`, { method: 'POST', tkey: tkeyOf(certgo.dataset.team), body: {} });
+          const url = `${location.origin}/c/${r.code}`;
+          $('#cert-out').innerHTML = `<div class="shrow" style="margin-top:6px"><div class="share" id="cert-link">${esc(url)}</div>
+            <a class="btn sm" href="/c/${esc(r.code)}" style="text-decoration:none">열기</a></div>`; }
+    catch (e) { flash(e.message, true); }
+  };
+  /* 주차 제출 — 팀 열쇠로 */
+  const wkgo = $('#wk-go');
+  if (wkgo) wkgo.onclick = async () => {
+    const tid = wkgo.dataset.team;
+    try { const r = await api(`/teams/${tid}/week`, { method: 'POST', tkey: tkeyOf(tid),
+            body: { week: +$('#wk-n').value, url: $('#wk-url').value.trim(), note: $('#wk-note').value.trim() } });
+          flash(r.final ? '마지막 주를 냈습니다 — 완주입니다' : `${r.week}주를 냈습니다`); }
+    catch (e) { flash(e.message, true); }
+  };
+  /* 선발·주차 체크인 — 운영자 열쇠로. 다시 그린다(표가 작다) */
+  document.querySelectorAll('[data-apick]').forEach(b => b.onclick = async () => {
+    try { await api(`/teams/${b.dataset.apick}/pick`, { method: 'POST', body: { state: b.dataset.st } });
+          flash(b.dataset.st === 'accepted' ? '수락했습니다 — 명단에 연락처가 붙었습니다' : '거절했습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-att]').forEach(b => b.onclick = async () => {
+    const [tid, w] = b.dataset.att.split(':');
+    try { const r = await api(`/teams/${tid}/attend`, { method: 'POST', body: { week: +w } }); flash(`${w}주 ${r.came ? '왔음' : '취소'}`); }
+    catch (e) { flash(e.message, true); }
+  });
   /* 예약금 상태 — 등록 데스크에서 고른다. 화면을 다시 그리지 않는다(표를 내려가며 차례로 고른다) */
   document.querySelectorAll('[data-dep]').forEach(sel => sel.onchange = async () => {
     try { await api(`/teams/${sel.dataset.dep}/deposit`, { method: 'POST', body: { state: sel.value } });
@@ -6158,6 +6389,29 @@ function wire() {
     try { await api(`/people/${curPerson}/outside/${b.dataset.ouDel}/delete`, { method: 'POST', tkey: OWN_TK, body: {} }); flash('지웠습니다'); }
     catch (e) { flash(e.message, true); }
   });
+  const mkadd = $('#mk-add');
+  if (mkadd) mkadd.onclick = async () => {
+    const [source, ref] = $('#mk-src').value.split(':');
+    try {
+      await api(`/people/${curPerson}/listings`, { method: 'POST', tkey: OWN_TK, body: { source, ref: +ref,
+        price: $('#mk-price').value, license: $('#mk-lic').value, buy_url: $('#mk-buy').value.trim(),
+        refund: $('#mk-ref').value.trim(), repo: $('#mk-repo').value.trim() } });
+      flash('올렸습니다. 운영진이 확인하면 마켓에 뜹니다');
+    } catch (e) { flash(e.message, true); }
+  };
+  /* 사이트 운영자 — 마켓 확인·내리기·비밀키 검사 */
+  document.querySelectorAll('[data-mka]').forEach(b => b.onclick = async () => {
+    const body = b.dataset.act === 'ok' ? { ok: true } : { off: prompt('내리는 이유 — 판매자에게 보입니다') || '' };
+    if (b.dataset.act === 'off' && !body.off) return;
+    try { await api(`/admin/market/${b.dataset.mka}`, { method: 'POST', body }); flash(b.dataset.act === 'ok' ? '공개했습니다' : '내렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-mks]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = '검사 중…';
+    try { const r = await api(`/admin/market/${b.dataset.mks}/scan`, { method: 'POST', body: {} });
+          flash(`검사: ${r.scan}${r.hits && r.hits.length ? ' — ' + r.hits.map(h => h.rule + ' @ ' + h.file).join(', ') : ''}${r.why ? ' (' + r.why + ')' : ''}`); }
+    catch (e) { flash(e.message, true); }
+  });
   /* 사이트 운영자 — 밖에서 만든 것 확인 */
   document.querySelectorAll('[data-oa]').forEach(b => b.onclick = async () => {
     try { await api(`/admin/outside/${b.dataset.oa}`, { method: 'POST', body: { ok: b.dataset.ok === '1' } }); flash(b.dataset.ok === '1' ? '공개했습니다' : '돌려보냈습니다'); }
@@ -6454,6 +6708,9 @@ const ASKP = location.pathname === '/ask';
 const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 — 구하기 «사람» 갈래에서 보내는 곳
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
+const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
+const MIT = location.pathname.match(/^\/m\/(\d+)$/);   // 마켓 상세 /m/<번호>
+const CRT = location.pathname.match(/^\/c\/([0-9a-f]{12})$/);   // 수료 확인 /c/<번호>
 const CND = location.pathname === '/conditions';  // 그날의 조건 아카이브
 const RNK = location.pathname === '/rank';       // 기여 순위 — 백준 랭킹처럼   // «받는 사람» — 후원자·의뢰자가 주제·문제를 올리는 세 화면
 const RCV = location.pathname.match(/^\/r\/([a-z0-9]+)$/);   // 받는 화면 /r/<id>?k=<열쇠>
@@ -6488,6 +6745,8 @@ if (TVM) {
 }
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (MKT || MIT) { tab = MIT ? 'mitem' : 'market'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RNK) { tab = 'rank'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CND) { tab = 'conds'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 /* 심사위원 입구. 밖에서 바로 들어오는 주소라 아래 탭을 숨기고 손님 차림으로 연다 */
@@ -6554,13 +6813,20 @@ document.addEventListener('click', async ev => {
     const v = id => ($('#' + id) || {}).value || '';
     try {
       const r = await api('/lectures', { method: 'POST', body: { title: v('la-title'), yt: v('la-yt'), series: v('la-series'),
-        minutes: v('la-min'), person: v('la-person'), teacher: v('la-teacher'), note: v('la-note') } });
+        minutes: v('la-min'), person: v('la-person'), teacher: v('la-teacher'), note: v('la-note'), buy: v('la-buy') } });
       history.pushState(null, '', '/learn?v=' + r.id);
       flash('올렸습니다'); render();
     } catch (e) { flash(e.message, true); }
   }
 });
 addEventListener('popstate', () => { if (tab === 'learn') render(); });
+/* 마켓 신고 — 로그인 없이. 서버 상한(WRITE_LIMIT)이 도배를 막는다 */
+document.addEventListener('click', async ev => {
+  if (ev.target.id !== 'mk-rp-go' || !MIT) return;
+  try { await api(`/market/${MIT[1]}/report`, { method: 'POST', body: { reason: ($('#mk-rp') || {}).value || '' } });
+        flash('운영진에게 알렸습니다', true); $('#mk-rp').value = ''; }
+  catch (e) { flash(e.message, true); }
+});
 /* 문제 은행 «풀었습니다» — 화면 어디서 눌러도 이 하나가 받는다 */
 document.addEventListener('click', async ev => {
   const b = ev.target.closest('[data-solve]'); if (b) { const box = document.getElementById('sol-' + b.dataset.solve); if (box) { box.hidden = !box.hidden; } return; }

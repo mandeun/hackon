@@ -2119,7 +2119,11 @@ with sync_playwright() as p:
     # 14 — 심사 링크의 열쇠가 주소창에서 사라진다 · 19 — 미리보기 iframe 에 allow-same-origin 없음
     visit(f"/j/{SE}?k={SJ}")
     A(pg.evaluate("location.search") == "", "심사 링크를 열었는데 주소창에 열쇠가 남아 있다")
-    A("allow-same-origin" not in pg.content(), "미리보기 iframe 이 같은 출처 권한을 가진다")
+    # 화면 파일 전체(스크립트 속 틀 포함)에서 allow-same-origin 을 가진 iframe 은 마켓 시연 하나뿐이어야 한다.
+    # 마켓 시연은 «바깥 출처일 때만» 그리고 그 판정은 마켓 절(같은 출처면 iframe 없음)이 따로 지킨다.
+    # 심사 미리보기는 제출 주소가 우리 출처일 수 있어 끝까지 빼 둔다.
+    _ifr = [t for t in re.findall(r"<iframe[^>]*>", pg.content(), re.S) if "allow-same-origin" in t]
+    A(all('id="mk-demo-frame"' in t for t in _ifr), f"미리보기 iframe 이 같은 출처 권한을 가진다: {[t[:120] for t in _ifr]}")
     ok("보안 감사 반영 — 죽지 않음·사본에 열쇠 없음·소스 404·도배 429·한 대회 신청 상한·CSV·헤더·길이·쿼리 열쇠 403·id·음수·주소창 열쇠")
     # ── 2026-09-26 짝 비교 심사 — 두 팀 중 나은 쪽만 고른다 ──
     _, pe = post("/api/events", {"title": "짝비교검사"}); PE, PK, PJ = pe["id"], pe["okey"], pe["jkey"]
@@ -3880,5 +3884,202 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 ok("모임·수업 — 제출 칸 없음, 예약금 조건 공개, 상태는 운영자가 표시하고 그 팀만 본다")
+
+# ── 마켓 (TASK-35~39) ───────────────────────────────────────
+# 파는 사람이 프로필에서 올리고 → 운영자 확인 → 사는 사람이 시연을 보고 판매처로 간다. 돈은 HACK:ON 을 안 지난다.
+_kp = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+KEV = lpostj("/api/events", {"title": "마켓 대회", "host": "검사", "starts": _kp, "ends": _kp})["id"]
+_ks = lpostj(f"/api/events/{KEV}/teams", {"name": "파는팀", "email": "ks@example.com", "contact": "ks@example.com", "agree": True})
+_kb = lpostj(f"/api/events/{KEV}/teams", {"name": "옆팀", "email": "kb@example.com", "contact": "kb@example.com", "agree": True})
+_r = urllib.request.Request(LEARN_BASE + f"/api/events/{KEV}/peers", headers={"x-tkey": _kb["tkey"]})
+KP = json.loads(urllib.request.urlopen(_r, timeout=10).read())["rows"][0]["id"]
+checklib.stop(LEARN_BASE)   # 제출은 마감 뒤라 막힌다 — 바깥에서 넣고 새로 띄운다
+con = _sq.connect(_ldb)
+con.execute("INSERT INTO submissions(team,url,note,show) VALUES(?,?,?,1)", (_ks["id"], "https://example.com/", "시연"))
+con.commit(); con.close()
+LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("market: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/p/{KP}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.tkey.{_ks['id']}', '{_ks['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#mk-add", timeout=10000)
+    pg.fill("#mk-price", "9900"); pg.select_option("#mk-lic", "MIT")
+    pg.fill("#mk-buy", "https://evil.example/pay")
+    pg.click("#mk-add"); pg.wait_for_timeout(600)
+    A(pg.inner_text("#p-sell").count("운영진 확인 기다리는 중") == 0, "허용 밖 판매처로 올라갔다")
+    pg.fill("#mk-buy", "https://me.gumroad.com/l/app")
+    pg.click("#mk-add"); pg.wait_for_timeout(900)
+    A("운영진 확인 기다리는 중" in pg.inner_text("#p-sell"), "올린 것이 «확인 기다리는 중» 으로 안 보인다")
+    ctx.close()
+    # 확인 전에는 마켓에 없다
+    A(json.loads(urllib.request.urlopen(LEARN_BASE + "/api/market").read())["rows"] == [], "운영자 확인 전에 마켓에 뜬다")
+    checklib.stop(LEARN_BASE)   # 운영자 확인은 쿠키 로그인 — 바깥에서 켜고 새로 띄운다
+    con = _sq.connect(_ldb); con.execute("UPDATE listings SET ok=1"); con.commit(); con.close()
+    LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("market2: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/", wait_until="networkidle"); pg.wait_for_timeout(500)
+    A(pg.locator("#nav-market").is_visible(), "공개된 것이 있는데 첫 화면에 마켓 입구가 없다")
+    pg.goto(f"{LEARN_BASE}/market", wait_until="networkidle")
+    pg.wait_for_selector("a.mk", timeout=10000)
+    A("9,900" in pg.inner_text("a.mk") and "완주 1" in pg.inner_text("a.mk"), "목록에 값·만든 사람의 완주가 없다")
+    pg.click("a.mk")
+    pg.wait_for_selector("#mk-buy", timeout=10000)
+    A(pg.get_attribute("#mk-demo iframe", "src") == "https://example.com/", "바깥 출처 시연이 iframe 으로 안 뜬다")
+    A("allow-same-origin" in (pg.get_attribute("#mk-demo iframe", "sandbox") or ""), "시연 iframe 에 sandbox 가 없다")
+    A(pg.get_attribute("#mk-go", "href") == "https://me.gumroad.com/l/app" and pg.get_attribute("#mk-go", "rel") == "noopener noreferrer",
+      "구매 버튼이 판매처로 안 가거나 noopener 가 없다")
+    A("통신판매 당사자가 아닙니다" in pg.inner_text("#mk-buy"), "구매 버튼과 같은 칸에 중개 고지가 없다")
+    _txt = pg.inner_text("body")
+    A("검증" not in _txt and "보장" not in _txt, "마켓 상세에 «검증»·«보장» 이 있다 — 품질 보증처럼 읽힌다")
+    A("ks@example.com" not in pg.content(), "마켓 상세에 판매자 연락처가 실린다")
+    pg.eval_on_selector("#mk-report", "d => d.open = true")
+    pg.fill("#mk-rp", "시연과 받은 것이 다릅니다"); pg.click("#mk-rp-go"); pg.wait_for_timeout(600)
+    con = _sq.connect(_ldb); _nrep = con.execute("SELECT COUNT(*) FROM market_reports").fetchone()[0]; con.close()
+    A(_nrep == 1, f"신고가 안 남는다: {_nrep}")
+    A(pg.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "마켓 상세가 폰 폭에서 가로로 넘친다")
+    ctx.close()
+    b.close()
+# 같은 출처 시연은 iframe 으로 안 띄운다 — sandbox 가 풀린다. 서버 응답의 시연 주소만 이 페이지 주소로 바꿔 화면 규칙을 본다
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_page()
+    def _same(route):
+        r = route.fetch(); d = r.json(); d["demo"]["url"] = LEARN_BASE + "/self"
+        route.fulfill(response=r, json=d)
+    pg.route("**/api/market/1", _same)
+    pg.goto(f"{LEARN_BASE}/m/1", wait_until="networkidle")
+    pg.wait_for_selector("#mk-demo", timeout=10000)
+    A(pg.query_selector("#mk-demo iframe") is None, "같은 출처 시연을 iframe 으로 띄운다 — sandbox 가 풀린다")
+    b.close()
+# 내리면 상세가 닫힌다
+checklib.stop(LEARN_BASE)
+con = _sq.connect(_ldb); con.execute("UPDATE listings SET off='신고 확인'"); con.commit(); con.close()
+LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_page()
+    pg.goto(f"{LEARN_BASE}/m/1", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A("내려간 상품" in pg.inner_text("body") and pg.query_selector("#mk-go") is None, "내린 상품의 구매 버튼이 살아 있다")
+    b.close()
+ok("마켓 — 허용 판매처만, 확인 전 비공개, 바깥 출처만 iframe, 구매는 판매처로, 중개 고지·신고, 금지어 없음")
+
+# ── 프로젝트 (TASK-31~33) ─────────────────────────────────────
+_pj = lpostj("/api/events", {"title": "3주 스터디", "host": "검사", "kind": "프로젝트", "weeks": 3, "pick": 1, "meet": "매주 화 20시",
+                             "starts": datetime.now().strftime("%Y-%m-%d")})
+PJ, PJK = _pj["id"], _pj["okey"]
+_pa = lpostj(f"/api/events/{PJ}/teams", {"name": "붙을팀", "email": "pja@example.com", "contact": "pja@example.com", "agree": True})
+_pb = lpostj(f"/api/events/{PJ}/teams", {"name": "떨어질팀", "email": "pjb@example.com", "contact": "pjb@example.com", "agree": True})
+A(json.loads(urllib.request.urlopen(LEARN_BASE + f"/api/events/{PJ}/board").read())["rows"] == [], "선발 전 지원자가 공개 명단에 보인다")
+A(lpost(f"/api/teams/{_pa['id']}/attend", {"week": 1}) == 403 and lpost(f"/api/teams/{_pa['id']}/pick", {"state": "accepted"}) == 403,
+  "운영자 열쇠 없이 주차 체크인·선발을 한다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 1200, "height": 900})
+    op = ctx.new_page()
+    op.on("pageerror", lambda e: errs.append("proj-op: " + str(e)))
+    op.goto(f"{LEARN_BASE}/app", wait_until="networkidle")
+    op.evaluate(f"localStorage.setItem('hackon.event', '{PJ}'); localStorage.setItem('hackon.okey.{PJ}', '{PJK}')")
+    op.reload(wait_until="networkidle")
+    op.evaluate(f"cur = '{PJ}'; tab = 'board'; render()")
+    op.wait_for_selector("#sec-apps .applicant", timeout=10000)
+    A(op.locator("#sec-apps .applicant").count() == 2, "지원자 카드가 둘이 아니다")
+    A("pja@example.com" not in op.inner_text("#sec-apps") and "처음 오는 분" in op.inner_text("#sec-apps"),
+      "지원자 카드에 연락처가 있거나, 기록 없는 사람을 «처음» 으로 안 그린다")
+    op.click(f"[data-apick='{_pa['id']}'][data-st='accepted']"); op.wait_for_timeout(700)
+    op.click(f"[data-apick='{_pb['id']}'][data-st='rejected']"); op.wait_for_timeout(700)
+    op.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
+    A("pja@example.com" in op.inner_text("#sec-desk") and "pjb@example.com" not in op.content(), "수락한 팀만 연락처가 붙어야 한다")
+    op.wait_for_selector(f"[data-att='{_pa['id']}:1']", timeout=10000)
+    A(op.locator(f"[data-att='{_pb['id']}:1']").count() == 0, "거절한 팀이 주차 체크인 표에 있다")
+    op.click(f"[data-att='{_pa['id']}:1']"); op.wait_for_timeout(700)
+    op.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
+    A("●" in op.inner_text(f"[data-att='{_pa['id']}:1']"), "주차 체크인이 안 찍힌다")
+    ctx.close()
+    # 붙은 팀 — 주차 제출
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("proj: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/e/{PJ}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.team.{PJ}', '{_pa['id']}'); localStorage.setItem('hackon.tkey.{_pa['id']}', '{_pa['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#wk-box", timeout=10000)
+    A("함께합니다" in pg.inner_text("#pick-mine") and "3주" in pg.inner_text("#proj-line"), "선발 결과·기간이 안 보인다")
+    A(pg.query_selector("#nx-submit") is None, "프로젝트인데 한 번짜리 «결과물 제출» 단추가 있다")
+    pg.fill("#wk-url", "https://week1.example"); pg.click("#wk-go"); pg.wait_for_timeout(800)
+    pg.wait_for_selector("#wk-box", timeout=10000)
+    A("1주" in pg.inner_text("#wk-box") and pg.eval_on_selector("#wk-n", "e => e.value") == "2", "낸 주가 안 남거나 다음 주가 안 골라진다")
+    pg.select_option("#wk-n", "3"); pg.fill("#wk-url", "https://final.example"); pg.click("#wk-go"); pg.wait_for_timeout(800)
+    _bd = json.loads(urllib.request.urlopen(LEARN_BASE + f"/api/events/{PJ}/board").read())["rows"]
+    A(len(_bd) == 1 and _bd[0]["weeksDone"] == [1, 3], f"공개 명단의 낸 주가 틀리다: {_bd}")
+    ctx.close()
+    # 떨어진 팀
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.goto(f"{LEARN_BASE}/e/{PJ}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.team.{PJ}', '{_pb['id']}'); localStorage.setItem('hackon.tkey.{_pb['id']}', '{_pb['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#pick-mine", timeout=10000)
+    A("함께하지 못합니다" in pg.inner_text("#pick-mine") and pg.query_selector("#wk-box") is None, "거절된 팀에게 주차 제출 칸이 열린다")
+    ctx.close()
+    b.close()
+ok("프로젝트 — 지원자 카드(연락처 없음·기록 없음은 «처음»), 수락해야 연락처, 주차 체크인, 주차 제출, 거절은 비공개")
+
+# ── 교육 — 수료 확인·수업 실적·강의 판매처 (TASK-29~30) ────────────────
+_today = datetime.now().strftime("%Y-%m-%d")
+_cl = lpostj("/api/events", {"title": "청소년 AI 수업", "host": "꿈드림", "kind": "모임", "starts": _today, "ends": _today})
+CL, CLK = _cl["id"], _cl["okey"]
+_c1 = lpostj(f"/api/events/{CL}/teams", {"name": "수강생", "email": "cl1@example.com", "contact": "cl1@example.com", "agree": True})
+_cl0 = lpostj("/api/events", {"title": "아무도 체크인 안 한 수업", "host": "센터", "kind": "모임", "starts": _today, "ends": _today})["id"]
+lpostj(f"/api/events/{_cl0}/teams", {"name": "결석", "email": "cl0@example.com", "contact": "cl0@example.com", "agree": True})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("edu: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/e/{CL}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.team.{CL}', '{_c1['id']}'); localStorage.setItem('hackon.tkey.{_c1['id']}', '{_c1['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#cert-go", timeout=10000)
+    pg.click("#cert-go"); pg.wait_for_timeout(600)
+    A(pg.query_selector("#cert-link") is None, "체크인 안 했는데 수료 확인이 나온다")
+    _r = urllib.request.Request(LEARN_BASE + f"/api/teams/{_c1['id']}/checkin", method="POST", data=b"{}",
+                                headers={"content-type": "application/json", "x-okey": CLK})
+    urllib.request.urlopen(_r, timeout=10).read()
+    pg.reload(wait_until="networkidle"); pg.wait_for_selector("#cert-go", timeout=10000)
+    pg.click("#cert-go"); pg.wait_for_selector("#cert-link", timeout=10000)
+    _curl = pg.inner_text("#cert-link")
+    A("/c/" in _curl, f"수료 확인 주소가 안 나온다: {_curl}")
+    pg.goto(_curl, wait_until="networkidle"); pg.wait_for_selector("#cert", timeout=10000)
+    _ct = pg.inner_text("#cert")
+    A("청소년 AI 수업" in _ct and "꿈드림" in _ct and "수강생" in _ct, f"수료 확인에 수업·기관·이름이 없다: {_ct}")
+    A("자격증" not in pg.inner_text("body") and "인증" not in pg.inner_text("body"), "수료 확인 화면에 «자격증»·«인증» 이 있다")
+    A("cl1@example.com" not in pg.content(), "수료 확인에 연락처가 실린다")
+    pg.goto(f"{LEARN_BASE}/e/{CL}/report", wait_until="networkidle"); pg.wait_for_selector("#meet-stat", timeout=10000)
+    A(pg.inner_text("#meet-stat").split("\n")[:4] == ["1", "신청", "1", "온 사람"], f"수업 실적 숫자가 틀리다: {pg.inner_text('#meet-stat')}")
+    pg.goto(f"{LEARN_BASE}/e/{_cl0}/report", wait_until="networkidle"); pg.wait_for_selector("#meet-stat", timeout=10000)
+    A("모름" in pg.inner_text("#meet-stat"), "체크인을 안 찍은 수업의 «온 사람» 을 0 으로 그린다")
+    ctx.close()
+    b.close()
+checklib.stop(LEARN_BASE)   # 강의 올리기는 쿠키 로그인한 운영자만 — 바깥에서 넣고 새로 띄운다
+con = _sq.connect(_ldb)
+con.execute("INSERT INTO lectures(title,yt,buy) VALUES(?,?,?)", ("자동 답장 전체판", "eeeeeeeeeee", "https://www.inflearn.com/course/auto"))
+_lid = con.execute("SELECT MAX(id) FROM lectures").fetchone()[0]
+con.commit(); con.close()
+LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_page()
+    pg.goto(f"{LEARN_BASE}/learn?v={_lid}", wait_until="networkidle"); pg.wait_for_selector("#lec-buy", timeout=10000)
+    A(pg.get_attribute("#lec-buy", "href") == "https://www.inflearn.com/course/auto" and pg.get_attribute("#lec-buy", "rel") == "noopener noreferrer",
+      "강의 판매처 단추가 틀리다")
+    b.close()
+ok("교육 — 수료 확인은 체크인한 사람만·금지어 없음·연락처 없음, 수업 실적(모름 구분), 강의 판매처 링크")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

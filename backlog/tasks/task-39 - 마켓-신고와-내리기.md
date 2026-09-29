@@ -1,7 +1,7 @@
 ---
 id: TASK-39
 title: 마켓 — 신고와 판매 링크 내리기
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 19:00'
 labels:
@@ -21,6 +21,7 @@ ordinal: 39000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 신고는 로그인 없이 되고 상한이 걸린다
-- [ ] #2 끈 판매는 공개 목록·상세에서 구매 버튼이 없다
+- [ ] #1 신고는 로그인 없이 되고 상한이 걸린다 — 로그인 없이 신고는 e2e 로 확인, 상한은 전역 WRITE_LIMIT 이고 이 길만의 검사는 없음
+- [x] #2 끈 판매는 공개 목록·상세에서 구매 버튼이 없다
+검사: node server.js --test · python3 check-e2e.py (2026-09-29), 체크한 항목은 지키는 코드를 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

@@ -1,7 +1,7 @@
 ---
 id: TASK-31
 title: 프로젝트 — 몇 주짜리 프로젝트 종류와 주차별 체크인
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 18:00'
 labels:
@@ -23,6 +23,7 @@ ordinal: 31000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 4주 프로젝트에서 2주 빠지면 프로필 «안 온 횟수» 가 2 늘어난다 — 단위 검사
-- [ ] #2 주차 체크인은 운영자 열쇠로만
+- [x] #1 4주 프로젝트에서 2주 빠지면 프로필 «안 온 횟수» 가 2 늘어난다 — 단위 검사
+- [x] #2 주차 체크인은 운영자 열쇠로만
+검사: node server.js --test · python3 check-e2e.py (2026-09-29), 체크한 항목은 지키는 코드를 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

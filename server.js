@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const os = require('node:os');
+const zlib = require('node:zlib');
 const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = __dirname;
@@ -138,10 +139,15 @@ const KINDS = {
   /* 해커톤이 아닌 것 — 당근 모임·교육 봉사·스터디 한 회. 제출·심사·순위가 없고
      신청 → D-3·D-1 참석 재확인 → 체크인 → 서로 평가만 쓴다. 안 온 것은 그대로 «안 온 횟수» 에 쌓인다 */
   '모임·수업': { hours: 2, what: '짧게 모여 배우거나 이야기합니다. 제출·심사·순위가 없습니다' },
+  /* 몇 주짜리 — 스터디·사이드 프로젝트(가짜연구소 시즌·YAPP 기수처럼). 매주 체크인과 주차 제출,
+     마지막 주 제출이 곧 완주다. 선발형이면 리더가 지원자 카드를 보고 수락한다 */
+  '프로젝트': { hours: 0, what: '몇 주 동안 매주 모입니다. 마지막 주 제출이 완주입니다' },
 };
 /* events.kind 에 남기는 값. 빈 값이 해커톤이다(예전 대회는 전부 빈 값) */
-const EVENT_KINDS = ['', '모임'];
-const kindOf = v => (v === '모임' || v === '모임·수업') ? '모임' : '';
+const EVENT_KINDS = ['', '모임', '프로젝트'];
+const kindOf = v => (v === '모임' || v === '모임·수업') ? '모임' : v === '프로젝트' ? '프로젝트' : '';
+const WEEKS_MAX = 16;
+const PICKS = ['applied', 'accepted', 'rejected'];
 /* 예약금 상태. HACK:ON 은 돈을 안 만진다 — 주최자가 따로 받고 여기엔 표시만 한다.
    토스 미니앱으로 받으려면 토스페이·인앱결제가 필요하고 둘 다 사업자등록이 있어야 한다(2026-09 정책표). */
 const DEPOSIT_STATES = ['받음', '돌려줌', '안 돌려줌'];
@@ -169,6 +175,9 @@ function draftPlan(start, end, teams, kind) {
   if (kind === '무박2일') return draftOvernight(start, teams);
   if (kind === '온라인 1주') return draftOnline(teams);
   if (kindOf(kind) === '모임') return draftMeetup(start, end);
+  if (kindOf(kind) === '프로젝트') return { rows: [
+    { at: '19:00', what: '첫 모임 · 팀 소개와 주차 계획' }, { at: '19:30', what: '매주 정기 모임 · 체크인' },
+    { at: '20:30', what: '주차 제출' }, { at: '21:00', what: '마지막 주 · 발표와 서로 평가' }], teams: 0, tight: false, kind: '프로젝트' };
   let a = mins(start), z = mins(end);
   if (a === null) a = 10 * 60;
   if (z === null || z <= a) z = a + 9 * 60;
@@ -698,6 +707,190 @@ function outsidePending(db, { siteAdmin } = {}) {
                      LEFT JOIN people p ON p.id=o.person WHERE o.ok=0 ORDER BY o.at LIMIT 200`).all();
 }
 
+/* ── 마켓 ─────────────────────────────────────────────
+   조사(2026-09-29): Polar·Lemon Squeezy·Paddle 은 «남의 상품을 대신 파는 마켓플레이스» 를 금지한다.
+   그래서 HACK:ON 계정으로 대신 팔지 않는다 — 판매자가 자기 판매처 계정을 열고 우리는 링크만 건다.
+   한국 개인 정산이 확인된 곳은 Gumroad(한국 계좌)·크몽(사업자 전 가능). 허용 판매처는 이 목록뿐이다. */
+const MARKET_HOSTS = ['gumroad.com', 'polar.sh', 'lemonsqueezy.com', 'kmong.com'];
+const LICENSES = ['MIT', '개인용', '상업용'];
+const PRICE_MIN = 1000, PRICE_MAX = 10000000;
+/* 판매처 주소 — https 이고 허용 판매처(그 하위 도메인 포함)일 때만 */
+function buyUrl(v) {
+  const s = webUrl(v);
+  if (!s) return '';
+  let u; try { u = new URL(s); } catch { return ''; }
+  if (u.protocol !== 'https:' || u.username || u.password) return '';
+  const h = u.hostname.toLowerCase();
+  return MARKET_HOSTS.some(d => h === d || h.endsWith('.' + d)) ? u.href : '';
+}
+/* 공개 저장소 — 지금은 github.com/<소유자>/<이름> 만. 비밀키 검사를 할 수 있는 곳만 받는다 */
+function repoUrl(v) {
+  const m = String(v || '').trim().match(/^https:\/\/github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/);
+  return m ? { url: `https://github.com/${m[1]}/${m[2]}`, owner: m[1], name: m[2] } : null;
+}
+/* 팔 수 있는 것 — 쇼케이스 동의(show)가 켜지고 마감이 지난 내 제출작, 운영자가 확인한 «밖에서 만든 것» */
+function sellableOf(db, pid) {
+  const subs = db.prepare(`SELECT t.id, t.name, e.title AS ev, e.due, e.ends, s.url FROM teams t
+                           JOIN events e ON e.id = t.event JOIN submissions s ON s.team = t.id
+                           WHERE (t.person=? OR (t.mate<>'' AND t.mate=?)) AND s.show=1 AND s.url<>''`).all(pid, pid)
+    .filter(r => closed({ due: r.due, ends: r.ends }) && webUrl(r.url))
+    .map(r => ({ source: 'submission', ref: r.id, title: r.name, from: r.ev, demo: webUrl(r.url) }));
+  const outs = db.prepare('SELECT id, title, url FROM outside WHERE person=? AND ok=1').all(pid)
+    .filter(r => webUrl(r.url)).map(r => ({ source: 'outside', ref: r.id, title: r.title, from: '밖에서 만든 것', demo: webUrl(r.url) }));
+  return [...subs, ...outs];
+}
+function addListing(db, pid, tkey, b) {
+  if (!ownsPerson(db, pid, tkey)) throw new HttpError(403, '본인 확인이 안 됩니다 — 신청한 브라우저에서 올려 주세요');
+  const it = sellableOf(db, pid).find(x => x.source === b.source && x.ref === +b.ref);
+  if (!it) throw new HttpError(403, '팔 수 있는 것이 아닙니다 — 쇼케이스 동의를 켠 제출작이나 운영진이 확인한 «밖에서 만든 것» 만 됩니다');
+  const price = Math.round(+b.price || 0);
+  if (!(price >= PRICE_MIN && price <= PRICE_MAX)) throw new HttpError(400, `값은 ${PRICE_MIN.toLocaleString()}원에서 ${PRICE_MAX.toLocaleString()}원 사이입니다`);
+  if (!LICENSES.includes(b.license)) throw new HttpError(400, '라이선스를 고르세요 — MIT · 개인용 · 상업용');
+  const buy = buyUrl(b.buy_url);
+  if (!buy) throw new HttpError(400, '판매 주소는 Gumroad · Polar · Lemon Squeezy · 크몽 의 https 주소만 됩니다');
+  const rp = b.repo ? repoUrl(b.repo) : null;
+  if (b.repo && !rp) throw new HttpError(400, '저장소는 https://github.com/<소유자>/<이름> 꼴만 됩니다');
+  if (db.prepare("SELECT COUNT(*) c FROM listings WHERE person=? AND off=''").get(pid).c >= 20) throw new HttpError(409, '한 사람당 20개까지입니다');
+  const r = db.prepare('INSERT INTO listings(person,source,ref,title,price,license,refund,buy_url,repo) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(pid, it.source, it.ref, String(b.title || it.title).trim().slice(0, 60) || it.title, price, b.license,
+         String(b.refund || '').trim().slice(0, 200), buy, rp ? rp.url : '');
+  return { id: Number(r.lastInsertRowid), rows: myListings(db, pid) };
+}
+function myListings(db, pid) {
+  return db.prepare('SELECT id, title, price, license, buy_url, repo, scan, ok, off, at FROM listings WHERE person=? ORDER BY id DESC').all(pid);
+}
+/* 데모 주소와 «며칠째 살아 있나». 제출작은 쇼케이스와 같은 liveness·ageOf 를 쓴다 — 따로 세면 어긋난다 */
+function demoOf(db, l) {
+  if (l.source === 'submission') {
+    const r = db.prepare(`SELECT s.url, s.show, e.due, e.ends, lv.state FROM teams t JOIN events e ON e.id=t.event
+                          JOIN submissions s ON s.team=t.id LEFT JOIN liveness lv ON lv.team=t.id WHERE t.id=?`).get(l.ref);
+    if (!r || !r.show || !closed({ due: r.due, ends: r.ends }) || !webUrl(r.url)) return null;
+    const st = (r.state === 1 || r.state === 0) ? r.state : null;
+    return { url: webUrl(r.url), open: openLabel(st), age: ageOf(r.ends, st), from: 'hackathon' };
+  }
+  const o = db.prepare('SELECT url, ok FROM outside WHERE id=?').get(l.ref);
+  return o && o.ok && webUrl(o.url) ? { url: webUrl(o.url), open: '모름', age: null, from: 'outside' } : null;
+}
+/* 판매자 신뢰 띠 — 새로 세지 않고 profile() 을 그대로. 연락처는 한 칸도 없다 */
+function sellerOf(db, pid) {
+  const p = profile(db, pid);
+  return { id: p.id, handle: p.handle || '', finished: p.finished, events: p.events, noshow: p.noshow,
+           manner: p.manner, skill: p.skill, praise: p.praise, tier: p.tier.name };
+}
+function publicListing(db, l) {
+  const demo = demoOf(db, l);
+  if (!demo) return null;   // 시연이 안 되는 것은 안 판다 — 시연이 «시험 사용» 이다(전자상거래법 17조⑥)
+  const buy = buyUrl(l.buy_url);
+  if (!buy) return null;
+  return { id: l.id, title: l.title, price: l.price, license: l.license, refund: l.refund, buy_url: buy,
+           repo: l.repo, scan: l.scan, demo, seller: sellerOf(db, l.person) };
+}
+function marketList(db) {
+  return db.prepare("SELECT * FROM listings WHERE ok=1 AND off='' ORDER BY id DESC LIMIT 100").all()
+    .map(l => publicListing(db, l)).filter(Boolean);
+}
+function marketItem(db, id) {
+  const l = db.prepare("SELECT * FROM listings WHERE id=? AND ok=1 AND off=''").get(+id);
+  const out = l && publicListing(db, l);
+  if (!out) throw new HttpError(404, '없거나 내려간 상품입니다');
+  return out;
+}
+function reportListing(db, id, reason) {
+  if (!db.prepare("SELECT 1 FROM listings WHERE id=? AND ok=1").get(+id)) throw new HttpError(404, '없는 상품입니다');
+  const r = String(reason || '').trim().slice(0, 300);
+  if (r.length < 2) throw new HttpError(400, '무엇이 문제인지 한 줄 적어 주세요');
+  db.prepare('INSERT INTO market_reports(listing, reason) VALUES(?,?)').run(+id, r);
+  return { ok: true };
+}
+function marketAdmin(db, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 볼 수 있습니다');
+  return db.prepare(`SELECT l.*, p.handle, (SELECT COUNT(*) FROM market_reports r WHERE r.listing=l.id) AS reports
+                     FROM listings l LEFT JOIN people p ON p.id=l.person
+                     WHERE l.ok=0 OR l.off<>'' OR EXISTS(SELECT 1 FROM market_reports r WHERE r.listing=l.id)
+                     ORDER BY l.ok, l.id DESC LIMIT 200`).all()
+    .map(l => ({ ...l, reasons: db.prepare('SELECT reason, at FROM market_reports WHERE listing=? ORDER BY id DESC LIMIT 10').all(l.id) }));
+}
+function reviewListing(db, id, b, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 할 수 있습니다');
+  const l = db.prepare('SELECT * FROM listings WHERE id=?').get(+id);
+  if (!l) throw new HttpError(404, '없는 상품입니다');
+  if (b.off !== undefined) {
+    db.prepare('UPDATE listings SET off=? WHERE id=?').run(String(b.off || '').trim().slice(0, 200), l.id);
+  }
+  if (b.ok) {
+    /* 비밀키가 걸린 것은 공개 못 한다. 검사를 «못 함»(모름)이면 운영자가 판단한다 */
+    if (l.scan === '걸림') throw new HttpError(409, '저장소에서 비밀키가 걸렸습니다 — 판매자가 지운 뒤 다시 검사하세요');
+    db.prepare('UPDATE listings SET ok=1 WHERE id=?').run(l.id);
+  }
+  return { ok: true };
+}
+
+/* ── 간이 비밀키 검사 (TASK-38) ─────────────────────────
+   gitleaks 전체가 아니라 흔한 규칙 몇 개만 서버 안에서 돈다 — 컨테이너에 바이너리를 더 넣지 않으려고.
+   받는 것은 공개 github 저장소 tar.gz 하나, 크기·시간 상한이 있다. 상한을 넘거나 못 받으면 «못 함»(모름)이다. */
+const SECRET_RULES = [
+  ['AWS 접근 키', /\b(AKIA|ASIA)[0-9A-Z]{16}\b/],
+  ['GitHub 토큰', /\bgh[pousr]_[A-Za-z0-9]{36,}\b/],
+  ['OpenAI 키', /\bsk-(proj-)?[A-Za-z0-9_-]{32,}\b/],
+  ['Anthropic 키', /\bsk-ant-[A-Za-z0-9_-]{32,}\b/],
+  ['Google API 키', /\bAIza[0-9A-Za-z_-]{35}\b/],
+  ['Slack 토큰', /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/],
+  ['Stripe 비밀 키', /\b(sk|rk)_live_[A-Za-z0-9]{20,}\b/],
+  ['개인 키', /-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/],
+];
+const SCAN_MAX = 50 * 1024 * 1024;
+/* 파일 목록 [{name, text}] 에서 걸린 것. 값은 돌려주지 않는다 — 규칙 이름과 파일만 */
+function scanTexts(files) {
+  const hits = [];
+  for (const f of files) {
+    if (/(^|\/)(node_modules|\.git)\//.test(f.name)) continue;
+    for (const [label, re] of SECRET_RULES) if (re.test(f.text)) hits.push({ file: f.name, rule: label });
+  }
+  return hits;
+}
+/* tar(ustar) 를 풀어 텍스트 파일만. 512 바이트 머리글 + 내용 — 바깥 라이브러리 없이 */
+function untarTexts(buf) {
+  const out = [];
+  for (let off = 0; off + 512 <= buf.length;) {
+    const h = buf.subarray(off, off + 512);
+    if (h.every(x => x === 0)) break;
+    const name = h.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
+    const prefix = h.subarray(345, 500).toString('utf8').replace(/\0.*$/s, '');
+    const size = parseInt(h.subarray(124, 136).toString('utf8').replace(/\0.*$/s, '').trim() || '0', 8) || 0;
+    const type = String.fromCharCode(h[156] || 48);
+    const body = buf.subarray(off + 512, off + 512 + size);
+    if ((type === '0' || type === '\0') && size > 0 && size < 2 * 1024 * 1024 && !body.subarray(0, 8000).includes(0))
+      out.push({ name: prefix ? prefix + '/' + name : name, text: body.toString('utf8') });
+    off += 512 + Math.ceil(size / 512) * 512;
+  }
+  return out;
+}
+async function scanListing(db, id, { siteAdmin } = {}, fetcher = fetch) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 할 수 있습니다');
+  const l = db.prepare('SELECT id, repo FROM listings WHERE id=?').get(+id);
+  if (!l) throw new HttpError(404, '없는 상품입니다');
+  const rp = repoUrl(l.repo);
+  if (!rp) { db.prepare("UPDATE listings SET scan='못 함' WHERE id=?").run(l.id); return { scan: '못 함', why: '저장소가 없습니다' }; }
+  let files;
+  try {
+    const ctl = AbortSignal.timeout(60000);
+    const r = await fetcher(`https://codeload.github.com/${rp.owner}/${rp.name}/tar.gz/HEAD`, { signal: ctl, headers: { 'user-agent': 'hackon-scan' } });
+    if (!r.ok) throw new Error('받기 ' + r.status);
+    const gz = Buffer.from(await r.arrayBuffer());
+    if (gz.length > SCAN_MAX) throw new Error('너무 큽니다');
+    files = untarTexts(zlib.gunzipSync(gz, { maxOutputLength: SCAN_MAX }));
+  } catch (e) {
+    db.prepare("UPDATE listings SET scan='못 함' WHERE id=?").run(l.id);
+    return { scan: '못 함', why: String(e.message || e).slice(0, 80) };
+  }
+  const hits = scanTexts(files);
+  const scan = hits.length ? '걸림' : '통과';
+  db.prepare('UPDATE listings SET scan=? WHERE id=?').run(scan, l.id);
+  /* 걸리면 공개도 끈다 — 이미 공개된 것이라도 */
+  if (hits.length) db.prepare("UPDATE listings SET ok=0 WHERE id=?").run(l.id);
+  return { scan, files: files.length, hits: hits.slice(0, 20) };
+}
+
 /* ── 강의 ─────────────────────────────────────────────
    유튜브 주소 꼴은 여럿이다(watch?v= · youtu.be/ · embed/ · shorts/ · live/). 사람이 붙여 넣는 것은
    주소라 받아 주되, **남기는 것은 11자 id 하나**다. 화면이 iframe 주소를 서버에서 받아 그대로 쓰므로
@@ -722,6 +915,8 @@ function ytId(v) {
 const lectureOut = r => ({
   id: r.id, title: r.title, yt: r.yt, minutes: r.minutes || 0, series: r.series, ord: r.ord, note: r.note,
   person: r.person, teacher: r.handle || r.teacher || '',
+  /* 판매처 — 걸러지기 전에 들어간 값도 공개할 때 다시 https 만 */
+  buy: /^https:\/\//i.test(webUrl(r.buy)) ? webUrl(r.buy) : '',
   /* 주소는 서버가 id 로 만든다. nocookie 쪽 — 누르기 전에는 추적 쿠키를 안 심는다 */
   embed: `https://www.youtube-nocookie.com/embed/${r.yt}`,
   thumb: `https://i.ytimg.com/vi/${r.yt}/hqdefault.jpg`,
@@ -742,10 +937,12 @@ function addLecture(db, b, { siteAdmin } = {}) {
   const pm = String(b.person || '').match(/([0-9a-f]{12})\s*$/);
   const person = pm && db.prepare('SELECT 1 FROM people WHERE id=?').get(pm[1]) ? pm[1] : '';
   if (b.person && !person) throw new HttpError(404, '그 프로필을 찾지 못했습니다 — 주소를 다시 확인해 주세요');
-  const r = db.prepare(`INSERT INTO lectures(title,yt,person,teacher,minutes,series,ord,note) VALUES(?,?,?,?,?,?,?,?)`)
+  const buy = String(b.buy || '').trim();
+  if (buy && !/^https:\/\//i.test(webUrl(buy))) throw new HttpError(400, '판매처 주소는 https:// 로 시작해야 합니다');
+  const r = db.prepare(`INSERT INTO lectures(title,yt,person,teacher,minutes,series,ord,note,buy) VALUES(?,?,?,?,?,?,?,?,?)`)
     .run(title, yt, person, String(b.teacher || '').trim().slice(0, 20),
          Math.min(600, Math.max(0, Math.round(+b.minutes || 0))),
-         String(b.series || '').trim().slice(0, 40), Math.round(+b.ord || 0), String(b.note || '').trim().slice(0, 200));
+         String(b.series || '').trim().slice(0, 40), Math.round(+b.ord || 0), String(b.note || '').trim().slice(0, 200), buy ? webUrl(buy) : '');
   return lectureOut(db.prepare('SELECT l.*, p.handle FROM lectures l LEFT JOIN people p ON p.id=l.person WHERE l.id=?').get(r.lastInsertRowid));
 }
 function delLecture(db, id, { siteAdmin } = {}) {
@@ -760,14 +957,21 @@ function profile(db, pid) {
   const me = db.prepare('SELECT * FROM people WHERE id=?').get(pid);
   if (!me) throw new HttpError(404, '없는 사람입니다');
   /* 짝으로 붙어 온 사람도 그 대회에 «있었다». 신청 칸에 이름이 없다고 기록이 없는 것이 아니다. */
-  const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends, e.due,
+  const rows = db.prepare(`SELECT t.id, t.name, t.event, t.came, t.role, e.title, e.ends, e.due, e.kind, e.weeks,
                                   t.person, t.mate, t.name AS owner_name, t.mate_name,
                                   s.url IS NOT NULL AS made, s.url, s.show AS shown, lv.state AS open
                            FROM teams t JOIN events e ON e.id = t.event
                            LEFT JOIN submissions s ON s.team = t.id
                            LEFT JOIN liveness lv ON lv.team = t.id
-                           WHERE t.person = ? OR (t.mate <> '' AND t.mate = ?)
+                           WHERE (t.person = ? OR (t.mate <> '' AND t.mate = ?))
+                             AND t.pick NOT IN ('applied', 'rejected')   -- 선발 안 된 지원은 «나온 대회» 가 아니다
                            ORDER BY e.ends DESC`).all(pid, pid);
+  /* 프로젝트는 주마다 센다 — 4주 중 2주 빠지면 안 온 것이 2다. 한 주라도 왔으면 «온 대회» 다 */
+  for (const r of rows) if (r.kind === '프로젝트' && r.weeks) {
+    const n = db.prepare('SELECT COUNT(*) c FROM attend WHERE team=? AND week<=?').get(r.id, r.weeks).c;
+    r.absent = r.weeks - n;
+    if (n) r.came = r.came || 'weekly';
+  }
   const past = rows.filter(r => r.ends < today());
   const came = past.filter(r => r.came).length;
   const made = past.filter(r => r.made).length;
@@ -790,7 +994,7 @@ function profile(db, pid) {
     /* 온 대회가 없으면 완주율은 «모름» 이다. 0 을 주면 모집 화면에서 «안 하는 사람» 으로 읽힌다(E22) */
     finishRate: came ? Math.round(made / came * 1000) / 10 : null,
     /* 매너는 실력과 따로 센다. 신청하고 안 온 것은 못해서가 아니다. */
-    noshow: past.length - came,
+    noshow: past.length - came + past.reduce((a, r) => a + (r.absent && r.came ? r.absent : r.absent && !r.came ? r.absent - 1 : 0), 0),
     skill: shrink(rt.map(r => r.skill)),
     manner: shrink(rt.map(r => r.manner)),
     /* 받은 칭찬 태그. 비매너 알림은 여기 절대 안 싣는다 — 사이트 운영자 화면에만 있다 */
@@ -2155,6 +2359,7 @@ function sitemap(db) {
   const base = CANON();
   const urls = ['/', '/manual'].concat(
     db.prepare('SELECT 1 FROM lectures LIMIT 1').get() ? ['/learn'] : [],
+    db.prepare("SELECT 1 FROM listings WHERE ok=1 AND off='' LIMIT 1").get() ? ['/market'] : [],
     db.prepare("SELECT id FROM events WHERE listed=1 AND ends >= date('now') ORDER BY ends").all()
       .map((r) => '/e/' + r.id));
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -2304,6 +2509,48 @@ function open(file) {
       role   TEXT NOT NULL DEFAULT '',
       ok     INTEGER NOT NULL DEFAULT 0,
       at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    /* 마켓 — 바이브코딩 결과물을 시연하고 정해진 값에 판다(TASK-35~39).
+       **HACK:ON 은 돈을 만지지 않는다.** 구매 버튼은 판매자 본인의 판매처 계정(buy_url)으로 간다.
+       ok=1(사이트 운영자 확인) 이고 off 가 빈 값일 때만 공개된다. */
+    CREATE TABLE IF NOT EXISTS listings(
+      id      INTEGER PRIMARY KEY,
+      person  TEXT NOT NULL,
+      source  TEXT NOT NULL,                 -- submission | outside
+      ref     INTEGER NOT NULL,              -- teams.id 또는 outside.id
+      title   TEXT NOT NULL,
+      price   INTEGER NOT NULL,              -- 원
+      license TEXT NOT NULL,                 -- MIT | 개인용 | 상업용
+      refund  TEXT NOT NULL DEFAULT '',
+      buy_url TEXT NOT NULL,
+      repo    TEXT NOT NULL DEFAULT '',      -- 공개 저장소(선택). 비밀키 검사 대상
+      scan    TEXT NOT NULL DEFAULT '',      -- '' 안 함 | 통과 | 걸림 | 못 함
+      ok      INTEGER NOT NULL DEFAULT 0,
+      off     TEXT NOT NULL DEFAULT '',      -- 내린 이유. 비면 살아 있음
+      at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS market_reports(
+      id      INTEGER PRIMARY KEY,
+      listing INTEGER NOT NULL,
+      reason  TEXT NOT NULL,
+      at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    /* 프로젝트 주차 체크인과 주차 제출. 마지막 주 제출은 submissions 에도 들어가 완주·쇼케이스·마켓이 그대로 돈다 */
+    CREATE TABLE IF NOT EXISTS attend(
+      team INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      week INTEGER NOT NULL,
+      at   TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY(team, week)
+    );
+    CREATE TABLE IF NOT EXISTS week_submits(
+      team INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      week INTEGER NOT NULL,
+      url  TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT '',
+      at   TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY(team, week)
     );
 
     /* 강의. 영상은 서버에 안 둔다 — 유튜브 id 만 적는다(Fly 도쿄 내보내기는 GB 당 $0.04 이고,
@@ -2632,7 +2879,16 @@ function open(file) {
   /* 예약금(원). 0 이면 안 받는다. 공개해도 되는 조건이다 — 받는 계좌는 여기 없다 */
   try { db.exec('ALTER TABLE events ADD COLUMN deposit INTEGER NOT NULL DEFAULT 0'); } catch {}
   /* 팀별 예약금 상태 — 운영자와 그 팀에게만. 공개 응답(board)에서 지운다 */
-  try { db.exec("ALTER TABLE teams ADD COLUMN deposit TEXT NOT NULL DEFAULT ''"); } catch {}      // 입금 안내 한 줄 — 맡기 확정된 사람에게만 보인다. 앱은 돈을 안 만진다
+  try { db.exec("ALTER TABLE teams ADD COLUMN deposit TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 프로젝트 — 주 수·정기 모임 시간·선발형 여부. 팀은 선발 상태(빈 값이면 바로 확정) */
+  try { db.exec('ALTER TABLE events ADD COLUMN weeks INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE events ADD COLUMN meet TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec('ALTER TABLE events ADD COLUMN pick INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE teams ADD COLUMN pick TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 수료 확인 번호 — 처음 요청할 때 한 번 만든다. 이 번호가 곧 공개 확인 주소(/c/<번호>)다 */
+  try { db.exec("ALTER TABLE teams ADD COLUMN cert TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 강의 판매처(인프런 등) — 사업자 없이 HACK:ON 이 직접 못 판다. 링크만 건다 */
+  try { db.exec("ALTER TABLE lectures ADD COLUMN buy TEXT NOT NULL DEFAULT ''"); } catch {}      // 입금 안내 한 줄 — 맡기 확정된 사람에게만 보인다. 앱은 돈을 안 만진다
   /* 2026-09-27 취소 규칙(스페이스클라우드·이벤터스: 규칙은 주최자가 정하고 상세 페이지에 박는다).
      cancel_rule — 한 줄. 비면 빈 문자열 그대로 둔다. 기본 문장은 «보여 줄 때»만 쓴다(화면이 갖고 있다) —
      기본값을 DB 에 써 두면 주최자가 안 정한 것과 «이 문장으로 정한 것» 을 나중에 가를 수 없다. */
@@ -3215,6 +3471,9 @@ function editEvent(db, id, b) {
   if (b.pay !== undefined) { set.push('pay=?'); val.push(plain(b.pay, 120)); }
   if (b.kind !== undefined) { set.push('kind=?'); val.push(kindOf(b.kind)); }
   if (b.deposit !== undefined) { set.push('deposit=?'); val.push(Math.min(1000000, Math.max(0, Math.floor(+b.deposit || 0)))); }
+  if (b.weeks !== undefined) { set.push('weeks=?'); val.push(Math.min(WEEKS_MAX, Math.max(0, Math.floor(+b.weeks || 0)))); }
+  if (b.meet !== undefined) { set.push('meet=?'); val.push(plain(b.meet, 40)); }
+  if (b.pick !== undefined) { set.push('pick=?'); val.push(b.pick ? 1 : 0); }
   /* 그날의 조건. 현장에서 공개한 제약을 운영자가 적어 둔다 — 아카이브의 원본이 이것뿐이다 */
   if (b.twist !== undefined) { set.push('twist=?'); val.push(plain(b.twist, 120)); }
   /* 취소 규칙 한 줄. 공개 페이지와 신청 뒤 카드에 접지 않고 그대로 나간다 */
@@ -3349,8 +3608,10 @@ function createEvent(db, b) {
     db.prepare("UPDATE owners SET name=? WHERE id=? AND name=''").run(b.host, owner);
   }
   db.prepare('UPDATE events SET owner=? WHERE id=?').run(owner, id);
-  db.prepare('UPDATE events SET kind=?, deposit=? WHERE id=?')
-    .run(kindOf(b.kind), Math.min(1000000, Math.max(0, Math.floor(+b.deposit || 0))), id);
+  db.prepare('UPDATE events SET kind=?, deposit=?, weeks=?, meet=?, pick=? WHERE id=?')
+    .run(kindOf(b.kind), Math.min(1000000, Math.max(0, Math.floor(+b.deposit || 0))),
+         kindOf(b.kind) === '프로젝트' ? Math.min(WEEKS_MAX, Math.max(1, Math.floor(+b.weeks || 4))) : 0,
+         plain(b.meet, 40), b.pick ? 1 : 0, id);
   db.prepare('UPDATE events SET okey=?, jkey=?, vkey=?, plan=? WHERE id=?')
     .run(okey, jkey, vkey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
   /* 예산을 «주었을 때만» 산식을 돌린다. 이름 하나로 여는 길은 전과 똑같이 현장 대회·자리 없음이다.
@@ -3480,6 +3741,98 @@ function setDeposit(db, tid, state) {
   if (!db.prepare('UPDATE teams SET deposit=? WHERE id=?').run(st, tid).changes) throw new HttpError(404, '없는 팀입니다');
   return { deposit: st };
 }
+/* ── 수료 확인 (TASK-29) ─────────────────────────────
+   이름은 «수료 확인» 만 쓴다. «자격증»·«인증» 은 쓰지 않는다 — 등록 안 한 민간자격을 운영하면
+   자격기본법 제17조로 처벌받는다. 이 페이지는 «이 사람이 이 수업에 왔다·끝까지 냈다» 는 사실 확인일 뿐이다.
+   받을 수 있는 사람: 모임·수업은 체크인한 사람(끝난 뒤), 프로젝트는 마지막 주를 낸 사람(완주). */
+function certEligible(db, tid) {
+  const t = db.prepare(`SELECT t.id, t.came, t.pick, e.kind, e.ends, e.starts, (SELECT url FROM submissions s WHERE s.team=t.id) AS url
+                        FROM teams t JOIN events e ON e.id=t.event WHERE t.id=?`).get(+tid);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  if (t.pick === 'applied' || t.pick === 'rejected') return { ok: false, why: '선발된 팀만 받습니다' };
+  if (t.kind === '모임') return t.came && today() >= String(t.starts).slice(0, 10) ? { ok: true } : { ok: false, why: '그날 체크인한 분만 받습니다' };
+  if (t.kind === '프로젝트') return t.url ? { ok: true } : { ok: false, why: '마지막 주를 내면 받습니다' };
+  return { ok: false, why: '해커톤은 프로필의 기록증을 쓰세요' };
+}
+function issueCert(db, tid, tkey) {
+  const t = db.prepare('SELECT id, tkey, cert FROM teams WHERE id=?').get(+tid);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  if (!tkey || tkey !== t.tkey) throw new HttpError(403, '팀 열쇠가 필요합니다 — 신청한 브라우저에서');
+  const el = certEligible(db, t.id);
+  if (!el.ok) throw new HttpError(409, el.why);
+  let code = t.cert;
+  if (!code) { code = crypto.randomBytes(6).toString('hex'); db.prepare('UPDATE teams SET cert=? WHERE id=?').run(code, t.id); }
+  return { code };
+}
+/* 공개 확인. 연락처는 없다. 이름은 본인이 정한 «보여 줄 이름» 이 있으면 그것, 없으면 팀 이름 */
+function certView(db, code) {
+  if (!/^[0-9a-f]{12}$/.test(String(code || ''))) throw new HttpError(404, '없는 번호입니다');
+  const r = db.prepare(`SELECT t.name, t.person, t.cert, e.title, e.host, e.starts, e.ends, e.kind, e.weeks, p.handle
+                        FROM teams t JOIN events e ON e.id=t.event LEFT JOIN people p ON p.id=t.person WHERE t.cert=?`).get(code);
+  if (!r) throw new HttpError(404, '없는 번호입니다');
+  return { code: r.cert, name: r.handle || r.name, course: r.title, host: r.host, starts: r.starts, ends: r.ends,
+           kind: r.kind === '프로젝트' ? `${r.weeks}주 프로젝트 완주` : '수업 참석', person: r.person || '' };
+}
+/* 수업 실적 — 기관에 내는 숫자. 체크인을 한 번도 안 찍었으면 «온 사람» 은 모름(null) 이다 */
+function meetStats(db, event) {
+  const e = db.prepare('SELECT id, title, host, starts, ends, kind FROM events WHERE id=?').get(event);
+  if (!e) throw new HttpError(404, '없는 대회입니다');
+  const applied = db.prepare("SELECT COUNT(*) c FROM teams WHERE event=? AND pick NOT IN ('applied','rejected')").get(event).c;
+  const came = db.prepare("SELECT COUNT(*) c FROM teams WHERE event=? AND came<>''").get(event).c;
+  return { title: e.title, host: e.host, starts: e.starts, ends: e.ends, kind: e.kind,
+           applied, came: came ? came : null,
+           rated: db.prepare('SELECT COUNT(*) c FROM ratings WHERE event=?').get(event).c,
+           certs: db.prepare("SELECT COUNT(*) c FROM teams WHERE event=? AND cert<>''").get(event).c };
+}
+
+/* ── 프로젝트 (TASK-31~33) ── */
+function projOf(db, tid) {
+  const t = db.prepare('SELECT t.id, t.event, t.tkey, t.pick, e.kind, e.weeks FROM teams t JOIN events e ON e.id=t.event WHERE t.id=?').get(+tid);
+  if (!t) throw new HttpError(404, '없는 팀입니다');
+  if (t.kind !== '프로젝트' || !t.weeks) throw new HttpError(400, '프로젝트가 아닙니다');
+  return t;
+}
+const weekOk = (t, w) => { const n = Math.floor(+w); if (!(n >= 1 && n <= t.weeks)) throw new HttpError(400, `주차는 1~${t.weeks} 입니다`); return n; };
+/** 주차 체크인. 다시 누르면 취소 — 등록 데스크의 체크인과 같은 규칙. 운영자 열쇠는 라우터가 본다 */
+function toggleAttend(db, tid, week) {
+  const t = projOf(db, tid), w = weekOk(t, week);
+  if (t.pick === 'applied' || t.pick === 'rejected') throw new HttpError(409, '선발되지 않은 팀입니다');
+  const had = db.prepare('SELECT 1 FROM attend WHERE team=? AND week=?').get(t.id, w);
+  if (had) db.prepare('DELETE FROM attend WHERE team=? AND week=?').run(t.id, w);
+  else db.prepare('INSERT INTO attend(team, week) VALUES(?,?)').run(t.id, w);
+  return { week: w, came: !had };
+}
+/** 주차 제출. 팀 열쇠로만. **마지막 주 제출이 곧 완주다** — submissions 에도 넣어 완주·쇼케이스·마켓이 그대로 돈다 */
+function weekSubmit(db, tid, tkey, b) {
+  const t = projOf(db, tid), w = weekOk(t, b.week);
+  if (!tkey || tkey !== t.tkey) throw new HttpError(403, '팀 열쇠가 필요합니다 — 신청한 브라우저에서');
+  if (t.pick === 'applied' || t.pick === 'rejected') throw new HttpError(409, '선발된 뒤에 낼 수 있습니다');
+  const url = webUrl(b.url);
+  if (!url) throw new HttpError(400, 'https:// 로 시작하는 주소를 넣어 주세요');
+  const note = plain(b.note, 200);
+  db.prepare(`INSERT INTO week_submits(team, week, url, note) VALUES(?,?,?,?)
+              ON CONFLICT(team, week) DO UPDATE SET url=excluded.url, note=excluded.note, at=datetime('now')`).run(t.id, w, url, note);
+  if (w === t.weeks) submit(db, t.id, { url, note });
+  return { week: w, final: w === t.weeks, done: db.prepare('SELECT week FROM week_submits WHERE team=? ORDER BY week').all(t.id).map(x => x.week) };
+}
+/** 지원자 카드 — 리더(운영자)가 고르는 화면. 연락처는 없다. 기록은 profile() 을 그대로 쓴다.
+    기록이 없는 사람은 «처음» — 완주율 0% 로 그리지 않는다(profile 이 null 을 준다) */
+function applicants(db, event) {
+  return db.prepare("SELECT id, name, role, note, person, pick FROM teams WHERE event=? AND pick<>'' ORDER BY id").all(event).map(t => {
+    let p = null; try { p = t.person ? profile(db, t.person) : null; } catch (_) { p = null; }
+    return { id: t.id, name: t.name, role: t.role, apply: t.note, pick: t.pick,
+             record: p ? { id: p.id, events: p.events, finished: p.finished, finishRate: p.finishRate, noshow: p.noshow,
+                           manner: p.manner, skill: p.skill, praise: p.praise, tier: p.tier.name,
+                           outside: (p.outside || []).length, lectures: (p.lectures || []).length } : null };
+  });
+}
+function setPick(db, tid, state) {
+  if (!PICKS.includes(state)) throw new HttpError(400, 'accepted · rejected · applied 중 하나입니다');
+  const t = db.prepare("SELECT id FROM teams WHERE id=? AND pick<>''").get(+tid);
+  if (!t) throw new HttpError(404, '지원자가 아닙니다');
+  db.prepare('UPDATE teams SET pick=? WHERE id=?').run(state, t.id);
+  return { pick: state };
+}
 function getEvent(db, id) {
   const e = db.prepare('SELECT * FROM events WHERE id=?').get(id);
   if (!e) throw new HttpError(404, '없는 대회입니다');
@@ -3554,6 +3907,8 @@ function joinTeam(db, event, b) {
            crypto.randomBytes(5).toString('hex'), b.share && b.contact ? 1 : 0, b.share && b.contact ? now : '');
   /* 자리 번호 — 이 대회에서 지금까지 나온 가장 큰 번호 + 1. 빠진 팀의 번호는 다시 안 쓴다(인쇄한 자리표와 어긋나지 않게) */
   db.prepare('UPDATE teams SET no = (SELECT COALESCE(MAX(no),0)+1 FROM teams t2 WHERE t2.event=? AND t2.id<>teams.id) WHERE id=?').run(event, Number(r.lastInsertRowid));
+  /* 선발형 대회 — 신청은 «지원» 으로 들어간다. 리더가 수락하기 전에는 공개 명단에 없다 */
+  if (e.pick) db.prepare("UPDATE teams SET pick='applied' WHERE id=?").run(Number(r.lastInsertRowid));
     return Number(r.lastInsertRowid);
   } catch {
     throw new HttpError(409, '같은 이름의 팀이 있습니다. 이미 신청한 팀이면 팀 링크로 들어오고, 기기를 바꿨다면 운영자에게 링크 재발급을 부탁하세요. 새 팀이면 이름 뒤에 소속을 붙여 보세요');
@@ -3850,7 +4205,7 @@ function board(db, event, admin = false, mine = 0) {
   const e = getEvent(db, event);
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
-           t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring, t.deposit,
+           t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring, t.deposit, t.pick,
            s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
@@ -3893,7 +4248,9 @@ function board(db, event, admin = false, mine = 0) {
   }
   /* 짝 비교 점수는 팀마다가 아니라 대회 전체를 한 번에 풀어야 나온다(상대의 세기가 들어간다) */
   const ps = pairScores(db, event);
-  const rows = teams.map((t, ti) => {
+  /* 선발형 — 수락 전·거절된 지원자는 공개 명단에 없다. 운영자와 그 팀 자신만 본다 */
+  const shown = teams.filter(t => admin || !(t.pick === 'applied' || t.pick === 'rejected') || (mine && String(t.id) === String(mine)));
+  const rows = shown.map((t, ti) => {
     let total = 0, judged = new Set();
     const rp = rankPts[t.id] || [];
     const rscore = rp.length ? Math.round(rp.reduce((a, b) => a + b, 0) / rp.length * 10) / 10 : 0;
@@ -3933,6 +4290,12 @@ function board(db, event, admin = false, mine = 0) {
                   delete row.show_at; }
     /* 예약금 상태는 돈 이야기다 — 운영자와 그 팀 자신에게만 */
     if (!admin && !(mine && String(t.id) === String(mine))) delete row.deposit;
+    /* 선발 전·거절된 지원자의 연락처는 리더(운영자)에게도 안 간다 — 수락해야 받는다 */
+    if (t.pick === 'applied' || t.pick === 'rejected') delete row.contact;
+    if (e.kind === '프로젝트') {
+      row.weeksDone = db.prepare('SELECT week FROM week_submits WHERE team=? ORDER BY week').all(t.id).map(x => x.week);
+      if (admin) row.attend = db.prepare('SELECT week FROM attend WHERE team=? ORDER BY week').all(t.id).map(x => x.week);
+    }
     return row;
   });
   /* 관객 평가 모드면 표 평균으로, 짝 비교 모드면 BT 점수로 줄 세운다. 아니면 심사 점수로.
@@ -5607,6 +5970,22 @@ function routes(db) {
         if (p === '/api/admin/outside' && req.method === 'GET') return json(res, 200, { rows: outsidePending(db, { siteAdmin }) });
         if ((m = p.match(/^\/api\/admin\/outside\/(\d+)$/)) && req.method === 'POST')
           return json(res, 200, reviewOutside(db, m[1], !!(await body(req)).ok, { siteAdmin }));
+        /* 마켓 — 읽기는 누구나, 판매 등록은 본인(팀·짝 열쇠), 확인·내리기·검사는 사이트 운영자 */
+        if (p === '/api/market' && req.method === 'GET') return json(res, 200, { rows: marketList(db) });
+        if ((m = p.match(/^\/api\/market\/(\d+)$/)) && req.method === 'GET') return json(res, 200, marketItem(db, m[1]));
+        if ((m = p.match(/^\/api\/market\/(\d+)\/report$/)) && req.method === 'POST')
+          return json(res, 200, reportListing(db, m[1], (await body(req)).reason));
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/listings$/)) && req.method === 'GET') {
+          if (!ownsPerson(db, m[1], req.headers['x-tkey'] || '')) throw new HttpError(403, '본인만 볼 수 있습니다');
+          return json(res, 200, { rows: myListings(db, m[1]), sellable: sellableOf(db, m[1]) });
+        }
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/listings$/)) && req.method === 'POST')
+          return json(res, 200, addListing(db, m[1], req.headers['x-tkey'] || '', await body(req)));
+        if (p === '/api/admin/market' && req.method === 'GET') return json(res, 200, { rows: marketAdmin(db, { siteAdmin }) });
+        if ((m = p.match(/^\/api\/admin\/market\/(\d+)$/)) && req.method === 'POST')
+          return json(res, 200, reviewListing(db, m[1], await body(req), { siteAdmin }));
+        if ((m = p.match(/^\/api\/admin\/market\/(\d+)\/scan$/)) && req.method === 'POST')
+          return json(res, 200, await scanListing(db, m[1], { siteAdmin }));
         if (p === '/api/admin/manner' && req.method === 'GET')
           return json(res, 200, { rows: mannerReports(db, { siteAdmin }) });
         if (p === '/api/admin/people' && req.method === 'GET') {
@@ -5912,6 +6291,30 @@ function routes(db) {
           const came = t.came ? '' : new Date().toISOString();
           db.prepare('UPDATE teams SET came=? WHERE id=?').run(came, +m[1]);
           return json(res, 200, { came });
+        }
+        /* 프로젝트 — 주차 체크인·선발은 운영자 열쇠, 주차 제출은 팀 열쇠 */
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/attend$/)) && req.method === 'POST') {
+          const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          needAdmin(db, t.event, key, owner, siteAdmin);
+          return json(res, 200, toggleAttend(db, +m[1], (await body(req)).week));
+        }
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/pick$/)) && req.method === 'POST') {
+          const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
+          if (!t) throw new HttpError(404, '없는 팀입니다');
+          needAdmin(db, t.event, key, owner, siteAdmin);
+          return json(res, 200, setPick(db, +m[1], (await body(req)).state));
+        }
+        /* 수료 확인 — 발급은 팀 열쇠, 확인은 누구나(번호만 알면) */
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/cert$/)) && req.method === 'POST')
+          return json(res, 200, issueCert(db, +m[1], req.headers['x-tkey'] || ''));
+        if ((m = p.match(/^\/api\/cert\/([0-9a-f]{12})$/)) && req.method === 'GET') return json(res, 200, certView(db, m[1]));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/meetstats$/)) && req.method === 'GET') return json(res, 200, meetStats(db, m[1]));
+        if ((m = p.match(/^\/api\/teams\/(\d+)\/week$/)) && req.method === 'POST')
+          return json(res, 200, weekSubmit(db, +m[1], req.headers['x-tkey'] || '', await body(req)));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/applicants$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner, siteAdmin);
+          return json(res, 200, { rows: applicants(db, m[1]) });
         }
         if ((m = p.match(/^\/api\/teams\/(\d+)\/deposit$/)) && req.method === 'POST') {
           const t = db.prepare('SELECT event FROM teams WHERE id=?').get(+m[1]);
@@ -6505,6 +6908,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
+               || p === '/market' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -8017,6 +8421,153 @@ async function selftest() {
   ok(prof2.skill.n === 1 && prof2.manner.n === 1, '실력과 매너를 따로 센다');
   ok(prof2.skill.score !== prof2.manner.score, '실력과 매너가 섞이지 않는다');
 
+  /* ── 프로젝트 (TASK-31~33) ── 주차 체크인·주차 제출·선발형 지원자 카드 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const pj = createEvent(db, { title: '4주 프로젝트', kind: '프로젝트', weeks: 4, meet: '화 20시', pick: 1, starts: '2020-05-01', ends: '2020-05-28' });
+    const ge = getEvent(db, pj.id);
+    ok(ge.kind === '프로젝트' && ge.weeks === 4 && ge.meet === '화 20시' && ge.pick === 1, '프로젝트: 종류·주 수·모임 시간·선발형이 남는다');
+    ok(getEvent(db, createEvent(db, { title: 'w', kind: '프로젝트', weeks: 99 }).id).weeks === 16, '프로젝트: 주 수는 16주까지');
+    const pa = joinTeam(db, pj.id, { name: '지원가', contact: 'proj-a@x.test', agree: true });
+    const pb = joinTeam(db, pj.id, { name: '지원나', contact: 'proj-b@x.test', agree: true });
+    const [iPa, iPb] = ['proj-a@x.test', 'proj-b@x.test'].map(c => pidOf(db, c));
+    const tkPa = db.prepare('SELECT tkey FROM teams WHERE id=?').get(pa).tkey;
+    ok(db.prepare('SELECT pick FROM teams WHERE id=?').get(pa).pick === 'applied', '선발형: 신청은 «지원» 으로 들어간다');
+    ok(board(db, pj.id, false).rows.length === 0, '선발형: 수락 전 지원자는 공개 명단에 없다');
+    ok(board(db, pj.id, false, pa).rows.length === 1, '선발형: 내 지원은 나에게는 보인다');
+    const ap = applicants(db, pj.id);
+    ok(ap.length === 2 && !JSON.stringify(ap).includes('x.test'), '지원자 카드: 둘이 나오고 연락처가 없다');
+    ok(!('contact' in board(db, pj.id, true).rows.find(r => r.id === pa)), '지원자 카드: 수락 전에는 운영자 명단에도 연락처가 없다');
+    ok(ap[0].record && ap[0].record.finishRate === null, '지원자 카드: 기록이 없으면 완주율은 모름(null) — 0% 가 아니다');
+    ok(raises(() => setPick(db, pa, '몰래'), 400), '선발: 정한 값 밖은 400');
+    setPick(db, pa, 'accepted'); setPick(db, pb, 'rejected');
+    ok(board(db, pj.id, true).rows.find(r => r.id === pa).contact === 'proj-a@x.test', '선발: 수락하면 리더가 연락처를 받는다');
+    ok(board(db, pj.id, false).rows.map(r => r.id).join() === String(pa), '선발: 공개 명단에는 수락된 팀만');
+    ok(profile(db, iPb).history.length === 0, '선발: 거절은 공개 기록(나온 대회)에 안 남는다');
+    ok(raises(() => weekSubmit(db, pb, db.prepare('SELECT tkey FROM teams WHERE id=?').get(pb).tkey, { week: 1, url: 'https://x.example' }), 409), '거절된 팀은 주차 제출을 못 한다');
+    /* 주차 체크인 — 4주 중 2주 */
+    ok(raises(() => toggleAttend(db, pa, 5), 400), '체크인: 주 수 밖은 400');
+    toggleAttend(db, pa, 1); toggleAttend(db, pa, 2); toggleAttend(db, pa, 3); toggleAttend(db, pa, 3);
+    ok(db.prepare('SELECT COUNT(*) c FROM attend WHERE team=?').get(pa).c === 2, '체크인: 다시 누르면 취소');
+    ok(profile(db, iPa).noshow === 2, '프로젝트: 4주 중 2주 빠지면 안 온 횟수가 2 (' + profile(db, iPa).noshow + ')');
+    /* 주차 제출 — 마지막 주가 완주 */
+    ok(raises(() => weekSubmit(db, pa, 'zzzz', { week: 1, url: 'https://x.example' }), 403), '주차 제출: 팀 열쇠만');
+    ok(raises(() => weekSubmit(db, pa, tkPa, { week: 2, url: 'javascript:alert(1)' }), 400), '주차 제출: https 주소만');
+    weekSubmit(db, pa, tkPa, { week: 1, url: 'https://w1.example' });
+    weekSubmit(db, pa, tkPa, { week: 3, url: 'https://w3.example' });
+    ok(profile(db, iPa).finished === 0, '주차 제출: 중간 주만 내면 완주가 아니다');
+    const fin = weekSubmit(db, pa, tkPa, { week: 4, url: 'https://final.example', note: '마지막' });
+    ok(fin.final && profile(db, iPa).finished === 1, '주차 제출: 마지막 주를 내면 완주');
+    ok(board(db, pj.id, false).rows[0].weeksDone.join() === '1,3,4', '주차 제출: 낸 주가 공개 명단에 보인다');
+  }
+
+  /* ── 교육 — 수료 확인·수업 실적·강의 판매처 (TASK-29~30) ── */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const cls = createEvent(db, { title: '청소년 AI 수업', host: '꿈드림', kind: '모임', starts: '2020-06-01', ends: '2020-06-01' });
+    const jt = (ev, b) => db.prepare('SELECT id, tkey FROM teams WHERE id=?').get(joinTeam(db, ev, b));
+    const c1 = jt(cls.id, { name: '수강하나', contact: 'cls1@x.test', agree: true });
+    const c2 = jt(cls.id, { name: '수강둘', contact: 'cls2@x.test', agree: true });
+    ok(meetStats(db, cls.id).came === null && meetStats(db, cls.id).applied === 2, '실적: 체크인을 안 찍었으면 온 사람은 모름(null)');
+    ok(raises(() => issueCert(db, c1.id, c1.tkey), 409), '수료: 체크인 안 한 사람은 못 받는다');
+    db.prepare("UPDATE teams SET came=datetime('now') WHERE id=?").run(c1.id);
+    ok(raises(() => issueCert(db, c1.id, 'zzzz'), 403), '수료: 팀 열쇠만');
+    const code = issueCert(db, c1.id, c1.tkey).code;
+    ok(/^[0-9a-f]{12}$/.test(code) && issueCert(db, c1.id, c1.tkey).code === code, '수료: 번호는 한 번 만들고 그대로');
+    const cv = certView(db, code);
+    ok(cv.course === '청소년 AI 수업' && cv.host === '꿈드림' && cv.kind === '수업 참석', '수료: 확인 페이지에 수업·기관이 실린다');
+    ok(!JSON.stringify(cv).includes('x.test'), '수료: 확인 페이지에 연락처가 없다');
+    ok(!/자격증|인증/.test(JSON.stringify(cv)), '수료: «자격증»·«인증» 낱말이 없다');
+    ok(raises(() => certView(db, 'ffffffffffff'), 404) && raises(() => certView(db, '../x'), 404), '수료: 없는 번호는 404');
+    ok(meetStats(db, cls.id).came === 1 && meetStats(db, cls.id).certs === 1, '실적: 온 사람·발급 수');
+    const hk = createEvent(db, { title: '보통 해커톤', starts: '2020-06-02' });
+    const h1 = jt(hk.id, { name: '해커', contact: 'hk1@x.test', agree: true });
+    db.prepare("UPDATE teams SET came=datetime('now') WHERE id=?").run(h1.id);
+    ok(raises(() => issueCert(db, h1.id, h1.tkey), 409), '수료: 해커톤은 기록증을 쓴다');
+    const pj1 = createEvent(db, { title: '1주 프로젝트', kind: '프로젝트', weeks: 1, starts: '2020-06-03' });
+    const p1 = jt(pj1.id, { name: '한주팀', contact: 'pj1@x.test', agree: true });
+    ok(raises(() => issueCert(db, p1.id, p1.tkey), 409), '수료: 프로젝트는 마지막 주를 내야');
+    weekSubmit(db, p1.id, p1.tkey, { week: 1, url: 'https://done.example' });
+    ok(certView(db, issueCert(db, p1.id, p1.tkey).code).kind === '1주 프로젝트 완주', '수료: 프로젝트 완주면 받는다');
+    /* 강의 판매처 */
+    ok(raises(() => addLecture(db, { title: 't', yt: 'dQw4w9WgXcQ', buy: 'http://inflearn.com/x' }, { siteAdmin: true }), 400), '강의: 판매처는 https 만');
+    ok(raises(() => addLecture(db, { title: 't', yt: 'dQw4w9WgXcQ', buy: 'javascript:alert(1)' }, { siteAdmin: true }), 400), '강의: javascript: 판매처는 400');
+    const Lb = addLecture(db, { title: '유료 전체판', yt: 'dQw4w9WgXcQ', buy: 'https://www.inflearn.com/course/x' }, { siteAdmin: true });
+    ok(Lb.buy === 'https://www.inflearn.com/course/x', '강의: 판매처 주소가 실린다');
+    db.prepare("UPDATE lectures SET buy='javascript:alert(1)' WHERE id=?").run(Lb.id);
+    ok(lectures(db).find(l => l.id === Lb.id).buy === '', '강의: 걸러지기 전 판매처도 공개할 때 다시 거른다');
+    delLecture(db, Lb.id, { siteAdmin: true });
+  }
+
+  /* ── 마켓 (TASK-35~39) ── 돈은 판매자 계정으로. 공개는 운영자 확인 뒤, 시연이 되는 것만 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    ok(buyUrl('https://gumroad.com/l/x') && buyUrl('https://me.gumroad.com/l/x') && buyUrl('https://kmong.com/gig/1'), '마켓: 허용 판매처를 받는다');
+    for (const bad of ['https://evilgumroad.com/x', 'http://gumroad.com/x', 'javascript:alert(1)', 'https://a:b@gumroad.com/x', 'https://gumroad.com.evil.test/x'])
+      ok(buyUrl(bad) === '', '마켓: 허용 밖 판매 주소를 받았다 — ' + bad);
+    ok(repoUrl('https://github.com/mandeun/hackon').name === 'hackon' && repoUrl('https://gitlab.com/a/b') === null && repoUrl('https://github.com/a/b/../../x') === null,
+       '마켓: 저장소는 github 소유자/이름 꼴만');
+    const kEv = createEvent(db, { title: '마켓시험', starts: '2020-04-01', ends: '2020-04-01' });
+    const kT = joinTeam(db, kEv.id, { name: '파는팀', contact: 'seller@x.test', agree: true });
+    const kTk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(kT).tkey;
+    const kP = pidOf(db, 'seller@x.test');
+    db.prepare("INSERT INTO submissions(team,url,note,show) VALUES(?,?,?,1)").run(kT, 'https://demo.example/app', '시연');
+    const good = { source: 'submission', ref: kT, price: 9900, license: 'MIT', buy_url: 'https://me.gumroad.com/l/app', refund: '받은 뒤 7일' };
+    ok(raises(() => addListing(db, kP, 'zzzz', good), 403), '마켓: 남의 열쇠로 못 올린다');
+    ok(raises(() => addListing(db, kP, kTk, { ...good, ref: 999999 }), 403), '마켓: 내 것이 아닌 것은 못 판다');
+    ok(raises(() => addListing(db, kP, kTk, { ...good, price: 10 }), 400), '마켓: 값이 너무 작으면 400');
+    ok(raises(() => addListing(db, kP, kTk, { ...good, license: '' }), 400), '마켓: 라이선스를 안 고르면 400');
+    ok(raises(() => addListing(db, kP, kTk, { ...good, buy_url: 'https://evil.test/pay' }), 400), '마켓: 허용 밖 판매처는 400');
+    const L1 = addListing(db, kP, kTk, good);
+    ok(marketList(db).length === 0, '마켓: 운영자 확인 전에는 공개되지 않는다');
+    ok(raises(() => reviewListing(db, L1.id, { ok: true }, {}), 403), '마켓: 운영자가 아니면 공개 못 한다');
+    reviewListing(db, L1.id, { ok: true }, { siteAdmin: true });
+    const pub = marketList(db);
+    ok(pub.length === 1 && pub[0].demo.url === 'https://demo.example/app' && pub[0].buy_url === 'https://me.gumroad.com/l/app', '마켓: 확인하면 시연 주소와 판매 주소가 공개된다');
+    ok(!JSON.stringify(pub).includes('seller@x.test') && !JSON.stringify(marketItem(db, L1.id)).includes('x.test'), '마켓: 판매자 연락처가 안 나간다');
+    ok(pub[0].seller.finished === 1 && pub[0].seller.praise, '마켓: 판매자 신뢰 띠가 프로필에서 온다');
+    db.prepare('UPDATE submissions SET show=0 WHERE team=?').run(kT);
+    ok(marketList(db).length === 0, '마켓: 쇼케이스 동의를 끄면 시연도 판매도 내려간다');
+    ok(raises(() => addListing(db, kP, kTk, good), 403), '마켓: 쇼케이스 동의 없는 제출작은 판매 등록 불가');
+    db.prepare('UPDATE submissions SET show=1 WHERE team=?').run(kT);
+    ok(raises(() => reportListing(db, L1.id, ''), 400) && raises(() => reportListing(db, 999999, '사기'), 404), '마켓: 빈 신고·없는 상품 신고는 막는다');
+    reportListing(db, L1.id, '데모가 광고와 다릅니다');
+    ok(marketAdmin(db, { siteAdmin: true }).some(r => r.id === L1.id && r.reports === 1), '마켓: 신고가 운영자 화면에 뜬다');
+    ok(raises(() => marketAdmin(db, {}), 403), '마켓: 운영자 목록은 운영자만');
+    reviewListing(db, L1.id, { off: '신고 확인 — 데모가 다름' }, { siteAdmin: true });
+    ok(marketList(db).length === 0 && raises(() => marketItem(db, L1.id), 404), '마켓: 내리면 목록·상세에서 빠진다');
+    ok(myListings(db, kP)[0].off === '신고 확인 — 데모가 다름', '마켓: 판매자에게는 내린 이유가 보인다');
+
+    /* 간이 비밀키 검사 */
+    const fakeKey = 'AKIA' + 'ABCDEFGHIJKLMNOP';
+    ok(scanTexts([{ name: 'src/app.js', text: `const k = "${fakeKey}"` }]).length === 1, '검사: AWS 키꼴을 잡는다');
+    ok(scanTexts([{ name: 'src/app.js', text: 'const k = process.env.KEY' }]).length === 0, '검사: 환경변수 이름은 안 잡는다');
+    const mkTar = files => {
+      const parts = [];
+      for (const [name, text] of files) {
+        const body = Buffer.from(text); const h = Buffer.alloc(512);
+        h.write(name, 0); h.write(body.length.toString(8).padStart(11, '0') + '\0', 124); h.write('0', 156); h.write('ustar\0', 257);
+        parts.push(h, body, Buffer.alloc((512 - body.length % 512) % 512));
+      }
+      parts.push(Buffer.alloc(1024));
+      return zlib.gzipSync(Buffer.concat(parts));
+    };
+    ok(untarTexts(zlib.gunzipSync(mkTar([['a/x.txt', 'hello'], ['a/y.js', 'world']]))).map(f => f.name).join() === 'a/x.txt,a/y.js', '검사: tar 를 푼다');
+    const L2 = addListing(db, kP, kTk, { ...good, repo: 'https://github.com/demo/app' });
+    reviewListing(db, L2.id, { ok: true }, { siteAdmin: true });
+    const fetchWith = gz => async () => ({ ok: true, arrayBuffer: async () => gz });
+    const s1 = await scanListing(db, L2.id, { siteAdmin: true }, fetchWith(mkTar([['app/.env', `KEY=${fakeKey}`]])));
+    ok(s1.scan === '걸림' && !JSON.stringify(s1).includes(fakeKey), '검사: 키가 있으면 걸림, 값은 안 돌려준다');
+    ok(db.prepare('SELECT ok FROM listings WHERE id=?').get(L2.id).ok === 0, '검사: 걸리면 공개를 끈다');
+    ok(raises(() => reviewListing(db, L2.id, { ok: true }, { siteAdmin: true }), 409), '검사: 걸린 것은 운영자도 공개 못 한다');
+    const s2 = await scanListing(db, L2.id, { siteAdmin: true }, async () => { throw new Error('망 끊김'); });
+    ok(s2.scan === '못 함', '검사: 못 받으면 «못 함»(모름) — 통과로 치지 않는다');
+    const s3 = await scanListing(db, L2.id, { siteAdmin: true }, fetchWith(mkTar([['app/main.js', 'console.log(1)']])));
+    ok(s3.scan === '통과', '검사: 깨끗하면 통과');
+    let c403 = 0; try { await scanListing(db, L2.id, {}, fetchWith(mkTar([]))); } catch (e) { c403 = e.code; }
+    ok(c403 === 403, '검사: 운영자만 돌린다');
+  }
+
   /* ── 모임·수업과 예약금 (TASK-28) ── 돈은 안 만진다. 상태 표시는 운영자와 그 팀만 */
   {
     const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
@@ -8202,7 +8753,7 @@ async function selftest() {
   db.prepare('DELETE FROM events WHERE id=?').run(rbEv.id);
 
   // 대회 유형
-  ok(Object.keys(KINDS).length === 4, '대회 유형이 넷이다 (당일·무박2일·온라인 1주·모임·수업)');
+  ok(Object.keys(KINDS).length === 5, '대회 유형이 다섯이다 (당일·무박2일·온라인 1주·모임·수업·프로젝트)');
   const on = draftPlan('10:00', '19:30', 6, '무박2일');
   ok(on.kind === '무박2일' && on.rows.some(r => r.what.includes('야식')),
      '무박 2일 초안에는 야식이 있다');

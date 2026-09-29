@@ -1,7 +1,7 @@
 ---
 id: TASK-34
 title: 조사 — 대회를 연 뒤 서버가 바깥 쓰기를 못 보는 현상
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 18:00'
 labels:
@@ -23,6 +23,10 @@ ordinal: 34000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 운영 WAL 크기 확인 기록
-- [ ] #2 원인 (1)/(2) 판정 — node 두 프로세스로 같은 실험을 해서 파이썬을 빼 본다
+- [x] #1 운영 WAL 크기 확인 기록 — 2026-09-29 /data/hackon.db-wal 140KB (db 647KB). 쌓이지 않는다
+- [x] #2 원인 (1)/(2) 판정 — node 두 프로세스로 같은 실험을 해서 파이썬을 빼 본다
+판정: **(1)**. node 만 바깥에서 쓰면 대회를 세 번 열어도 서버가 6/6 을 다 본다. 파이썬 sqlite3(macOS 3.50.4, node 는 3.53.1)가
+한 번 쓰고 닫으면 그 뒤로는 node 가 바깥에서 쓴 줄도 서버가 못 본다(7/8, 파이썬은 8 을 본다). 대회 생성과는 무관 — 처음 가설 (2)는 틀렸다.
+운영은 node 혼자 쓰므로 해당 없음. 검사는 checklib.stop() 으로 «끄고 → 쓰고 → 새로 띄우기».
+재현: scratchpad iso6.py(서버 하나 + node·파이썬 바깥 쓰기)
 <!-- AC:END -->
