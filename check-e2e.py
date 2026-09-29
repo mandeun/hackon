@@ -3614,5 +3614,271 @@ with sync_playwright() as pw:
     ctx.close()
     b.close()
 ok("화면이 단추 셋을 같은 크기로 그린다 — 접힌 것 없음, «로그인» 을 누르면 실제로 뜬다")
+
+# ── 강의 /learn (TASK-25) ────────────────────────────────────
+# 올리기는 쿠키 로그인한 사이트 운영자만이라 검사에서는 DB 에 직접 넣는다(로그인 흉내를 서버에 두지 않는다).
+import sqlite3 as _sq
+import tempfile as _tf
+_ldir = _tf.mkdtemp(prefix="hackon-learn-")
+_ldb = os.path.join(_ldir, "learn.db")
+LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+
+
+def lpost(path, payload):
+    r = urllib.request.Request(LEARN_BASE + path, method="POST", data=json.dumps(payload).encode(),
+                               headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(r, timeout=10) as res:
+            return res.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+A(lpost("/api/lectures", {"title": "몰래", "yt": "dQw4w9WgXcQ"}) == 403, "로그인 없이 강의가 올라간다")
+A(lpost("/api/lectures/1/delete", {}) == 403, "로그인 없이 강의를 내릴 수 있다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("learn: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/learn", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A("아직 올라온 강의가 없습니다" in pg.inner_text("body"), "강의 0건일 때 «없음» 문구가 안 나온다")
+    A("불러오지 못했습니다" not in pg.inner_text("body"), "강의 0건을 «모름» 으로 그린다")
+    pg.goto(f"{LEARN_BASE}/", wait_until="networkidle")
+    A(pg.locator("#nav-learn").is_hidden(), "강의가 없는데 첫 화면에 강의 입구가 열려 있다")
+    # 바깥에서 쓸 때는 서버를 끄고 쓴 뒤 새로 띄운다(checklib.stop 설명 참고)
+    checklib.stop(LEARN_BASE)
+    con = _sq.connect(_ldb)
+    con.execute("INSERT INTO lectures(title,yt,teacher,minutes,series,ord) VALUES(?,?,?,?,?,?)",
+                ("설치부터 첫 대화까지", "dQw4w9WgXcQ", "정회광", 12, "AI 시작하기", 1))
+    con.execute("INSERT INTO lectures(title,yt,teacher,minutes,series,ord) VALUES(?,?,?,?,?,?)",
+                ("<img src=x onerror=alert(1)>", "aaaaaaaaaaa", "", 0, "", 0))
+    con.commit(); con.close()
+    LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+    pg.goto(f"{LEARN_BASE}/", wait_until="networkidle")
+    pg.wait_for_timeout(500)
+    A(pg.locator("#nav-learn").is_visible(), "강의가 있는데 첫 화면에 강의 입구가 안 열린다")
+    pg.goto(f"{LEARN_BASE}/learn", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    body_t = pg.inner_text("body")
+    A("AI 시작하기" in body_t and "낱개" in body_t, "강의가 묶음별로 안 나온다")
+    A(pg.locator("img[src='x']").count() == 0, "강의 제목의 태그가 그대로 살아난다")
+    pg.click("[data-lec]:has-text('설치부터')")
+    pg.wait_for_selector("#lec-now iframe", timeout=10000)
+    src = pg.get_attribute("#lec-now iframe", "src")
+    A(src == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ", f"재생 주소가 서버가 만든 nocookie 가 아니다: {src}")
+    A(pg.url.endswith("/learn?v=1"), f"누른 강의가 주소에 안 남는다: {pg.url}")
+    A(pg.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "폰 폭에서 가로 스크롤이 생긴다")
+    ctx.close()
+    b.close()
+ok("강의 — 0건은 «없음», 태그는 글자로, 재생은 nocookie, 쓰기는 로그인한 운영자만")
+
+# ── 지원서 미리 채우기 (TASK-26) ─────────────────────────────
+# 두 번째 대회부터는 이름·역할·링크를 다시 안 쓴다. 남기는 곳은 이 브라우저뿐이고, 연락처는 새 칸에 안 들어간다.
+def lpostj(path, payload):
+    r = urllib.request.Request(LEARN_BASE + path, method="POST", data=json.dumps(payload).encode(),
+                               headers={"content-type": "application/json"})
+    with urllib.request.urlopen(r, timeout=10) as res:
+        return json.loads(res.read())
+
+
+_soon = (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d")
+EV1 = lpostj("/api/events", {"title": "첫째 대회", "host": "검사", "starts": _soon})["id"]
+EV2 = lpostj("/api/events", {"title": "둘째 대회", "host": "검사", "starts": _soon})["id"]
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("lastapp: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/e/{EV1}", wait_until="networkidle")
+    pg.wait_for_selector("#t-name", timeout=10000)
+    A(pg.query_selector("#t-last") is None, "처음 온 사람에게 «지난 신청 내용» 이 뜬다")
+    pg.fill("#t-name", "지난팀"); pg.fill("#t-email", "last@example.com"); pg.check("#t-agree")
+    pg.click("#t-join")
+    pg.wait_for_selector("#m-save", timeout=10000)
+    pg.select_option("#m-role", "기획")
+    if pg.query_selector("#m-contact"): pg.fill("#m-contact", "last@example.com")
+    pg.fill("#m-link", "https://last.example/me")
+    pg.click("#m-save")
+    pg.wait_for_timeout(800)
+    stored = pg.evaluate("localStorage.getItem('hackon.lastapp') || ''")
+    A("지난팀" in stored and "기획" in stored and "last.example" in stored, f"지난 신청 내용이 안 남는다: {stored}")
+    A("@" not in stored and "last@" not in stored, f"새 저장 칸에 연락처가 들어갔다: {stored}")
+    pg.goto(f"{LEARN_BASE}/e/{EV2}", wait_until="networkidle")
+    pg.wait_for_selector("#t-name", timeout=10000)
+    A(pg.input_value("#t-name") == "지난팀", "두 번째 대회에서 팀 이름이 안 채워진다")
+    A(pg.input_value("#t-email") == "last@example.com", "두 번째 대회에서 이메일이 안 채워진다")
+    A(pg.query_selector("#t-last") is not None, "채웠다는 안내가 없다 — 모르고 남의 이름으로 낼 수 있다")
+    pg.check("#t-agree"); pg.click("#t-join")
+    pg.wait_for_selector("#m-save", timeout=10000)
+    A(pg.eval_on_selector("#m-role", "e => e.value") == "기획", "두 번째 칸의 역할이 안 채워진다")
+    A(pg.input_value("#m-link") == "https://last.example/me", "두 번째 칸의 링크가 안 채워진다")
+    # 지우기 — 공용 PC 에서 다음 사람에게 안 남게
+    ctx2 = b.new_context(viewport={"width": 412, "height": 900})
+    pg2 = ctx2.new_page()
+    pg2.goto(f"{LEARN_BASE}/e/{EV1}", wait_until="networkidle")
+    pg2.evaluate("localStorage.setItem('hackon.lastapp', JSON.stringify({name:'남의팀'})); localStorage.setItem('hackon.contact','other@example.com')")
+    pg2.reload(wait_until="networkidle")
+    pg2.wait_for_selector("#t-forget", timeout=10000)
+    pg2.click("#t-forget")
+    pg2.wait_for_timeout(300)
+    A(pg2.input_value("#t-name") == "" and pg2.input_value("#t-email") == "", "지우기를 눌러도 칸이 남아 있다")
+    A(pg2.evaluate("localStorage.getItem('hackon.lastapp')") is None
+      and pg2.evaluate("localStorage.getItem('hackon.contact')") is None, "지우기를 눌러도 기기에 남아 있다")
+    ctx2.close()
+    ctx.close()
+    b.close()
+ok("지원서 미리 채우기 — 두 번째 대회에서 이름·이메일·역할·링크가 채워지고, 새 칸에 연락처 없음, 지우기 동작")
+
+# ── 매너 평가 ────────────────────────────────────────────────
+# 서버에는 사람 평가 길이 있었는데 그걸 부르는 화면이 없었다. 이제 대회 화면에서 같이 한 사람을 평가한다.
+_past = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+MEV = lpostj("/api/events", {"title": "매너 대회", "host": "검사", "starts": _past, "ends": _past})["id"]
+_ma = lpostj(f"/api/events/{MEV}/teams", {"name": "평가하는팀", "email": "ma@example.com", "contact": "ma@example.com", "agree": True})
+_mb = lpostj(f"/api/events/{MEV}/teams", {"name": "받는팀", "email": "mb@example.com", "contact": "mb@example.com", "agree": True})
+A(_ma.get("tkey") and _mb.get("tkey"), f"신청 응답에 팀 열쇠가 없다: {_ma}")
+A(lpost("/api/admin/manner", {}) in (403, 404), "로그인 없이 매너 알림 목록 길이 열린다")
+_ar = urllib.request.Request(LEARN_BASE + "/api/admin/manner")
+try:
+    urllib.request.urlopen(_ar, timeout=10); _code = 200
+except urllib.error.HTTPError as e:
+    _code = e.code
+A(_code == 403, f"로그인 없이 매너 알림을 읽는다: {_code}")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("manner: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/e/{MEV}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.team.{MEV}', '{_ma['id']}'); localStorage.setItem('hackon.tkey.{_ma['id']}', '{_ma['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#peers", timeout=10000)
+    A("받는팀" in pg.inner_text("#peers") and "평가하는팀" not in pg.inner_text("#peers"), "같이 한 사람 목록이 틀렸다(나를 빼고 상대만)")
+    A("mb@example.com" not in pg.content(), "평가 칸에 상대 연락처가 실린다")
+    pg.click("#peers [data-star^='mn-'] button[data-i='5']")
+    pg.click("#peers [data-ptag='친절해요']")
+    pg.click("#peers [data-peer-go]")
+    pg.wait_for_timeout(800)
+    # 받은 사람 프로필에 칭찬이 뜬다 — 사람 id 는 공개 목록에서 얻는다
+    pid = pg.eval_on_selector("#peers [data-peer]", "e => e.dataset.peer")
+    pg.goto(f"{LEARN_BASE}/p/{pid}", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A(pg.locator("#praise .pill", has_text="친절해요").count() == 1, "받은 칭찬이 프로필에 안 뜬다")
+    A("3건부터 숫자" in pg.inner_text("body"), "칭찬 한 건에 숫자가 붙는다")
+    # 비매너 알림 — 공개 프로필에 안 뜬다
+    pg.goto(f"{LEARN_BASE}/e/{MEV}", wait_until="networkidle")
+    pg.wait_for_selector("#peers", timeout=10000)
+    pg.eval_on_selector("#peers details", "d => d.open = true")
+    pg.select_option("#peers [data-pbad]", "무례했어요")
+    pg.fill("#peers [data-pbadnote]", "공개되면안되는메모")
+    pg.click("#peers [data-peer-go]")
+    pg.wait_for_timeout(800)
+    pg.goto(f"{LEARN_BASE}/p/{pid}", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A("공개되면안되는메모" not in pg.content() and "무례했어요" not in pg.content(), "비매너 알림이 공개 프로필에 보인다")
+    ctx.close()
+    b.close()
+ok("매너 평가 — 대회 화면에서 같이 한 사람만, 칭찬은 프로필에, 비매너 알림은 비공개, 알림 목록은 운영자만")
+
+# ── 프로필 넓히기 (TASK-27) ───────────────────────────────────
+# 올린 강의가 «가르칠 수 있음» 의 근거가 되고, 밖에서 만든 것은 운영자 확인 전까지 본인에게만 보인다.
+_r = urllib.request.Request(LEARN_BASE + f"/api/events/{MEV}/peers", headers={"x-tkey": _mb["tkey"]})
+PA = json.loads(urllib.request.urlopen(_r, timeout=10).read())["rows"][0]["id"]
+_r = urllib.request.Request(LEARN_BASE + f"/api/people/{PA}", method="POST", data=json.dumps({"handle": "가르치는사람", "level": "가르칠 수 있음"}).encode(),
+                            headers={"content-type": "application/json", "x-tkey": _ma["tkey"]})
+urllib.request.urlopen(_r, timeout=10).read()
+# 강의 올리기는 쿠키 로그인한 운영자만이라 검사에서는 바깥에서 넣는다 — 서버를 끄고 쓰고 새로 띄운다
+checklib.stop(LEARN_BASE)
+con = _sq.connect(_ldb)
+con.execute("INSERT INTO lectures(title,yt,person,minutes) VALUES(?,?,?,?)", ("메일 자동 답장", "bbbbbbbbbbb", PA, 9))
+con.commit(); con.close()
+LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("profile: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/p/{PA}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.tkey.{_ma['id']}', '{_ma['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A("강의 1개로 확인" in pg.inner_text("body"), "올린 강의가 «가르칠 수 있음» 옆에 근거로 안 붙는다")
+    A(pg.locator("#p-lec a[href='/learn?v=3']").count() == 1 or pg.locator("#p-lec a").count() == 1, "올린 강의 카드가 없다")
+    A("강의 올림" in pg.inner_text("#xp"), "기여에 «강의 올림» 이 안 든다")
+    pg.fill("#ou-title", "진로 찾기 사이트"); pg.fill("#ou-url", "https://jinro.example"); pg.fill("#ou-role", "기획")
+    pg.click("#ou-go")
+    pg.wait_for_timeout(900)
+    A("확인 기다리는 중" in pg.inner_text("#p-out"), "올린 것이 본인에게 «확인 전» 으로 안 보인다")
+    ctx2 = b.new_context(viewport={"width": 412, "height": 900})
+    pg2 = ctx2.new_page()
+    pg2.goto(f"{LEARN_BASE}/p/{PA}", wait_until="networkidle")
+    pg2.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A("진로 찾기 사이트" not in pg2.inner_text("body"), "운영자 확인 전인데 남에게 보인다")
+    A(pg2.query_selector("#ou-go") is None, "남의 프로필에 «올리기» 칸이 열린다")
+    # 운영자 확인도 쿠키 로그인이 필요하다 — 끄고 바깥에서 고치고 새로 띄운다
+    checklib.stop(LEARN_BASE)
+    con = _sq.connect(_ldb); con.execute("UPDATE outside SET ok=1"); con.commit(); con.close()
+    LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
+    pg2.goto(f"{LEARN_BASE}/p/{PA}", wait_until="networkidle")
+    pg2.wait_for_selector("body[data-ready='1']", timeout=10000)
+    A("진로 찾기 사이트" in pg2.inner_text("body"), "운영자가 확인했는데 공개되지 않는다")
+    A(pg2.get_attribute("#p-out a", "rel") == "noopener noreferrer", "바깥 링크에 noopener 가 없다")
+    ctx2.close()
+    ctx.close()
+    b.close()
+ok("프로필 넓히기 — 강의가 «가르칠 수 있음» 근거, 기여에 강의, 밖에서 만든 것은 확인 전 본인만")
+
+# ── 모임·수업과 예약금 (TASK-28) ─────────────────────────────
+_gsoon = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+_g = lpostj("/api/events", {"title": "4050 AI 모임", "host": "검사", "starts": _gsoon, "kind": "모임", "deposit": 10000})
+GEV, GOK = _g["id"], _g["okey"]
+_g1 = lpostj(f"/api/events/{GEV}/teams", {"name": "첫손님", "email": "g1@example.com", "contact": "g1@example.com", "agree": True})
+_g2 = lpostj(f"/api/events/{GEV}/teams", {"name": "둘째손님", "email": "g2@example.com", "contact": "g2@example.com", "agree": True})
+A(lpost(f"/api/teams/{_g1['id']}/deposit", {"state": "받음"}) == 403, "운영자 열쇠 없이 예약금 상태를 바꾼다")
+_gb = json.loads(urllib.request.urlopen(LEARN_BASE + f"/api/events/{GEV}/board").read())
+A(all("deposit" not in r for r in _gb["rows"]), "손님용 순위표에 예약금 상태가 실린다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 412, "height": 900})
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("meetup: " + str(e)))
+    # 참가자 화면
+    pg.goto(f"{LEARN_BASE}/e/{GEV}", wait_until="networkidle")
+    pg.evaluate(f"localStorage.setItem('hackon.team.{GEV}', '{_g1['id']}'); localStorage.setItem('hackon.tkey.{_g1['id']}', '{_g1['tkey']}')")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#next", timeout=10000)
+    A(pg.query_selector("#nx-submit") is None, "모임인데 «결과물 제출하기» 가 있다")
+    A("체크인합니다" in pg.inner_text("#next"), "모임 다음 할 일에 체크인 안내가 없다")
+    A(pg.locator("#dep-line").is_visible() and "10,000" in pg.inner_text("#dep-line"), "공개 페이지에 예약금 조건이 없다")
+    A("주최자 확인 전" in pg.inner_text("#dep-mine"), "예약금 상태 «모름» 이 안 보인다")
+    # 운영자 — 등록 데스크에서 고른다
+    ctx2 = b.new_context(viewport={"width": 1200, "height": 900})
+    op = ctx2.new_page()
+    op.on("pageerror", lambda e: errs.append("meetup-op: " + str(e)))
+    op.goto(f"{LEARN_BASE}/app", wait_until="networkidle")
+    op.evaluate(f"localStorage.setItem('hackon.event', '{GEV}'); localStorage.setItem('hackon.okey.{GEV}', '{GOK}')")
+    op.reload(wait_until="networkidle")
+    op.evaluate(f"cur = '{GEV}'; tab = 'board'; render()")
+    op.wait_for_selector(f"select[data-dep='{_g1['id']}']", state="attached", timeout=10000)
+    op.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
+    op.select_option(f"select[data-dep='{_g1['id']}']", "받음")
+    op.wait_for_timeout(800)
+    ctx2.close()
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("#dep-mine", timeout=10000)
+    A("받음" in pg.inner_text("#dep-mine"), "운영자가 표시한 예약금 상태가 그 팀에 안 보인다")
+    # 다른 팀 브라우저에서는 남의 상태가 안 보인다
+    ctx3 = b.new_context(viewport={"width": 412, "height": 900})
+    p3 = ctx3.new_page()
+    p3.goto(f"{LEARN_BASE}/e/{GEV}", wait_until="networkidle")
+    p3.evaluate(f"localStorage.setItem('hackon.team.{GEV}', '{_g2['id']}'); localStorage.setItem('hackon.tkey.{_g2['id']}', '{_g2['tkey']}')")
+    p3.reload(wait_until="networkidle")
+    p3.wait_for_selector("#dep-mine", timeout=10000)
+    A("주최자 확인 전" in p3.inner_text("#dep-mine"), "남의 팀 예약금 상태가 내 화면에 섞인다")
+    ctx3.close()
+    ctx.close()
+    b.close()
+ok("모임·수업 — 제출 칸 없음, 예약금 조건 공개, 상태는 운영자가 표시하고 그 팀만 본다")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

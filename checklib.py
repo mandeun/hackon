@@ -22,6 +22,7 @@ import urllib.error
 import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+_STOPS = {}   # base URL → 끄는 함수. stop() 이 쓴다
 
 
 def _free_port():
@@ -71,8 +72,21 @@ def start(timeout=30, extra_env=None):
             sys.exit(f"검사용 서버가 뜨자마자 죽었다 (종료 코드 {proc.returncode}):\n{log.read()}")
         try:
             with urllib.request.urlopen(base + "/api/health", timeout=1):
+                _STOPS[base] = cleanup
                 return base
         except (urllib.error.URLError, ConnectionError, OSError):
             time.sleep(0.2)
     cleanup()
     sys.exit(f"검사용 서버가 {timeout}초 안에 안 떴다")
+
+
+def stop(base):
+    """띄운 서버 하나를 끈다. 검사가 DB 에 **바깥에서** 써야 할 때 쓴다.
+
+    파이썬 sqlite3 와 node:sqlite 는 같은 파일의 잠금을 서로 맞추지 않는다 — 서버가 켜진 채로
+    바깥에서 쓰면 둘이 서로 다른 DB 를 보게 된다(2026-09-29 강의 검사에서 실제로 갈라졌다).
+    그래서 끄고 → 쓰고 → 같은 DB 로 새로 띄운다. 운영에서는 node 혼자 쓰므로 이 일이 없다.
+    """
+    f = _STOPS.pop(base, None)
+    if f:
+        f()
