@@ -1,7 +1,7 @@
 ---
 id: TASK-36
 title: 마켓 — 상세 페이지(라이브 시연·가격·라이선스·고지)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 19:00'
 labels:
@@ -25,7 +25,8 @@ ordinal: 36000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 같은 출처 주소는 iframe 으로 안 띄운다 — e2e
-- [ ] #2 고지 문구가 구매 버튼과 같은 화면에 있다 — e2e, 문구를 지워 빨간 줄
-- [ ] #3 화면에 «검증»·«보장» 낱말이 없다 — 금지어 검사, 넣어 빨간 줄
+- [x] #1 같은 출처 주소는 iframe 으로 안 띄운다 — e2e
+- [x] #2 고지 문구가 구매 버튼과 같은 화면에 있다 — e2e, 문구를 지워 빨간 줄
+- [x] #3 화면에 «검증»·«보장» 낱말이 없다 — 금지어 검사, 넣어 빨간 줄
+검사: node server.js --test · python3 check-e2e.py (2026-09-29), 체크한 항목은 지키는 코드를 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

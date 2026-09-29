@@ -1,7 +1,7 @@
 ---
 id: TASK-33
 title: 프로젝트 — 주차별 제출, 마지막 주 제출이 완주
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 18:00'
 labels:
@@ -21,5 +21,6 @@ ordinal: 33000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 중간 주만 내고 마지막 주를 안 내면 완주가 아니다 — 단위 검사, 깨뜨려 확인
+- [x] #1 중간 주만 내고 마지막 주를 안 내면 완주가 아니다 — 단위 검사, 깨뜨려 확인
+검사: node server.js --test · python3 check-e2e.py (2026-09-29), 체크한 항목은 지키는 코드를 깨뜨려 빨간 줄 확인
 <!-- AC:END -->

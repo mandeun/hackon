@@ -3973,6 +3973,8 @@ PJ, PJK = _pj["id"], _pj["okey"]
 _pa = lpostj(f"/api/events/{PJ}/teams", {"name": "붙을팀", "email": "pja@example.com", "contact": "pja@example.com", "agree": True})
 _pb = lpostj(f"/api/events/{PJ}/teams", {"name": "떨어질팀", "email": "pjb@example.com", "contact": "pjb@example.com", "agree": True})
 A(json.loads(urllib.request.urlopen(LEARN_BASE + f"/api/events/{PJ}/board").read())["rows"] == [], "선발 전 지원자가 공개 명단에 보인다")
+A(lpost(f"/api/teams/{_pa['id']}/attend", {"week": 1}) == 403 and lpost(f"/api/teams/{_pa['id']}/pick", {"state": "accepted"}) == 403,
+  "운영자 열쇠 없이 주차 체크인·선발을 한다")
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     ctx = b.new_context(viewport={"width": 1200, "height": 900})

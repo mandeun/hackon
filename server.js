@@ -8528,6 +8528,7 @@ async function selftest() {
     ok(pub[0].seller.finished === 1 && pub[0].seller.praise, '마켓: 판매자 신뢰 띠가 프로필에서 온다');
     db.prepare('UPDATE submissions SET show=0 WHERE team=?').run(kT);
     ok(marketList(db).length === 0, '마켓: 쇼케이스 동의를 끄면 시연도 판매도 내려간다');
+    ok(raises(() => addListing(db, kP, kTk, good), 403), '마켓: 쇼케이스 동의 없는 제출작은 판매 등록 불가');
     db.prepare('UPDATE submissions SET show=1 WHERE team=?').run(kT);
     ok(raises(() => reportListing(db, L1.id, ''), 400) && raises(() => reportListing(db, 999999, '사기'), 404), '마켓: 빈 신고·없는 상품 신고는 막는다');
     reportListing(db, L1.id, '데모가 광고와 다릅니다');
