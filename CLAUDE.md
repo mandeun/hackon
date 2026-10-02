@@ -41,6 +41,8 @@ python3 check-e2e.py   # e2e — playwright 필요
 ## 하지 않는 것
 
 - **배포하지 않는다.** `fly deploy` 는 사람이 직접 한다. 에이전트는 PR 까지다.
+  사람이 폰에서도 배포할 수 있는 GitHub Actions «배포» 단추의 틀이 `docs/deploy-workflow.yml` 에 있다(손으로만 돌고 검사 초록 뒤에만 올린다).
+  에이전트 토큰에는 workflow 권한이 없어 사람이 GitHub 웹에서 `.github/workflows/deploy.yml` 로 한 번 붙여 넣는다. 에이전트는 이 단추를 누르지 않는다.
 - 키·토큰·비밀번호를 코드에 적지 않는다. 환경변수로 뺀다.
 - 생성된 파일을 직접 고치지 않는다. 그것을 만든 소스를 고친다.
 
