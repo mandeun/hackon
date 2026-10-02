@@ -4850,7 +4850,7 @@ const SCREEN = {
 
   /* ── 게시판 — 주제별로 떠들고, 켜 본 것 자랑하고, 막힌 걸 묻는 곳 ──
      연락처는 공개 글에 안 싣는다(서버가 막는다). 팀원 찾기는 대회 «같이 할 사람 추천» 의 서로 좋아요로 */
-  async board() {
+  async forum() {
     const id = bdPostId();
     if (id) {
       let d = null, gone = false;
@@ -8645,7 +8645,7 @@ else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'no
 else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (WRT) { tab = 'write'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
-else if (BRD) { tab = 'board'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (BRD) { tab = 'forum'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

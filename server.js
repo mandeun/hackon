@@ -9676,6 +9676,14 @@ async function selftest() {
       ok(bookView(wdb, bk.id).people.some(p => p.author === '김작가'), '공동 집필 — 합쳐진 사람이 «함께 쓴 사람» 에 오른다');
       ok(!bookText('<script>alert(1)</script>본문', 100).includes('<script'), '공동 집필 — 스크립트 꼬리표는 벗긴다(화면은 글자로만 그린다)');
     }
+    /* 화면(SCREEN) 이름이 겹치면 뒤엣것이 앞엣것을 조용히 덮는다 — 게시판 board() 가 순위표 board() 를 덮어
+       대회를 만들면 운영 화면 대신 게시판이 떴다(10/02 e2e 가 잡음). 파일에서 이름을 세어 막는다 */
+    {
+      const html = fs.readFileSync(path.join(ROOT, 'hack-on.html'), 'utf8');
+      const names = [...html.matchAll(/^  (?:async )?([a-zA-Z]+)\(\) \{/gm)].map(m => m[1]);
+      const dup = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];
+      ok(names.length > 20 && !dup.length, '화면 이름이 겹치면 앞 화면이 사라진다: ' + dup.join(','));
+    }
     /* 게시판 — 주제·연락처·추천 한 번·개념글·신고 셋 숨김·지우기 열쇠·정렬 */
     {
       const bdb = open(':memory:');
