@@ -142,8 +142,10 @@ with sync_playwright() as p:
     # 목록이 비면 grid 가 높이 0 이라 '보인다' 가 안 된다. 개수 표시가 채워지길 기다린다.
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
     htxt = pg.inner_text("body")
-    for must in ["대회 찾기", "열린 대회", "대회 열기", "협찬"]:
+    for must in ["열린 대회", "대회 열기", "협찬"]:
         A(must in htxt, f"첫 화면에 '{must}' 가 없다")
+    # 위 고리 «대회» 가 열린 대회 목록으로 간다(10/02 고리를 셋으로 줄이며 «대회 찾기» → «대회»)
+    A(pg.locator('nav.sec a[href="#list"]').count() == 1, "첫 화면 위 고리에 대회 목록 입구가 없다")
     for sel in ("#hero-open", "#hero-go"):
         box = pg.locator(sel).bounding_box()
         A(box is not None and box["y"] + box["height"] <= 844,
