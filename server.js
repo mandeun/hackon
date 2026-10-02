@@ -6501,6 +6501,20 @@ function chapterSave(db, cid, ekey, x) {
   const e = editPropose(db, cid, { body: x.body, base: x.base, note: x.note || '편집자 직접 고침', author: bookOf(db, c.book).b.editor });
   return editMerge(db, e.id, ekey);
 }
+/* 되돌리기 — 편집자가 판 기록에서 고른 판의 글을 «새 판» 으로 다시 올린다. 지우지 않는다(되돌린 것도 또 되돌릴 수 있게).
+   0판은 «처음 빈 장» 이다. 지금 글과 같으면 판을 만들지 않는다 */
+function chapterRevert(db, cid, ekey, ver) {
+  const c = chapterOf(db, cid), b = needEditor(db, c.book, ekey);
+  const v = parseInt(ver, 10);
+  if (!(v >= 0 && v < c.ver)) throw new HttpError(400, '되돌릴 판을 골라 주세요');
+  const body = v === 0 ? '' : ((db.prepare('SELECT body FROM chapter_vers WHERE chapter=? AND ver=?').get(c.id, v) || {}).body);
+  if (body === undefined) throw new HttpError(404, '없는 판입니다');
+  if (body === c.body) throw new HttpError(400, '지금 글과 같습니다');
+  const nv = c.ver + 1;
+  db.prepare('INSERT INTO chapter_vers(chapter,ver,body,author,note) VALUES(?,?,?,?,?)').run(c.id, nv, body, b.editor, `${v}판으로 되돌림`);
+  db.prepare("UPDATE chapters SET body=?, ver=?, updated=datetime('now') WHERE id=?").run(body, nv, c.id);
+  return { ver: nv };
+}
 function bookMd(db, id) {
   const { b } = bookOf(db, id);
   const ch = db.prepare('SELECT title, body FROM chapters WHERE book=? ORDER BY ord, id').all(b.id);
@@ -8689,6 +8703,7 @@ function routes(db) {
           if (bb.agree !== true) throw new HttpError(400, '이용 규칙에 동의해야 제안할 수 있습니다');
           return json(res, 201, editPropose(db, m[1], bb, ipTag(clientIp(req))));
         }
+        if ((m = p.match(/^\/api\/chapters\/(\d+)\/revert$/)) && req.method === 'POST') return json(res, 200, chapterRevert(db, m[1], req.headers['x-ekey'] || '', (await body(req)).ver));
         if ((m = p.match(/^\/api\/edits\/(\d+)\/merge$/)) && req.method === 'POST') return json(res, 200, editMerge(db, m[1], req.headers['x-ekey'] || ''));
         if ((m = p.match(/^\/api\/edits\/(\d+)\/close$/)) && req.method === 'POST') return json(res, 200, editClose(db, m[1], req.headers['x-ekey'] || ''));
         /* 게시판 */
@@ -9751,6 +9766,13 @@ async function selftest() {
       const md = bookMd(wdb, bk.id);
       ok(md.startsWith('# 바이브코딩 첫걸음') && md.includes('## 1장') && md.includes('## 도구 고르기') && md.includes('김작가'), '공동 집필 — 마크다운으로 장 차례대로, 함께 쓴 사람까지');
       ok(bookView(wdb, bk.id).people.some(p => p.author === '김작가'), '공동 집필 — 합쳐진 사람이 «함께 쓴 사람» 에 오른다');
+      /* 되돌리기 — 편집자만, 새 판으로(기록은 그대로), 되돌린 것도 또 되돌릴 수 있다 */
+      const cur = chapterView(wdb, ch).chapter;
+      bad = false; try { chapterRevert(wdb, ch, 'wrong', 1); } catch (e) { bad = e.code === 403; } ok(bad, '공동 집필 — 편집자만 되돌린다');
+      const rv = chapterRevert(wdb, ch, bk.ekey, 1);
+      ok(rv.ver === cur.ver + 1 && chapterView(wdb, ch).chapter.body === '첫 문단.\n둘째 문단.' && chapterView(wdb, ch).history[0].note === '1판으로 되돌림', '공동 집필 — 1판으로 되돌리면 새 판이 되고 기록에 남는다');
+      ok(chapterRevert(wdb, ch, bk.ekey, cur.ver).ver === cur.ver + 2 && chapterView(wdb, ch).chapter.body === cur.body, '공동 집필 — 되돌린 것도 다시 되돌릴 수 있다');
+      bad = false; try { chapterRevert(wdb, ch, bk.ekey, 99); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 없는 판(지금 판 이상)으로는 못 되돌린다');
       ok(!bookText('<script>alert(1)</script>본문', 100).includes('<script'), '공동 집필 — 스크립트 꼬리표는 벗긴다(화면은 글자로만 그린다)');
     }
     /* 화면(SCREEN) 이름이 겹치면 뒤엣것이 앞엣것을 조용히 덮는다 — 게시판 board() 가 순위표 board() 를 덮어

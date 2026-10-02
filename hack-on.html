@@ -4852,7 +4852,7 @@ const SCREEN = {
           ${d.isEditor ? `<div class="shrow" style="margin-top:10px">${e.stale ? '' : `<button class="btn sm" data-merge="${e.id}">합치기</button>`}<button class="btn sec sm" data-eclose="${e.id}">돌려보내기</button></div>` : `<div style="margin-top:8px"><button type="button" class="bdmini" style="margin:0" data-bdreport="e:${e.id}">신고</button></div>`}
         </div>`).join('')}` : ''}
       ${SAFETY_LINE}
-      ${d.history.length ? `<details class="more"><summary>판 기록 ${d.history.length}</summary><div class="in">${d.history.map(h => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${h.ver}판</b><span>${esc(h.author)}</span><span>${esc(h.note)}</span><span>${esc(ago(h.at))}</span></div>`).join('')}</div></details>` : ''}`;
+      ${d.history.length ? `<details class="more"><summary>판 기록 ${d.history.length}</summary><div class="in">${d.history.map(h => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${h.ver}판</b><span>${esc(h.author)}</span><span>${esc(h.note)}</span><span>${esc(ago(h.at))}</span>${d.isEditor && h.ver !== c.ver ? `<button type="button" class="bdmini" data-revert="${h.ver}">이 판으로</button>` : ''}</div>`).join('')}</div></details>` : ''}`;
   },
 
   /* ── 게시판 — 주제별로 떠들고, 켜 본 것 자랑하고, 막힌 걸 묻는 곳 ──
@@ -7649,6 +7649,9 @@ function wire() {
       wrEditing = false; flash(r ? '저장했습니다 — 새 판이 됐습니다' : '제안을 보냈습니다 — 편집자가 합치면 글에 들어갑니다'); render();
     } catch (e) { flash(e.message, true); }
   };
+  document.querySelectorAll('[data-revert]').forEach(b => b.onclick = async () => { const at = wrPath();
+    if (!confirm(`${b.dataset.revert}판으로 되돌릴까요? 지금 글은 판 기록에 그대로 남습니다.`)) return;
+    try { const r = await api(`/chapters/${at.ch}/revert`, { method: 'POST', ekey: ekeyOf(at.book), body: { ver: +b.dataset.revert } }); flash(`되돌렸습니다 — ${r.ver}판`); render(); } catch (e) { flash(e.message, true); } });
   document.querySelectorAll('[data-merge]').forEach(b => b.onclick = async () => { const at = wrPath();
     try { const r = await api(`/edits/${b.dataset.merge}/merge`, { method: 'POST', ekey: ekeyOf(at.book) }); flash(`합쳤습니다 — ${r.ver}판`); render(); } catch (e) { flash(e.message, true); } });
   document.querySelectorAll('[data-eclose]').forEach(b => b.onclick = async () => { const at = wrPath();

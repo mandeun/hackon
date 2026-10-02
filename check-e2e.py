@@ -4664,6 +4664,10 @@ with sync_playwright() as pw:
     ed.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-write.png"), full_page=True)
     _md = urllib.request.urlopen(BASE + f"/api/books/{_book}.md", timeout=10).read().decode()
     A(_md.startswith("# e2e 같이 쓰는 책") and "둘째 문단을 고쳤다." in _md and "김e2e" in _md, "마크다운 내보내기가 이상하다")
+    # 되돌리기 — 편집자가 판 기록에서 1판으로(새 판이 되고 글이 돌아온다)
+    ed.on("dialog", lambda d: d.accept())
+    ed.click("details.more summary"); ed.click('[data-revert="1"]'); ed.wait_for_timeout(600)
+    A("둘째 문단을 고쳤다." not in ed.inner_text("#wr-ch") and "3판" in ed.inner_text("#wr-ch"), "1판으로 되돌렸는데 글·판이 안 바뀐다")
     b.close()
 ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md")
 
