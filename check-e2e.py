@@ -4091,5 +4091,28 @@ with sync_playwright() as pw:
       "강의 판매처 단추가 틀리다")
     b.close()
 ok("교육 — 수료 확인은 체크인한 사람만·금지어 없음·연락처 없음, 수업 실적(모름 구분), 강의 판매처 링크")
+
+# ── AI 지갑 (/wallet) — 이 기기에만 저장, 날짜순, 달력 파일에 하루 전 알림 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 390, "height": 844}, accept_downloads=True)
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("wallet: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/wallet", wait_until="networkidle"); pg.wait_for_selector("#wl-go", timeout=10000)
+    for _n, _k, _d, _e in [("늦게 오는 것", "expire", "2099-12-31", ""), ("먼저 오는 것", "reset", "2099-01-01", ""), ("날짜 없는 것", "trial", "", "")]:
+        pg.fill("#wl-name", _n); pg.click(f'[data-wkind="{_k}"]'); pg.fill("#wl-date", _d); pg.select_option("#wl-every", _e)
+        pg.click("#wl-go"); pg.wait_for_timeout(500)
+    _wl = pg.inner_text("#wal-list")
+    A(_wl.index("먼저 오는 것") < _wl.index("늦게 오는 것") < _wl.index("날짜 없는 것"), f"AI 지갑이 날짜순(날짜 모름은 맨 뒤)이 아니다: {_wl[:200]}")
+    with pg.expect_download() as _dl:
+        pg.click("#wal-ics")
+    _ics = open(_dl.value.path(), encoding="utf-8").read()
+    A(_ics.count("BEGIN:VEVENT") == 2 and "TRIGGER:-P1D" in _ics, "AI 지갑 달력 파일에 날짜 있는 것 둘·하루 전 알림이 없다")
+    _reqs = []
+    pg.on("request", lambda r: _reqs.append(r.url) if "/api/" in r.url and r.method != "GET" else None)
+    pg.fill("#wl-name", "서버로 가면 안 됨"); pg.click("#wl-go"); pg.wait_for_timeout(500)
+    A(not _reqs, f"AI 지갑이 서버로 보낸다: {_reqs}")
+    b.close()
+ok("AI 지갑 — 날짜순·날짜 모름은 맨 뒤·달력 파일(하루 전 알림)·서버로 안 보냄")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
