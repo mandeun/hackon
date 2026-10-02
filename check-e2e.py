@@ -2626,7 +2626,8 @@ with sync_playwright() as p:
     ids = pub.evaluate("""[...document.querySelectorAll('#view input, #view textarea, #view select, #view button')]
         .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-') || ['data-rep', 'data-blk', 'data-unblk'].includes(n)) || '?')""")
     # 신고·차단(data-rep·data-blk·data-unblk)은 앱스토어 지침 1.2 로 공개 화면에 일부러 둔다 — 고치는 칸이 아니다
-    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i in ("data-rep", "data-blk", "data-unblk") or i == "nt-bell" or i.startswith("fb-") for i in ids),
+    # 공유·달력에(share-ev·ev-cal)는 10/02 정보 줄의 링크를 단추로 바꾼 것 — 아무것도 안 고친다(보내기·메뉴 펼치기)
+    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i in ("data-rep", "data-blk", "data-unblk", "share-ev", "ev-cal") or i == "nt-bell" or i.startswith("fb-") for i in ids),
       f"공개 화면에 신청·줄 수 있는 것·소식 알림·피드백·신고·차단 말고 다른 칸이 있다: {ids}")
     # 「언제」 옆에 「어디」. 대역 B·C 가 페이지 전체에서 갈 곳을 못 찾았다.
     A(pub.is_visible("#place-line"), "공개 페이지에 «어디» 줄이 없다")
@@ -4247,9 +4248,12 @@ with sync_playwright() as pw:
     pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("brief: " + str(e)))
     pg.add_init_script(f"localStorage.setItem('hackon.owner','{_bv['owner']}');localStorage.setItem('hackon.waljob','개발');"
                        f"localStorage.setItem('hackon.wallet', JSON.stringify([{{name:'브리핑 마감',kind:'due',date:'{_soon3}'}},{{name:'먼 마감',kind:'due',date:'2099-01-01'}}]))")
-    _w = []; pg.on("request", lambda r: _w.append(r.url) if "/api/" in r.url and r.method != "GET" else None)
-    pg.goto(BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#br-work")
-    A("브리핑 검사 대회" in pg.inner_text("#br-work") and "D-10" in pg.inner_text("#br-work"), f"켜 둔 일에 내 대회 D-day 가 없다: {pg.inner_text('#br-work')}")
+    # /api/cal 은 POST 지만 읽기다(열쇠를 주소가 아니라 본문에 싣느라 POST) — 쓰기로 세지 않는다
+    _w = []; pg.on("request", lambda r: _w.append(r.url) if "/api/" in r.url and r.method != "GET" and not r.url.endswith("/api/cal") else None)
+    # 브리핑은 «오늘»(/cal) 에 합쳤다 — /brief 주소는 같은 화면을 연다. 내 대회는 달력(다가오는 30일)에
+    pg.goto(BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#cal-month")
+    A(pg.query_selector("#br-cal") is not None and pg.query_selector("#br-work") is None, "오늘 화면에 브리핑 카드가 없거나 «켜 둔 일» 이 겹쳐 나온다")
+    A("브리핑 검사 대회" in pg.inner_text("#cal-next"), f"내 대회가 오늘 화면 «다가오는 30일» 에 없다: {pg.inner_text('#cal-next')}")
     _bc = pg.inner_text("#br-cal")
     A("브리핑 마감" in _bc and "D-3" in _bc and "먼 마감" not in _bc, f"7일 안 마감만 떠야 한다: {_bc}")
     A("재현" in pg.inner_text("#br-tip"), "고른 직무(개발)의 오늘의 스위치가 없다")
@@ -4407,7 +4411,9 @@ with sync_playwright() as pw:
     A("e2e/tiny" not in _h, "하루치뿐인 것(는 만큼 모름)이 확 뜬 것 판에 올랐다")
     A("쉽게:" in _h and "MCP" in _h, f"확 뜬 것 줄에 «쉽게» 가 없다: {_h}")
     # 아래 목록 줄에도 «쉽게» — 그리고 확 뜬 것 판은 목록(#list) 밖이라 칩 수와 그린 줄 수가 그대로 맞는다
-    A(pg.locator("#list .ez").count() >= 3, "목록 줄에 «쉽게» 가 안 붙는다")
+    # «쉽게» 는 어려운 말이 있는 줄에만(10/02 — 출처 종류로 붙이던 뻔한 문장은 뺐다)
+    A(pg.locator("#list .ez").count() >= 1, "어려운 말(MCP·에이전트)이 있는 줄에 «쉽게» 가 안 붙는다")
+    A("누구나 보고 고쳐 쓸 수 있게" not in pg.inner_text("#view, body"), "출처 종류로 붙이던 뻔한 «쉽게» 문장이 아직 있다")
     _all = pg.evaluate("document.querySelector('.chip[data-k=\"all\"]').dataset.n")
     A(int(_all) == pg.locator("#list .it").count(), "확 뜬 것 판이 칩 수와 목록 줄 수를 어긋나게 한다")
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "뉴스가 폰 폭에서 옆으로 밀린다")
@@ -4434,19 +4440,25 @@ with sync_playwright() as pw:
     # «있을 때만 뜨는 것»(id 가 nav- 로 시작 — 강의·마켓·순위·그날의 조건)은 자료가 생기면 켜진다. 늘 보이는 고리만 센다
     _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
     A(len(_vis) <= 3, f"첫 화면 늘 보이는 고리가 셋을 넘는다: {_vis}")
-    _groups = pg.evaluate("[...document.querySelectorAll('nav.sec .more-in .mg')].map(x => x.textContent.trim())")
-    A(_groups == ["매일", "참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 다르다: {_groups}")
-    _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
+    _groups = pg.evaluate("[...document.querySelectorAll('#menu-sheet .mg')].map(x => x.textContent.trim())")
+    A(_groups == ["매일", "같이", "참가", "열기"], f"전체 메뉴 묶음이 다르다: {_groups}")
+    _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"], #menu-sheet a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
     for _h in _hrefs:
         try:
             _code = urllib.request.urlopen(BASE + _h, timeout=10).status
         except urllib.error.HTTPError as _e:
             _code = _e.code
         A(_code == 200, f"첫 화면 고리 {_h} 가 {_code}")
-    pg.click("nav.sec details.navmore summary"); pg.wait_for_timeout(200)
-    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "더 보기를 펴면 폰 폭에서 옆으로 밀린다")
+    A(pg.locator("#menu-sheet").is_hidden(), "전체 메뉴가 처음부터 열려 있다")
+    pg.click("#nav-menu"); pg.wait_for_selector("#menu-sheet .tiles a")
+    A(pg.evaluate("document.activeElement && document.activeElement.closest('#menu-sheet') !== null"), "메뉴를 열었는데 포커스가 판 안으로 안 간다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "메뉴를 펴면 폰 폭에서 옆으로 밀린다")
+    _tiles = pg.eval_on_selector_all("#menu-sheet .tiles a", "els => els.map(e => e.getBoundingClientRect()).filter(r => r.right > 391 || r.width < 120)")
+    A(not _tiles, f"메뉴 타일이 화면 밖이거나 너무 좁다: {_tiles}")
+    pg.keyboard.press("Escape"); pg.wait_for_timeout(150)
+    A(pg.locator("#menu-sheet").is_hidden() and pg.evaluate("document.activeElement.id") == "nav-menu", "Esc 로 안 닫히거나 포커스가 «메뉴» 로 안 돌아온다")
     b.close()
-ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식), 더 보기는 넷으로 묶고 고리마다 200")
+ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식) + 메뉴 판(묶음 넷·타일·Esc·포커스), 고리마다 200")
 
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
@@ -4558,6 +4570,81 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "ON 클럽이 폰 폭에서 옆으로 밀린다")
     b.close()
 ok("ON 클럽 — 노랑이 새 자세 둘, 다가오는 밤, 폰 폭")
+
+# ── 게시판 /board — 글쓰기·추천(한 번)·댓글·주제 거르기·연락처 막기·지우기, 폰 폭 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("board: " + str(e)))
+    pg.on("dialog", lambda d: d.accept())
+    pg.goto(BASE + "/board", wait_until="networkidle"); pg.wait_for_selector("#bd-sort")
+    pg.click("#bd-new"); pg.wait_for_selector("#bd-form")
+    pg.click('[data-bdft="vibe"]'); pg.fill("#bdf-title", "커서로 하루 만에 예약 앱 켰습니다 — 아주 긴 제목이 잘리지 않고 다 보이는지 확인하려고 길게 씁니다")
+    pg.fill("#bdf-body", "후기\n막힌 곳: 로그인"); pg.fill("#bdf-nick", "e2e닉")
+    pg.click("#bdf-send"); pg.wait_for_selector("#bd-post")
+    A("/board/" in pg.url, f"글을 올렸는데 글 화면으로 안 간다: {pg.url}")
+    A("e2e닉" in pg.inner_text("#bd-post") and "막힌 곳: 로그인" in pg.inner_text("#bd-post"), "올린 글이 안 보인다")
+    pg.click("[data-bdup]"); pg.wait_for_timeout(300)
+    A(pg.inner_text("#bd-upn") == "1", "추천이 안 올라간다")
+    pg.click("[data-bdup]"); pg.wait_for_timeout(300)
+    A(pg.inner_text("#bd-upn") == "0", "다시 누르면 추천이 취소돼야 한다")
+    pg.fill("#bdc-body", "010-9999-8888 로 연락 주세요"); pg.click("#bdc-send"); pg.wait_for_timeout(300)
+    A("010-9999-8888" not in pg.inner_text("#bd-comments"), "연락처 댓글이 올라갔다")
+    pg.fill("#bdc-body", "축하해요! 로그인은 세션부터"); pg.click("#bdc-send"); pg.wait_for_timeout(500)
+    A("축하해요" in pg.inner_text("#bd-comments"), "댓글이 안 달린다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "글 화면이 폰 폭에서 옆으로 밀린다")
+    pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-board-post.png"), full_page=True)
+    # 목록 — 주제 거르기, 제목이 안 잘린다
+    pg.goto(BASE + "/board", wait_until="networkidle"); pg.wait_for_selector("#bd-list")
+    A("잘리지 않고 다 보이는지" in pg.inner_text("#bd-list"), "긴 제목이 목록에서 잘린다")
+    pg.click('[data-bdt="qna"]'); pg.wait_for_timeout(300)
+    A("커서로 하루 만에" not in pg.inner_text("#bd-list"), "다른 주제 글이 섞여 나온다")
+    pg.click('[data-bdt="vibe"]'); pg.wait_for_timeout(300)
+    A("커서로 하루 만에" in pg.inner_text("#bd-list"), "고른 주제의 글이 안 나온다")
+    pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-board.png"), full_page=True)
+    # 지우기 — 쓴 브라우저만
+    pg.click(".bdrow"); pg.wait_for_selector("#bd-post")
+    _bid = pg.url.rsplit("/", 1)[1]
+    pg.click('[data-bddel^="p:"]'); pg.wait_for_url("**/board")
+    st = urllib.request.urlopen(urllib.request.Request(BASE + f"/api/board/{_bid}"), timeout=5) if False else None
+    try:
+        urllib.request.urlopen(BASE + f"/api/board/{_bid}", timeout=5); _gone = False
+    except urllib.error.HTTPError as e:
+        _gone = e.code == 404
+    A(_gone, "지운 글이 아직 열린다")
+    b.close()
+ok("게시판 — 글쓰기·추천 한 번(다시 누르면 취소)·연락처 댓글 막기·주제 거르기·긴 제목 다 보임·지우기")
+
+# ── 공동 집필 /write — 책 만들기 → 편집자 고치기 → 다른 사람 제안 → 차이 보고 합치기 → 충돌 제안은 «합칠 수 없음» → .md ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ed = b.new_context(viewport={"width": 390, "height": 844}).new_page(); ed.on("pageerror", lambda e: errs.append("write-ed: " + str(e)))
+    ed.goto(BASE + "/write", wait_until="networkidle"); ed.wait_for_selector("#wr-new")
+    ed.fill("#wr-title", "e2e 같이 쓰는 책"); ed.fill("#wr-editor", "편집e2e"); ed.click("#wr-make"); ed.wait_for_selector("#wr-chs")
+    _book = ed.url.rsplit("/", 1)[1]
+    ed.click("#wr-chs .bdrow"); ed.wait_for_selector("#wr-ch")
+    ed.click("#wr-edit"); ed.fill("#wr-body", "첫 문단.\n둘째 문단."); ed.click("#wr-send"); ed.wait_for_timeout(500)
+    A("둘째 문단." in ed.inner_text("#wr-ch") and "1판" in ed.inner_text("#wr-ch"), "편집자 고치기가 1판으로 안 들어간다")
+    _churl = ed.url
+    # 다른 사람 둘이 같은 1판 위에서 제안
+    for who, body in (("김e2e", "첫 문단.\n둘째 문단을 고쳤다."), ("박e2e", "첫 문단 고침.\n둘째 문단.")):
+        wp = b.new_context(viewport={"width": 390, "height": 844}).new_page(); wp.on("pageerror", lambda e: errs.append("write-w: " + str(e)))
+        wp.goto(_churl, wait_until="networkidle"); wp.wait_for_selector("#wr-edit")
+        A("합치기" not in wp.inner_text("#view"), "편집자 아닌 사람에게 «합치기» 가 보인다")
+        wp.click("#wr-edit"); wp.fill("#wr-body", body); wp.fill("#wr-author", who); wp.fill("#wr-note", who + " 고침"); wp.click("#wr-send"); wp.wait_for_timeout(500)
+        A("둘째 문단." in wp.inner_text("#wr-ch") and wp.locator(".wredit").count() >= 1, "제안이 글을 바로 바꾸거나 기다리는 제안에 안 뜬다")
+    ed.reload(wait_until="networkidle"); ed.wait_for_selector(".wredit")
+    A(ed.locator(".wredit").count() == 2 and ed.locator(".dfa").count() >= 1 and ed.locator(".dfd").count() >= 1, "편집자에게 차이(들어온 줄·빠진 줄)가 안 보인다")
+    ed.locator(".wredit", has_text="김e2e").locator("[data-merge]").click(); ed.wait_for_timeout(600)
+    A("둘째 문단을 고쳤다." in ed.inner_text("#wr-ch") and "2판" in ed.inner_text("#wr-ch"), "합치기 뒤 글·판이 안 바뀐다")
+    _stale = ed.locator(".wredit", has_text="박e2e")
+    A("합칠 수 없음" in _stale.inner_text() and _stale.locator("[data-merge]").count() == 0, "옛 판 위 제안에 «합칠 수 없음» 이 없거나 합치기 단추가 남아 있다")
+    A("둘째 문단을 고쳤다" not in _stale.locator(".diff").inner_text(), "옛 판 위 제안의 차이를 지금 판과 비교해 «남의 고침을 지우는 것» 처럼 그린다")
+    A(ed.evaluate("document.documentElement.scrollWidth") <= 391, "공동 집필이 폰 폭에서 옆으로 밀린다")
+    ed.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-write.png"), full_page=True)
+    _md = urllib.request.urlopen(BASE + f"/api/books/{_book}.md", timeout=10).read().decode()
+    A(_md.startswith("# e2e 같이 쓰는 책") and "둘째 문단을 고쳤다." in _md and "김e2e" in _md, "마크다운 내보내기가 이상하다")
+    b.close()
+ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md")
 
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

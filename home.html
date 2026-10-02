@@ -90,15 +90,35 @@ input::placeholder{color:var(--mute)}
 /* 손가락 자리. 22px 짜리 글줄은 폰에서 옆 것이 눌린다 */
 .top nav.sec a,.top nav.tools a{display:inline-flex;align-items:center;min-height:44px}
 .top nav.sec a:hover{color:var(--ink)}
-.top nav.sec details.navmore{display:contents}
-.top nav.sec details.navmore summary{display:inline-flex;align-items:center;min-height:44px;cursor:pointer;list-style:none;font-weight:700;color:var(--ink)}
-.top nav.sec details.navmore summary::-webkit-details-marker{display:none}
-.top nav.sec details.navmore summary::after{content:" ▾";font-size:11px;margin-left:3px}
-.top nav.sec details.navmore[open] summary::after{content:" ▴"}
-.top nav.sec .more-in{display:flex;flex-wrap:wrap;column-gap:16px;width:100%}
-.top nav.sec a.nav-today{color:var(--ink);font-weight:800;gap:6px}
-.top nav.sec a.nav-today .dot{width:7px;height:7px;border-radius:50%;background:var(--on);box-shadow:0 0 0 3px rgba(200,245,59,.25)}
-.top nav.sec .more-in .mg{width:100%;font-size:12px;font-weight:700;color:var(--mute);margin-top:6px;letter-spacing:.02em}
+.top nav.sec > a{color:var(--ink);font-weight:700}
+.top nav.sec a.nav-today{font-weight:800;gap:6px}
+.top nav.sec a.nav-today .dot{width:7px;height:7px;border-radius:50%;background:var(--on);box-shadow:0 0 0 3px rgba(200,245,59,.3)}
+.top nav.sec #nav-menu{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:0 13px;border-radius:999px;border:1px solid var(--hair);background:#fff;font:inherit;font-weight:800;color:var(--ink);cursor:pointer}
+.top nav.sec #nav-menu i{display:grid;gap:3px}
+.top nav.sec #nav-menu i b{display:block;width:14px;height:2px;border-radius:2px;background:var(--ink)}
+/* 전체 메뉴 판 — 폰은 아래에서 올라오는 시트, 넓은 화면은 오른쪽 위 판. 묶음마다 아이콘 타일 + 한 줄 */
+#menu-sheet{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center}
+#menu-sheet[hidden]{display:none}
+#menu-sheet .bd{position:absolute;inset:0;background:rgba(11,16,32,.45);backdrop-filter:blur(2px)}
+#menu-sheet .pn{position:relative;width:100%;max-height:86vh;overflow:auto;background:#fff;border-radius:24px 24px 0 0;padding:10px 16px calc(18px + env(safe-area-inset-bottom));animation:up .18s ease-out}
+@keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+#menu-sheet .grip{width:40px;height:4px;border-radius:4px;background:#DDE1E6;margin:2px auto 10px}
+#menu-sheet .mh{display:flex;align-items:center;justify-content:space-between;margin:0 2px 6px}
+#menu-sheet .mh b{font-size:18px;letter-spacing:-.02em}
+#menu-sheet .mh button{width:40px;height:40px;border-radius:12px;border:0;background:var(--soft);font-size:18px;cursor:pointer}
+#menu-sheet .mg{display:block;font-size:12px;font-weight:800;color:var(--mute);letter-spacing:.04em;margin:14px 4px 8px}
+#menu-sheet .tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#menu-sheet .tiles a{display:flex;gap:10px;align-items:center;min-height:58px;padding:10px 12px;border-radius:16px;background:var(--soft);text-decoration:none;color:var(--ink)}
+#menu-sheet .tiles a:hover,#menu-sheet .tiles a:focus-visible{background:#F1FBD5;outline:none}
+#menu-sheet .tiles .ic{flex:none;width:34px;height:34px;border-radius:11px;background:#0B1020;display:grid;place-items:center;font-size:17px}
+#menu-sheet .tiles b{display:block;font-size:14.5px;line-height:1.25}
+#menu-sheet .tiles small{display:block;font-size:12px;color:var(--mute);font-weight:500;line-height:1.3}
+#menu-sheet .tiles a.hot .ic{background:#C8F53B}
+@media (min-width:720px){#menu-sheet{align-items:flex-start;justify-content:flex-end;padding:64px 24px 0}
+  #menu-sheet .bd{background:rgba(11,16,32,.18)}
+  #menu-sheet .pn{width:560px;border-radius:22px;max-height:80vh;box-shadow:0 24px 60px rgba(11,16,32,.25)}
+  #menu-sheet .grip{display:none}
+  #menu-sheet .tiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .top nav.tools{display:flex;gap:12px;align-items:center}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
@@ -271,30 +291,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a id="nav-market" href="/market" hidden>마켓</a>
       <a id="nav-rank" href="/rank" hidden>순위</a>
       <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
-      <details class="navmore"><summary>더 보기</summary><span class="more-in">
-        <b class="mg">매일</b>
-        <a href="/brief">아침 브리핑</a>
-        <a href="/wallet">AI 지갑</a>
-        <a href="/made">만든 것</a>
-        <a href="/setups">세팅 모음</a>
-        <b class="mg">참가할 때</b>
-        <a href="/recruit">모집공고</a>
-        <a href="/problems">문제 은행</a>
-        <a href="/gigs">외주</a>
-        <a href="/cert">실무 기록 단계</a>
-        <a href="/ref">추천 코드</a>
-        <b class="mg">열 때</b>
-        <a id="nav-manual" href="#">운영 매뉴얼</a>
-        <a href="/around">모아 보기</a>
-        <a href="/launch">시작하면 받는 것</a>
-        <b class="mg">같이 할 때</b>
-        <a href="/club">ON 클럽</a>
-        <a href="/card">드릴 수 있는 것 올리기</a>
-        <a href="/partner">협찬·협업 안내</a>
-        <a href="/biz">기업·기관</a>
-        <a href="/crew">크루 모집</a>
-        <a href="/thanks">기여자</a>
-        <a href="/en" hreflang="en" lang="en">English</a></span></details>
+      <button type="button" id="nav-menu" aria-haspopup="dialog" aria-controls="menu-sheet" aria-expanded="false"><i aria-hidden="true"><b></b><b></b><b></b></i>메뉴</button>
     </nav>
     <nav class="tools" aria-label="도구">
       <a id="nav-login" href="/app?login=1" style="display:none">로그인</a>
@@ -303,6 +300,16 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     </nav>
   </div>
 </header>
+<!-- 전체 메뉴 판(10/02) — «더 보기» 펼치기가 한 줄로 쏟아져 고르기 어려웠다. 묶음 넷 · 타일마다 한 줄 -->
+<div id="menu-sheet" hidden role="dialog" aria-modal="true" aria-label="전체 메뉴"><div class="bd" data-menu-close></div><div class="pn">
+  <div class="grip" aria-hidden="true"></div>
+  <div class="mh"><b>전체 메뉴</b><button type="button" data-menu-close aria-label="닫기">✕</button></div>
+  <b class="mg">매일</b><nav class="tiles" aria-label="매일"><a href="/cal" class="hot"><span class="ic" aria-hidden="true">📅</span><span><b>오늘</b><small>내 일정·브리핑</small></span></a><a href="/news"><span class="ic" aria-hidden="true">📰</span><span><b>소식</b><small>이번 주 확 뜬 것</small></span></a><a href="/wallet"><span class="ic" aria-hidden="true">👛</span><span><b>AI 지갑</b><small>구독·크레딧 마감</small></span></a><a href="/made"><span class="ic" aria-hidden="true">🛠️</span><span><b>만든 것</b><small>남이 켠 것 구경</small></span></a><a href="/setups"><span class="ic" aria-hidden="true">⚙️</span><span><b>세팅 모음</b><small>그대로 따라 하기</small></span></a></nav>
+  <b class="mg">같이</b><nav class="tiles" aria-label="같이"><a href="/board" class="hot"><span class="ic" aria-hidden="true">💬</span><span><b>게시판</b><small>주제별 이야기</small></span></a><a href="/write"><span class="ic" aria-hidden="true">✍️</span><span><b>공동 집필</b><small>같이 쓰고 합치기</small></span></a><a href="/club"><span class="ic" aria-hidden="true">🔌</span><span><b>ON 클럽</b><small>매달 켜 보는 밤</small></span></a><a href="/card"><span class="ic" aria-hidden="true">🤝</span><span><b>드릴 수 있는 것</b><small>심사·장소·크레딧</small></span></a><a href="/crew"><span class="ic" aria-hidden="true">🧑‍🚀</span><span><b>크루</b><small>같이 이끌기</small></span></a></nav>
+  <b class="mg">참가</b><nav class="tiles" aria-label="참가"><a href="/recruit"><span class="ic" aria-hidden="true">📣</span><span><b>모집공고</b><small>팀·프로젝트</small></span></a><a href="/problems"><span class="ic" aria-hidden="true">🧩</span><span><b>문제 은행</b><small>풀어 달라는 일</small></span></a><a href="/gigs"><span class="ic" aria-hidden="true">💼</span><span><b>외주</b><small>일감에 손 들기</small></span></a><a href="/cert"><span class="ic" aria-hidden="true">📜</span><span><b>실무 기록</b><small>완주가 이력</small></span></a><a href="/ref"><span class="ic" aria-hidden="true">🎟️</span><span><b>추천 코드</b><small>품앗이</small></span></a></nav>
+  <b class="mg">열기</b><nav class="tiles" aria-label="열기"><a href="/app?make=1"><span class="ic" aria-hidden="true">⚡</span><span><b>대회 열기</b><small>이름 하나면</small></span></a><a href="#" id="nav-manual"><span class="ic" aria-hidden="true">📘</span><span><b>운영 매뉴얼</b><small>처음 여는 사람</small></span></a><a href="/around"><span class="ic" aria-hidden="true">🗺️</span><span><b>모아 보기</b><small>다른 곳 대회</small></span></a><a href="/launch"><span class="ic" aria-hidden="true">🚀</span><span><b>시작하면 받는 것</b><small>첫 대회 혜택</small></span></a><a href="/partner"><span class="ic" aria-hidden="true">🏷️</span><span><b>협찬 안내</b><small>주면 받는 것</small></span></a><a href="/biz"><span class="ic" aria-hidden="true">🏢</span><span><b>기업·기관</b><small>사내 해커톤</small></span></a><a href="/thanks"><span class="ic" aria-hidden="true">🙏</span><span><b>기여자</b><small>같이 켠 사람</small></span></a><a href="/en"><span class="ic" aria-hidden="true">🌏</span><span><b>English</b><small>For visitors</small></span></a></nav>
+</div></div>
+
 
 <!-- 표제. 한 문장, 단추 둘. -->
 <div class="hero">
@@ -423,6 +430,16 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 
 <script>
 /* 링크는 '고치는 곳' 에서 받아 꽂는다 */
+/* 전체 메뉴 판 — 열면 첫 타일에 포커스, Esc·바깥·✕ 로 닫고 «메뉴» 단추로 포커스를 돌려준다 */
+(function () {
+  var btn = document.getElementById('nav-menu'), sh = document.getElementById('menu-sheet');
+  if (!btn || !sh) return;
+  function open() { sh.hidden = false; btn.setAttribute('aria-expanded', 'true'); document.body.style.overflow = 'hidden'; var f = sh.querySelector('.tiles a'); if (f) f.focus(); }
+  function close() { sh.hidden = true; btn.setAttribute('aria-expanded', 'false'); document.body.style.overflow = ''; btn.focus(); }
+  btn.addEventListener('click', open);
+  sh.addEventListener('click', function (e) { if (e.target.closest('[data-menu-close]')) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !sh.hidden) close(); });
+})();
 ['nav-manual','manual-link2','foot-manual'].forEach(function(id){ document.getElementById(id).href = 매뉴얼; });
 var mailLink = document.getElementById('mail-link');
 mailLink.href = 'mailto:' + 연락메일 + '?subject=' + encodeURIComponent('[협찬 문의] HACK:ON');

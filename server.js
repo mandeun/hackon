@@ -2518,7 +2518,7 @@ async function newsTick(db) {
   try {
     const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     for (const r of ((await j(`https://api.github.com/search/repositories?q=created:%3E${since}&sort=stars&order=desc&per_page=6`)) || {}).items || [])
-      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 80) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발', born: r.created_at });
+      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 200) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발', born: r.created_at });
   } catch {}
   try { for (const d of (await j('https://huggingface.co/api/datasets?sort=trendingScore&direction=-1&limit=4')) || [])
     got.push({ src: 'ds', title: d.id, url: 'https://huggingface.co/datasets/' + d.id, note: `♥ ${d.likes || 0}`, job: '데이터' }); } catch {}
@@ -2531,7 +2531,7 @@ async function newsTick(db) {
   } catch {}
   const ins = db.prepare('INSERT OR IGNORE INTO news(src,key,title,url,note,job) VALUES(?,?,?,?,?,?)');
   let added = 0;
-  for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 160), g.url.slice(0, 500), String(g.note).slice(0, 200), g.src === 'hackon' ? '' : (g.job || jobOf(g.title))).changes);
+  for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 260), g.url.slice(0, 500), String(g.note).slice(0, 200), g.src === 'hackon' ? '' : (g.job || jobOf(g.title))).changes);
   const snapped = newsSnap(db, got);
   db.prepare("DELETE FROM news WHERE at < date('now','-30 days')").run();
   db.prepare("DELETE FROM news_counts WHERE day < date('now','-30 days')").run();
@@ -2571,7 +2571,9 @@ const newsKind = src => NEWS_KIND_OF[src] || 'read';
 /* 혜택 — 무료 크레딧·할인·사용 한도 리셋. 출처가 아니라 제목으로 가른다(어느 매체에서든 나온다).
    논문·데이터셋은 뺀다 — «credit assignment» 같은 말이 걸린다. «free» 는 혼자 쓰면 오픈소스까지 다 걸려 뒤에 무엇이 붙을 때만 */
 const DEAL_RE = /무료로|무료 ?(체험|제공|크레딧|플랜|이용)|할인|공짜|크레딧|쿠폰|프로모션|리셋|초기화|한도 ?(상향|늘|두 배|2배)|free (tier|plan|credits?|trial|for|access)|\bdiscount|\d+ ?% off|\bcredits\b|\bpromo(tion)?\b|giveaway|(rate|usage) limits?|price (cut|drop)|half[- ]price/i;
-const newsKindOf = r => (!['paper', 'ds', 'hf'].includes(r.src) && DEAL_RE.test(String(r.title || ''))) ? 'deal' : newsKind(r.src);
+/* 할인·무료는 **AI 모델·AI 도구의 구독·요금·크레딧** 만(10/02 요청). 운동화 할인·숙박 쿠폰이 «무료·할인» 칸을 먹지 않게 */
+const AI_DEAL_RE = /gpt|chatgpt|챗\s?gpt|챗지피티|claude|클로드|gemini|제미나이|llm|openai|오픈에이아이|anthropic|앤트로픽|copilot|코파일럿|cursor|커서|perplexity|퍼플렉시티|midjourney|미드저니|grok|deepseek|딥시크|mistral|llama|qwen|sora|runway|elevenlabs|notebooklm|hugging\s?face|허깅페이스|groq|together\s?ai|replicate|\bapi\b|토큰|token|모델|\bmodels?\b|\bai\b|인공지능|생성형|에이전트|agent/i;
+const newsKindOf = r => (!['paper', 'ds', 'hf'].includes(r.src) && DEAL_RE.test(String(r.title || '')) && AI_DEAL_RE.test(String(r.title || ''))) ? 'deal' : newsKind(r.src);
 /* 출처 무게 — «읽고 나서 오늘 할 일이 생기는 정도». 보는 사람이 한국에서 일하는 사람이라
    한국어로 읽히고 바로 손에 잡히는 곳이 높다. 제보·우승작이 가장 높다(우리 사람이 써 본 것).
    2026-09-27 실측으로 한 번 고쳤다: 논문(paper)이 12 였을 때 ▲수가 붙어 «오늘 꼭 볼 것» 다섯 자리 중
@@ -2645,19 +2647,6 @@ function newsNormTitle(t) {
 /* ── 5살도 알아듣게 — 줄마다 «쉽게:» 한 줄 ───────────────────────────────────────
    AI 를 부르지 않는다. 출처 종류로 «이게 뭔지» 한 문장, 제목 속 어려운 말을 사전에서 둘까지 푼다.
    사전에 없는 말은 설명하지 않는다(모르는 것을 지어내면 그게 제일 나쁜 설명이다). */
-const NEWS_EASY_SRC = {
-  hf: '누구나 받아 쓸 수 있게 공개된 AI 두뇌(모델)예요.',
-  paper: '연구자들이 «이렇게 하니 더 잘 되더라» 하고 쓴 글이에요.',
-  space: '웹에서 바로 눌러 볼 수 있는 AI 놀이터예요.',
-  ds: 'AI 를 가르칠 때 쓰는 공부 자료 묶음이에요.',
-  gh: '누구나 보고 고쳐 쓸 수 있게 공개된 프로그램이에요.',
-  hackon: '우리 대회에서 하루 만에 만든 것 중 1등이에요.',
-  tube: '새 도구를 먼저 써 본 사람이 영상으로 알려 주는 거예요.',
-  ph: '새로 나온 앱·서비스를 소개하는 곳에 올라온 거예요.',
-  show: '누가 직접 만들어서 «이거 봐 주세요» 하고 올린 거예요.',
-  tip: '같은 일 하는 사람이 써 보고 좋아서 알려 준 거예요.',
-};
-const NEWS_EASY_KIND = { deal: '공짜로 주거나 싸게 해 주는 소식이에요.', read: '요즘 AI 쪽에서 무슨 일이 있었는지 알려 주는 글이에요.', tool: '새로 나온 도구 소식이에요.' };
 /* 위에서부터 먼저 걸리는 둘. 영어 낱말은 \b 로 묶어 «drag» 속 «rag» 같은 것을 안 잡는다 */
 const NEWS_GLOSS = [
   [/\bmcp\b|model context protocol/i, 'MCP', 'AI 가 다른 앱을 쓸 수 있게 꽂는 플러그'],
@@ -2679,8 +2668,10 @@ const NEWS_GLOSS = [
   [/\bllms?\b|language model|언어\s?모델/i, 'LLM', '말을 알아듣고 글을 쓰는 AI'],
   [/open.?source|오픈\s?소스|open.?weight/i, '오픈소스', '누구나 공짜로 보고 고쳐 쓸 수 있는 것'],
 ];
+/* 출처 종류로 붙이던 한 문장(«누구나 보고 고쳐 쓸 수 있게 공개된 프로그램이에요»)은 뺐다 — 줄마다 같은 말이라
+   관심을 끌지 못했다(10/02). 이제 제목에 어려운 말이 있을 때만 그 말을 푼다. 없으면 «쉽게» 줄 자체가 없다. */
 function newsEasy(r) {
-  const base = NEWS_EASY_SRC[r.src] || NEWS_EASY_KIND[r.kind || newsKind(r.src)] || '';
+  const base = '';
   const t = String(r.title || ''), terms = [];
   for (const [re, w, say] of NEWS_GLOSS) { if (terms.length >= 2) break; if (re.test(t)) terms.push(`«${w}» 는 ${say}.`); }
   return [base, ...terms].filter(Boolean).join(' ');
@@ -3425,6 +3416,39 @@ function open(file) {
       hidden  INTEGER NOT NULL DEFAULT 0,
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    /* 공동 집필 — 책 하나를 장으로 나누고, 누구나 «고쳐 쓰기 제안» 을 내면 편집자가 차이를 보고 «합치기».
+       깃의 머지를 글에 옮긴 것: 제안은 어느 판(base) 위에서 썼는지 기억하고, 그 사이 장이 바뀌었으면 합치지 않는다(충돌).
+       편집자 열쇠(ekey)는 만든 브라우저에만 — 헤더 x-ekey 로만 받는다. */
+    CREATE TABLE IF NOT EXISTS books(id TEXT PRIMARY KEY, title TEXT NOT NULL, about TEXT NOT NULL DEFAULT '', editor TEXT NOT NULL DEFAULT '', ekey TEXT NOT NULL, created TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS chapters(id INTEGER PRIMARY KEY, book TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, ord INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', ver INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS chapter_vers(chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, ver INTEGER NOT NULL, body TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(chapter, ver));
+    CREATE TABLE IF NOT EXISTS edits(id INTEGER PRIMARY KEY, chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, base INTEGER NOT NULL, body TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '익명', status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL DEFAULT (datetime('now')), decided TEXT NOT NULL DEFAULT '');
+    /* 게시판 — 주제(갤러리)별 글·댓글·추천. 디시·레딧식이지만 연락처는 안 싣는다(공개 칸 원칙 그대로).
+       지우기 열쇠(bkey·ckey)는 쓴 사람 브라우저에만 — 헤더로만 받는다. 신고 셋이면 저절로 숨김. */
+    CREATE TABLE IF NOT EXISTS board_posts(
+      id      INTEGER PRIMARY KEY,
+      topic   TEXT NOT NULL,
+      title   TEXT NOT NULL,
+      body    TEXT NOT NULL DEFAULT '',
+      nick    TEXT NOT NULL DEFAULT '익명',
+      bkey    TEXT NOT NULL,
+      up      INTEGER NOT NULL DEFAULT 0,
+      comments INTEGER NOT NULL DEFAULT 0,
+      hidden  INTEGER NOT NULL DEFAULT 0,
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS board_posts_t ON board_posts(topic, created);
+    CREATE TABLE IF NOT EXISTS board_comments(
+      id      INTEGER PRIMARY KEY,
+      post    INTEGER NOT NULL REFERENCES board_posts(id) ON DELETE CASCADE,
+      body    TEXT NOT NULL,
+      nick    TEXT NOT NULL DEFAULT '익명',
+      ckey    TEXT NOT NULL,
+      hidden  INTEGER NOT NULL DEFAULT 0,
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS board_votes(post INTEGER NOT NULL, voter TEXT NOT NULL, PRIMARY KEY(post, voter));
+    CREATE TABLE IF NOT EXISTS board_reports(kind TEXT NOT NULL, ref INTEGER NOT NULL, voter TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', PRIMARY KEY(kind, ref, voter));
     /* 내 달력 구독 — 폰 달력이 주기적으로 읽어 가는 주소(/cal/<token>.ics). 열쇠 대신 «어느 대회에 무슨 역할» 만 적어 둔다.
        열쇠를 주소에 싣지 않으려고 만든 표다 — 토큰이 새도 드러나는 것은 공개 대회 날짜뿐이다. */
     CREATE TABLE IF NOT EXISTS cal_subs(
@@ -6327,6 +6351,198 @@ function setOffer(db, id, b) {
   return { id, status: b.status };
 }
 
+/* ── 공동 집필 — 장별 «고쳐 쓰기 제안» → 편집자 «합치기»(머지). 충돌이면 안 합친다 ─────────────────── */
+const BOOK_BODY_MAX = 60000, BOOK_CH_MAX = 60, EDIT_PENDING_MAX = 50;
+const bookText = (v, n) => String(v == null || typeof v === 'object' ? '' : v).replace(/\r\n?/g, '\n').replace(/<\/?script[^>]*>/gi, '').slice(0, n);
+function bookCreate(db, x) {
+  const title = plain(x.title, 80);
+  if (!title) throw new HttpError(400, '책 이름을 적어 주세요');
+  const id = crypto.randomBytes(4).toString('hex'), ekey = crypto.randomBytes(10).toString('hex');
+  db.prepare('INSERT INTO books(id,title,about,editor,ekey) VALUES(?,?,?,?,?)').run(id, title, plain(x.about, 200), plain(x.editor, 30) || '편집자', ekey);
+  db.prepare('INSERT INTO chapters(book,ord,title) VALUES(?,1,?)').run(id, '1장');
+  return { id, ekey };
+}
+function bookOf(db, id, ekey = '') {
+  const b = db.prepare('SELECT * FROM books WHERE id=?').get(String(id));
+  if (!b) throw new HttpError(404, '없는 책입니다');
+  return { b, editor: !!ekey && String(ekey) === b.ekey };
+}
+function needEditor(db, id, ekey) { const r = bookOf(db, id, ekey); if (!r.editor) throw new HttpError(403, '편집자만 할 수 있습니다'); return r.b; }
+function bookView(db, id, ekey = '') {
+  const { b, editor } = bookOf(db, id, ekey);
+  const chapters = db.prepare(`SELECT c.id, c.ord, c.title, c.ver, c.updated, length(c.body) AS chars,
+      (SELECT COUNT(*) FROM edits e WHERE e.chapter = c.id AND e.status = 'pending') AS pending FROM chapters c WHERE c.book=? ORDER BY c.ord, c.id`).all(b.id);
+  const people = db.prepare(`SELECT author, COUNT(*) n FROM chapter_vers v JOIN chapters c ON c.id = v.chapter WHERE c.book=? AND author<>'' GROUP BY author ORDER BY n DESC`).all(b.id);
+  return { book: { id: b.id, title: b.title, about: b.about, editor: b.editor, created: b.created }, chapters, people, isEditor: editor };
+}
+function chapterOf(db, cid) {
+  const c = db.prepare('SELECT * FROM chapters WHERE id=?').get(+cid);
+  if (!c) throw new HttpError(404, '없는 장입니다');
+  return c;
+}
+function chapterView(db, cid, ekey = '') {
+  const c = chapterOf(db, cid), { b, editor } = bookOf(db, c.book, ekey);
+  const edits = db.prepare(`SELECT id, base, body, note, author, status, created FROM edits WHERE chapter=? AND status='pending' ORDER BY id`).all(c.id)
+    /* 차이는 «그 제안이 쓰인 판» 과 비교해야 한다. 지금 판과 비교하면 옛 판 위 제안이 «남의 고침을 지우는 것» 처럼 보인다 */
+    .map(e => ({ ...e, stale: e.base !== c.ver,
+      base_body: e.base === c.ver ? c.body : e.base === 0 ? '' : ((db.prepare('SELECT body FROM chapter_vers WHERE chapter=? AND ver=?').get(c.id, e.base) || {}).body || '') }));
+  const history = db.prepare('SELECT ver, author, note, at FROM chapter_vers WHERE chapter=? ORDER BY ver DESC LIMIT 30').all(c.id);
+  return { book: { id: b.id, title: b.title }, chapter: { id: c.id, ord: c.ord, title: c.title, body: c.body, ver: c.ver, updated: c.updated }, edits, history, isEditor: editor };
+}
+function chapterAdd(db, bookId, ekey, x) {
+  const b = needEditor(db, bookId, ekey);
+  const n = db.prepare('SELECT COUNT(*) c, COALESCE(MAX(ord),0) m FROM chapters WHERE book=?').get(b.id);
+  if (n.c >= BOOK_CH_MAX) throw new HttpError(409, `장은 ${BOOK_CH_MAX}개까지입니다`);
+  const r = db.prepare('INSERT INTO chapters(book,ord,title) VALUES(?,?,?)').run(b.id, n.m + 1, plain(x.title, 60) || `${n.m + 1}장`);
+  return { id: Number(r.lastInsertRowid) };
+}
+/* 제안 — 어느 판 위에서 썼는지(base)를 같이 받는다. 지금 판과 똑같은 글은 제안이 아니다 */
+function editPropose(db, cid, x) {
+  const c = chapterOf(db, cid);
+  const body = bookText(x.body, BOOK_BODY_MAX);
+  if (!body.trim()) throw new HttpError(400, '고쳐 쓴 글이 비었습니다');
+  if (body === c.body) throw new HttpError(400, '바뀐 곳이 없습니다');
+  const base = Number.isInteger(+x.base) ? +x.base : c.ver;
+  if (base > c.ver || base < 0) throw new HttpError(400, '없는 판 위에서 쓴 제안입니다');
+  if (db.prepare("SELECT COUNT(*) c FROM edits WHERE chapter=? AND status='pending'").get(c.id).c >= EDIT_PENDING_MAX)
+    throw new HttpError(429, '이 장에 기다리는 제안이 너무 많습니다. 편집자가 정리한 뒤에 다시 내 주세요');
+  const r = db.prepare('INSERT INTO edits(chapter,base,body,note,author) VALUES(?,?,?,?,?)').run(c.id, base, body, plain(x.note, 140), plain(x.author, 30) || '익명');
+  return { id: Number(r.lastInsertRowid), base };
+}
+/* 합치기 — 제안이 지금 판 위에서 쓰였을 때만. 그 사이 다른 제안이 합쳐졌으면 409(덮어쓰면 남의 고침이 사라진다) */
+function editMerge(db, eid, ekey) {
+  const e = db.prepare('SELECT * FROM edits WHERE id=?').get(+eid);
+  if (!e) throw new HttpError(404, '없는 제안입니다');
+  const c = chapterOf(db, e.chapter); needEditor(db, c.book, ekey);
+  if (e.status !== 'pending') throw new HttpError(409, '이미 정리된 제안입니다');
+  if (e.base !== c.ver) throw new HttpError(409, `그 사이 이 장이 바뀌었습니다(${e.base}판 → ${c.ver}판). 제안한 사람이 새 판 위에 다시 쓰거나, 편집자가 직접 옮겨 적어야 합니다`);
+  const ver = c.ver + 1;
+  db.prepare('INSERT INTO chapter_vers(chapter,ver,body,author,note) VALUES(?,?,?,?,?)').run(c.id, ver, e.body, e.author, e.note);
+  db.prepare("UPDATE chapters SET body=?, ver=?, updated=datetime('now') WHERE id=?").run(e.body, ver, c.id);
+  db.prepare("UPDATE edits SET status='merged', decided=datetime('now') WHERE id=?").run(e.id);
+  return { ver };
+}
+function editClose(db, eid, ekey) {
+  const e = db.prepare('SELECT * FROM edits WHERE id=?').get(+eid);
+  if (!e) throw new HttpError(404, '없는 제안입니다');
+  const c = chapterOf(db, e.chapter); needEditor(db, c.book, ekey);
+  if (e.status !== 'pending') throw new HttpError(409, '이미 정리된 제안입니다');
+  db.prepare("UPDATE edits SET status='closed', decided=datetime('now') WHERE id=?").run(e.id);
+  return { ok: true };
+}
+/* 편집자가 직접 고치기 — 제안을 내고 바로 합치는 것과 같다(기록이 남는다) */
+function chapterSave(db, cid, ekey, x) {
+  const c = chapterOf(db, cid); needEditor(db, c.book, ekey);
+  if (x.title !== undefined) db.prepare('UPDATE chapters SET title=? WHERE id=?').run(plain(x.title, 60) || c.title, c.id);
+  if (x.body === undefined) return { ver: c.ver };
+  const e = editPropose(db, cid, { body: x.body, base: x.base, note: x.note || '편집자 직접 고침', author: bookOf(db, c.book).b.editor });
+  return editMerge(db, e.id, ekey);
+}
+function bookMd(db, id) {
+  const { b } = bookOf(db, id);
+  const ch = db.prepare('SELECT title, body FROM chapters WHERE book=? ORDER BY ord, id').all(b.id);
+  const people = db.prepare(`SELECT DISTINCT author FROM chapter_vers v JOIN chapters c ON c.id=v.chapter WHERE c.book=? AND author<>''`).all(b.id).map(r => r.author);
+  return `# ${b.title}\n\n${b.about ? b.about + '\n\n' : ''}` + ch.map(c => `## ${c.title}\n\n${c.body.trim()}\n`).join('\n') +
+    `\n---\n함께 쓴 사람: ${people.join(', ') || b.editor} · HACK:ON 공동 집필 (${mailSite()}/w/${b.id})\n`;
+}
+
+/* ── 게시판 — 주제별 글·댓글·추천(▲). 개념글은 추천 BOARD_BEST 이상 ───────────────────────────── */
+const BOARD_TOPICS = [['free', '자유'], ['vibe', '바이브코딩'], ['ai', 'AI 도구'], ['team', '팀원 구함'], ['show', '자랑·데모'], ['career', '취업·커리어'], ['shop', '사장님'], ['qna', '질문']];
+const BOARD_TOPIC_KEYS = BOARD_TOPICS.map(t => t[0]);
+const BOARD_BEST = 10, BOARD_HIDE_AT = 3, BOARD_PAGE = 30;
+const BOARD_LIMIT = +(process.env.BOARD_LIMIT || 6);   // IP 하나가 10분에 쓸 수 있는 글 수(댓글은 ×3)
+/* 사칭 막기 — 운영자·해커온 이름으로 쓰지 못한다(레드팀 10/02) */
+const BOARD_RESERVED = /운영자|관리자|운영진|해커온|hack\s*:?\s*on|admin|공식/i;
+const boardNick = v => { const n = plain(v, 16).replace(/\s+/g, ' '); if (BOARD_RESERVED.test(n)) throw new HttpError(400, '그 닉네임은 쓸 수 없습니다(운영자 사칭 방지)'); return n || '익명'; };
+/* 게시판의 연락처 거름 — 깃허브·데모 주소는 자랑·질문에 꼭 필요하다(전에는 바깥 주소를 다 막아 «자랑·데모» 에 링크를 못 붙였다).
+   주소는 빼고 본다. 단 오픈 채팅방 주소는 연락처라 그대로 막는다 */
+const boardContact = t => /open\.kakao\.com/i.test(String(t || '')) || looksContact(String(t || '').replace(/https?:\/\/[^\s]+/gi, ' '));
+/* 신고를 «서로 다른 사람» 으로 세려면 표(브라우저가 만든 값)만으로는 안 된다 — 한 사람이 표 셋을 만들어 남의 글을 내릴 수 있었다.
+   그래서 IP 를 소금 친 해시로 같이 적고, 서로 다른 해시가 셋일 때만 숨긴다. 날 IP 는 저장하지 않는다 */
+const IP_SALT = process.env.IP_SALT || crypto.randomBytes(16).toString('hex');
+const ipTag = ip => crypto.createHash('sha256').update(IP_SALT + '|' + String(ip || '')).digest('hex').slice(0, 16);
+function boardClean(title, body) {
+  const t = plain(title, 80), b = String(body == null || typeof body === 'object' ? '' : body).replace(/[<>]/g, '').trim().slice(0, 3000);
+  return { t, b };
+}
+function boardPost(db, x) {
+  const topic = BOARD_TOPIC_KEYS.includes(x.topic) ? x.topic : '';
+  if (!topic) throw new HttpError(400, '주제를 골라 주세요');
+  const { t, b } = boardClean(x.title, x.body);
+  if (!t) throw new HttpError(400, '제목을 적어 주세요');
+  if (notWriting(t) && !b) throw new HttpError(400, '글이 아닌 것 같습니다 — 한 줄이라도 적어 주세요');
+  if (boardContact(t) || boardContact(b)) throw new HttpError(400, '연락처는 공개 글에 적지 않습니다 — 팀원은 대회 «같이 할 사람 추천» 의 서로 좋아요로 이어집니다');
+  const bkey = crypto.randomBytes(8).toString('hex');
+  const r = db.prepare('INSERT INTO board_posts(topic,title,body,nick,bkey) VALUES(?,?,?,?,?)').run(topic, t, b, boardNick(x.nick), bkey);
+  return { id: Number(r.lastInsertRowid), bkey };
+}
+function boardList(db, { topic = '', sort = 'hot', page = 0, now = Date.now() } = {}) {
+  const tp = BOARD_TOPIC_KEYS.includes(topic) ? topic : '';
+  const since = sort === 'top' ? new Date(now - 7 * 86400000).toISOString().replace('T', ' ').slice(0, 19) : '';
+  let rows = db.prepare(`SELECT id, topic, title, nick, up, comments, created, substr(body, 1, 140) AS peek FROM board_posts
+    WHERE hidden = 0 AND (? = '' OR topic = ?) AND (? = '' OR created >= ?) ORDER BY id DESC LIMIT 600`).all(tp, tp, since, since);
+  const hrs = r => Math.max(0, (now - Date.parse(String(r.created).replace(' ', 'T') + 'Z')) / 3600000);
+  /* 인기: 레딧·해커뉴스식 — 추천은 로그로 눌러 «오래된 글이 영원히 위» 를 막고, 시간이 지날수록 내려간다 */
+  if (sort === 'hot') rows.sort((a, b) => (Math.log10(1 + b.up) + b.comments * 0.05 + 1) / Math.pow(hrs(b) + 2, 1.2) - (Math.log10(1 + a.up) + a.comments * 0.05 + 1) / Math.pow(hrs(a) + 2, 1.2) || b.id - a.id);
+  else if (sort === 'top') rows.sort((a, b) => b.up - a.up || b.id - a.id);
+  const total = rows.length, p = Math.max(0, parseInt(page, 10) || 0);
+  rows = rows.slice(p * BOARD_PAGE, (p + 1) * BOARD_PAGE).map(r => ({ ...r, best: r.up >= BOARD_BEST }));
+  return { topics: BOARD_TOPICS, rows, total, page: p, pageSize: BOARD_PAGE, best: BOARD_BEST };
+}
+function boardView(db, id, voter = '') {
+  const post = db.prepare('SELECT id, topic, title, body, nick, up, comments, created FROM board_posts WHERE id=? AND hidden=0').get(+id);
+  if (!post) throw new HttpError(404, '없거나 내려간 글입니다');
+  post.best = post.up >= BOARD_BEST;
+  post.voted = !!(voter && db.prepare('SELECT 1 FROM board_votes WHERE post=? AND voter=?').get(post.id, String(voter)));
+  const comments = db.prepare('SELECT id, body, nick, created FROM board_comments WHERE post=? AND hidden=0 ORDER BY id').all(post.id);
+  return { post, comments, topics: BOARD_TOPICS };
+}
+function boardComment(db, id, x) {
+  const p = db.prepare('SELECT id FROM board_posts WHERE id=? AND hidden=0').get(+id);
+  if (!p) throw new HttpError(404, '없거나 내려간 글입니다');
+  const b = String(x.body == null || typeof x.body === 'object' ? '' : x.body).replace(/[<>]/g, '').trim().slice(0, 1000);
+  if (!b) throw new HttpError(400, '댓글을 적어 주세요');
+  if (boardContact(b)) throw new HttpError(400, '연락처는 공개 댓글에 적지 않습니다');
+  const ckey = crypto.randomBytes(8).toString('hex');
+  const r = db.prepare('INSERT INTO board_comments(post,body,nick,ckey) VALUES(?,?,?,?)').run(p.id, b, boardNick(x.nick), ckey);
+  db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(p.id, p.id);
+  return { id: Number(r.lastInsertRowid), ckey };
+}
+/* 추천 — 한 브라우저(voter 토큰) 한 번. 다시 누르면 취소. 토큰이 없으면 못 누른다(새로고침 연타 막기) */
+function boardVote(db, id, voter) {
+  const v = String(voter || '');
+  if (!/^[0-9a-z]{12,40}$/i.test(v)) throw new HttpError(400, '추천 표가 없습니다 — 새로고침 뒤 다시 눌러 주세요');
+  const p = db.prepare('SELECT id FROM board_posts WHERE id=? AND hidden=0').get(+id);
+  if (!p) throw new HttpError(404, '없거나 내려간 글입니다');
+  const had = db.prepare('SELECT 1 FROM board_votes WHERE post=? AND voter=?').get(p.id, v);
+  if (had) db.prepare('DELETE FROM board_votes WHERE post=? AND voter=?').run(p.id, v);
+  else db.prepare('INSERT INTO board_votes(post,voter) VALUES(?,?)').run(p.id, v);
+  const up = db.prepare('SELECT COUNT(*) c FROM board_votes WHERE post=?').get(p.id).c;
+  db.prepare('UPDATE board_posts SET up=? WHERE id=?').run(up, p.id);
+  return { up, voted: !had };
+}
+/* 신고 — 서로 다른 셋이면 저절로 숨김(운영자가 보기 전에). 같은 사람 연타는 한 번 */
+function boardReport(db, kind, id, voter, reason, ip = '') {
+  const v = String(voter || '');
+  if (!/^[0-9a-z]{12,40}$/i.test(v)) throw new HttpError(400, '신고 표가 없습니다');
+  const tbl = kind === 'c' ? 'board_comments' : 'board_posts';
+  if (!db.prepare(`SELECT 1 FROM ${tbl} WHERE id=?`).get(+id)) throw new HttpError(404, '없는 글입니다');
+  db.prepare('INSERT OR IGNORE INTO board_reports(kind,ref,voter,ip,reason) VALUES(?,?,?,?,?)').run(kind === 'c' ? 'c' : 'p', +id, v, String(ip || v), plain(reason, 100));
+  const n = db.prepare('SELECT COUNT(DISTINCT ip) c FROM board_reports WHERE kind=? AND ref=?').get(kind === 'c' ? 'c' : 'p', +id).c;
+  if (n >= BOARD_HIDE_AT) db.prepare(`UPDATE ${tbl} SET hidden=1 WHERE id=?`).run(+id);
+  if (n >= BOARD_HIDE_AT && kind === 'c') { const c = db.prepare('SELECT post FROM board_comments WHERE id=?').get(+id); db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(c.post, c.post); }
+  return { reports: n, hidden: n >= BOARD_HIDE_AT };
+}
+function boardDelete(db, kind, id, key, admin = false) {
+  const tbl = kind === 'c' ? 'board_comments' : 'board_posts', col = kind === 'c' ? 'ckey' : 'bkey';
+  const r = db.prepare(`SELECT * FROM ${tbl} WHERE id=?`).get(+id);
+  if (!r) throw new HttpError(404, '없는 글입니다');
+  if (!admin && (!key || String(key) !== r[col])) throw new HttpError(403, '쓴 사람만 지울 수 있습니다');
+  db.prepare(`UPDATE ${tbl} SET hidden=1 WHERE id=?`).run(r.id);
+  if (kind === 'c') db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(r.post, r.post);
+  return { ok: true };
+}
+
 /* ── 내 달력 — 연 대회·신청한 대회·심사 맡은 대회의 날짜·마감·재확인·할 일 ──────────────
    열쇠는 브라우저에 있다. 화면이 든 열쇠를 보내면 하나씩 맞춰 보고 맞는 것만 «내 것» 으로 친다.
    구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에. 폰 달력은 구독 주소로(내보내기만). */
@@ -6368,7 +6584,7 @@ function calItems(db, refs) {
 function calIcs(db, refs, base) {
   const { items } = calItems(db, refs);
   const d = s => String(s).replace(/-/g, '');
-  const esc = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\;');
+  const esc = s => String(s || '').replace(/\r/g, '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
   const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
   const ev = items.filter(i => i.kind !== 'day' || items.findIndex(x => x.kind === 'day' && x.event === i.event) === items.indexOf(i)).map((i, n) => {
     const e = i.kind === 'day' ? db.prepare('SELECT starts, ends FROM events WHERE id=?').get(i.event) : null;
@@ -6668,7 +6884,7 @@ function questionsOf(db, event) {
 function icsOf(e, base) {
   const d = s => String(s || '').replace(/-/g, '');
   const next = s => { const t = new Date(s + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10).replace(/-/g, ''); };
-  const esc = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
+  const esc = s => String(s || '').replace(/\r/g, '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//HACK:ON//KO', 'BEGIN:VEVENT',
     'UID:hackon-' + e.id + '@hackon.mandeun.com',
     'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z',
@@ -8383,11 +8599,54 @@ function routes(db) {
           return res.end(calIcs(db, JSON.parse(sub.refs), siteOf(req)));
         }
         if (p === '/api/cal/sub' && req.method === 'POST') return json(res, 201, calSub(db, calRefs(db, await body(req), owner)));
+        /* 공동 집필 */
+        if (p === '/api/books' && req.method === 'POST') {
+          if (tooMany('bk:' + clientIp(req), BOARD_LIMIT)) throw new HttpError(429, '책을 너무 빨리 만들고 있습니다. 잠시 뒤에 다시 해 주세요');
+          return json(res, 201, bookCreate(db, await body(req)));
+        }
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})$/)) && req.method === 'GET') return json(res, 200, bookView(db, m[1], req.headers['x-ekey'] || ''));
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\.md$/)) && req.method === 'GET') {
+          res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="hackon-book-${m[1]}.md"` });
+          return res.end(bookMd(db, m[1]));
+        }
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\/chapters$/)) && req.method === 'POST') return json(res, 201, chapterAdd(db, m[1], req.headers['x-ekey'] || '', await body(req)));
+        if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'GET') return json(res, 200, chapterView(db, m[1], req.headers['x-ekey'] || ''));
+        if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'POST') return json(res, 200, chapterSave(db, m[1], req.headers['x-ekey'] || '', await body(req)));
+        if ((m = p.match(/^\/api\/chapters\/(\d+)\/edits$/)) && req.method === 'POST') {
+          if (tooMany('ed:' + clientIp(req), BOARD_LIMIT * 3)) throw new HttpError(429, '제안을 너무 빨리 내고 있습니다. 잠시 뒤에 다시 해 주세요');
+          return json(res, 201, editPropose(db, m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/edits\/(\d+)\/merge$/)) && req.method === 'POST') return json(res, 200, editMerge(db, m[1], req.headers['x-ekey'] || ''));
+        if ((m = p.match(/^\/api\/edits\/(\d+)\/close$/)) && req.method === 'POST') return json(res, 200, editClose(db, m[1], req.headers['x-ekey'] || ''));
+        /* 게시판 */
+        if (p === '/api/board' && req.method === 'GET')
+          return json(res, 200, boardList(db, { topic: String(q.topic || ''), sort: ['hot', 'new', 'top'].includes(q.sort) ? q.sort : 'hot', page: q.page }));
+        if (p === '/api/board' && req.method === 'POST') {
+          if (tooMany('bp:' + clientIp(req), BOARD_LIMIT)) throw new HttpError(429, '글을 너무 빨리 올리고 있습니다. 10분 뒤에 다시 해 주세요');
+          return json(res, 201, boardPost(db, await body(req)));
+        }
+        if ((m = p.match(/^\/api\/board\/(\d+)$/)) && req.method === 'GET')
+          return json(res, 200, boardView(db, m[1], String(req.headers['x-voter'] || '')));
+        if ((m = p.match(/^\/api\/board\/(\d+)\/comments$/)) && req.method === 'POST') {
+          if (tooMany('bc:' + clientIp(req), BOARD_LIMIT * 3)) throw new HttpError(429, '댓글을 너무 빨리 달고 있습니다. 잠시 뒤에 다시 해 주세요');
+          return json(res, 201, boardComment(db, m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/board\/(\d+)\/up$/)) && req.method === 'POST') {
+          /* 표는 브라우저가 만든다 — 새 표를 계속 만들어 추천을 부풀리는 것을 IP 상한으로 묶는다(레드팀 10/02) */
+          if (tooMany('bv:' + clientIp(req), BOARD_LIMIT * 10)) throw new HttpError(429, '추천을 너무 많이 눌렀습니다. 잠시 뒤에 다시 해 주세요');
+          return json(res, 200, boardVote(db, m[1], req.headers['x-voter']));
+        }
+        if ((m = p.match(/^\/api\/board\/(p|c)\/(\d+)\/report$/)) && req.method === 'POST')
+          return json(res, 200, boardReport(db, m[1], m[2], req.headers['x-voter'], (await body(req)).reason, ipTag(clientIp(req))));
+        if ((m = p.match(/^\/api\/board\/(p|c)\/(\d+)\/delete$/)) && req.method === 'POST')
+          return json(res, 200, boardDelete(db, m[1], m[2], req.headers['x-bkey'] || '', siteAdmin));
         /* 자리 매칭 — 카드(공개 목록·올리기·내 카드)와 요청(보내기·답하기·거두기) */
         if (p === '/api/givers' && req.method === 'GET')
           return json(res, 200, giversList(db, { kind: NEED_KINDS.includes(q.kind) ? q.kind : '', event: /^[a-z0-9]+$/.test(q.event || '') ? q.event : '' }));
-        if (p === '/api/givers' && req.method === 'POST')
+        if (p === '/api/givers' && req.method === 'POST') {
+          if (tooMany('gv:' + clientIp(req), BOARD_LIMIT)) throw new HttpError(429, '카드를 너무 빨리 올리고 있습니다. 잠시 뒤에 다시 해 주세요');
           return json(res, 201, addGiver(db, await body(req), cookieOwner || ''));
+        }
         if ((m = p.match(/^\/api\/givers\/(\d+)$/)) && req.method === 'GET')
           return json(res, 200, giverInbox(db, m[1], String(req.headers['x-gkey'] || '')));
         if ((m = p.match(/^\/api\/givers\/(\d+)$/)) && req.method === 'POST')
@@ -8621,7 +8880,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/board' || p.match(/^\/board\/\d+$/) || p === '/write' || p.match(/^\/w\/[0-9a-f]{8}(\/\d+)?$/) || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -9383,6 +9642,92 @@ async function selftest() {
       ok(bmine.find(r => r.id === k1).stuck.includes('3시간') && bmine.filter(r => r.stuck !== undefined).length === 1, '막힌 곳 — 본인 줄에만 보인다');
       ok(badm.find(r => r.id === k1).stuck.includes('3시간'), '막힌 곳 — 운영자는 본다');
     }
+    /* 공동 집필 — 제안 → 합치기, 충돌이면 409, 편집자 열쇠, 판 기록, 마크다운 */
+    {
+      const wdb = open(':memory:');
+      let bad = false; try { bookCreate(wdb, { title: '  ' }); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 이름 없는 책은 안 만든다');
+      const bk = bookCreate(wdb, { title: '바이브코딩 첫걸음', about: '같이 쓰는 입문서', editor: '편집장' });
+      const v0 = bookView(wdb, bk.id);
+      ok(v0.chapters.length === 1 && !v0.isEditor && bookView(wdb, bk.id, bk.ekey).isEditor && !JSON.stringify(v0).includes(bk.ekey), '공동 집필 — 첫 장이 있고, 편집자는 열쇠로만, 열쇠는 응답에 없다');
+      const ch = v0.chapters[0].id;
+      bad = false; try { chapterAdd(wdb, bk.id, 'wrong', { title: '2장' }); } catch (e) { bad = e.code === 403; } ok(bad, '공동 집필 — 남이 장을 못 늘린다');
+      chapterSave(wdb, ch, bk.ekey, { body: '첫 문단.\n둘째 문단.', base: 0 });
+      ok(chapterView(wdb, ch).chapter.ver === 1 && chapterView(wdb, ch).history[0].author === '편집장', '공동 집필 — 편집자 직접 고침도 판으로 남는다');
+      bad = false; try { editPropose(wdb, ch, { body: '첫 문단.\n둘째 문단.', base: 1 }); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 바뀐 곳 없는 제안은 안 받는다');
+      bad = false; try { editPropose(wdb, ch, { body: 'x', base: 9 }); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 없는 판 위의 제안은 안 받는다');
+      const a = editPropose(wdb, ch, { body: '첫 문단.\n둘째 문단을 고쳤다.', base: 1, author: '김작가', note: '둘째 문단 다듬기' });
+      const b2 = editPropose(wdb, ch, { body: '첫 문단 고침.\n둘째 문단.', base: 1, author: '박작가' });
+      ok(chapterView(wdb, ch).edits.length === 2 && chapterView(wdb, ch).edits.every(e => !e.stale), '공동 집필 — 기다리는 제안 둘');
+      bad = false; try { editMerge(wdb, a.id, 'wrong'); } catch (e) { bad = e.code === 403; } ok(bad, '공동 집필 — 편집자만 합친다');
+      ok(editMerge(wdb, a.id, bk.ekey).ver === 2 && chapterView(wdb, ch).chapter.body.includes('둘째 문단을 고쳤다'), '공동 집필 — 합치면 새 판이 되고 글이 바뀐다');
+      ok(chapterView(wdb, ch).edits.find(e => e.id === b2.id).stale, '공동 집필 — 옛 판 위의 제안에는 «바뀜» 표시');
+      ok(chapterView(wdb, ch).edits.find(e => e.id === b2.id).base_body === '첫 문단.\n둘째 문단.', '공동 집필 — 옛 판 위 제안의 차이는 그 판과 비교한다');
+      bad = false; try { editMerge(wdb, b2.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 그 사이 장이 바뀌었으면 합치지 않는다(남의 고침을 덮지 않게)');
+      ok(chapterView(wdb, ch).chapter.body.includes('둘째 문단을 고쳤다'), '공동 집필 — 충돌난 제안은 글을 안 바꾼다');
+      bad = false; try { editMerge(wdb, a.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 한 제안을 두 번 합치지 않는다');
+      editClose(wdb, b2.id, bk.ekey);
+      const c3 = editPropose(wdb, ch, { body: '지금 판 위의 제안', base: 2 });
+      editClose(wdb, c3.id, bk.ekey);
+      bad = false; try { editMerge(wdb, c3.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 돌려보낸 제안은 지금 판 위라도 합쳐지지 않는다');
+      ok(chapterView(wdb, ch).edits.length === 0, '공동 집필 — 돌려보낸 제안은 목록에서 빠진다');
+      chapterAdd(wdb, bk.id, bk.ekey, { title: '도구 고르기' });
+      const md = bookMd(wdb, bk.id);
+      ok(md.startsWith('# 바이브코딩 첫걸음') && md.includes('## 1장') && md.includes('## 도구 고르기') && md.includes('김작가'), '공동 집필 — 마크다운으로 장 차례대로, 함께 쓴 사람까지');
+      ok(bookView(wdb, bk.id).people.some(p => p.author === '김작가'), '공동 집필 — 합쳐진 사람이 «함께 쓴 사람» 에 오른다');
+      ok(!bookText('<script>alert(1)</script>본문', 100).includes('<script'), '공동 집필 — 스크립트 꼬리표는 벗긴다(화면은 글자로만 그린다)');
+    }
+    /* 화면(SCREEN) 이름이 겹치면 뒤엣것이 앞엣것을 조용히 덮는다 — 게시판 board() 가 순위표 board() 를 덮어
+       대회를 만들면 운영 화면 대신 게시판이 떴다(10/02 e2e 가 잡음). 파일에서 이름을 세어 막는다 */
+    {
+      const html = fs.readFileSync(path.join(ROOT, 'hack-on.html'), 'utf8');
+      const names = [...html.matchAll(/^  (?:async )?([a-zA-Z]+)\(\) \{/gm)].map(m => m[1]);
+      const dup = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];
+      ok(names.length > 20 && !dup.length, '화면 이름이 겹치면 앞 화면이 사라진다: ' + dup.join(','));
+    }
+    /* 게시판 — 주제·연락처·추천 한 번·개념글·신고 셋 숨김·지우기 열쇠·정렬 */
+    {
+      const bdb = open(':memory:');
+      let bad = false; try { boardPost(bdb, { topic: 'nope', title: 'x' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 없는 주제에는 못 쓴다');
+      bad = false; try { boardPost(bdb, { topic: 'team', title: '팀원 구해요', body: '카톡 hackme12 로 연락 주세요' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 공개 글에 연락처를 적으면 막는다');
+      bad = false; try { boardPost(bdb, { topic: 'free', title: '   ', body: '본문만 있는 글' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 본문이 있어도 빈 제목은 안 받는다');
+      const p1 = boardPost(bdb, { topic: 'vibe', title: '<script>alert(1)</script> 커서로 하루 만에', body: '후기 <b>입니다</b>', nick: '  ' });
+      const v1 = boardView(bdb, p1.id);
+      ok(!v1.post.title.includes('<') && !v1.post.body.includes('<') && v1.post.nick === '익명', '게시판 — 꺾쇠는 빠지고 빈 닉은 «익명»');
+      ok(!JSON.stringify(v1).includes(p1.bkey) && !JSON.stringify(boardList(bdb)).includes(p1.bkey), '게시판 — 지우기 열쇠는 응답에 안 나간다');
+      bad = false; try { boardVote(bdb, p1.id, ''); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 추천 표 없이는 못 누른다');
+      const vv = 'voter' + 'a'.repeat(12);
+      ok(boardVote(bdb, p1.id, vv).up === 1 && boardVote(bdb, p1.id, vv).up === 0, '게시판 — 같은 표로 두 번 누르면 취소(부풀리기 없음)');
+      for (let i = 0; i < BOARD_BEST; i++) boardVote(bdb, p1.id, 'v' + String(i).padStart(12, '0'));
+      ok(boardList(bdb).rows.find(r => r.id === p1.id).best, `게시판 — 추천 ${BOARD_BEST} 이상이면 개념글`);
+      const p2 = boardPost(bdb, { topic: 'qna', title: '질문 하나요', body: '로그인 붙이는 법' });
+      ok(boardList(bdb, { topic: 'qna' }).rows.every(r => r.topic === 'qna') && boardList(bdb, { topic: 'qna' }).rows.length === 1, '게시판 — 주제로 거른다');
+      ok(boardList(bdb, { sort: 'top' }).rows[0].id === p1.id && boardList(bdb, { sort: 'new' }).rows[0].id === p2.id, '게시판 — 주간 TOP 은 추천순, 최신은 새 글부터');
+      bad = false; try { boardComment(bdb, p2.id, { body: '010-1234-5678 로 전화 주세요' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 댓글에 연락처를 적으면 막는다');
+      const c1 = boardComment(bdb, p2.id, { body: '세션 쿠키부터 보세요', nick: '선배' });
+      ok(boardView(bdb, p2.id).post.comments === 1 && boardView(bdb, p2.id).comments[0].nick === '선배', '게시판 — 댓글이 달리고 수가 센다');
+      bad = false; try { boardDelete(bdb, 'p', p2.id, 'wrong'); } catch (e) { bad = e.code === 403; } ok(bad, '게시판 — 남의 글은 못 지운다');
+      bad = false; try { boardDelete(bdb, 'c', c1.id, p2.bkey); } catch (e) { bad = e.code === 403; } ok(bad, '게시판 — 글 열쇠로 남의 댓글을 못 지운다');
+      boardDelete(bdb, 'c', c1.id, c1.ckey);
+      ok(boardView(bdb, p2.id).post.comments === 0, '게시판 — 지운 댓글은 수에서 빠진다');
+      const r1 = 'r'.repeat(12);
+      boardReport(bdb, 'p', p2.id, r1, '광고'); boardReport(bdb, 'p', p2.id, r1, '광고'); boardReport(bdb, 'p', p2.id, 'r'.repeat(13), '');
+      ok(boardList(bdb).rows.some(r => r.id === p2.id), '게시판 — 같은 사람이 여러 번 신고해도 한 번(아직 안 숨김)');
+      ok(boardReport(bdb, 'p', p2.id, 'r'.repeat(14), '').hidden && !boardList(bdb).rows.some(r => r.id === p2.id), `게시판 — 서로 다른 ${BOARD_HIDE_AT}명이 신고하면 숨김`);
+      bad = false; try { boardView(bdb, p2.id); } catch (e) { bad = e.code === 404; } ok(bad, '게시판 — 숨긴 글은 열리지 않는다');
+      /* 레드팀 10/02 — 한 사람(같은 IP)이 표를 셋 만들어도 남의 글을 못 내린다 */
+      const pz = boardPost(bdb, { topic: 'free', title: '내려가면 안 되는 글', body: '멀쩡' });
+      for (let i = 0; i < 5; i++) boardReport(bdb, 'p', pz.id, 'z' + String(i).padStart(12, '0'), '', 'same-ip');
+      ok(boardList(bdb).rows.some(r => r.id === pz.id), '게시판 — 같은 IP 에서 표를 여러 개 만들어 신고해도 안 내려간다');
+      ok(boardReport(bdb, 'p', pz.id, 'y'.repeat(12), '', 'ip-2').hidden === false && boardReport(bdb, 'p', pz.id, 'x'.repeat(12), '', 'ip-3').hidden === true, '게시판 — 서로 다른 IP 셋이면 내려간다');
+      ok(boardPost(bdb, { topic: 'show', title: '데모 켰어요', body: '여기서 눌러 보세요 https://github.com/acme/demo · https://acme.vercel.app' }).id > 0, '게시판 — 깃허브·데모 주소는 붙일 수 있다');
+      bad = false; try { boardPost(bdb, { topic: 'team', title: '팀원', body: 'https://open.kakao.com/o/abc 로 와요' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 오픈 채팅 주소는 연락처라 막는다');
+      bad = false; try { boardPost(bdb, { topic: 'free', title: '공지', body: '본문', nick: '해커온 운영자' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 운영자·해커온 이름으로 못 쓴다(사칭)');
+      /* 인기: 오래된 추천 많은 글보다 방금 올라온 추천 몇 개 글이 위로 갈 수 있어야 한다(영원히 고정 안 됨) */
+      bdb.prepare("UPDATE board_posts SET created=datetime('now','-10 days') WHERE id=?").run(p1.id);
+      const p3 = boardPost(bdb, { topic: 'show', title: '방금 켰습니다', body: '데모' });
+      for (let i = 0; i < 3; i++) boardVote(bdb, p3.id, 'w' + String(i).padStart(12, '0'));
+      ok(boardList(bdb, { sort: 'hot' }).rows[0].id === p3.id, '게시판 — 인기는 시간이 지나면 내려간다(열흘 된 개념글보다 방금 글)');
+    }
     /* 내 달력 — 든 열쇠가 맞는 대회만, 역할별 날짜·마감·재확인·할 일 */
     {
       const ce = createEvent(db, { title: '달력 검사', starts: '2099-07-10', ends: '2099-07-11' });
@@ -9411,6 +9756,9 @@ async function selftest() {
          '내 달력 — 구독 주소는 날짜·마감을 싣고 열쇠는 안 싣는다');
       ok((ics.match(/SUMMARY:(\d\d:\d\d )?달력 검사\r/g) || []).length === 1, '내 달력 — 구독에서 이틀짜리 대회는 한 줄(이틀 걸침)');
       let bad = false; try { calSub(db, []); } catch (e) { bad = e.code === 400; } ok(bad, '내 달력 — 빈 구독은 안 만든다');
+      db.prepare('UPDATE events SET title=? WHERE id=?').run('주입\rATTENDEE:evil@x.test\r\nX-EVIL:1', ch.id);
+      const ics2 = calIcs(db, refs, 'https://x.test');
+      ok(!/\r(?!\n)/.test(ics2) && !/\r\nATTENDEE/.test(ics2) && !/\r\nX-EVIL/.test(ics2), '내 달력 — 제목의 줄바꿈으로 달력 파일에 줄을 끼워 넣지 못한다');
     }
     /* 대회 혜택 — 확정된 것만, 끝난 대회·비공개 대회는 빼고 */
     {
@@ -11975,7 +12323,7 @@ async function selftest() {
     ok(tiny.length === 2, '제목이 짧다고 서로 다른 글이 하나로 뭉쳤다');
     /* 혜택 묶음 — 무료 크레딧·할인·한도 리셋은 출처와 상관없이 «무료·할인·리셋» 으로 간다 */
     const dl = newsEnrich([{ id: 1, src: 'geek', title: 'Claude Code 사용 한도 리셋 — 주간 한도 두 배', url: 'https://d.example/1', note: '', at: T, job: '' },
-                           { id: 2, src: 'ph', title: 'Get $50 free credits for new users', url: 'https://d.example/2', note: '', at: T, job: '' },
+                           { id: 2, src: 'ph', title: 'Get $50 free OpenAI API credits for new users', url: 'https://d.example/2', note: '', at: T, job: '' },
                            { id: 3, src: 'paper', title: 'Credits assignment for free agents', url: 'https://d.example/3', note: '', at: T, job: '' },
                            { id: 4, src: 'gh', title: 'A free and open source note app', url: 'https://d.example/4', note: '', at: T, job: '' }], T);
     const kk = Object.fromEntries(dl.map(r => [r.id, r.kind]));
@@ -12097,19 +12445,23 @@ async function selftest() {
     ok(hot[0].url === 'https://github.com/new/kid', '확 뜬 것 — 는 비율로 섞어 큰 저장소가 맨 위를 늘 먹지 않는다: ' + hot.map(r => r.url).join(','));
     ok(newsHot(hdb, { day: D, per: 1 }).filter(r => r.src === 'gh').length === 1, '확 뜬 것 — 한 출처가 판을 다 먹지 않는다');
     ok(/«MCP» 는/.test(at('https://github.com/new/kid').easy) && /«에이전트» 는/.test(at('https://github.com/new/kid').easy), '확 뜬 것 — 줄마다 «쉽게» 가 붙는다');
-    ok(newsFeed(hdb).length >= 5 && newsFeed(hdb).every(r => r.easy), '쉽게 — 모든 소식 줄에 «쉽게» 가 붙는다');
+    ok(newsFeed(hdb).find(r => r.url === 'https://github.com/new/kid').easy.includes('«MCP» 는') && newsFeed(hdb).find(r => r.url === 'https://yozm.example/1').easy === '', '쉽게 — 어려운 말이 있는 줄에만 «쉽게» 가 붙는다');
     const md = newsMd(hdb);
     ok(md.includes('## 이번 주 확 뜬 것') && md.includes('+300') && md.includes('쉽게:'), '확 뜬 것 — 마크다운에도 같은 판과 «쉽게» 가 실린다');
   }
   ok(loginFailHtml('<b>x</b> 실패 (KOE320)').includes('&lt;b&gt;x&lt;/b&gt; 실패 (KOE320)') && loginFailHtml('x').includes('href="/app?login=1"'),
      '로그인 실패 화면 — 공급자 메시지는 글자로만, 다시 하기 길이 있다');
+  ok(newsKindOf({ src: 'geek', title: 'ChatGPT Plus 첫 달 무료 체험' }) === 'deal' && newsKindOf({ src: 'geek', title: 'Claude API 크레딧 50% 할인' }) === 'deal',
+     '할인·무료 — AI 모델 구독·크레딧 소식은 «무료·할인» 으로');
+  ok(newsKindOf({ src: 'geek', title: '운동화 30% 할인 쿠폰' }) !== 'deal' && newsKindOf({ src: 'ph', title: '숙박 무료 체험 프로모션' }) !== 'deal',
+     '할인·무료 — AI 와 상관없는 할인은 «무료·할인» 에 안 든다');
   /* 5살 설명 — 출처 종류 한 문장 + 제목 속 어려운 말 둘까지. 모르는 말은 풀지 않는다 */
-  ok(newsEasy({ src: 'hf', title: 'acme/tiny-7b' }).startsWith('누구나 받아 쓸 수 있게 공개된 AI 두뇌'), '쉽게 — 허깅페이스 모델은 «공개된 AI 두뇌»');
+  ok(newsEasy({ src: 'hf', title: 'acme/tiny-7b' }) === '', '쉽게 — 어려운 말이 없으면 «쉽게» 를 안 붙인다(출처 종류로 뻔한 말을 붙이지 않는다)');
   ok(newsEasy({ src: 'paper', title: 'A RAG pipeline for reasoning' }).includes('«RAG» 는') && newsEasy({ src: 'paper', title: 'A RAG pipeline for reasoning' }).includes('«추론» 는'), '쉽게 — 제목 속 RAG·추론을 푼다');
   ok(!newsEasy({ src: 'gh', title: 'drag-and-drop builder' }).includes('RAG'), '쉽게 — «drag» 속 «rag» 를 RAG 로 잘못 풀지 않는다');
   ok((newsEasy({ src: 'gh', title: 'MCP agent for LLM coding with RAG' }).match(/«/g) || []).length === 2, '쉽게 — 어려운 말은 둘까지만');
-  ok(newsEasy({ src: 'gh', title: 'zzqx frobnicator' }) === NEWS_EASY_SRC.gh, '쉽게 — 사전에 없는 말은 설명을 지어내지 않는다');
-  ok(newsEasy({ src: 'geek', title: '오늘의 소식', kind: 'read' }) === NEWS_EASY_KIND.read, '쉽게 — 기사 출처는 종류(읽을거리)로 한 문장');
+  ok(newsEasy({ src: 'gh', title: 'zzqx frobnicator' }) === '', '쉽게 — 사전에 없는 말은 설명을 지어내지 않는다');
+  ok(newsEasy({ src: 'geek', title: 'RAG 로 사내 문서 검색 붙이기', kind: 'read' }).startsWith('«RAG» 는'), '쉽게 — 기사 제목 속 어려운 말도 푼다');
   /* 관문 값을 안 넘기면 조용히 꺼지지 않고 터진다 */
   ok((() => { try { pickFeed('x', [], undefined); return false; } catch { return true; } })(),
      'AI 관문 — aiOnly 를 안 넘기면 그 자리에서 터진다');
