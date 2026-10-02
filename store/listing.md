@@ -49,6 +49,14 @@ HACK:ON 은 작은 해커톤을 여는 사람을 위한 운영 도구입니다.
 결과를 공개하면 각 팀이 자기 점수와 심사평을 봅니다.
 결과 보고서·명단 내려받기·증서까지 한 번에 나갑니다.
 
+■ 같이 할 사람
+역할·실력·강점·하려는 이유가 맞는 사람을 셋 권합니다. 서로 «좋아요»를 누른 두 사람에게만 연락처가 열립니다.
+방마다 다른 초대 링크로 어디서 몇 명 왔는지 저절로 셉니다.
+
+■ 아침 브리핑
+«오늘 켤 것» 한 장 — 내 대회 D-day, 7일 안 마감, 새 AI 모델·도구, 할인. 메일·공지를 붙여 넣으면 마감이 달력에 들어갑니다.
+지갑·브리핑 내용은 기기에만 저장됩니다.
+
 ■ 안전
 공개 글(질문·제출작)은 누구나 신고하고 차단할 수 있고, 운영자가 내립니다.
 연락처는 그 대회 운영자만 봅니다. 광고·추적·위치 수집을 하지 않습니다.
@@ -56,6 +64,17 @@ HACK:ON 은 작은 해커톤을 여는 사람을 위한 운영 도구입니다.
 
 웹(hackon.kr)과 같은 계정, 같은 대회를 씁니다. 노트북으로 준비하고 당일엔 폰으로 굴리세요.
 문의: hi@mandeun.com
+```
+
+### 새로운 기능 (1.1.0)
+
+```
+· 같이 할 사람 추천 — 서로 «좋아요»일 때만 연락처가 열립니다
+· 아침 브리핑 «오늘 켤 것» — 내 대회·마감·새 모델·할인 한 장
+· 메일·공지를 붙여 넣으면 마감이 달력으로
+· 운영자: 방마다 초대 링크와 들어온 수, 모집 문구 복사
+· 프로필 기록을 링크드인·링커리어 꼴로 복사
+· 신청 때 적은 이메일을 다시 묻지 않습니다, 글자 잘림 고침
 ```
 
 ### 새로운 기능 (1.0.0)
@@ -100,6 +119,12 @@ Every event gets a public page. Participants apply with a name and an email. Cap
 ■ After the event
 Publish results and each team sees its own scores and feedback. Download the report, the roster and certificates.
 
+■ Find teammates
+Three suggestions matched on role, level, strengths and goals. Contact details open only when both people press «Like».
+
+■ Morning brief
+One page: your events' countdown, deadlines within 7 days, new AI models and tools, discounts. Paste an email to put its deadlines on your calendar. Wallet and brief data stay on your device.
+
 ■ Safety
 Anyone can report or block public posts (questions, submissions); organizers take them down.
 Contact details are visible only to that event's organizers. No ads, no tracking, no location.
@@ -107,6 +132,17 @@ Delete your account in the app: «대회» (Events) tab → «계정 삭제» (D
 
 The interface is in Korean. Same account and events as the web (hackon.kr).
 Contact: hi@mandeun.com
+```
+
+### What's New (1.1.0)
+
+```
+· Teammate suggestions — contacts open only on a mutual «Like»
+· Morning brief: events, deadlines, new models, discounts on one page
+· Paste an email or notice to add its deadlines to your calendar
+· Organizers: per-channel invite links with sign-up counts and copy-ready posts
+· Copy your record in LinkedIn / Linkareer format
+· No more re-asking the email you gave at sign-up; text clipping fixes
 ```
 
 ### What's New (1.0.0)
@@ -183,6 +219,7 @@ hi@mandeun.com
 | 식별자 › 기기 ID | 예(푸시 켠 사람) | 아니오 | 앱 기능 | `push_tokens.token` — 대회 «따라가기» 용 APNs 토큰. 사람과 안 묶인다 |
 | 사용 데이터 › 제품 상호작용 | 예 | 아니오 | 분석 | `visits` — 날짜·화면 경로·보낸 도메인·횟수만. IP·사람 없음 |
 | 기타 › 평가 | 예 | 예 | 앱 기능 | `scores`·`votes`·`ratings`(참가자 상호평가, 준 사람은 안 보임) |
+| 사용자 콘텐츠 › 기타(팀원 추천) | 예 | 예 | 앱 기능 | `teams.strengths`·`aim`, `match_likes`. 서로 «좋아요» 한 두 참가자에게만 서로의 이메일이 보인다 |
 | 위치·연락처·사진·건강·금융·검색 기록·브라우징 기록·진단 | 아니오 | | | |
 
 - IP 주소는 저장하지 않는다. 쓰기 상한(`tooMany`)을 위해 메모리에 10분만 두고 버린다(`clientIp`, `sweepTries`).
@@ -203,6 +240,7 @@ hi@mandeun.com
 | 개인 정보 › 이메일 주소 | 예 | 예(동의한 사람만, 협찬사) | 필수(신청할 때) | 앱 기능, 개발자 커뮤니케이션(결과 안내 메일) |
 | 개인 정보 › 사용자 ID | 예 | 아니오 | 선택(로그인할 때) | 계정 관리 |
 | 앱 활동 › 기타 사용자 생성 콘텐츠 | 예 | 아니오 | 선택 | 앱 기능 |
+| (참고) 팀원 추천 연락처 | — | 아니오 | 선택 | 사용자가 서로 «좋아요» 를 눌러 직접 주고받는 것이라 제3자 «공유» 가 아니다(Play 정의: 사용자가 시작한 전달). 처리방침 2절에 적었다 |
 | 앱 활동 › 앱 상호작용 | 예 | 아니오 | 자동 | 분석 (`visits`, 사람과 안 묶임) |
 | 기기 또는 기타 ID | 예(푸시 켠 사람) | 아니오 | 선택 | 앱 기능(알림) — 안드로이드 껍데기가 FCM 을 쓰면 여기에 해당 |
 | 위치·금융·건강·메시지·사진·동영상·오디오·파일·캘린더·연락처 | 아니오 | | | |
