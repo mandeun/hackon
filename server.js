@@ -9649,6 +9649,9 @@ async function selftest() {
       ok(chapterView(wdb, ch).chapter.body.includes('둘째 문단을 고쳤다'), '공동 집필 — 충돌난 제안은 글을 안 바꾼다');
       bad = false; try { editMerge(wdb, a.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 한 제안을 두 번 합치지 않는다');
       editClose(wdb, b2.id, bk.ekey);
+      const c3 = editPropose(wdb, ch, { body: '지금 판 위의 제안', base: 2 });
+      editClose(wdb, c3.id, bk.ekey);
+      bad = false; try { editMerge(wdb, c3.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 돌려보낸 제안은 지금 판 위라도 합쳐지지 않는다');
       ok(chapterView(wdb, ch).edits.length === 0, '공동 집필 — 돌려보낸 제안은 목록에서 빠진다');
       chapterAdd(wdb, bk.id, bk.ekey, { title: '도구 고르기' });
       const md = bookMd(wdb, bk.id);
