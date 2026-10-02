@@ -832,6 +832,9 @@ const TEMPLATES = [
   { chip: '우리 가게',      title: '우리 가게 문제 풀기 대회',       cap: 10, hours: '6시간', kind: '당일',    topic: '가게에서 사장님이 매일 손으로 하는 일', note: '10명 · 하루. 사장님이 문제를 올리고 결과물을 받는다' },
   { chip: '반나절 3시간',   title: '점심 뒤 세 시간 만들기',          cap: 10, hours: '3시간', kind: '당일',    topic: '', note: '10명 · 13~16시. 여섯 시간이 부담이면 이걸로. 발표 없이 주소 제출로 끝' },
   { chip: '온라인 1주',     title: '일주일 만들기 온라인 대회',      cap: 30, hours: '7일', kind: '온라인 1주', topic: '', note: '모이지 않는다. 각자 만들고 마지막 날 발표' },
+  /* 동아리 데모데이 — 10/31 선릉 바이브코딩 해커톤 꼴. 루키가 각자 하던 프로젝트를 MVP 까지 만들어 오고,
+     1분 시연 영상(유튜브)과 발표 자료를 낸 뒤 그날은 이그나이트 2분 발표만 한다 */
+  { chip: '동아리 데모데이', title: '바이브코딩 데모데이',            cap: 30, hours: '2시간', kind: '데모데이', topic: '각자 하던 프로젝트를 MVP 까지', note: '30명 · 2시간. 미리 만들어 오고 1분 시연 영상과 발표 자료를 냅니다. 그날은 2분 발표(제목 5초 + 8장 × 15초)만' },
 ];
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
@@ -848,6 +851,10 @@ const isBlocked = (ev, team) => blockList().includes(ev + '|' + team);
 const repBtns = (ev, kind, ref, team) => LIVE
   ? ` <button class="lnk" data-rep="${esc(kind)}" data-ev="${esc(ev)}" data-ref="${esc(String(ref))}" data-team="${esc(team)}">신고</button>`
     + ` <button class="lnk" data-blk="${esc(team)}" data-ev="${esc(ev)}" data-kind="${esc(kind)}" data-ref="${esc(String(ref))}">차단</button>` : '';
+/* 데모데이 제출 둘. 영상은 서버가 유튜브 id 로만 남긴다 — 주소는 여기서 만든다 */
+const demoLinks = r => (r.video || r.deck) ? `<div class="shrow" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+  ${r.video ? `<a class="btn sec sm" target="_blank" rel="noopener noreferrer" href="https://youtu.be/${esc(r.video)}">▶ 1분 시연 영상</a>` : ''}
+  ${r.deck && /^https?:\/\//i.test(r.deck) ? `<a class="btn sec sm" target="_blank" rel="noopener noreferrer" href="${esc(r.deck)}">발표 자료</a>` : ''}</div>` : '';
 const blockedNote = (ev, n) => n ? `<div class="meta" style="margin-top:8px">차단한 팀의 글 ${n}개를 숨겼습니다. <button class="lnk" data-unblk="${esc(ev)}">차단 풀기</button></div>` : '';
 /* 장소 제보 칩. 그릴 때와 제보를 넣은 뒤에 같은 함수를 쓴다 — 두 곳에 적으면 한쪽만 고치게 된다.
    제보가 하나도 없으면 0 을 그리지 않는다. 없는 것과 «모르는 것» 은 다르다. */
@@ -1321,6 +1328,17 @@ function tickDue() {
   });
 }
 setInterval(tickDue, 1000);
+/* 이그나이트 장 넘김 — 제목 5초, 그다음 15초마다 한 장, 8장. 슬라이드는 발표자가 자동 넘김으로 틀고
+   큰 화면은 «지금 몇 번째 장인가» 만 보여 준다. 말하기(2분 5초)가 끝나면 «질문·바꾸기» 로 바뀐다 */
+function tickIgnite() {
+  const el = document.getElementById('tv-ign'); if (!el) return;
+  const s = Math.floor((Date.now() - +el.dataset.from) / 1000);
+  if (s < 0) { el.textContent = ''; return; }
+  if (s < 5) { el.innerHTML = `<em>제목</em> · ${5 - s}초`; return; }
+  const k = Math.floor((s - 5) / 15);
+  el.innerHTML = k < 8 ? `<em>${k + 1}</em> / 8장 · 다음 장까지 ${15 - (s - 5) % 15}초` : '말하기 끝 · 질문·바꾸기';
+}
+setInterval(tickIgnite, 1000);
 const dueBox = e => e.due ? `<div class="due" data-due="${esc(e.due)}"></div>` : '';
 
 /* 참가 신청 칸. 운영 화면과 공개 화면이 같은 것을 쓴다 — 두 벌로 두면 한쪽만 고치게 된다.
@@ -2421,7 +2439,7 @@ const SCREEN = {
       <div class="meta" id="f-tplnote" style="margin:-2px 0 8px"></div>
       <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 불편 하나 없애기"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
       ${rq ? `<label>어떻게 받을까요</label>
-      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button><button type="button" class="pick" data-how="프로젝트">프로젝트 · 몇 주 동안</button></div>
+      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button><button type="button" class="pick" data-how="프로젝트">프로젝트 · 몇 주 동안</button><button type="button" class="pick" data-how="데모데이">데모데이 · 미리 만들어 와서 발표</button></div>
       <div class="meta" style="margin:-2px 0 8px">«온라인으로 결과물만»은 모이지 않습니다. 일주일 동안 각자 만들어 내고, 올린 분이 받아서 «됐다»를 답합니다.</div>` : ''}
       ${(() => { const ids = Object.keys(localStorage).filter(k => k.startsWith('hackon.okey.')).map(k => k.slice(12)); if (!ids.length || !LIVE) return '';
         return `<details class="more" id="f-fromwrap" style="margin-top:8px"><summary>지난 대회에서 가져오기 <span class="when">기준표·주제·진행 순서·자리</span></summary>
@@ -2748,6 +2766,7 @@ const SCREEN = {
               <div style="height:9px"></div>
               <a class="btn sec sm" target="_blank" rel="noopener noreferrer"
                 href="${/^https?:\/\//i.test(r.url) ? esc(r.url) : '#'}">만든 것 열기</a>
+              ${demoLinks(r)}
             </div>`).join('')}${blockedNote(e.id, madeAll.length - made.length)}` : ''}`
         : `<h3>나온 팀</h3>
           <table><tr><th>자리</th><th>팀</th><th class="n">제출</th></tr>
@@ -3572,6 +3591,7 @@ const SCREEN = {
             ${String(r.id) === String(myId) ? '' : `<div class="meta">${repBtns(e.id, 'submission', r.id, r.name).trim()}</div>`}
             ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
             ${r.url ? `<div class="share" style="margin-top:10px">${esc(r.url)}</div>` : ''}
+            ${demoLinks(r)}
             ${(r.words_public || []).length ? `<div class="meta" style="margin-top:8px"><b>사람들이 남긴 말</b><br>${r.words_public.map(w => '“' + esc(w) + '”').join('<br>')}</div>` : ''}</div>`).join('')}
           ${blockedNote(e.id, madeAll.length - made.length)}`;
       })()}
@@ -4137,8 +4157,11 @@ const SCREEN = {
               const idx = Math.max(0, Math.min(d.order.length - 1, Math.floor((now - start) / 60000 / per)));
               const end = new Date(start.getTime() + (idx + 1) * per * 60000);
               const due = `${ymd()}T${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+              /* 이그나이트면 팀 시작 시각을 남겨 두고 «몇 번째 장 · 다음 장까지» 를 1초마다 고친다(tickIgnite) */
+              const ign = /이그나이트/.test(cur1.what) ? start.getTime() + idx * per * 60000 : 0;
               return `<div class="tvlabel">지금 발표 · ${per}분</div>
                <div class="tvclock" id="tv-pitch" data-due="${due}"></div>
+               ${ign ? `<div class="tvsub" id="tv-ign" data-from="${ign}" style="margin-top:.8vh"></div>` : ''}
                <div class="tvsub" style="margin-top:1.2vh"><em>${d.order[idx].no}</em> ${esc(d.order[idx].name)}${d.order[idx + 1] ? ` <span style="color:#AEB6C8">· 다음 ${d.order[idx + 1].no} ${esc(d.order[idx + 1].name)}</span>` : ' <span style="color:#AEB6C8">· 마지막</span>'}</div>
                <div class="tvsub" style="font-size:2.1vh;color:#AEB6C8;margin-top:.6vh">${d.order.map((o, i) => `${i === idx ? '<b style="color:#fff">' : ''}${o.no} ${esc(o.name)}${i === idx ? '</b>' : ''}`).join(' → ')}</div>`;
             }
@@ -4732,6 +4755,11 @@ const SCREEN = {
         <div class="shrow"><input id="s-url" value="${esc(t.url || '')}" placeholder="https://… (누르면 바로 열리는 주소)" style="flex:1"><button type="button" class="btn sec sm" id="s-try" title="내기 전에 새 창에서 열어 봅니다">새 창에서 확인</button></div>
         <div class="meta" id="s-url-hint"></div>
         <div class="meta">제출해야 후원 크레딧과 프로필 «완주»가 남습니다. 미완이어도 주소는 내세요.</div>
+        <label>1분 시연 영상 <span class="pill">유튜브 주소</span></label>
+        <input id="s-video" value="${t.video ? 'https://youtu.be/' + esc(t.video) : ''}" placeholder="https://youtu.be/… (일부 공개로 올려도 됩니다)">
+        <label>발표 자료 <span class="pill">구글 슬라이드·PDF 주소</span></label>
+        <input id="s-deck" value="${esc(t.deck || '')}" placeholder="https://… 제목 1장 + 8장, 장당 15초 자동 넘김">
+        <div class="meta">데모데이 대회면 둘 다 냅니다. 마감 전에는 운영자와 우리 팀만 봅니다.</div>
         ${t.seats ? `<label>팀 자리 <span class="pill">밖에서 구한 분은 게스트로</span></label>
           <div class="seats">
             ${t.seats.mem.map((m, i) => `<span class="seat${m.g ? ' g' : ''}">${esc(m.n)}
@@ -5304,6 +5332,8 @@ function wire() {
       try {
         const dr = kind === '모임·수업'
           ? await api(`/draft?start=19:00&end=21:00&teams=0&kind=${encodeURIComponent(kind)}`)
+          : kind === '데모데이'
+          ? await api(`/draft?start=13:00&end=15:00&teams=20&kind=${encodeURIComponent(kind)}`)
           : await api(`/draft?start=10:00&end=19:30&teams=6&kind=${encodeURIComponent(kind)}`);
         await api(`/events/${cur}`, { method: 'PATCH', body: { plan: dr.rows } });
       } catch {}
@@ -5337,6 +5367,7 @@ function wire() {
                   '무박2일': '야식과 잘 자리를 미리 정해 두세요.',
                   '온라인 1주': '각자 만들고 마지막 날에만 모입니다.',
                   '모임·수업': '당근 모임·교육 봉사처럼 짧게 모입니다. 참석 확인·체크인·서로 평가만 씁니다.',
+                  '데모데이': '만들기는 각자 미리 합니다. 그날은 2분 발표(제목 5초 + 8장 × 15초 자동 넘김)·심사·시상만 — 2시간이면 20팀이 듭니다.',
                   '프로젝트': '4주가 기본입니다. 매주 체크인하고 주차마다 결과물을 냅니다 — 마지막 주 제출이 완주입니다.' };
       fkindnote.textContent = K[fkind.value] || '';
     };
@@ -5393,6 +5424,8 @@ function wire() {
                 aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(),
                 show: $('#s-show') ? $('#s-show').checked : undefined,
                 sale: $('#s-sale') ? $('#s-sale').value.trim() : undefined,
+                video: $('#s-video') ? $('#s-video').value.trim() : undefined,
+                deck: $('#s-deck') ? $('#s-deck').value.trim() : undefined,
                 request: $('#s-request') ? $('#s-request').value : undefined } });
       flash('제출했습니다');
     } catch (e) { flash(e.message, true); }

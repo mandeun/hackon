@@ -2604,9 +2604,10 @@ with sync_playwright() as p:
         A(pub.query_selector(bad_id) is None, f"공개 화면에 {bad_id} 가 있다")
     # 공개 화면 칸은 참가 신청(t-)과 «줄 수 있는 것»(g- 칸, data-give-* 단추) 둘뿐. 운영 칸은 위 bad_id 로 이미 막았다.
     ids = pub.evaluate("""[...document.querySelectorAll('#view input, #view textarea, #view select, #view button')]
-        .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-')) || '?')""")
-    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i == "nt-bell" or i.startswith("fb-") for i in ids),
-      f"공개 화면에 신청·줄 수 있는 것·소식 알림·피드백 말고 다른 칸이 있다: {ids}")
+        .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-') || ['data-rep', 'data-blk', 'data-unblk'].includes(n)) || '?')""")
+    # 신고·차단(data-rep·data-blk·data-unblk)은 앱스토어 지침 1.2 로 공개 화면에 일부러 둔다 — 고치는 칸이 아니다
+    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i in ("data-rep", "data-blk", "data-unblk") or i == "nt-bell" or i.startswith("fb-") for i in ids),
+      f"공개 화면에 신청·줄 수 있는 것·소식 알림·피드백·신고·차단 말고 다른 칸이 있다: {ids}")
     # 「언제」 옆에 「어디」. 대역 B·C 가 페이지 전체에서 갈 곳을 못 찾았다.
     A(pub.is_visible("#place-line"), "공개 페이지에 «어디» 줄이 없다")
     A("다산관 101호" in pub.inner_text("#place-line"),

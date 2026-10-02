@@ -142,6 +142,9 @@ const KINDS = {
   /* 몇 주짜리 — 스터디·사이드 프로젝트(가짜연구소 시즌·YAPP 기수처럼). 매주 체크인과 주차 제출,
      마지막 주 제출이 곧 완주다. 선발형이면 리더가 지원자 카드를 보고 수락한다 */
   '프로젝트': { hours: 0, what: '몇 주 동안 매주 모입니다. 마지막 주 제출이 완주입니다' },
+  /* 데모데이 — 동아리 안 대회처럼 각자 미리 만들어 오고, 그날은 발표·심사·시상만 한다.
+     발표는 이그나이트 변형: 제목 5초 + 8장 × 15초 자동 넘김 = 2분 5초. 팀당 3분(바꾸는 시간 포함)으로 잡는다 */
+  '데모데이': { hours: 2, what: '각자 미리 만들어 옵니다. 그날은 2분 발표(이그나이트)·심사·시상만 합니다' },
 };
 /* events.kind 에 남기는 값. 빈 값이 해커톤이다(예전 대회는 전부 빈 값) */
 const EVENT_KINDS = ['', '모임', '프로젝트'];
@@ -175,6 +178,7 @@ function draftPlan(start, end, teams, kind) {
   if (kind === '무박2일') return draftOvernight(start, teams);
   if (kind === '온라인 1주') return draftOnline(teams);
   if (kindOf(kind) === '모임') return draftMeetup(start, end);
+  if (kind === '데모데이') return draftDemoDay(start, end, teams);
   if (kindOf(kind) === '프로젝트') return { rows: [
     { at: '19:00', what: '첫 모임 · 팀 소개와 주차 계획' }, { at: '19:30', what: '매주 정기 모임 · 체크인' },
     { at: '20:30', what: '주차 제출' }, { at: '21:00', what: '마지막 주 · 발표와 서로 평가' }], teams: 0, tight: false, kind: '프로젝트' };
@@ -208,6 +212,28 @@ function draftPlan(start, end, teams, kind) {
   rows.push({ at: hhmm(buildEnd + R.prep + n * R.perTeam), what: '심사' });
   rows.push({ at: hhmm(z - R.award), what: '시상 · 마무리' });
   return { rows, teams: n, tight: buildEnd - buildStart < 120 };
+}
+
+/** 데모데이. 만들기 시간이 없다 — 제출(1분 시연 영상·발표 자료)은 전날까지 받고,
+    당일은 앞에서부터 발표를 깔고 끝에서 시상을 거꾸로 잡는다. 팀이 많아 넘치면 tight 로 알린다. */
+const IGNITE = { title: 5, slides: 8, per: 15, slot: 3 };   // 초·장·초·분(바꾸는 시간 포함)
+function draftDemoDay(start, end, teams) {
+  let a = mins(start), z = mins(end);
+  if (a === null) a = 13 * 60;
+  if (z === null || z <= a) z = a + 120;
+  const n = Math.max(1, +teams || 20);
+  const talk = IGNITE.title + IGNITE.slides * IGNITE.per;   // 125초
+  const showAt = a + 25, judgeAt = showAt + n * IGNITE.slot, awardAt = Math.max(judgeAt + 15, z - 15);
+  return {
+    rows: [
+      { at: hhmm(a), what: '등록 · 발표 자료 화면 연결 확인' },
+      { at: hhmm(a + 15), what: `시작 인사 · 발표 규칙 (제목 ${IGNITE.title}초 + ${IGNITE.slides}장 × ${IGNITE.per}초 자동 넘김)` },
+      { at: hhmm(showAt), what: `이그나이트 발표 (${n}팀 · 팀당 ${IGNITE.slot}분 · 말하기 ${Math.floor(talk / 60)}분 ${talk % 60}초)` },
+      { at: hhmm(judgeAt), what: '관객 투표 · 심사' },
+      { at: hhmm(awardAt), what: '시상 · 단체 사진' },
+    ],
+    teams: n, tight: awardAt + 10 > z, kind: '데모데이',
+  };
 }
 
 /** 무박 2일. 국민대 오픈소스 매뉴얼과 ASCII HACKATHON 진행표를 섞었다. */
@@ -255,26 +281,31 @@ function planWarn(plan, teams) {
   const gapAfter = i => (i + 1 < rows.length ? rows[i + 1].m - rows[i].m : null);
   const find = re => rows.findIndex(r => re.test(r.what));
 
+  /* 데모데이(미리 만들어 오는 대회)는 그날 팀을 짜지 않고, 발표 길이는 «팀당 N분» 글에서 읽는다 */
+  const prebuilt = rows.some(r => /이그나이트|데모데이/.test(r.what));
   const iTeam = find(/팀 짜기|팀빌딩|팀 빌딩/);
-  if (iTeam < 0) out.push('팀 짜기 시간이 없습니다');
+  if (iTeam < 0) { if (!prebuilt) out.push('팀 짜기 시간이 없습니다'); }
   else if (gapAfter(iTeam) !== null && gapAfter(iTeam) < R.team)
     out.push(`팀 짜기가 ${gapAfter(iTeam)}분입니다. ${R.team}분은 주세요`);
 
   const iDue = find(/제출 마감|코드 프리즈/);
-  const iShow = find(/^발표|최종 발표|데모/);   // '아이디어 발표' 에 걸리면 안 된다
+  const iShow = find(/^발표|최종 발표|데모|이그나이트/);   // '아이디어 발표' 에 걸리면 안 된다
   if (iDue >= 0 && iShow > iDue) {
     const buf = rows[iShow].m - rows[iDue].m;
     if (buf < R.prep) out.push(`마감과 발표 사이가 ${buf}분입니다. ${R.prep}분은 두세요`);
   }
-  if (iShow >= 0 && gapAfter(iShow) !== null && gapAfter(iShow) < n * R.perTeam)
-    out.push(`발표가 ${gapAfter(iShow)}분입니다. ${n}팀이면 ${n * R.perTeam}분 걸립니다`);
+  const per = iShow >= 0 ? +((rows[iShow].what.match(/팀당\s*(\d+)\s*분/) || [])[1] || R.perTeam) : R.perTeam;
+  if (iShow >= 0 && gapAfter(iShow) !== null && gapAfter(iShow) < n * per)
+    out.push(`발표가 ${gapAfter(iShow)}분입니다. ${n}팀이면 ${n * per}분 걸립니다`);
 
   if (rows.length > 1 && rows[1].m - rows[0].m > R.open)
     out.push(`여는 순서가 ${rows[1].m - rows[0].m}분입니다. ${R.open}분을 넘기지 마세요`);
 
   const iJudge = find(/심사/);
-  if (iJudge >= 0 && gapAfter(iJudge) !== null && gapAfter(iJudge) < R.judge)
-    out.push(`심사가 ${gapAfter(iJudge)}분입니다. ${R.judge}분은 주세요`);
+  /* 데모데이는 심사위원이 발표를 들으며 점수를 넣는다 — 끝나고는 합의·관객 투표만 남아 15분이면 된다 */
+  const judgeMin = prebuilt ? 15 : R.judge;
+  if (iJudge >= 0 && gapAfter(iJudge) !== null && gapAfter(iJudge) < judgeMin)
+    out.push(`심사가 ${gapAfter(iJudge)}분입니다. ${judgeMin}분은 주세요`);
   return out;
 }
 
@@ -2828,6 +2859,9 @@ function open(file) {
   try { db.exec("ALTER TABLE submissions ADD COLUMN show_at TEXT NOT NULL DEFAULT ''"); } catch {}
   for (const c of ['aiuse', 'aidrop'])
     try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
+  /* 데모데이 제출 둘 — 1분 시연 영상(유튜브 id 11자만, 주소·iframe 은 안 받는다)과 발표 자료 주소 */
+  for (const c of ['video', 'deck'])
+    try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
   for (const c of ['role', 'found', 'note', 'agreed', 'came', 'want'])
@@ -3969,6 +4003,18 @@ function submit(db, team, b) {
        주소를 바꾸려면 새 주소를 적는다 — 지우는 길은 두지 않는다. */
     .run(team, webUrl(b.url) || ((prev && prev.url) || ''), b.note || '',
          (b.aiuse || '').slice(0, 500), (b.aidrop || '').slice(0, 500), on, at, sale);
+  /* 시연 영상·발표 자료. 안 보내면 그대로 두고(옛 화면이 지우지 않게), 빈 값을 보내면 지운다.
+     유튜브가 아닌 것은 막는다 — 받아 두면 공개 페이지에 남의 주소가 걸린다 */
+  if (b.video !== undefined) {
+    const v = String(b.video || '').trim(), id = v ? ytId(v) : '';
+    if (v && !id) throw new HttpError(400, '시연 영상은 유튜브 주소로 넣어 주세요');
+    db.prepare('UPDATE submissions SET video=? WHERE team=?').run(id, team);
+  }
+  if (b.deck !== undefined) {
+    const d = String(b.deck || '').trim(), u = d ? webUrl(d) : '';
+    if (d && !u) throw new HttpError(400, '발표 자료는 https:// 로 시작하는 주소로 넣어 주세요');
+    db.prepare('UPDATE submissions SET deck=? WHERE team=?').run(u, team);
+  }
   /* 어느 주제·요청으로 만들었나. 이 대회에 붙은 요청만 고를 수 있다. 안 보내면 그대로 */
   if (b.request !== undefined) {
     const rq = String(b.request || '');
@@ -4232,7 +4278,7 @@ function board(db, event, admin = false, mine = 0) {
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
            t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring, t.deposit, t.pick,
-           s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at
+           s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at, s.video, s.deck
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
   /* 심사위원별 등수 보정(MLH 의 stack ranking 을 눈금으로). 관대한 심사위원의 90점과 짠 심사위원의 70점이
@@ -4309,7 +4355,7 @@ function board(db, event, admin = false, mine = 0) {
        운영자만 언제든 본다. 심사위원도 마감 뒤에 본다(judgeView 의 hideUrl 과 같은 선). */
     /* 다만 mine(팀 열쇠를 낸 그 팀)에게는 자기 것을 돌려준다 — 안 주면 제출 칸이
        비어 보이고, 설명만 고쳐 내는 순간 주소가 지워졌다(대역시험 1). */
-    if (!admin && !closed(e) && !(mine && String(t.id) === String(mine))) { delete row.url; row.hidden = !!t.url; }
+    if (!admin && !closed(e) && !(mine && String(t.id) === String(mine))) { delete row.url; delete row.video; delete row.deck; row.hidden = !!t.url; }
     /* 개인정보는 운영자에게만. 화면에서 감추면 브라우저 콘솔에서 다 보인다. */
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
                   delete row.photo; delete row.came; delete row.apply;
@@ -8817,7 +8863,18 @@ async function selftest() {
   db.prepare('DELETE FROM events WHERE id=?').run(rbEv.id);
 
   // 대회 유형
-  ok(Object.keys(KINDS).length === 5, '대회 유형이 다섯이다 (당일·무박2일·온라인 1주·모임·수업·프로젝트)');
+  ok(Object.keys(KINDS).length === 6, '대회 유형이 여섯이다 (당일·무박2일·온라인 1주·모임·수업·프로젝트·데모데이)');
+  /* 데모데이 — 10/31 선릉 바이브코딩 해커톤 꼴: 13시 · 2시간 · 루키 위주 20팀 · 이그나이트 2분 */
+  {
+    const dd = draftPlan('13:00', '15:00', 20, '데모데이');
+    ok(dd.kind === '데모데이' && !dd.rows.some(r => /만들기|팀 짜기/.test(r.what)), '데모데이: 만들기·팀 짜기 순서가 없다');
+    ok(dd.rows.some(r => /이그나이트 발표 \(20팀 · 팀당 3분/.test(r.what)), '데모데이: 이그나이트 발표가 팀당 3분으로 잡힌다');
+    ok(!dd.tight && dd.rows[dd.rows.length - 1].at === '14:45', '데모데이: 20팀이면 2시간 안에 14:45 시상까지 든다');
+    ok(draftPlan('13:00', '15:00', 40, '데모데이').tight, '데모데이: 40팀이면 2시간이 모자라다고 알린다');
+    ok(planWarn(dd.rows, 20).length === 0, '데모데이 진행표에 «팀 짜기 없음»·«발표 7분» 경고가 안 뜬다: ' + planWarn(dd.rows, 20).join(' / '));
+    ok(planWarn(draftPlan('10:00', '19:30', 6).rows.filter(r => !/팀 짜기/.test(r.what)), 6).some(w => /팀 짜기/.test(w)),
+       '당일 대회에서 팀 짜기를 빼면 여전히 경고한다');
+  }
   const on = draftPlan('10:00', '19:30', 6, '무박2일');
   ok(on.kind === '무박2일' && on.rows.some(r => r.what.includes('야식')),
      '무박 2일 초안에는 야식이 있다');
@@ -9033,6 +9090,16 @@ async function selftest() {
   submit(db, ta, { url: 'https://example.com/b', aiuse: '화면 만들 때', aidrop: '추천 로직은 버렸다' });
   const sb = board(db, evAI, true).rows.find(r => r.id === ta);
   ok(sb.aiuse === '화면 만들 때' && sb.aidrop === '추천 로직은 버렸다', 'AI 사용 기록이 남는다');
+  /* 데모데이 제출 — 1분 시연 영상(유튜브)과 발표 자료. 마감 전엔 남에게 안 보인다 */
+  submit(db, ta, { url: 'https://example.com/b', video: 'https://youtu.be/dQw4w9WgXcQ', deck: 'https://docs.example/slides' });
+  const sv = board(db, evAI, true).rows.find(r => r.id === ta);
+  ok(sv.video === 'dQw4w9WgXcQ' && sv.deck === 'https://docs.example/slides', '데모데이: 시연 영상은 유튜브 id 로, 발표 자료는 주소로 남는다');
+  const pubV = board(db, evAI, false).rows.find(r => r.id === ta);
+  ok(!('video' in pubV) && !('deck' in pubV), '데모데이: 마감 전 공개 순위표엔 영상·발표 자료가 없다');
+  submit(db, ta, { url: 'https://example.com/b', note: '설명만 고침' });
+  ok(board(db, evAI, true).rows.find(r => r.id === ta).video === 'dQw4w9WgXcQ', '데모데이: 영상 칸을 안 보내면 먼저 낸 영상이 그대로다');
+  let badV = 0; try { submit(db, ta, { video: 'https://evil.example/v' }); } catch (e) { badV = e.code; }
+  ok(badV === 400, '데모데이: 유튜브가 아닌 영상 주소는 막는다');
   db.prepare('DELETE FROM events WHERE id=?').run(evAI);
 
   // 팀 짜기 — 혼자 온 사람과 자리 남은 팀
