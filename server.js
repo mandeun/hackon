@@ -6945,7 +6945,9 @@ async function selftest() {
   const db = open(tmp);
   let n = 0; const ok = (c, m) => { if (!c) throw new Error('실패: ' + m); n++; };
 
-  const evR = createEvent(db, { title: '첫 대회', host: '유재원', starts: '2026-10-01', prize: 1000000 });
+  /* 시작일은 오늘 기준 30일 뒤. 고정 날짜(2026-10-01)로 두었더니 그날이 지나자
+     «끝난 대회» 가 되어 sitemap·이력 검사가 빨개졌다 */
+  const evR = createEvent(db, { title: '첫 대회', host: '유재원', starts: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10), prize: 1000000 });
   const ev = evR.id, okey = evR.okey;
   ok(getEvent(db, ev).title === '첫 대회', '대회 개설');
   editEvent(db, ev, { prize: 500000, due: '2026-11-07T17:00' });
@@ -9033,7 +9035,8 @@ async function selftest() {
     .run(ev, '박실무', '어느회사', '도입 검토를 같이 봐 줍니다');
   const helper = db.prepare('SELECT id FROM supporters WHERE event=?').get(ev).id;
   const due = assign(db, ev, { team: t1, helper });
-  ok(due === '2026-10-15', '기한을 안 주면 대회 끝나고 14일 (' + due + ')');
+  const due14 = new Date(Date.parse(db.prepare('SELECT ends FROM events WHERE id=?').get(ev).ends) + 14 * 864e5).toISOString().slice(0, 10);
+  ok(due === due14, '기한을 안 주면 대회 끝나고 14일 (' + due + ' / ' + due14 + ')');
   bad = false; try { assign(db, ev, { team: t1, helper }); } catch { bad = true; }
   ok(bad, '같은 짝을 두 번 넣지 않는다');
   db.prepare("UPDATE assignments SET due='2020-01-01'").run();
