@@ -3407,6 +3407,41 @@ function open(file) {
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    /* 줄 사람 카드 — 대회에 매이지 않는다. «저는 심사를 할 수 있어요 · 마포 · 주말» 을 올려 두면
+       주최자가 자기 대회에서 «요청» 을 보내고, 카드 주인이 수락하면 그 둘에게만 연락처가 열린다.
+       contact·gkey 는 공개 응답에 절대 안 실린다. gkey 는 카드 주인의 열쇠(헤더 x-gkey 로만). */
+    CREATE TABLE IF NOT EXISTS givers(
+      id      INTEGER PRIMARY KEY,
+      kind    TEXT NOT NULL DEFAULT 'other',
+      name    TEXT NOT NULL,
+      org     TEXT NOT NULL DEFAULT '',
+      area    TEXT NOT NULL DEFAULT '',
+      days    TEXT NOT NULL DEFAULT '',
+      cap     INTEGER NOT NULL DEFAULT 0,
+      intro   TEXT NOT NULL DEFAULT '',
+      contact TEXT NOT NULL DEFAULT '',
+      gkey    TEXT NOT NULL,
+      owner   TEXT NOT NULL DEFAULT '',
+      hidden  INTEGER NOT NULL DEFAULT 0,
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    /* 주최자 → 카드 주인 요청. 한 카드에 한 대회는 한 번(UNIQUE). 주최자 연락처는 요청에 적는다 —
+       계정에 연락처가 없어서다. 수락(ok) 전엔 양쪽 다 상대 연락처를 못 본다. */
+    CREATE TABLE IF NOT EXISTS asks(
+      id           INTEGER PRIMARY KEY,
+      giver        INTEGER NOT NULL REFERENCES givers(id) ON DELETE CASCADE,
+      event        TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      need         INTEGER,
+      msg          TEXT NOT NULL DEFAULT '',
+      from_name    TEXT NOT NULL,
+      from_contact TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending',   -- pending|ok|no|cancel
+      pledge       INTEGER,
+      created      TEXT NOT NULL DEFAULT (datetime('now')),
+      decided      TEXT NOT NULL DEFAULT '',
+      UNIQUE(giver, event)
+    );
+
     /* 관객·참가자 상호평가. 심사위원을 못 구했을 때 그 자리를 대신한다.
        한 사람(voter 토큰)이 한 팀에 한 번, 1~5점. 현장 큰 화면의 QR 로 열어 폰으로 준다.
        심사 점수(scores)와 별개 테이블 — 섞이지 않는다. */
@@ -4148,6 +4183,7 @@ function mergeOwners(db, from, into) {
     db.prepare('UPDATE OR IGNORE work_joins SET owner=? WHERE owner=?').run(into, from);
     db.prepare('DELETE FROM work_joins WHERE owner=?').run(from);
     db.prepare('UPDATE gigs SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE givers SET owner=? WHERE owner=?').run(into, from);
     db.prepare('UPDATE OR IGNORE gig_offers SET owner=? WHERE owner=?').run(into, from);
     db.prepare('DELETE FROM gig_offers WHERE owner=?').run(from);
     db.prepare('UPDATE OR IGNORE ref_codes SET owner=? WHERE owner=?').run(into, from);
@@ -4198,6 +4234,8 @@ async function deleteAccount(db, owner, b, notify) {
     db.prepare('DELETE FROM work_stars WHERE owner=?').run(owner);
     db.prepare('DELETE FROM work_joins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM gigs WHERE owner=?').run(owner);
+    /* 줄 사람 카드 — 연락처가 든 카드라 같이 지운다(받은 요청도 따라간다) */
+    db.prepare('DELETE FROM givers WHERE owner=?').run(owner);
     db.prepare('DELETE FROM gig_offers WHERE owner=?').run(owner);
     db.prepare('DELETE FROM ref_codes WHERE owner=?').run(owner);
     db.prepare('DELETE FROM ref_uses WHERE owner=?').run(owner);
@@ -6282,6 +6320,144 @@ function setOffer(db, id, b) {
   return { id, status: b.status };
 }
 
+/* ── 자리 매칭 — 줄 사람 카드(givers)와 요청(asks) ─────────────────────────────
+   메일 복붙 문구 대신 앱 안에서: 카드 올리기 → 주최자 요청 → 카드 주인 수락 → 둘에게만 연락처.
+   수락하면 그 대회 자리에 확정 기여(pledge ok)로 오른다 — 공개 장부·결과 보고서가 그대로 쓴다. */
+const ASK_PENDING_MAX = 30;                       // 한 대회가 한꺼번에 걸어 둘 수 있는 요청 — 도배 막기
+function addGiver(db, b, owner = '') {
+  const kind = NEED_KINDS.includes(b.kind) ? b.kind : '';
+  if (!kind) throw new HttpError(400, '무엇을 드릴 수 있는지 골라 주세요');
+  const name = plain(b.name, 40);
+  if (!name) throw new HttpError(400, '이름을 적어 주세요');
+  const contact = plain(b.contact, 100);
+  if (!contact) throw new HttpError(400, '수락했을 때 주최자에게 갈 연락처를 적어 주세요');
+  const intro = plain(b.intro, 120), org = plain(b.org, 60), area = plain(b.area, 30), days = plain(b.days, 40);
+  /* 카드는 공개다. 공개 칸에 연락처를 적으면 «수락한 둘에게만» 약속이 깨진다 */
+  for (const v of [intro, org, area, days, name]) if (looksContact(v)) throw new HttpError(400, '연락처는 «연락처» 칸에만 적어 주세요 — 나머지는 공개됩니다');
+  const gkey = crypto.randomBytes(8).toString('hex');
+  const r = db.prepare('INSERT INTO givers(kind,name,org,area,days,cap,intro,contact,gkey,owner) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(kind, name, org, area, days, Math.max(0, Math.min(10000, parseInt(b.cap, 10) || 0)), intro, contact, gkey, String(owner || ''));
+  return { id: Number(r.lastInsertRowid), gkey };
+}
+function giverByKey(db, id, gkey) {
+  const g = db.prepare('SELECT * FROM givers WHERE id=?').get(+id);
+  if (!g) throw new HttpError(404, '없는 카드입니다');
+  if (!gkey || String(gkey) !== g.gkey) throw new HttpError(403, '카드 열쇠가 맞지 않습니다');
+  return g;
+}
+function editGiver(db, id, gkey, b) {
+  const g = giverByKey(db, id, gkey);
+  const next = { ...g };
+  for (const [k, n] of [['name', 40], ['org', 60], ['area', 30], ['days', 40], ['intro', 120], ['contact', 100]])
+    if (b[k] !== undefined) next[k] = plain(b[k], n);
+  if (b.kind !== undefined && NEED_KINDS.includes(b.kind)) next.kind = b.kind;
+  if (b.cap !== undefined) next.cap = Math.max(0, Math.min(10000, parseInt(b.cap, 10) || 0));
+  if (b.hidden !== undefined) next.hidden = b.hidden ? 1 : 0;
+  if (!next.name || !next.contact) throw new HttpError(400, '이름과 연락처는 비울 수 없습니다');
+  for (const k of ['intro', 'org', 'area', 'days', 'name']) if (looksContact(next[k])) throw new HttpError(400, '연락처는 «연락처» 칸에만 적어 주세요 — 나머지는 공개됩니다');
+  db.prepare('UPDATE givers SET kind=?,name=?,org=?,area=?,days=?,cap=?,intro=?,contact=?,hidden=? WHERE id=?')
+    .run(next.kind, next.name, next.org, next.area, next.days, next.cap, next.intro, next.contact, next.hidden, g.id);
+  return giverInbox(db, g.id, gkey);
+}
+/* 공개 카드 목록. 연락처·열쇠·주인은 안 싣는다. event 를 주면 그 대회에 맞는 순으로(fit 이유를 붙여) */
+function giversList(db, { kind = '', event = '' } = {}) {
+  const rows = db.prepare(`SELECT g.id, g.kind, g.name, g.org, g.area, g.days, g.cap, g.intro, g.created,
+      (SELECT COUNT(*) FROM asks a WHERE a.giver = g.id AND a.status = 'ok') AS done
+    FROM givers g WHERE g.hidden = 0 AND (? = '' OR g.kind = ?) ORDER BY g.id DESC LIMIT 300`).all(kind, kind);
+  const e = event ? db.prepare('SELECT id, place, starts, cap FROM events WHERE id=?').get(event) : null;
+  const want = e ? new Set(db.prepare('SELECT kind FROM needs WHERE event=?').all(e.id).map(r => r.kind)) : new Set();
+  const asked = e ? new Map(db.prepare('SELECT giver, status FROM asks WHERE event=?').all(e.id).map(r => [r.giver, r.status])) : new Map();
+  for (const g of rows) {
+    g.fit = [];
+    if (e) {
+      if (want.has(g.kind)) g.fit.push('빈 자리와 같은 종류');
+      const area = String(g.area || '').replace(/\s/g, '');
+      if (area && String(e.place || '').replace(/\s/g, '').includes(area.replace(/(시|구|군|동)$/, ''))) g.fit.push('같은 동네');
+      if (g.kind === 'venue' && g.cap && e.cap && g.cap >= e.cap) g.fit.push(`${g.cap}명까지 — 정원이 들어간다`);
+      g.asked = asked.get(g.id) || '';
+    }
+    if (g.done) g.fit.push(`수락 ${g.done}번`);
+    g.score = (want.has(g.kind) ? 10 : 0) + (g.fit.includes('같은 동네') ? 6 : 0) + Math.min(g.done, 5);
+  }
+  return rows.sort((a, b) => b.score - a.score || b.done - a.done || b.id - a.id);
+}
+/* 카드 주인 화면 — 내 카드(연락처 포함)와 받은 요청. 주최자 연락처는 수락한 요청에만 */
+function giverInbox(db, id, gkey) {
+  const g = giverByKey(db, id, gkey);
+  const asks = db.prepare(`SELECT a.id, a.event, a.need, a.msg, a.from_name, a.from_contact, a.status, a.created, a.decided,
+      e.title, e.starts, e.ends, e.host, e.place, n.label AS need_label
+    FROM asks a JOIN events e ON e.id = a.event LEFT JOIN needs n ON n.id = a.need
+    WHERE a.giver = ? AND a.status <> 'cancel' ORDER BY (a.status = 'pending') DESC, a.id DESC`).all(g.id)
+    .map(a => { if (a.status !== 'ok') delete a.from_contact; return a; });
+  const { gkey: _k, owner: _o, ...card } = g;
+  return { card, asks };
+}
+function askGiver(db, event, b) {
+  const e = db.prepare('SELECT id, title, ends FROM events WHERE id=?').get(event);
+  if (!e) throw new HttpError(404, '없는 대회입니다');
+  if (e.ends && e.ends < today()) throw new HttpError(409, '끝난 대회에서는 요청을 보낼 수 없습니다');
+  const g = db.prepare('SELECT * FROM givers WHERE id=? AND hidden=0').get(+b.giver);
+  if (!g) throw new HttpError(404, '없거나 내려간 카드입니다');
+  let need = null;
+  if (b.need) {
+    const n = db.prepare('SELECT id FROM needs WHERE id=? AND event=?').get(+b.need, event);
+    if (!n) throw new HttpError(400, '이 대회의 자리가 아닙니다');
+    need = n.id;
+  }
+  const from_name = plain(b.from_name, 40), from_contact = plain(b.from_contact, 100);
+  if (!from_name || !from_contact) throw new HttpError(400, '수락하면 상대에게 갈 내 이름과 연락처를 적어 주세요');
+  const pending = db.prepare("SELECT COUNT(*) c FROM asks WHERE event=? AND status='pending'").get(event).c;
+  if (pending >= ASK_PENDING_MAX) throw new HttpError(429, `답을 기다리는 요청이 ${ASK_PENDING_MAX}개입니다. 답이 온 뒤에 더 보내 주세요`);
+  try {
+    const r = db.prepare('INSERT INTO asks(giver,event,need,msg,from_name,from_contact) VALUES(?,?,?,?,?,?)')
+      .run(g.id, event, need, plain(b.msg, 300), from_name, from_contact);
+    const id = Number(r.lastInsertRowid);
+    /* 카드 주인 연락처가 메일이면 알린다. 열쇠는 주소의 # 뒤에만 — 서버 기록에 안 남는다 */
+    void sendMail(db, { to: g.contact, kind: 'ask', event, subject: `[HACK:ON] «${e.title}» 에서 ${OFFER_KIND_LABEL[g.kind] || '도움'} 요청이 왔습니다`,
+      text: `${from_name} 님이 «${e.title}» 에 ${OFFER_KIND_LABEL[g.kind] || '도움'}을 부탁했습니다.\n${plain(b.msg, 300) ? '\n«' + plain(b.msg, 300) + '»\n' : ''}\n수락하면 서로의 연락처가 열립니다. 수락·거절은 여기서:\n${mailSite()}/card#${g.id}.${g.gkey}\n` }).catch(() => {});
+    return { id, status: 'pending' };
+  } catch (err) {
+    if (/UNIQUE/.test(String(err && err.message))) throw new HttpError(409, '이 카드에는 이미 요청을 보냈습니다');
+    throw err;
+  }
+}
+function answerAsk(db, askId, gkey, yes) {
+  const a = db.prepare('SELECT * FROM asks WHERE id=?').get(+askId);
+  if (!a) throw new HttpError(404, '없는 요청입니다');
+  const g = giverByKey(db, a.giver, gkey);
+  if (a.status !== 'pending') throw new HttpError(409, '이미 답한 요청입니다');
+  if (!yes) {
+    db.prepare("UPDATE asks SET status='no', decided=datetime('now') WHERE id=?").run(a.id);
+    return { id: a.id, status: 'no' };
+  }
+  /* 둘 다 동의했다(주최자가 요청, 카드 주인이 수락) — 확정 기여로 바로 올린다 */
+  let need = a.need;
+  if (!need) need = Number(db.prepare('INSERT INTO needs(event,kind,label,qty,note) VALUES(?,?,?,1,?)')
+    .run(a.event, g.kind, OFFER_KIND_LABEL[g.kind] || '기타', '매칭으로 들어온 자리').lastInsertRowid);
+  const pr = db.prepare("INSERT INTO pledges(need,event,name,org,contact,note,status,pkey) VALUES(?,?,?,?,?,?,'ok',?)")
+    .run(need, a.event, g.name, g.org, g.contact, g.intro, crypto.randomBytes(5).toString('hex'));
+  db.prepare("UPDATE asks SET status='ok', decided=datetime('now'), pledge=?, need=? WHERE id=?").run(Number(pr.lastInsertRowid), need, a.id);
+  const e = db.prepare('SELECT title FROM events WHERE id=?').get(a.event);
+  void sendMail(db, { to: a.from_contact, kind: 'ask-ok', event: a.event, subject: `[HACK:ON] ${g.name} 님이 «${e.title}» 요청을 수락했습니다`,
+    text: `${g.name}${g.org ? ' (' + g.org + ')' : ''} 님이 ${OFFER_KIND_LABEL[g.kind] || '도움'} 요청을 수락했습니다.\n연락처: ${g.contact}\n\n운영 화면의 자리에 확정으로 올랐습니다.\n` }).catch(() => {});
+  return { id: a.id, status: 'ok', from_contact: a.from_contact };
+}
+/* 운영자 화면 — 보낸 요청과 상태. 카드 주인 연락처는 수락한 것에만 */
+function asksOf(db, event) {
+  return db.prepare(`SELECT a.id, a.giver, a.need, a.msg, a.status, a.created, a.decided,
+      g.kind, g.name, g.org, g.area, g.contact, n.label AS need_label
+    FROM asks a JOIN givers g ON g.id = a.giver LEFT JOIN needs n ON n.id = a.need
+    WHERE a.event = ? AND a.status <> 'cancel' ORDER BY a.id DESC`).all(event)
+    .map(a => { if (a.status !== 'ok') delete a.contact; return a; });
+}
+function cancelAsk(db, askId) {
+  const a = db.prepare('SELECT * FROM asks WHERE id=?').get(+askId);
+  if (!a) throw new HttpError(404, '없는 요청입니다');
+  if (a.status !== 'pending') throw new HttpError(409, '답이 온 요청은 거둘 수 없습니다');
+  db.prepare("UPDATE asks SET status='cancel', decided=datetime('now') WHERE id=?").run(a.id);
+  return { id: a.id, status: 'cancel' };
+}
+
 /* ── 준 사람의 화면(/s/<ref>?k=). ref 는 p<pledge id> 또는 o<offer id>.
    보는 것: 내 후원이 확인됐나(대기·확인·거절 — 모름은 «아직 확인 전»), 대회가 어디까지 왔나(신청·제출),
    끝난 뒤엔 결과물 상위 셋·설문 요약·보고서 주소. 연락처는 어디에도 없다(공개 장부와 같은 선). */
@@ -8102,6 +8278,33 @@ function routes(db) {
           needAdmin(db, r.event, key, owner, siteAdmin);
           return json(res, 200, setPledge(db, +m[1], await body(req)));
         }
+        /* 자리 매칭 — 카드(공개 목록·올리기·내 카드)와 요청(보내기·답하기·거두기) */
+        if (p === '/api/givers' && req.method === 'GET')
+          return json(res, 200, giversList(db, { kind: NEED_KINDS.includes(q.kind) ? q.kind : '', event: /^[a-z0-9]+$/.test(q.event || '') ? q.event : '' }));
+        if (p === '/api/givers' && req.method === 'POST')
+          return json(res, 201, addGiver(db, await body(req), cookieOwner || ''));
+        if ((m = p.match(/^\/api\/givers\/(\d+)$/)) && req.method === 'GET')
+          return json(res, 200, giverInbox(db, m[1], String(req.headers['x-gkey'] || '')));
+        if ((m = p.match(/^\/api\/givers\/(\d+)$/)) && req.method === 'POST')
+          return json(res, 200, editGiver(db, m[1], String(req.headers['x-gkey'] || ''), await body(req)));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/asks$/)) && req.method === 'GET') {
+          needAdmin(db, m[1], key, owner, siteAdmin);
+          return json(res, 200, asksOf(db, m[1]));
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/asks$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner, siteAdmin);
+          return json(res, 201, askGiver(db, m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/asks\/(\d+)\/answer$/)) && req.method === 'POST') {
+          const b = await body(req);
+          return json(res, 200, answerAsk(db, m[1], String(req.headers['x-gkey'] || ''), !!b.yes));
+        }
+        if ((m = p.match(/^\/api\/asks\/(\d+)\/cancel$/)) && req.method === 'POST') {
+          const a = db.prepare('SELECT event FROM asks WHERE id=?').get(+m[1]);
+          if (!a) throw new HttpError(404, '없는 요청입니다');
+          needAdmin(db, a.event, key, owner, siteAdmin);
+          return json(res, 200, cancelAsk(db, m[1]));
+        }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/offer$/)) && req.method === 'POST')
           return json(res, 201, addOffer(db, m[1], await body(req)));   // 공개 — 아무나 제안
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/offers$/)) && req.method === 'GET') {
@@ -8644,8 +8847,8 @@ async function selftest() {
     const owned = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
       .map((t) => t.name)
       .filter((n) => db.prepare('SELECT COUNT(*) c FROM pragma_table_info(?) WHERE name=\'owner\'').get(n).c);
-    ok(owned.join(',') === 'event_trash,events,gig_offers,gigs,logins,news,pack_curators,ref_codes,ref_uses,setups,site_admins,work_joins,work_stars,works',
-       'owner 를 가진 표는 열넷 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
+    ok(owned.join(',') === 'event_trash,events,gig_offers,gigs,givers,logins,news,pack_curators,ref_codes,ref_uses,setups,site_admins,work_joins,work_stars,works',
+       'owner 를 가진 표는 열다섯 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
     /* 소식(제보)도 따라간다 */
     const o1 = crypto.randomBytes(6).toString('hex'), o2 = crypto.randomBytes(6).toString('hex');
     db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o1, '갑');
@@ -9074,6 +9277,59 @@ async function selftest() {
       ok(bpub.every(r => r.stuck === undefined), '막힌 곳 — 공개 순위표 줄에는 안 붙는다(이름과 묶이지 않게)');
       ok(bmine.find(r => r.id === k1).stuck.includes('3시간') && bmine.filter(r => r.stuck !== undefined).length === 1, '막힌 곳 — 본인 줄에만 보인다');
       ok(badm.find(r => r.id === k1).stuck.includes('3시간'), '막힌 곳 — 운영자는 본다');
+    }
+    /* 자리 매칭 — 카드 올리기 → 주최자 요청 → 카드 주인 수락 → 둘에게만 연락처, 확정 기여로 */
+    {
+      const em = createEvent(db, { title: '매칭 검사', starts: '2099-05-01', ends: '2099-05-01', place: '서울 마포구 와우산로' });
+      db.prepare('UPDATE events SET place=? WHERE id=?').run('서울 마포구 와우산로', em.id);
+      const need = Number(db.prepare("INSERT INTO needs(event,kind,label) VALUES(?,'judge','심사위원 2명')").run(em.id).lastInsertRowid);
+      let bad = false; try { addGiver(db, { kind: 'judge', name: '김심사', contact: 'j@x.test', intro: '카톡 judge99 로 연락' }); } catch (e) { bad = e.code === 400; }
+      ok(bad, '매칭 — 공개 칸(소개)에 연락처를 적으면 막는다');
+      bad = false; try { addGiver(db, { kind: 'judge', name: '김심사' }); } catch (e) { bad = e.code === 400; }
+      ok(bad, '매칭 — 연락처 없는 카드는 안 받는다(수락해도 이을 길이 없다)');
+      const gj = addGiver(db, { kind: 'judge', name: '김심사', org: '어느 회사', area: '마포', days: '주말', intro: 'AI 서비스 기획 8년', contact: 'judge@x.test' });
+      const gv = addGiver(db, { kind: 'venue', name: '동네 공간', area: '강남', cap: 40, contact: 'venue@x.test' });
+      const list = giversList(db, { event: em.id });
+      ok(!JSON.stringify(list).includes('judge@x.test') && !JSON.stringify(list).includes(gj.gkey), '매칭 — 공개 카드 목록에 연락처·열쇠가 없다');
+      ok(list[0].id === gj.id && list[0].fit.includes('빈 자리와 같은 종류') && list[0].fit.includes('같은 동네'), '매칭 — 대회의 빈 자리·동네에 맞는 카드가 위로: ' + JSON.stringify(list[0].fit));
+      bad = false; try { giverInbox(db, gj.id, 'wrong'); } catch (e) { bad = e.code === 403; }
+      ok(bad, '매칭 — 남의 카드 화면은 열쇠 없이 못 연다');
+      bad = false; try { askGiver(db, em.id, { giver: gj.id, need }); } catch (e) { bad = e.code === 400; }
+      ok(bad, '매칭 — 주최자 이름·연락처 없이는 요청을 못 보낸다');
+      const other = createEvent(db, { title: '남의 대회', starts: '2099-05-01', ends: '2099-05-01' });
+      const oneed = Number(db.prepare("INSERT INTO needs(event,kind,label) VALUES(?,'judge','x')").run(other.id).lastInsertRowid);
+      bad = false; try { askGiver(db, em.id, { giver: gj.id, need: oneed, from_name: '주최', from_contact: 'host@x.test' }); } catch (e) { bad = e.code === 400; }
+      ok(bad, '매칭 — 남의 대회 자리로는 요청을 못 건다');
+      const ak = askGiver(db, em.id, { giver: gj.id, need, from_name: '동아리 회장', from_contact: 'host@x.test', msg: '11월 심사 부탁드려요' });
+      bad = false; try { askGiver(db, em.id, { giver: gj.id, from_name: '주최', from_contact: 'h' }); } catch (e) { bad = e.code === 409; }
+      ok(bad, '매칭 — 같은 카드에 같은 대회가 두 번 요청하지 못한다');
+      let inbox = giverInbox(db, gj.id, gj.gkey);
+      ok(inbox.asks.length === 1 && inbox.asks[0].title === '매칭 검사' && inbox.asks[0].from_contact === undefined, '매칭 — 수락 전엔 카드 주인도 주최자 연락처를 못 본다');
+      ok(asksOf(db, em.id)[0].contact === undefined, '매칭 — 수락 전엔 주최자도 카드 주인 연락처를 못 본다');
+      bad = false; try { answerAsk(db, ak.id, gv.gkey, true); } catch (e) { bad = e.code === 403; }
+      ok(bad, '매칭 — 다른 카드 열쇠로는 남의 요청에 답하지 못한다');
+      const ans = answerAsk(db, ak.id, gj.gkey, true);
+      ok(ans.status === 'ok' && ans.from_contact === 'host@x.test', '매칭 — 수락하면 카드 주인에게 주최자 연락처가 열린다');
+      ok(asksOf(db, em.id)[0].contact === 'judge@x.test', '매칭 — 수락하면 주최자에게 카드 주인 연락처가 열린다');
+      const pl = db.prepare("SELECT * FROM pledges WHERE need=? AND status='ok'").get(need);
+      ok(pl && pl.name === '김심사', '매칭 — 수락하면 그 자리에 확정 기여로 오른다');
+      bad = false; try { answerAsk(db, ak.id, gj.gkey, false); } catch (e) { bad = e.code === 409; }
+      ok(bad, '매칭 — 이미 답한 요청은 다시 못 뒤집는다');
+      ok(giversList(db, {}).find(g => g.id === gj.id).done === 1, '매칭 — 수락 수가 카드에 쌓인다');
+      /* 거절·거두기 */
+      const ak2 = askGiver(db, em.id, { giver: gv.id, from_name: '동아리 회장', from_contact: 'host@x.test' });
+      ok(cancelAsk(db, ak2.id).status === 'cancel' && giverInbox(db, gv.id, gv.gkey).asks.length === 0, '매칭 — 주최자가 거둔 요청은 카드 주인 화면에서 사라진다');
+      /* 숨긴 카드는 목록·요청 둘 다에서 빠진다 */
+      editGiver(db, gv.id, gv.gkey, { hidden: true });
+      ok(!giversList(db, {}).some(g => g.id === gv.id), '매칭 — 숨긴 카드는 공개 목록에 없다');
+      /* 끝난 대회 · 도배 */
+      const ended = createEvent(db, { title: '끝난 매칭', starts: '2020-01-01', ends: '2020-01-01' });
+      bad = false; try { askGiver(db, ended.id, { giver: gj.id, from_name: 'a', from_contact: 'b' }); } catch (e) { bad = e.code === 409; }
+      ok(bad, '매칭 — 끝난 대회는 요청을 못 보낸다');
+      const flood = createEvent(db, { title: '도배', starts: '2099-05-01', ends: '2099-05-01' });
+      for (let i = 0; i < ASK_PENDING_MAX; i++) askGiver(db, flood.id, { giver: addGiver(db, { kind: 'mentor', name: '멘토' + i, contact: 'm' + i + '@x.test' }).id, from_name: 'a', from_contact: 'b' });
+      bad = false; try { askGiver(db, flood.id, { giver: gj.id, from_name: 'a', from_contact: 'b' }); } catch (e) { bad = e.code === 429; }
+      ok(bad, `매칭 — 답을 기다리는 요청이 ${ASK_PENDING_MAX}개면 더 못 보낸다`);
     }
     /* 결과물 «넘길 수 있어요» — 마감 뒤 받는 화면에만 보인다. 만든 것 링크 — 주소 꼴만 남는다 */
     {
