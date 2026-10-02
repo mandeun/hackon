@@ -3425,6 +3425,13 @@ function open(file) {
       hidden  INTEGER NOT NULL DEFAULT 0,
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    /* 내 달력 구독 — 폰 달력이 주기적으로 읽어 가는 주소(/cal/<token>.ics). 열쇠 대신 «어느 대회에 무슨 역할» 만 적어 둔다.
+       열쇠를 주소에 싣지 않으려고 만든 표다 — 토큰이 새도 드러나는 것은 공개 대회 날짜뿐이다. */
+    CREATE TABLE IF NOT EXISTS cal_subs(
+      token   TEXT PRIMARY KEY,
+      refs    TEXT NOT NULL,
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     /* 주최자 → 카드 주인 요청. 한 카드에 한 대회는 한 번(UNIQUE). 주최자 연락처는 요청에 적는다 —
        계정에 연락처가 없어서다. 수락(ok) 전엔 양쪽 다 상대 연락처를 못 본다. */
     CREATE TABLE IF NOT EXISTS asks(
@@ -6320,6 +6327,65 @@ function setOffer(db, id, b) {
   return { id, status: b.status };
 }
 
+/* ── 내 달력 — 연 대회·신청한 대회·심사 맡은 대회의 날짜·마감·재확인·할 일 ──────────────
+   열쇠는 브라우저에 있다. 화면이 든 열쇠를 보내면 하나씩 맞춰 보고 맞는 것만 «내 것» 으로 친다.
+   구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에. 폰 달력은 구독 주소로(내보내기만). */
+const CAL_ROLE = { host: '내가 연 대회', team: '신청한 대회', judge: '심사 맡은 대회' };
+function calRefs(db, b, owner) {
+  const refs = new Map();
+  const put = (event, role) => { if (!refs.has(event) || role === 'host') refs.set(event, role); };
+  if (owner) for (const e of db.prepare('SELECT id FROM events WHERE owner=?').all(String(owner))) put(e.id, 'host');
+  for (const h of Array.isArray(b.hosts) ? b.hosts.slice(0, 50) : [])
+    if (h && db.prepare("SELECT 1 FROM events WHERE id=? AND okey=? AND okey<>''").get(String(h.event || ''), String(h.okey || ''))) put(String(h.event), 'host');
+  for (const t of Array.isArray(b.teams) ? b.teams.slice(0, 50) : [])
+    if (t && db.prepare("SELECT 1 FROM teams WHERE id=? AND event=? AND tkey=? AND tkey<>''").get(+t.team || 0, String(t.event || ''), String(t.tkey || ''))) put(String(t.event), 'team');
+  for (const j of Array.isArray(b.judges) ? b.judges.slice(0, 50) : [])
+    if (j && db.prepare("SELECT 1 FROM events WHERE id=? AND jkey=? AND jkey<>''").get(String(j.event || ''), String(j.jkey || ''))) put(String(j.event), 'judge');
+  return [...refs].map(([event, role]) => ({ event, role }));
+}
+function calItems(db, refs) {
+  const items = [], events = [];
+  for (const { event, role } of refs) {
+    const e = db.prepare('SELECT id, title, host, starts, ends, due, place, plan, kind FROM events WHERE id=?').get(event);
+    if (!e || !isDay(String(e.starts).slice(0, 10))) continue;
+    events.push({ id: e.id, title: e.title, role, starts: e.starts, ends: e.ends });
+    const st = String(e.starts).slice(0, 10), end = isDay(String(e.ends).slice(0, 10)) ? String(e.ends).slice(0, 10) : st;
+    let plan = []; try { plan = JSON.parse(e.plan || '[]'); } catch {}
+    const first = (plan.find(x => x && /^\d{1,2}:\d{2}$/.test(String(x.t || x.at || ''))) || {});
+    for (let d = st, n = 0; d <= end && n < 14; d = addDays(d, 1), n++)
+      items.push({ date: d, time: n === 0 ? String(first.t || first.at || '') : '', kind: 'day', title: e.title, event: e.id, role, place: e.place || '' });
+    if (e.due && role !== 'judge') items.push({ date: String(e.due).slice(0, 10), time: String(e.due).slice(11, 16), kind: 'due', title: `제출 마감 — ${e.title}`, event: e.id, role });
+    if (role === 'team') items.push({ date: addDays(st, -3), time: '', kind: 'check', title: `참석 답하기 — ${e.title}`, event: e.id, role });
+    if (role === 'judge') items.push({ date: st, time: '', kind: 'judge', title: `심사 — ${e.title}`, event: e.id, role });
+    if (role === 'host') try {
+      const td = todoOf(db, e.id);
+      for (const t of [...td.late, ...td.now, ...td.week, ...td.later]) if (!t.done && isDay(String(t.due || ''))) items.push({ date: t.due, time: '', kind: 'todo', title: t.title, event: e.id, role });
+    } catch {}
+  }
+  items.sort((a, b) => a.date.localeCompare(b.date) || (a.time || '99').localeCompare(b.time || '99'));
+  return { events, items };
+}
+function calIcs(db, refs, base) {
+  const { items } = calItems(db, refs);
+  const d = s => String(s).replace(/-/g, '');
+  const esc = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\;');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+  const ev = items.filter(i => i.kind !== 'day' || items.findIndex(x => x.kind === 'day' && x.event === i.event) === items.indexOf(i)).map((i, n) => {
+    const e = i.kind === 'day' ? db.prepare('SELECT starts, ends FROM events WHERE id=?').get(i.event) : null;
+    const endDay = e ? addDays(isDay(String(e.ends).slice(0, 10)) ? String(e.ends).slice(0, 10) : String(e.starts).slice(0, 10), 1) : addDays(i.date, 1);
+    return ['BEGIN:VEVENT', `UID:hackon-cal-${i.event}-${i.kind}-${n}@hackon.kr`, 'DTSTAMP:' + stamp,
+      'DTSTART;VALUE=DATE:' + d(i.date), 'DTEND;VALUE=DATE:' + d(endDay),
+      'SUMMARY:' + esc((i.time ? i.time + ' ' : '') + i.title), 'URL:' + base + '/e/' + i.event, 'END:VEVENT'].join('\r\n');
+  });
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//HACK:ON//KO', 'X-WR-CALNAME:HACK:ON 내 대회', ...ev, 'END:VCALENDAR'].join('\r\n') + '\r\n';
+}
+function calSub(db, refs) {
+  if (!refs.length) throw new HttpError(400, '달력에 넣을 대회가 없습니다');
+  const token = crypto.randomBytes(12).toString('hex');
+  db.prepare('INSERT INTO cal_subs(token, refs) VALUES(?,?)').run(token, JSON.stringify(refs));
+  return { token };
+}
+
 /* ── 대회 혜택 — 지금 열린 대회에 참가하면 받는 것 ─────────────────────────────
    상금·협찬(크레딧·상품)·확정된 멘토·심사·간식 + 누구나 받는 것(완주 증서·실무 기록·팀원 추천).
    «받는 것» 은 확정된 것만 적는다 — 신청만 들어온 후원(pending)을 혜택으로 적으면 거짓 약속이 된다. */
@@ -8307,6 +8373,14 @@ function routes(db) {
           return json(res, 200, setPledge(db, +m[1], await body(req)));
         }
         if (p === '/api/perks' && req.method === 'GET') return json(res, 200, perksOf(db));
+        if (p === '/api/cal' && req.method === 'POST') return json(res, 200, calItems(db, calRefs(db, await body(req), owner)));
+        if ((m = p.match(/^\/api\/cal\/([0-9a-f]{24})\.ics$/)) && req.method === 'GET') {
+          const sub = db.prepare('SELECT refs FROM cal_subs WHERE token=?').get(m[1]);
+          if (!sub) throw new HttpError(404, '없는 달력 주소입니다');
+          res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8', 'cache-control': 'no-cache' });
+          return res.end(calIcs(db, JSON.parse(sub.refs), siteOf(req)));
+        }
+        if (p === '/api/cal/sub' && req.method === 'POST') return json(res, 201, calSub(db, calRefs(db, await body(req), owner)));
         /* 자리 매칭 — 카드(공개 목록·올리기·내 카드)와 요청(보내기·답하기·거두기) */
         if (p === '/api/givers' && req.method === 'GET')
           return json(res, 200, giversList(db, { kind: NEED_KINDS.includes(q.kind) ? q.kind : '', event: /^[a-z0-9]+$/.test(q.event || '') ? q.event : '' }));
@@ -9306,6 +9380,34 @@ async function selftest() {
       ok(bpub.every(r => r.stuck === undefined), '막힌 곳 — 공개 순위표 줄에는 안 붙는다(이름과 묶이지 않게)');
       ok(bmine.find(r => r.id === k1).stuck.includes('3시간') && bmine.filter(r => r.stuck !== undefined).length === 1, '막힌 곳 — 본인 줄에만 보인다');
       ok(badm.find(r => r.id === k1).stuck.includes('3시간'), '막힌 곳 — 운영자는 본다');
+    }
+    /* 내 달력 — 든 열쇠가 맞는 대회만, 역할별 날짜·마감·재확인·할 일 */
+    {
+      const ce = createEvent(db, { title: '달력 검사', starts: '2099-07-10', ends: '2099-07-11' });
+      db.prepare("UPDATE events SET due='2099-07-11T15:00' WHERE id=?").run(ce.id);
+      const ct = joinTeam(db, ce.id, { name: '달력팀', agree: true, email: 'cal@x.test' });
+      const tk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(ct).tkey;
+      const cj = createEvent(db, { title: '심사할 대회', starts: '2099-08-01', ends: '2099-08-01' });
+      const jk = db.prepare('SELECT jkey FROM events WHERE id=?').get(cj.id).jkey;
+      const ch = createEvent(db, { title: '내가 연 대회', starts: '2099-09-01', ends: '2099-09-01' });
+      const refs = calRefs(db, { teams: [{ event: ce.id, team: ct, tkey: tk }, { event: ce.id, team: ct, tkey: 'wrong' }],
+        judges: [{ event: cj.id, jkey: jk }, { event: ch.id, jkey: 'nope' }], hosts: [{ event: ch.id, okey: ch.okey }] }, '');
+      ok(refs.length === 3 && refs.find(r => r.event === ce.id).role === 'team' && refs.find(r => r.event === cj.id).role === 'judge' && refs.find(r => r.event === ch.id).role === 'host',
+         '내 달력 — 맞는 열쇠만 내 대회로 친다: ' + JSON.stringify(refs));
+      ok(calRefs(db, { teams: [{ event: ce.id, team: ct, tkey: 'wrong' }], judges: [{ event: cj.id, jkey: '' }] }, '').length === 0, '내 달력 — 틀린·빈 열쇠로는 남의 대회가 안 들어온다');
+      const { items } = calItems(db, refs), k = (kind, ev) => items.filter(i => i.kind === kind && i.event === ev);
+      ok(k('day', ce.id).map(i => i.date).join() === '2099-07-10,2099-07-11', '내 달력 — 이틀짜리 대회는 이틀 다 찍힌다');
+      ok(k('due', ce.id)[0].date === '2099-07-11' && k('due', ce.id)[0].time === '15:00', '내 달력 — 제출 마감이 시각과 함께');
+      ok(k('check', ce.id)[0].date === '2099-07-07', '내 달력 — 신청한 대회는 사흘 전에 «참석 답하기»');
+      ok(k('judge', cj.id).length === 1 && k('due', cj.id).length === 0, '내 달력 — 심사 맡은 대회는 심사 날만(제출 마감은 안 찍는다)');
+      ok(k('todo', ch.id).length > 0 && k('check', ch.id).length === 0, '내 달력 — 내가 연 대회에는 할 일이 붙는다');
+      ok(items.every((x, i) => i === 0 || items[i - 1].date <= x.date), '내 달력 — 날짜순');
+      const { token } = calSub(db, refs);
+      const ics = calIcs(db, JSON.parse(db.prepare('SELECT refs FROM cal_subs WHERE token=?').get(token).refs), 'https://x.test');
+      ok(ics.includes('BEGIN:VCALENDAR') && ics.includes('DTSTART;VALUE=DATE:20990710') && ics.includes('DTEND;VALUE=DATE:20990712') && ics.includes('15:00 제출 마감') && !ics.includes(tk) && !ics.includes(jk),
+         '내 달력 — 구독 주소는 날짜·마감을 싣고 열쇠는 안 싣는다');
+      ok((ics.match(/SUMMARY:(\d\d:\d\d )?달력 검사\r/g) || []).length === 1, '내 달력 — 구독에서 이틀짜리 대회는 한 줄(이틀 걸침)');
+      let bad = false; try { calSub(db, []); } catch (e) { bad = e.code === 400; } ok(bad, '내 달력 — 빈 구독은 안 만든다');
     }
     /* 대회 혜택 — 확정된 것만, 끝난 대회·비공개 대회는 빼고 */
     {
