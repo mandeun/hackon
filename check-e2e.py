@@ -541,10 +541,11 @@ with sync_playwright() as p:
     pg.click('#host-tabs [data-sec="spon"]')
     pg.wait_for_timeout(500)
     pg.click("#b-home")
-    pg.wait_for_timeout(600)
-    A(pg.evaluate("tab") == "home", f"로고를 눌렀는데 처음으로 안 간다: {pg.evaluate('tab')}")
-    A("열린 대회" in pg.inner_text("#view"), "처음 화면이 아니다")
-    ok("로고를 누르면 처음 화면으로")
+    pg.wait_for_load_state("networkidle")
+    A(urllib.parse.urlparse(pg.url).path == "/", f"로고를 눌렀는데 hackon.kr 첫 화면으로 안 간다: {pg.url}")
+    A(pg.query_selector("#count") is not None, "첫 화면(home.html)이 아니다")
+    A(pg.is_visible("#nav-mine") and pg.get_attribute("#nav-mine", "href") == "/app", "열쇠로 대회를 연 기기인데 첫 화면에 «내 대회» 로 돌아갈 길이 없다")
+    ok("로고를 누르면 /app 이 아니라 사이트 첫 화면으로")
 
     # ── 운영 매뉴얼 — 사이트 안에서 바로 읽힌다 ──────────────
     # 전에는 깃허브로 내보냈다. 읽을 것을 읽으러 밖으로 내보내면 대부분 안 돌아온다.

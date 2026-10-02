@@ -87,6 +87,12 @@ input::placeholder{color:var(--mute)}
 /* 손가락 자리. 22px 짜리 글줄은 폰에서 옆 것이 눌린다 */
 .top nav.sec a,.top nav.tools a{display:inline-flex;align-items:center;min-height:44px}
 .top nav.sec a:hover{color:var(--ink)}
+.top nav.sec details.navmore{display:contents}
+.top nav.sec details.navmore summary{display:inline-flex;align-items:center;min-height:44px;cursor:pointer;list-style:none;font-weight:700;color:var(--ink)}
+.top nav.sec details.navmore summary::-webkit-details-marker{display:none}
+.top nav.sec details.navmore summary::after{content:" ▾";font-size:11px;margin-left:3px}
+.top nav.sec details.navmore[open] summary::after{content:" ▴"}
+.top nav.sec .more-in{display:flex;flex-wrap:wrap;column-gap:16px;width:100%}
 .top nav.tools{display:flex;gap:12px;align-items:center}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
@@ -250,25 +256,28 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   <div class="wrap">
     <a href="/" class="logo" aria-label="HACK:ON 처음으로" translate="no">HACK<span class="stamp">:</span>ON</a>
     <nav class="sec" aria-label="절">
+      <!-- 폰에서 열두 고리가 세 줄을 먹었다. 자주 가는 다섯과 «있을 때만 뜨는 것» 만 꺼내 두고 나머지는 «더 보기» 에 -->
       <a href="#list">대회 찾기</a>
-      <a href="#give">협찬·돕기</a>
-      <a href="/problems">문제 은행</a>
-      <a href="/around">모아 보기</a>
-      <a href="/setups">세팅 모음</a>
+      <a href="/news">해커온뉴스</a>
       <a href="/wallet">AI 지갑</a>
-      <a href="/recruit">모집공고</a>
       <a href="/made">만든 것</a>
-      <a href="/gigs">외주</a>
-      <a href="/ref">추천 코드</a>
+      <a href="/recruit">모집공고</a>
       <a id="nav-learn" href="/learn" hidden>강의</a>
       <a id="nav-market" href="/market" hidden>마켓</a>
       <a id="nav-rank" href="/rank" hidden>순위</a>
       <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
-      <a href="/news">해커온뉴스</a>
-      <a id="nav-manual" href="#">운영 매뉴얼</a>
+      <details class="navmore"><summary>더 보기</summary><span class="more-in">
+        <a href="/gigs">외주</a>
+        <a href="/ref">추천 코드</a>
+        <a href="/setups">세팅 모음</a>
+        <a href="/around">모아 보기</a>
+        <a href="/problems">문제 은행</a>
+        <a href="#give">협찬·돕기</a>
+        <a id="nav-manual" href="#">운영 매뉴얼</a></span></details>
     </nav>
     <nav class="tools" aria-label="도구">
       <a id="nav-login" href="/app?login=1" style="display:none">로그인</a>
+      <a id="nav-mine" href="/app" style="display:none;font-weight:800">내 대회</a>
       <a id="nav-open" href="/app?make=1" class="btn s">대회 열기</a>
     </nav>
   </div>
@@ -641,6 +650,9 @@ document.getElementById('open-go').addEventListener('click', function(){
     .then(function(){ go.disabled = false; go.textContent = '대회 열기'; });
 });
 
+/* 로고가 이제 늘 이 첫 화면으로 온다. 로그인 없이 열쇠로만 대회를 연 사람도 돌아갈 길이 있어야 해서,
+   이 기기에 주최자 열쇠나 연 대회가 남아 있으면 «내 대회» 를 띄운다(값은 안 읽어 보내고 있다는 것만 본다) */
+try { if (localStorage.getItem('hackon.owner') || localStorage.getItem('hackon.event')) document.getElementById('nav-mine').style.display = ''; } catch (e) {}
 /* 로그인이 켜져 있을 때만 단추를 보여 준다. 머리띠는 좁아서 첫 공급자 하나만 —
    나머지는 /app 안의 카드에서 고른다. 목록은 서버가 준 것만 쓴다(여기 적으면 죽은 단추가 남는다). */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){

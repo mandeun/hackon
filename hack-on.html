@@ -7535,13 +7535,10 @@ function wire() {
 
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.t; render(); });
 
-/* 로고를 누르면 처음으로. 공개·심사·보고서 화면에서는 그 대회 안에 머문다 —
-   손님을 남의 운영 화면으로 떨어뜨리지 않는다. */
+/* 로고를 누르면 hackon.kr 첫 화면으로. 어느 화면에서든 같은 곳 — 전에는 /app 안의 «처음» 탭으로 가서
+   «로고 = 사이트 처음» 이라는 약속이 /app 에서만 깨졌다. 내 대회는 첫 화면 «내 대회» 와 아래 탭에서 다시 연다 */
 const home = document.getElementById('b-home');
-if (home) home.onclick = () => {
-  if (location.pathname !== '/app') { location.href = '/app'; return; }
-  tab = 'home'; curTeam = ''; render();
-};
+if (home) home.onclick = () => { location.href = '/'; };
 
 /* 주소가 /e/<대회id> 면 읽기 전용 공개 화면으로 연다. 아래 탭과 편집 칸을 감춘다. */
 const PRO = location.pathname.match(/^\/p\/([0-9a-f]{12})$/);
