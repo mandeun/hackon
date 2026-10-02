@@ -692,6 +692,7 @@ body.guest:not(.tv) #cta{background:linear-gradient(rgba(238,241,244,0),#EEF1F4 
 body.tv #cta{display:none}
 @media print{#cta{display:none!important}}
 </style>
+<script src="/menu.js"></script>
 </head>
 <body>
 <a href="#view" class="sr">본문으로 건너뛰기</a>
@@ -711,6 +712,7 @@ body.tv #cta{display:none}
       <span id="who"></span>
       <!-- 손님 머리글의 오른쪽 자리. 첫 화면 .top 과 같은 모양이다. 운영 화면·큰 화면에는 안 나온다 -->
       <a id="g-open" href="/app?make=1">대회 열기</a>
+      <button type="button" class="hk-btn" id="nav-menu" data-menu-open aria-haspopup="dialog" aria-controls="menu-sheet" aria-expanded="false"><i aria-hidden="true"><b></b><b></b><b></b></i>메뉴</button>
     </div>
   </header>
   <main id="view"></main>
@@ -4902,7 +4904,7 @@ const SCREEN = {
     if (!at) {
       const mine = keyIds('hackon.ekey.');
       const books = await Promise.all(mine.map(id => api(`/books/${id}`).then(d => d.book).catch(() => null)));
-      return `<section class="mhero" id="wr-hero"><h2>같이 쓰는 <span class="lime">책</span></h2>
+      return `<section class="mhero" id="wr-hero"><img class="hk-art" src="/art/write.webp" alt="" width="96" height="96" loading="lazy" decoding="async"><h2>같이 쓰는 <span class="lime">책</span></h2>
           <p>장을 나눠 링크를 보내면, 누구나 고쳐 쓰기를 제안하고 편집자가 <b>합치기</b>를 누릅니다.</p>
           <div class="steps3"><span>① 책 만들기</span><span>② 링크 보내기</span><span>③ 고친 것 합치기</span></div></section>
         <div class="card" id="wr-new"><label>책 이름</label><input id="wr-title" maxlength="80" placeholder="예) 바이브코딩 첫걸음">
@@ -5008,7 +5010,7 @@ const SCREEN = {
             <b class="bdt">${esc(r.title)}</b>
             ${r.peek ? `<span class="bdpeek">${esc(r.peek)}</span>` : ''}
             <span class="bdmeta"><span>${esc(r.nick)} · ${esc(ago(r.created))}</span><span>💬 ${r.comments}</span></span></span></a>`).join('')
-        : `<div class="card"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>${SAFETY_LINE}`;
+        : `<div class="card" id="bd-empty"><img class="hk-art" src="/art/board.webp" alt="" width="96" height="96" loading="lazy" decoding="async"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>${SAFETY_LINE}`;
   },
 
   /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
@@ -5026,7 +5028,7 @@ const SCREEN = {
     const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const cells = []; for (let d = new Date(t0.getTime() - 111 * 86400000); d <= t0; d.setDate(d.getDate() + 1)) { const k = ymd(d); cells.push(`<i class="${on.has(k) ? 'on' : ''}" title="${k}"></i>`); }
     const stat = [['🏁', '연 대회', c.hosted], ['🎟️', '신청', c.joined], ['🚀', '제출', c.submitted], ['💬', '글', c.posts], ['🗨️', '댓글', c.comments], ['🔥', '받은 추천', c.upsGot], ['✍️', '합쳐진 고침', c.editsMerged], ['🤝', '연결', c.asksOk]];
-    return `<section class="mhero" id="me-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi-on.svg" alt="" width="40" height="40">
+    return `<section class="mhero" id="me-hero"><img class="hk-art" src="/art/me.webp" alt="" width="104" height="104" loading="lazy" decoding="async"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi-on.svg" alt="" width="40" height="40">
         <span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">Lv.${m.level}</span><b style="color:#fff">${esc(m.title)}</b></div>
         <h2 style="margin-top:10px" id="me-lv">${got ? `배지 <span class="lime">${got}</span> / ${m.badges.length}` : '첫 배지까지 한 걸음'}</h2>
         <div class="lvbar" role="progressbar" aria-label="다음 레벨까지" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>

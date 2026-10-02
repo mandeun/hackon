@@ -7465,7 +7465,18 @@ const hueOf = (hex) => {
   return Math.round(((h * 60) + 360) % 360);
 };
 
-const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 'zh.html', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg',
+/* 힉스필드 그림(작은 webp 원본 주소). /art/<이름>.webp 가 이 표만 본다 */
+const HF_CDN = 'https://d8j0ntlcm91z4.cloudfront.net/user_3ERvwmumZiLA4IhDFgAw5PMHUW7/';
+const ART = {
+  hero: HF_CDN + 'hf_20261002_173019_d7a89225-acbf-4872-b42a-24b4a12e1a8a_min.webp',    // 첫 화면 — 카페 책상 위 노랑이
+  me: HF_CDN + 'hf_20261002_173020_fb9dc8fe-af45-4ae0-be52-4d2f75d8fdec_min.webp',      // 나 — 트로피
+  board: HF_CDN + 'hf_20261002_173020_aa109475-961d-4f1c-a45f-cd515afe20d0_min.webp',   // 게시판 — 수다 떠는 둘
+  write: HF_CDN + 'hf_20261002_173020_600d8dbc-0ad5-4604-bd82-80214173d0dd_min.webp',   // 공동 집필 — 책 위
+  news: HF_CDN + 'hf_20261002_173022_77056f80-6a43-4da1-80a7-2c2137ae5240_min.webp',    // 소식 — 돋보기
+  club: HF_CDN + 'hf_20261002_173022_3fcdf796-6462-4d9a-9e96-bc5323e494f3_min.webp',    // ON 클럽 — 옥상 밤
+  tools: HF_CDN + 'hf_20261002_160648_a852d09d-d35a-4262-9016-f2b2067af247_min.webp',   // 삽 공구함
+};
+const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 'zh.html', 'menu.js', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg',
   /* 첫 화면 표제 사진과 링크 미리보기 그림. 빠져 있어서 둘 다 404 였다 — CSS 는 있는데 사진만 안 나왔다 */
   'hero.jpg', 'og.png',
   /* 노랑이. 평면 SVG 라 셋 합쳐 5KB 가 안 된다 — 그림 파일로 두면 색을 고칠 때마다 다시 만들어야 한다 */
@@ -7508,7 +7519,7 @@ const SEC_HEADERS = {
    아래 selftest 가 STATIC_OK 의 확장자를 전부 이 표와 대조한다. */
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg',
-  '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
+  '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.webp': 'image/webp' };
 
 function body(req) {
   return new Promise((res, rej) => {
@@ -9102,6 +9113,18 @@ function routes(db) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8',
                              'cache-control': 'no-cache' });
         return res.end(manualPage(md));
+      }
+
+      /* 그림 — 힉스필드로 만든 노랑이 스티커. art/<이름>.webp 가 저장소에 있으면 그것을, 없으면 힉스필드 원본(작은 webp)으로 보낸다.
+         파일을 art/ 에 넣기만 하면 코드 수정 없이 우리 서버 것으로 바뀐다(scripts/fetch-art.sh). 이름은 ART 에 있는 것만 — 경로를 받지 않는다 */
+      if ((m = p.match(/^\/art\/([a-z]+)\.webp$/)) && ART[m[1]]) {
+        const f = path.join(ROOT, 'art', m[1] + '.webp');
+        if (fs.existsSync(f)) {
+          res.writeHead(200, { 'content-type': 'image/webp', 'cache-control': 'public, max-age=86400', ...SEC_HEADERS });
+          return fs.createReadStream(f).pipe(res);
+        }
+        res.writeHead(302, { location: ART[m[1]], 'cache-control': 'public, max-age=3600', ...SEC_HEADERS });
+        return res.end();
       }
 
       /* 주소가 셋 갈린다.
