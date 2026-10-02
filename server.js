@@ -3151,7 +3151,7 @@ function privacyPage() {
 <h2>2. 보는 사람</h2>
 <p>연락처는 그 대회의 운영자만 봅니다. 공개 페이지·큰 화면·결과 보고서에는 연락처가 나가지 않습니다. 협찬사에는 «협찬사 제공 동의»를 한 참가자의 이메일만, 그 대회의 협찬사에만 갑니다.</p>
 <h2>3. 두는 기간</h2>
-<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다). 로그인 정보(회원번호·별명·바꾼 이메일 값)는 계정을 지울 때까지 둡니다 — hi@mandeun.com 으로 말씀하시면 지웁니다.</p>
+<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다). 로그인 정보(회원번호·별명·바꾼 이메일 값)는 계정을 지울 때까지 둡니다. 계정은 앱·웹의 «대회» 탭 아래 «계정 삭제»에서 직접 지웁니다 — 계정·로그인 정보·그 계정으로 연 대회가 함께 지워집니다. 거기까지 못 오시면 hi@mandeun.com 으로 말씀하세요.</p>
 <h2>4. 앱이 쓰는 기기 기능</h2>
 <ul><li>카메라 — 심사·투표 링크의 QR 을 찍을 때만. 사진은 저장하지 않습니다.</li><li>알림 — 대회 전날·마감 30분 전·새 소식. 켜고 끄는 것은 본인이 정합니다.</li><li>저장 공간 — 마지막으로 받은 대회 정보를 기기에 두어 인터넷이 끊겨도 진행표를 보여 줍니다.</li></ul>
 <h2>5. 하지 않는 것</h2>
@@ -3296,6 +3296,32 @@ function mergeOwners(db, from, into) {
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   return into;
+}
+/* 계정 지우기 — 앱스토어 지침 5.1.1(v): 로그인이 있으면 앱 안에서 지울 수 있어야 한다.
+   메일로 부탁하라는 길만 두면 심사에서 걸린다.
+   owner 를 갖는 표(mergeOwners 와 같은 다섯)를 전부 비운다. 연 대회는 deleteEvent 로 접는다 —
+   신청한 팀에 «대회가 접혔다» 알림이 가는 길을 그대로 탄다. 휴지통 사본은 지운다(되살릴 주인이 없다).
+   제보(news)는 이미 공개된 소식이라 글은 두고 주인 칸만 비운다. */
+async function deleteAccount(db, owner, b, notify) {
+  if (!owner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(owner)) throw new HttpError(404, '없는 계정입니다');
+  if (String((b && b.confirm) || '').trim() !== '탈퇴')
+    throw new HttpError(409, '지우려면 «탈퇴» 라고 적어 보내세요');
+  /* 마지막 사이트 운영자가 나가면 아무도 운영 화면을 못 연다 */
+  if (db.prepare('SELECT 1 FROM site_admins WHERE owner=?').get(owner)
+      && db.prepare('SELECT COUNT(*) c FROM site_admins').get().c === 1)
+    throw new HttpError(409, '마지막 사이트 운영자는 지울 수 없습니다. 다른 운영자를 먼저 앉혀 주세요');
+  const evs = db.prepare('SELECT id, title FROM events WHERE owner=?').all(owner);
+  for (const e of evs) await deleteEvent(db, e.id, { confirm: e.title }, notify);
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM event_trash WHERE owner=?').run(owner);
+    db.prepare("UPDATE news SET owner='' WHERE owner=?").run(owner);
+    db.prepare('DELETE FROM logins WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM site_admins WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM owners WHERE id=?').run(owner);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { ok: true, events: evs.length };
 }
 const linksOf = (db, owner) => (owner
   ? db.prepare('SELECT provider FROM logins WHERE owner=? ORDER BY created, provider').all(owner).map((r) => r.provider)
@@ -5930,6 +5956,14 @@ function routes(db) {
             links: me2 ? linksOf(db, me2.id).map((id) => ({ id, label: (LOGINS[id] || {}).label || id })) : [],
           });
         }
+        /* 계정 지우기. 로그인 쿠키든 열쇠(x-owner)든 그 계정의 주인이면 지운다. 쿠키도 같이 지운다 */
+        if (p === '/api/account/delete' && req.method === 'POST') {
+          if (!owner) throw new HttpError(401, '지울 계정이 없습니다. 로그인하거나 열쇠를 가진 기기에서 해 주세요');
+          const r = await deleteAccount(db, owner, await body(req));
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', ...(res.corsHeaders || {}),
+            'set-cookie': 'hackon_s=; Path=/; Max-Age=0' });
+          return res.end(JSON.stringify(r));
+        }
         if (p === '/api/visits' && req.method === 'GET') {
           /* ADMIN_KEY 를 아는 사람만. 그게 없으면(내 노트북) 이 컴퓨터에서만 보인다. */
           const local = /^(::1$|::ffff:127\.|127\.)/.test(req.socket.remoteAddress || '');
@@ -7222,6 +7256,34 @@ async function selftest() {
     ok(db.prepare("SELECT owner FROM event_trash WHERE event='gone'").get().owner === o2,
        '합칠 때 휴지통의 지운 대회도 따라온다 — 되살릴 권리를 잃지 않는다');
     ok(db.prepare('SELECT name FROM owners WHERE id=?').get(o2).name === '갑', '이름이 빈 쪽으로 이름을 옮긴다');
+  }
+  /* 계정 지우기 — 앱스토어 지침 5.1.1(v). owner 를 가진 다섯 표에서 이 계정이 사라지고, 남의 것은 그대로다 */
+  {
+    const a = crypto.randomBytes(6).toString('hex'), other = crypto.randomBytes(6).toString('hex');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(a, '지울사람');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(other, '남');
+    db.prepare("INSERT INTO logins(provider,uid,owner) VALUES('kakao',?,?)").run('del-' + a, a);
+    const ea = createEvent(db, { title: '지울계정대회', owner: a });
+    const eo = createEvent(db, { title: '남의대회', owner: other });
+    db.prepare("INSERT INTO event_trash(event,owner,title,json) VALUES('gone2',?,'지운 대회','{}')").run(a);
+    db.prepare("INSERT INTO news(src,key,title,url,owner) VALUES('제보',?,'제보 한 줄','https://x.test',?)").run('k-del-' + a, a);
+    let code = 0; try { await deleteAccount(db, a, {}); } catch (e) { code = e.code; }
+    ok(code === 409 && db.prepare('SELECT 1 FROM owners WHERE id=?').get(a), '계정 지우기: «탈퇴» 라고 안 적으면 안 지운다');
+    const r = await deleteAccount(db, a, { confirm: '탈퇴' }, async () => 0);
+    ok(r.events === 1, '계정 지우기: 연 대회 수를 돌려준다');
+    ok(!db.prepare('SELECT 1 FROM owners WHERE id=?').get(a)
+       && !db.prepare('SELECT 1 FROM logins WHERE owner=?').get(a)
+       && !db.prepare('SELECT 1 FROM events WHERE id=?').get(ea.id)
+       && !db.prepare('SELECT 1 FROM event_trash WHERE owner=?').get(a),
+       '계정 지우기: 계정·로그인·연 대회·휴지통 사본이 다 사라진다');
+    const nw = db.prepare('SELECT owner FROM news WHERE key=?').get('k-del-' + a);
+    ok(nw && nw.owner === '', '계정 지우기: 공개된 제보는 남기되 주인 칸을 비운다');
+    ok(db.prepare('SELECT 1 FROM owners WHERE id=?').get(other) && db.prepare('SELECT 1 FROM events WHERE id=?').get(eo.id),
+       '계정 지우기: 남의 계정과 대회는 그대로다');
+    code = 0; try { await deleteAccount(db, a, { confirm: '탈퇴' }); } catch (e) { code = e.code; }
+    ok(code === 404, '계정 지우기: 이미 지운 계정은 없는 계정이다');
+    db.prepare('DELETE FROM events WHERE id=?').run(eo.id);
+    db.prepare('DELETE FROM owners WHERE id=?').run(other);
   }
   /* 옛 DB 옮겨심기 — owners.kakao 에만 있던 계정이 logins 로 온다. 몇 번 돌려도 같다(E19) */
   {
