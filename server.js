@@ -3104,7 +3104,7 @@ function visitsOf(db, days) {
 
 function sitemap(db) {
   const base = CANON();
-  const urls = ['/', '/en', '/club', '/tools', '/manual', '/launch', '/biz', '/partner', '/crew'].concat(
+  const urls = ['/', '/en', '/club', '/tools', '/manual', '/launch', '/biz', '/partner', '/crew', '/terms'].concat(
     db.prepare('SELECT 1 FROM lectures LIMIT 1').get() ? ['/learn'] : [],
     db.prepare("SELECT 1 FROM listings WHERE ok=1 AND off='' LIMIT 1").get() ? ['/market'] : [],
     db.prepare("SELECT 1 FROM spots WHERE state<>'hidden' LIMIT 1").get() ? ['/around'] : [],
@@ -4142,35 +4142,190 @@ function mdToHtml(md) {
 /* 제목을 주소로 쓴다. 한글이 그대로 들어가도 되지만 공백과 기호는 뺀다. */
 const slug = s => String(s).trim().toLowerCase().replace(/[^\w가-힣]+/g, '-').replace(/^-|-$/g, '');
 
+/* ── 법·약관 화면 — 처리방침(/privacy)·이용 규칙(/terms) ─────────────────────
+   앱스토어·플레이 심사와 개인정보보호법이 «주소 하나로 열리는 글» 을 요구한다. 웹·아이폰 앱·안드로이드 앱이 같은 글을 본다.
+   적힌 것과 실제가 다르면 그게 곧 반려 사유다 — 아래 «받는 것» 은 open() 의 표와 purgeOld()·deleteAccount() 를 읽고 적었다.
+   표·기간이 바뀌면 여기도 같이 바꾼다. 화면 틀(legalHtml)은 둘이 같이 쓴다 — 글씨 17px, 링크는 손가락 크기. */
+const LEGAL_SINCE = '2026-10-05';
+function legalHtml({ title, path: at, desc, body, links }) {
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title} — HACK:ON</title><meta name="description" content="${desc}">
+<link rel="canonical" href="https://hackon.kr${at}"><link rel="icon" href="/icon.svg"><meta name="theme-color" content="#EEF1F4">
+<style>:root{--pg:#EEF1F4;--card:#fff;--ink:#191F28;--grey:#4E5968;--hair:#E1E5EA;--on:#C8F53B}
+@media (prefers-color-scheme:dark){:root{--pg:#0E1117;--card:#161B22;--ink:#E8ECF1;--grey:#AEB8C4;--hair:#2A313B}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--ink);font:17px/1.75 'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',system-ui,sans-serif;
+  letter-spacing:-.01em;word-break:keep-all;overflow-wrap:break-word;-webkit-text-size-adjust:100%}
+a{color:inherit;text-underline-offset:3px}
+.wrap{max-width:720px;margin:0 auto;padding:0 18px 56px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 0}
+.top a{text-decoration:none;font-weight:800;letter-spacing:-.02em;padding:8px 0}
+h1{font-size:clamp(26px,6vw,32px);line-height:1.25;letter-spacing:-.03em;margin:10px 0 6px}
+.lead{color:var(--grey);margin:0 0 16px}
+section,.sum{background:var(--card);border:1px solid var(--hair);border-radius:16px;padding:18px 20px;margin:12px 0}
+.sum{border-left:6px solid var(--on)}
+h2{font-size:19px;line-height:1.4;margin:0 0 8px;letter-spacing:-.02em}
+ul{margin:6px 0;padding-left:22px}li{margin:7px 0}p{margin:6px 0}
+.toc{display:flex;flex-wrap:wrap;gap:2px 16px;font-size:15.5px;color:var(--grey)}
+.toc a{padding:6px 0}
+.note{color:var(--grey);font-size:15.5px}
+.foot{display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:22px;border-top:1px solid var(--hair);padding-top:10px}
+.foot a{display:inline-block;padding:12px 0;font-weight:700}
+</style></head><body><div class="wrap">
+<div class="top"><a href="/">HACK:ON</a><span class="note">시행 ${LEGAL_SINCE}</span></div>
+${body}
+<nav class="foot" aria-label="함께 보는 글">${links.map(([h, t]) => `<a href="${h}">${t}</a>`).join('')}</nav>
+</div></body></html>`;
+}
+
 function privacyPage() {
-  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HACK:ON 개인정보 처리방침</title>
-<style>body{font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;max-width:680px;margin:0 auto;padding:24px 20px;line-height:1.7;color:#191F28}h1{font-size:24px}h2{font-size:17px;margin-top:26px}li{margin:4px 0}</style></head><body>
-<h1>HACK:ON 개인정보 처리방침</h1>
-<p>HACK:ON(hackon.mandeun.com 과 같은 이름의 아이폰 앱)은 로그인을 안 해도 씁니다 — 열쇠 하나가 곧 계정입니다. 로그인은 여러 기기에서 같은 대회를 열기 위한 선택입니다. 아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
-<h2>1. 받는 것과 이유</h2>
-<ul>
-<li><b>참가 신청</b> — 이름(팀 이름), 이메일. 대회 운영·참가 확인·결과 안내·상금 지급. 협찬사 제공은 따로 동의한 사람만.</li>
-<li><b>자리 맡기·제안</b> — 이름, 소속(선택), 연락처. 운영자가 확인할 때만 씁니다. 공개 장부에는 이름·소속만 나갑니다.</li>
-<li><b>주제·문제 올리기(받는 사람)</b> — 공개될 이름, 연락처. 결과 안내에만 씁니다.</li>
-<li><b>앱 피드백</b> — 적은 글, 연락처(선택).</li>
+  const toc = ['받는 것', '보는 사람', '두는 기간', '맡기는 곳', '나라 밖', '내 권리', '쿠키·기기', '지키는 법', '14세', '책임자']
+    .map((t, i) => `<a href="#p${i + 1}">${i + 1}. ${t}</a>`).join('');
+  return legalHtml({ title: '개인정보 처리방침', path: '/privacy',
+    desc: 'HACK:ON 이 받는 정보, 두는 기간, 맡기는 곳, 내 권리.',
+    links: [['/terms', '이용 규칙'], ['/delete-account', '계정 삭제'], ['/', '첫 화면']],
+    body: `<h1>HACK:ON 개인정보 처리방침</h1>
+<p class="lead">HACK:ON(웹사이트 hackon.kr, 아이폰 앱, 안드로이드 앱)이 받는 정보와 쓰는 곳입니다. 웹과 앱은 같은 서버·같은 계정을 씁니다.
+아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
+<div class="sum"><b>한눈에</b><ul>
+<li>로그인 없이도 씁니다. 로그인은 여러 기기에서 같은 대회를 열기 위한 선택입니다.</li>
+<li>연락처는 그 대회 운영자만 봅니다. 공개 화면에는 나가지 않습니다.</li>
+<li>참가 신청 연락처는 대회가 끝나고 6개월 뒤 지웁니다.</li>
+<li>광고 추적, 제3자 분석 도구, 위치 수집을 하지 않습니다.</li>
+<li>만 14세 이상이 쓰는 서비스입니다.</li></ul>
+<div class="toc">${toc}</div></div>
+
+<section id="p1"><h2>1. 받는 것과 쓰는 곳</h2>
+<p>그 기능을 쓸 때만 받습니다. «선택» 은 안 적어도 그 기능을 쓸 수 있습니다.</p><ul>
+<li><b>참가 신청</b> — 팀 이름(혼자면 본인 이름), 이메일. 고르면 역할·인원·어디서 봤는지·메모·만든 것 링크, 짝 신청이면 짝의 이름·이메일. 정원이 차면 대기 명단에 이름·이메일.
+  대회 운영·참가 확인·결과 안내·상금 지급에 씁니다.</li>
+<li><b>결과물과 평가</b> — 결과물 주소·설명·AI 를 쓴 방법·시연 영상(유튜브 번호)·발표 자료 주소, 심사 점수·심사평, 관객 점수, 참가자끼리 준 점수(준 사람은 안 보입니다), 불편했던 일 알림(사이트 운영자만 봅니다), 대회 평가·설문.</li>
+<li><b>기록(프로필)</b> — 이메일을 되돌릴 수 없게 바꾼 값으로 사람 번호를 만들어 대회 기록을 잇습니다. 이메일 원문은 이 번호에 담기지 않습니다. 보여 줄 이름, 실력 단계, 만든 기록증 카드.</li>
+<li><b>소개 세 칸(선택)</b> — 한 줄 소개·지금 하는 일·찾는 사람. 프로필과 팀원 추천에 <b>공개</b>됩니다. 연락처는 적을 수 없게 막았습니다.</li>
 <li><b>팀원 추천(선택)</b> — 고른 강점·하려는 이유, 누구에게 «좋아요» 를 눌렀는지. 같은 대회 안에서 맞을 사람을 권하는 데만 씁니다.</li>
-<li><b>소개 세 칸(선택)</b> — 한 줄 소개·지금 하는 일·찾는 사람. 프로필과 팀원 추천에 <b>공개</b>됩니다. 연락처는 적을 수 없게 막아 두었습니다.</li>
-<li><b>AI 지갑·아침 브리핑</b> — 구독·마감·붙여 넣은 글은 <b>그 기기에만</b> 저장되고 서버로 오지 않습니다.</li>
-<li><b>푸시 알림</b> — 기기 토큰. 사람 정보가 아니며 «따라가기»를 끄면 지웁니다.</li>
-<li><b>로그인(선택)</b> — 카카오·구글·네이버 중 고른 곳에서 <b>회원번호와 별명</b>. 어느 기기에서든 내 대회를 열기 위해서. 회원번호는 HACK:ON 에만 발급되는 번호라 그 서비스의 아이디가 아니며, 비밀번호는 받지 않습니다.</li>
-<li><b>이메일(그 서비스가 주는 경우)</b> — <b>같은 사람인지 알아보는 데만</b> 씁니다. 구글로 들어온 분이 지난번 카카오로 들어온 분과 같은 사람이면 대회가 흩어지지 않아야 하기 때문입니다. 주소는 저장하지 않고 되돌릴 수 없게 바꾼 값만 둡니다. 이 주소로 메일을 보내지 않고, 광고에 쓰지 않습니다.</li>
-</ul>
-<h2>2. 보는 사람</h2>
-<p>연락처는 그 대회의 운영자만 봅니다. 공개 페이지·큰 화면·결과 보고서에는 연락처가 나가지 않습니다. 협찬사에는 «협찬사 제공 동의»를 한 참가자의 이메일만, 그 대회의 협찬사에만 갑니다. 팀원 추천에서 <b>서로 «좋아요»를 누른 두 참가자</b>에게는 서로의 연락처가 보입니다 — 한쪽만 누르면 아무에게도 안 보이고, 좋아요를 거두면 다시 닫힙니다.</p>
-<h2>3. 두는 기간</h2>
-<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다). 로그인 정보(회원번호·별명·바꾼 이메일 값)는 계정을 지울 때까지 둡니다. 계정은 앱·웹의 «대회» 탭 아래 «계정 삭제»에서 직접 지웁니다 — 계정·로그인 정보·그 계정으로 연 대회가 함께 지워집니다. 거기까지 못 오시면 hi@mandeun.com 으로 말씀하세요.</p>
-<h2>4. 앱이 쓰는 기기 기능</h2>
-<ul><li>카메라 — 심사·투표 링크의 QR 을 찍을 때만. 사진은 저장하지 않습니다.</li><li>알림 — 대회 전날·마감 30분 전·새 소식. 켜고 끄는 것은 본인이 정합니다.</li><li>저장 공간 — 마지막으로 받은 대회 정보를 기기에 두어 인터넷이 끊겨도 진행표를 보여 줍니다.</li></ul>
-<h2>5. 하지 않는 것</h2>
-<p>광고 추적, 제3자 분석 도구, 위치 수집, 연락처 접근, 앱 안 결제를 하지 않습니다.</p>
-<h2>6. 묻는 곳</h2>
-<p>hi@mandeun.com · 개정 2026-09-26</p>
-</body></html>`;
+<li><b>자리 맡기·제안</b> — 이름, 소속(선택), 연락처, 메모, 이해관계 없음 표시. 공개 장부에는 확인된 이름·소속만 나갑니다.</li>
+<li><b>줄 사람 카드</b> — 이름·소속·지역·되는 요일·소개(공개), 연락처. 주최자가 요청을 보낼 때는 주최자 이름·연락처를 받습니다.</li>
+<li><b>풀어 달라는 문제</b> — 공개될 이름, 번거로운 일 세 줄, 연락처(운영자만). «풀었습니다» 를 보낼 때는 이름·주소·메모·연락처(문제를 낸 분만 봅니다).</li>
+<li><b>만든 것·외주·마켓</b> — 작업물 제목·소개·주소·영상·저장소, 외주 의뢰·서비스 글, 함께하기 신청·제안의 메모와 금액(올린 사람만 봅니다), 판매 주소·가격.</li>
+<li><b>게시판</b> — 닉네임, 제목·본문·댓글. 추천·신고를 한 번만 세려고 이 기기가 만든 무작위 표를 받고, 차단에 쓰는 «글쓴이 표» 는 그 표를 되돌릴 수 없게 바꾼 값으로 둡니다. 신고할 때는 IP 를 소금 친 해시로 바꿔 둡니다 — IP 원문은 저장하지 않습니다.</li>
+<li><b>공동 집필</b> — 책 제목·소개·편집자 이름, 장 본문과 고친 기록, 고쳐 쓰기 제안(이름·글·메모), 제안한 사람의 IP 해시와 글쓴이 표(도배를 막는 데만).</li>
+<li><b>내 달력 구독</b> — 구독 주소 번호와 «어느 대회에 무슨 역할» 목록만. 이름·열쇠는 담지 않습니다.</li>
+<li><b>로그인(선택)</b> — 카카오·구글·네이버·Apple 중 고른 곳에서 <b>회원번호와 별명</b>. 회원번호는 HACK:ON 에만 발급되는 번호라 그 서비스의 아이디가 아니며, 비밀번호는 받지 않습니다.</li>
+<li><b>로그인 이메일(그 서비스가 주는 경우)</b> — <b>같은 사람인지 알아보는 데만</b> 씁니다. 주소는 저장하지 않고 되돌릴 수 없게 바꾼 값만 둡니다. 이 주소로 메일을 보내지 않고, 광고에 쓰지 않습니다.</li>
+<li><b>앱 알림</b> — 기기 토큰과 따라가는 대회. 사람 정보와 묶지 않습니다.</li>
+<li><b>피드백·신고·제보</b> — 적은 글, 연락처(선택), 신고 사유. 소식 제보에는 로그인 별명, 모아 보기 제보에는 계정(공개 안 함). 장소 제보는 누가 썼는지 담지 않습니다. 세팅 모음에 낸 세팅, 추천인 코드.</li>
+<li><b>저절로 남는 것</b> — 화면 방문 수(날짜·화면·보낸 사이트·횟수만, 사람·IP 없음), 메일 발송 기록(받는 주소·제목), 남용을 막는 IP(메모리에만 10분, 저장 안 함).</li></ul></section>
+
+<section id="p2"><h2>2. 보는 사람과 남에게 주는 것</h2>
+<p>연락처는 그 대회의 운영자만 봅니다. 공개 페이지·큰 화면·결과 보고서에는 연락처가 나가지 않습니다. 남에게 가는 것은 아래뿐입니다.</p><ul>
+<li><b>협찬사</b> — «협찬사 제공 동의» 를 따로 켠 참가자의 이메일만, 그 대회의 협찬사에만 갑니다. 참가자용 크레딧·쿠폰 발급과 사용 안내에 쓰며, 두는 기간은 협찬사 정책을 따릅니다.</li>
+<li><b>팀원 추천</b> — <b>서로 «좋아요»를 누른 두 참가자</b>에게는 서로의 연락처가 보입니다. 한쪽만 누르면 아무에게도 안 보이고, 좋아요를 거두면 다시 닫힙니다.</li>
+<li><b>줄 사람 카드</b> — 카드 주인이 요청을 수락하면 그 주최자와 카드 주인에게만 서로의 연락처가 보입니다.</li></ul>
+<p>법이 정한 경우 말고는 이 밖에 주지 않습니다.</p></section>
+
+<section id="p3"><h2>3. 두는 기간과 지우는 법</h2><ul>
+<li><b>대회 연락처</b>(참가 신청·대기·짝·자리 맡기·제안·대회에 붙은 문제·멘토) — 대회 종료 후 <b>6개월</b> 뒤 지웁니다.</li>
+<li><b>피드백 연락처, 메일 발송 기록의 받는 주소, «풀었습니다» 연락처</b> — 6개월 뒤 지웁니다.</li>
+<li><b>지운 팀·지운 대회</b> — 휴지통에 30일 둔 뒤 지웁니다. 그동안 운영자가 되살릴 수 있습니다. 연습용 대회는 3일 뒤 휴지통으로 갑니다.</li>
+<li><b>계정에 묶인 것</b>(로그인 정보·만든 것·외주·카드·세팅·추천인 코드) — 계정을 지울 때까지. 계정은 앱이나 hackon.kr/app 에서 로그인 → 아래 «대회» 탭 → 위쪽 «계정 삭제» 에서 직접 지웁니다. 지워지는 것은 <a href="/delete-account">계정 삭제 안내</a>에 적었습니다.</li>
+<li><b>따로 기간이 없는 것</b> — 게시판·공동 집필 글, 프로필 기록, 대회에 안 붙은 문제, 로그인 없이 만든 카드. 쓴 기기에서 직접 내릴 수 있고, 서버에서도 지우길 원하시면 메일로 말씀해 주세요.</li>
+<li><b>앱 알림 토큰</b> — «따라가기» 를 끄거나 그 대회가 지워지면 지웁니다.</li>
+<li><b>서버 백업</b> — 10분마다 한 벌씩, 최근 12벌(약 2시간 치)만 둡니다. 지운 대회의 사본 파일은 30일 뒤 지웁니다. 지운 정보도 백업에서 빠지기까지 이만큼 걸릴 수 있습니다.</li></ul>
+<p>지울 때는 데이터베이스에서 되살릴 수 없게 지웁니다. 종이로 뽑아 두지 않습니다.</p></section>
+
+<section id="p4"><h2>4. 처리를 맡기는 곳(위탁)</h2><ul>
+<li><b>Fly.io, Inc.</b> — 서버·데이터베이스와 그 백업 보관(일본 도쿄 지역).</li>
+<li><b>Resend, Inc.</b> — 신청 확인·참석 확인·결과 안내 메일 보내기. 보낼 때만 받는 주소와 메일 내용을 넘깁니다.</li></ul>
+<p>로그인은 고른 곳(카카오·구글·네이버·Apple)이 본인 확인을 하고, 그 결과(회원번호·별명·이메일 확인 여부)만 받습니다. 그 화면에는 그 회사의 처리방침이 따릅니다.
+앱 알림은 아직 보내지 않고 토큰만 둡니다. 보내기 시작하면 보내는 회사를 여기에 더하고 알립니다.</p></section>
+
+<section id="p5"><h2>5. 나라 밖으로 옮기는 것(국외 이전)</h2>
+<p>서비스를 쓰는 동안 네트워크로 그때그때 옮겨 저장합니다.</p><ul>
+<li><b>Fly.io, Inc.(미국 회사)</b> — 서버가 <b>일본(도쿄)</b>에 있습니다. 이 방침에 적은 정보 전부. 서버 운영에 쓰고, 이 방침의 기간까지 둡니다.</li>
+<li><b>Resend, Inc.(미국)</b> — 받는 이메일 주소와 메일 내용. 메일을 보낼 때 옮기고, Resend 의 보관 정책을 따릅니다.</li></ul>
+<p>옮기기를 원하지 않으시면 서비스를 쓰지 않으시거나(서버가 나라 밖에 있습니다), 이메일을 적지 않아 메일을 받지 않을 수 있습니다. 문의는 각 회사 누리집의 개인정보 창구나 hi@mandeun.com 으로 해 주세요.</p></section>
+
+<section id="p6"><h2>6. 내 권리와 요청하는 법</h2>
+<p>내 정보를 보고, 고치고, 지우고, 처리를 멈추라고 요청할 수 있습니다. 동의는 언제든 거둘 수 있습니다.</p><ul>
+<li><b>직접</b> — 팀 화면에서 팀 이름 고치기·신청 취소(제출 마감 전), 쓴 글 내리기, 카드 숨기기, <a href="/delete-account">계정 삭제</a>.</li>
+<li><b>메일</b> — hi@mandeun.com 으로 원하는 것과 그 정보가 있는 대회·글을 알려 주세요. 본인인지 확인한 뒤 10일 안에 답합니다. 법정대리인이나 위임받은 분도 요청할 수 있습니다.</li></ul></section>
+
+<section id="p7"><h2>7. 쿠키·기기 저장·앱 기능</h2><ul>
+<li><b>쿠키</b> — 로그인을 이어 주는 쿠키 하나(30일)와 로그인하는 동안만 쓰는 쿠키(10분). 광고·추적 쿠키는 없습니다.</li>
+<li><b>기기 저장</b> — 대회·팀 열쇠, 지난 신청 내용, 추천·신고용 무작위 표, 차단 목록, 최근 간 곳. AI 지갑·아침 브리핑의 구독·마감·붙여 넣은 글은 <b>그 기기에만</b> 저장되고 서버로 오지 않습니다.</li>
+<li>브라우저 설정에서 사이트 데이터를 지우면 함께 지워집니다. 로그인하지 않은 채 열쇠를 지우면 내 대회를 다시 못 열 수 있습니다.</li>
+<li>강의·시연 영상은 유튜브(youtube-nocookie) 화면을 불러옵니다. 영상을 틀면 유튜브 정책이 따릅니다.</li>
+<li><b>앱 기능</b> — 알림(대회 전날·마감·새 소식, 켜고 끄는 것은 본인이), 저장 공간(인터넷이 끊겨도 진행표를 보여 주려고), 카메라(앱에서 QR 을 찍을 때만, 사진은 저장하지 않음).</li></ul>
+<p>광고 추적, 제3자 분석 도구, 위치 수집, 주소록 접근, 앱 안 결제를 하지 않습니다.</p></section>
+
+<section id="p8"><h2>8. 지키는 법</h2><ul>
+<li>모든 연결을 https 로 암호화합니다.</li>
+<li>운영 화면과 내 신청은 열쇠를 가진 사람만 엽니다. 백업 사본에는 열쇠를 담지 않습니다.</li>
+<li>로그인 이메일과 게시판 IP 는 원문 대신 되돌릴 수 없는 값만 둡니다.</li></ul></section>
+
+<section id="p9"><h2>9. 만 14세 미만</h2>
+<p>HACK:ON 은 <b>만 14세 이상</b>이 쓰는 서비스입니다. 참가 신청 때 «만 14세 이상입니다» 에 동의를 받습니다. 만 14세 미만의 정보가 들어온 것을 알게 되면 바로 지웁니다.</p></section>
+
+<section id="p10"><h2>10. 개인정보 보호책임자와 도움받을 곳</h2>
+<p><b>개인정보 보호책임자</b> — HACK:ON 운영자 · <a href="mailto:hi@mandeun.com">hi@mandeun.com</a></p>
+<p class="note">침해 신고·상담: 개인정보침해신고센터(privacy.kisa.or.kr · 국번 없이 118), 개인정보분쟁조정위원회(kopico.go.kr · 1833-6972), 대검찰청(spo.go.kr · 국번 없이 1301), 경찰청(ecrm.police.go.kr · 국번 없이 182).</p>
+<p class="note">이 방침을 바꾸면 이 페이지에 먼저 알립니다. 시행일 ${LEGAL_SINCE}.</p></section>` });
+}
+
+/* 이용 규칙 — 누구나 볼 수 있는 글(게시판·집필·질문·카드)에 대한 약속. 짧게 둔다 — 길면 아무도 안 읽는다.
+   앱 안 «첫 글 전 동의»(hack-on.html RULES_TEXT)가 이 주소를 가리킨다. 숫자(신고 셋·24시간)는 BOARD_HIDE_AT·SAFETY_LINE 과 같다. */
+function termsPage() {
+  return legalHtml({ title: '이용 규칙', path: '/terms',
+    desc: 'HACK:ON 이용 규칙 — 공개 글에 쓰지 않는 것, 신고, 쓴 글의 권리.',
+    links: [['/privacy', '개인정보 처리방침'], ['/delete-account', '계정 삭제'], ['/', '첫 화면']],
+    body: `<h1>HACK:ON 이용 규칙</h1>
+<p class="lead">함께 쓰는 곳이라 몇 가지만 지켜 주세요. 웹(hackon.kr)과 앱이 같은 규칙을 씁니다.</p>
+<section><h2>1. 누구나 보는 글에 쓰지 않는 것</h2><ul>
+<li>전화번호·이메일·오픈채팅 같은 <b>연락처</b> — 연락은 서로 «좋아요» 나 요청 수락으로 열립니다.</li>
+<li>욕설·비방·차별·혐오, 성적인 글</li>
+<li>광고·도배(스팸), 운영자 사칭</li>
+<li>불법인 것, 남의 개인정보나 저작물을 허락 없이 올리는 것</li></ul></section>
+<section><h2>2. 신고와 차단</h2><ul>
+<li>글마다 «신고» 가 있습니다. 게시판·공동 집필에서는 서로 다른 세 사람이 신고하면 저절로 내려갑니다.</li>
+<li>운영자가 <b>24시간 안에</b> 확인하고, 규칙을 어긴 글은 지웁니다.</li>
+<li>«차단» 을 누르면 그 사람의 글이 내 화면에서 안 보입니다.</li></ul></section>
+<section><h2>3. 어기면</h2>
+<p>글을 지우고, 되풀이하면 쓰기를 막습니다.</p></section>
+<section><h2>4. 쓴 글의 권리</h2><ul>
+<li>내가 쓴 글과 올린 결과물은 <b>내 것</b>입니다.</li>
+<li>공동 집필 글은 <b>함께 쓴 사람들의 것</b>입니다.</li>
+<li>HACK:ON 은 그 글을 이 사이트와 앱에 <b>보여 줄 권한만</b> 갖습니다. 글을 내리면 보여 주기를 멈춥니다.</li></ul></section>
+<section><h2>5. 나이</h2>
+<p><b>만 14세 이상</b>이 쓸 수 있습니다.</p></section>
+<section><h2>6. 책임</h2>
+<p>HACK:ON 은 사람과 대회를 잇는 도구라 있는 그대로 제공하며, 사용자끼리 정한 약속·돈·계약은 당사자 사이의 일입니다.</p></section>
+<section><h2>7. 문의</h2>
+<p><a href="mailto:hi@mandeun.com">hi@mandeun.com</a> · 개인정보는 <a href="/privacy">처리방침</a>을 봐 주세요.</p></section>` });
+}
+
+/* 안드로이드 앱 링크(Digital Asset Links). 앱(TWA)이 «이 주소는 내 것» 이라고 증명하는 파일이다 — 없으면 앱 안에 브라우저 주소창이 뜬다.
+   패키지 이름과 서명 지문은 코드에 안 적는다(TWA_PACKAGE·TWA_SHA256, 지문은 쉼표로 여럿). 모양이 틀리면 내지 않는다(404) —
+   틀린 파일을 내면 구글이 «검증 실패» 로 캐시해 고친 뒤에도 한동안 주소창이 남는다. */
+function assetLinks(pkg, sha) {
+  const p = String(pkg || '').trim();
+  if (p.length > 200 || !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(p)) return null;
+  const fps = [...new Set(String(sha || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean))];
+  if (!fps.length || fps.length > 10 || !fps.every(f => /^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/.test(f))) return null;
+  return [{ relation: ['delegate_permission/common.handle_all_urls'],
+            target: { namespace: 'android_app', package_name: p, sha256_cert_fingerprints: fps } }];
+}
+/* 지운 대회의 사본 파일(backup/hackon-<대회>-<시각>.json). 휴지통 줄과 같은 30일 — 팀 연락처가 통째로 들어 있다.
+   DB 통째 백업(.db)은 backup() 이 12벌로 돌린다. 이건 그 목록에 안 걸려 끝없이 쌓였다 */
+function sweepDumps(dir, days = 30, now = Date.now()) {
+  let n = 0;
+  let files = [];
+  try { files = fs.readdirSync(dir); } catch { return 0; }
+  for (const f of files) {
+    if (!/^hackon-.+\.json$/.test(f)) continue;
+    const fp = path.join(dir, f);
+    try { if (now - fs.statSync(fp).mtimeMs > days * 864e5) { fs.rmSync(fp, { force: true }); n++; } } catch {}
+  }
+  return n;
 }
 
 function manualPage(md) {
@@ -7514,6 +7669,13 @@ function routes(db) {
         res.writeHead(Object.keys(res.corsHeaders).length ? 204 : 403, res.corsHeaders);
         return res.end();
       }
+      /* 안드로이드 앱 링크 확인 파일. www 로 와도 넘기지 않고 그 자리에서 낸다 — 구글 검증기는 리다이렉트를 따라가지 않는다 */
+      if (p === '/.well-known/assetlinks.json' && req.method === 'GET') {
+        const al = assetLinks(process.env.TWA_PACKAGE, process.env.TWA_SHA256);
+        if (!al) throw new HttpError(404, '없습니다');
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600', ...SEC_HEADERS });
+        return res.end(JSON.stringify(al));
+      }
       const bare = wwwTo(req.headers.host);
       if (bare) { res.writeHead(301, { location: bare + req.url }); return res.end(); }
       /* 학습용 수집기는 문에서 돌려보낸다(robots 를 안 지키는 놈까지) */
@@ -9061,10 +9223,10 @@ function routes(db) {
           }) + eventLd(ev, base)));
         }
       }
-      /* 개인정보 처리방침 — 앱스토어가 요구한다. 앱과 웹이 같은 것을 받는다 */
-      if (p === '/privacy') {
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
-        return res.end(privacyPage());
+      /* 개인정보 처리방침·이용 규칙 — 앱스토어·플레이가 요구한다. 앱과 웹이 같은 것을 받는다 */
+      if (p === '/privacy' || p === '/terms') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', ...SEC_HEADERS });
+        return res.end(p === '/privacy' ? privacyPage() : termsPage());
       }
       if (p === '/manual') {
         let md = '';
@@ -10008,6 +10170,53 @@ async function selftest() {
       db.prepare('UPDATE events SET title=? WHERE id=?').run('주입\rATTENDEE:evil@x.test\r\nX-EVIL:1', ch.id);
       const ics2 = calIcs(db, refs, 'https://x.test');
       ok(!/\r(?!\n)/.test(ics2) && !/\r\nATTENDEE/.test(ics2) && !/\r\nX-EVIL/.test(ics2), '내 달력 — 제목의 줄바꿈으로 달력 파일에 줄을 끼워 넣지 못한다');
+    }
+    /* 법·약관 — 처리방침·이용 규칙·안드로이드 앱 링크·지운 대회 사본 파일 */
+    {
+      const FP = Array.from({ length: 32 }, (_, i) => (i * 7 % 256).toString(16).padStart(2, '0').toUpperCase()).join(':');
+      const al = assetLinks('kr.hackon.app', FP.toLowerCase() + ' , ' + FP);
+      ok(Array.isArray(al) && al.length === 1 && al[0].relation[0] === 'delegate_permission/common.handle_all_urls'
+         && al[0].target.namespace === 'android_app' && al[0].target.package_name === 'kr.hackon.app'
+         && JSON.stringify(al[0].target.sha256_cert_fingerprints) === JSON.stringify([FP]),
+         '앱 링크 — 패키지·지문이 맞으면 Digital Asset Links 한 장(지문은 대문자로, 겹치면 하나)');
+      ok(assetLinks('kr.hackon.app', FP + ',' + FP.replace(/^../, 'AB')).length === 1
+         && assetLinks('kr.hackon.app', FP + ',' + FP.replace(/^../, 'AB'))[0].target.sha256_cert_fingerprints.length === 2,
+         '앱 링크 — 지문을 쉼표로 여럿 받는다');
+      const bad = [['', FP], [undefined, FP], ['hackon', FP], ['1kr.hackon', FP], ['kr..hackon', FP], ['kr.hackon-app', FP], ['kr.hackon.', FP],
+                   ['kr.hackon.app', ''], ['kr.hackon.app', undefined], ['kr.hackon.app', FP.slice(0, -3)], ['kr.hackon.app', FP + ':00'],
+                   ['kr.hackon.app', FP.replace(/:/g, '')], ['kr.hackon.app', FP.replace(/^../, 'ZZ')], ['kr.hackon.app', FP + ',nope']];
+      ok(bad.every(([p, s]) => assetLinks(p, s) === null), '앱 링크 — 패키지 이름·지문 모양이 하나라도 틀리면 안 낸다(404): '
+         + bad.filter(([p, s]) => assetLinks(p, s) !== null).map(x => JSON.stringify(x)).join(' '));
+      const pv = privacyPage(), tv = termsPage(), src = fs.readFileSync(__filename, 'utf8');
+      ok(pv.includes('hackon.kr') && !pv.includes('hackon.mandeun.com'), '처리방침 — 대표 주소 hackon.kr 로 적는다(옛 mandeun 주소 없음)');
+      ok(pv.includes('위탁') && pv.includes('국외 이전') && pv.includes('만 14세') && pv.includes(LEGAL_SINCE),
+         '처리방침 — 위탁·국외 이전·만 14세·시행일');
+      ok(/<b>개인정보 보호책임자<\/b> — HACK:ON 운영자 · <a href="mailto:hi@mandeun\.com">/.test(pv), '처리방침 — 보호책임자를 이름 대신 «HACK:ON 운영자 · hi@mandeun.com» 으로 적는다');
+      /* 글자 하나로 보면 공회전한다 — 화면 글꼴 이름(Apple SD Gothic)에도 «Apple» 이 있다. 줄·절을 잘라서 본다 */
+      const cut = (from, to = '</') => ((pv.split(from)[1] || '').split(to)[0]);
+      const loginLine = cut('<b>로그인(선택)</b>', '</li>'), p4 = cut('id="p4"', '</section>'), p5 = cut('id="p5"', '</section>');
+      ok(['카카오', '구글', '네이버', 'Apple'].every(l => loginLine.includes(l)) && Object.values(LOGINS).every(l => loginLine.includes(l.label)),
+         '처리방침 — 로그인 줄에 공급자를 빠짐없이 적는다(LOGINS 에 붙이면 여기도): ' + loginLine.slice(0, 60));
+      const reg = (String(fs.readFileSync(path.join(ROOT, 'fly.toml'), 'utf8')).match(/primary_region\s*=\s*"(\w+)"/) || [])[1];
+      ok(({ nrt: '도쿄' })[reg] && pv.includes(({ nrt: '도쿄' })[reg]) && pv.includes('Fly.io'), '처리방침 — 서버 지역이 fly.toml 의 primary_region 과 같다: ' + reg);
+      ok(!src.includes('api.resend' + '.com') || (p4.includes('Resend, Inc.') && p5.includes('Resend, Inc.(미국)')), '처리방침 — 메일을 Resend 로 보내면 위탁·국외 이전 둘 다에 적는다');
+      ok(p4.includes('Fly.io, Inc.') && p5.includes('Fly.io, Inc.(미국 회사)'), '처리방침 — 서버 회사를 위탁·국외 이전 둘 다에 적는다');
+      ok(pv.includes('href="/terms"') && pv.includes('href="/delete-account"') && pv.includes('href="/"'), '처리방침 — 이용 규칙·계정 삭제·첫 화면으로 가는 길');
+      ok(pv.includes('위쪽 «계정 삭제»') && pv.includes('«대회» 탭'), '처리방침 — 계정 삭제 자리를 화면 그대로(«대회» 탭 위쪽)');
+      ok(tv.includes('신고하면 저절로 내려갑니다') && tv.includes('만 14세') && tv.includes('24시간') && tv.includes('보여 줄 권한만') && tv.includes('href="/privacy"'),
+         '이용 규칙 — 신고·만 14세·24시간·글의 권리·처리방침 길');
+      ok(tv.includes(({ 2: '두 사람', 3: '세 사람', 4: '네 사람', 5: '다섯 사람' })[BOARD_HIDE_AT] || '모름'), '이용 규칙 — 저절로 내려가는 신고 수가 BOARD_HIDE_AT 과 같다');
+      ok(!/hidden|undefined/.test(pv + tv), '법·약관 — 감춘 줄·빈 값 없음');
+      ok(sitemap(db).includes('/terms</loc>'), 'sitemap 에 이용 규칙(/terms)');
+      /* 지운 대회 사본 파일 — 30일 넘은 .json 만 지운다. DB 백업(.db)·다른 파일은 안 건드린다 */
+      const dd = fs.mkdtempSync(path.join(require('os').tmpdir(), 'hackon-dumps-'));
+      const put = (f, age) => { fs.writeFileSync(path.join(dd, f), '{}'); const t = (Date.now() - age * 864e5) / 1000; fs.utimesSync(path.join(dd, f), t, t); };
+      put('hackon-old1-2026-01-01T00-00-00.json', 31); put('hackon-new1-2026-09-30T00-00-00.json', 29);
+      put('hackon-2026-01-01T00-00-00.db', 40); put('keep-me.json', 40);
+      ok(sweepDumps(dd) === 1 && fs.readdirSync(dd).sort().join(',') === 'hackon-2026-01-01T00-00-00.db,hackon-new1-2026-09-30T00-00-00.json,keep-me.json',
+         '지운 대회 사본 파일 — 30일 넘은 것만 지운다: ' + fs.readdirSync(dd).join(','));
+      ok(sweepDumps(path.join(dd, 'none')) === 0, '사본 폴더가 없어도 멈추지 않는다');
+      fs.rmSync(dd, { recursive: true, force: true });
     }
     /* 대회 혜택 — 확정된 것만, 끝난 대회·비공개 대회는 빼고 */
     {
@@ -12951,8 +13160,10 @@ function main() {
   const tick = () => { try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); } };
   tick();
   setInterval(tick, 10 * 60 * 1000).unref();
-  try { purgeOld(db); } catch (e) { console.error('purge', e.message); }
-  setInterval(() => { try { purgeOld(db); } catch (e) { console.error('purge', e.message); } }, 60 * 60 * 1000).unref();
+  /* 보유 기간 — DB 의 연락처(purgeOld)와 지운 대회의 사본 파일(sweepDumps, 30일). 처리방침 3절이 이 둘을 약속한다 */
+  const purge = () => { try { purgeOld(db); sweepDumps(path.join(path.dirname(DBFILE), 'backup')); } catch (e) { console.error('purge', e.message); } };
+  purge();
+  setInterval(purge, 60 * 60 * 1000).unref();
   const sweep = () => sweepSamples(db).catch(e => console.error('sample sweep', e.message));
   sweep(); setInterval(sweep, 60 * 60 * 1000).unref();
   /* 해커온뉴스 — 켜지고 15초 뒤 한 번, 그 뒤 6시간마다. 밖이 죽어도 앱은 산다. */
