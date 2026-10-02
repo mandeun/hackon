@@ -4,7 +4,7 @@ FROM node:24-alpine
 
 WORKDIR /app
 # GUIDE.md 는 /manual 이 읽어서 화면으로 만든다. 빠지면 배포판에서만 매뉴얼이 404 가 난다.
-COPY server.js home.html hack-on.html news.html en.html qr.js sw.js manifest.webmanifest icon.svg logo.svg og.png hero.jpg norangi.svg norangi-run.svg norangi-hi.svg norangi-vibe.svg norangi-on.svg club.html tools.html story-norangi.svg brand.html delete-account.html package.json GUIDE.md start.sh ./
+COPY server.js home.html hack-on.html news.html en.html qr.js sw.js manifest.webmanifest icon.svg logo.svg og.png hero.jpg norangi.svg norangi-run.svg norangi-hi.svg norangi-vibe.svg norangi-on.svg club.html tools.html story-norangi.svg brand.html delete-account.html package.json GUIDE.md start.sh icon-192.png icon-512.png icon-maskable-512.png offline.html ./
 
 # 백업 한 벌을 볼륨 밖으로 보내는 바이너리. 태그를 고정한다 — latest 로 두면
 # 다시 빌드할 때마다 다른 litestream 이 들어온다.
