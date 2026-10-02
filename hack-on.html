@@ -841,6 +841,14 @@ const view = $('#view');
 /* 구글 캘린더 종일 일정은 끝 날짜가 «다음 날»이다(배타). 하루 대회면 ends+1 */
 const gcalEnd = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10).replace(/-/g, ''); };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+/* 신고·차단 — 앱스토어 지침 1.2. 참가자에게는 계정이 없으니 차단은 «이 기기에서 그 팀 글을 안 본다» 이다.
+   «대회 id|팀 이름» 으로 적는다. 막을 때 신고도 같이 넣어 운영자가 본다(운영 화면 «신고» 카드). */
+const blockList = () => { try { return JSON.parse(localStorage.getItem('hackon.block') || '[]'); } catch (_) { return []; } };
+const isBlocked = (ev, team) => blockList().includes(ev + '|' + team);
+const repBtns = (ev, kind, ref, team) => LIVE
+  ? ` <button class="lnk" data-rep="${esc(kind)}" data-ev="${esc(ev)}" data-ref="${esc(String(ref))}" data-team="${esc(team)}">신고</button>`
+    + ` <button class="lnk" data-blk="${esc(team)}" data-ev="${esc(ev)}" data-kind="${esc(kind)}" data-ref="${esc(String(ref))}">차단</button>` : '';
+const blockedNote = (ev, n) => n ? `<div class="meta" style="margin-top:8px">차단한 팀의 글 ${n}개를 숨겼습니다. <button class="lnk" data-unblk="${esc(ev)}">차단 풀기</button></div>` : '';
 /* 장소 제보 칩. 그릴 때와 제보를 넣은 뒤에 같은 함수를 쓴다 — 두 곳에 적으면 한쪽만 고치게 된다.
    제보가 하나도 없으면 0 을 그리지 않는다. 없는 것과 «모르는 것» 은 다르다. */
 function vchip(t) {
@@ -2692,6 +2700,8 @@ const SCREEN = {
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const qas = LIVE ? await api(`/events/${cur}/questions`).catch(() => []) : [];
     const e = d.event;
+    /* 들어온 신고. 못 읽었으면 null — «신고 0건» 과 «모름» 을 같은 화면으로 그리지 않는다 */
+    const reps = (LIVE && e.admin) ? await api(`/events/${cur}/reports`).catch(() => null) : [];
     /* 선발형 프로젝트 — 지원자 카드. 연락처 없이 기록만(수락하면 명단에 연락처가 붙는다) */
     const apps = (LIVE && e.pick) ? await api(`/events/${cur}/applicants`).then(r => r.rows).catch(() => null) : [];
     /* 운영자 board 에는 심사·투표 열쇠가 딸려 온다. 적어 두면 링크·창 열기가 늘 된다. */
@@ -2718,7 +2728,8 @@ const SCREEN = {
                      : e.pmode ? (r.pscore === null ? '—' : r.pscore + ' (' + r.pairs + '번)')
                      : (r.score === null ? '—' : String(r.score));
       /* 만든 것. 마감 전에는 서버가 주소를 안 내려보내므로 이 목록은 저절로 빈다. */
-      const made = d.rows.filter(r => r.url);
+      const madeAll = d.rows.filter(r => r.url);
+      const made = madeAll.filter(r => !isBlocked(e.id, r.name));
       return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 참가 ${e.teams}팀</p>
       ${dueBox(e)}
@@ -2729,14 +2740,15 @@ const SCREEN = {
           <table><tr><th>순위</th><th>팀</th><th class="n">${sHead}</th></tr>
           ${d.rows.map(r => `<tr><td>${r.rank ?? '—'}</td><td>${esc(r.name)}</td>
             <td class="n">${esc(sOf(r))}</td></tr>`).join('')}</table>
-          ${made.length ? `<h3 style="margin-top:18px">무엇을 만들었나</h3>
+          ${madeAll.length ? `<h3 style="margin-top:18px">무엇을 만들었나</h3>
             ${made.map(r => `<div class="card">
               <h3>${r.rank ? r.rank + '위 · ' : ''}${esc(r.name)}</h3>
+              <div class="meta">${repBtns(e.id, 'submission', r.id, r.name).trim()}</div>
               ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
               <div style="height:9px"></div>
               <a class="btn sec sm" target="_blank" rel="noopener noreferrer"
                 href="${/^https?:\/\//i.test(r.url) ? esc(r.url) : '#'}">만든 것 열기</a>
-            </div>`).join('')}` : ''}`
+            </div>`).join('')}${blockedNote(e.id, madeAll.length - made.length)}` : ''}`
         : `<h3>나온 팀</h3>
           <table><tr><th>자리</th><th>팀</th><th class="n">제출</th></tr>
           ${d.rows.map(r => `<tr><td>${r.no}</td><td>${esc(r.name)}</td>
@@ -3072,6 +3084,17 @@ const SCREEN = {
         </div>` : ''}
       </div>`; })()}
 
+      ${(() => {
+        if (reps === null) return `<div class="card" id="rep-op"><h3>신고</h3><div class="meta">신고 목록을 못 읽었습니다. 새로고침해 보세요.</div></div>`;
+        if (!reps.length) return '';
+        const KIND = { question: '질문', team: '팀', submission: '제출작', sponsor: '후원', other: '기타' };
+        const open = reps.filter(r => !r.done).length;
+        return `<div class="card" id="rep-op"><h3>신고 <span class="pill${open ? ' warn' : ''}">${open} 대기</span></h3>
+        <div class="meta">참가자·관객이 넣은 신고입니다. <b>24시간 안에</b> 보고, 질문이면 아래 «내리기»로 내린 뒤 «처리함»을 누르세요.</div>
+        ${reps.map(r => `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)">
+          <div><b>${esc(KIND[r.kind] || r.kind)}</b>${r.ref ? ' #' + esc(r.ref) : ''} · ${esc(r.reason)}${r.note ? ' · ' + esc(r.note) : ''}</div>
+          <div class="meta" style="margin-top:4px">${esc(r.at)} ${r.done ? '<span class="pill ok">처리함</span>' : `<button class="lnk" data-repdone="${r.id}">처리함</button>`}</div>
+        </div>`).join('')}</div>`; })()}
       ${(() => { const qs = qas || []; if (!qs.length) return '';
         return `<div class="card" id="qa-op"><h3>질문 <span class="pill">${qs.filter(q => !q.answer).length} 대기</span></h3>
         <div class="meta">참가팀이 팀 열쇠로 물은 것입니다. 답하면 소식에 «답변»으로 올라갑니다.</div>
@@ -3413,17 +3436,19 @@ const SCREEN = {
         <ul class="news" id="news-list">${notes.map(newsRow).join('')}</ul></div>` : ''}
       ${(() => {
         /* 묻고 답하기 — 커뮤니티가 아니다. 팀 열쇠로 묻고 운영자만 답한다. 급한 것은 대화방으로 */
-        const qs = qas || [];
+        const qsAll = qas || [];
+        const myName = mine ? mine.name : null;
+        const qs = qsAll.filter(q => q.team === myName || !isBlocked(e.id, q.team));
         const canAsk = mine && !ended && tkeyOf(mine.id);
-        if (!qs.length && !canAsk) return '';
+        if (!qsAll.length && !canAsk) return '';
         return `<div class="card" id="qa"><h3>질문 <span class="pill">${qs.length}</span></h3>
           <div class="meta">참가팀이 묻고 운영자가 답합니다. 답은 소식에도 올라갑니다.${e.chat ? ' 지금 급한 것은 <b>대화방</b>으로.' : ''}</div>
           ${canAsk ? `<div class="shrow" style="margin-top:8px"><input id="q-in" maxlength="200" placeholder="한 줄로 (200자)"><button class="btn sm" id="q-go">묻기</button></div>` : ''}
           ${canAsk ? '<div class="meta" style="margin-top:4px">연락처는 적지 마세요 — 모두가 봅니다. 답 없는 질문은 셋까지.</div>' : ''}
           ${qs.map(q => `<div class="qrow" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)">
-            <div><b>${esc(q.team)}</b> · ${esc(q.text)}</div>
+            <div><b>${esc(q.team)}</b> · ${esc(q.text)}${q.team === myName ? '' : repBtns(e.id, 'question', q.id, q.team)}</div>
             ${q.answer ? `<div class="meta" style="margin-top:4px">↳ ${esc(q.answer)}</div>` : `<div class="meta" style="margin-top:4px">${q.waiting ? '답을 기다리는 중 (하루 넘음)' : '답을 기다리는 중'}${canAsk && q.team === mine.name ? ` <button class="lnk" data-qclose="${q.id}">내 질문 닫기</button>` : ''}</div>`}
-          </div>`).join('')}</div>`; })()}
+          </div>`).join('')}${blockedNote(e.id, qsAll.length - qs.length)}</div>`; })()}
       ${(reqs.length || !ended) ? `<div class="card" id="reqs"><h3>이 대회의 주제 · 요청 <span class="pill">${reqs.length}</span></h3>
         <div class="meta">후원자가 낸 관심 주제와 의뢰자가 낸 번거로운 일입니다.</div>
         ${reqs.map(r => `<div class="card" style="margin-top:9px">
@@ -3536,16 +3561,19 @@ const SCREEN = {
       ${(() => {
         /* 마감 전에는 무엇을 만들고 있는지만 보이고 링크는 안 보인다.
            서버가 아예 안 내려보낸다 - 화면에서만 감추면 소용이 없다. */
-        const made = d.rows.filter(r => r.done || r.hidden || r.note);
-        if (meet || !made.length) return '';
+        const madeAll = d.rows.filter(r => r.done || r.hidden || r.note);
+        const made = madeAll.filter(r => String(r.id) === String(myId) || !isBlocked(e.id, r.name));
+        if (meet || !madeAll.length) return '';
         return `<h3>${d.closed ? '제출작' : '무엇을 만들고 있나'}</h3>
           ${d.closed ? '' : `<p class="sub">링크는 <b>마감 뒤</b>에 한꺼번에 열립니다.
             먼저 낸 팀이 손해를 보지 않게 하기 위해서입니다.</p>`}
           ${made.map(r => `<div class="card"${r.featured ? ' style="border-left:3px solid var(--acc)"' : ''}>
             <h3>${r.featured ? '⭐ ' : ''}${esc(r.name)}${r.featured ? ' <span class="pill">추천작</span>' : ''}</h3>
+            ${String(r.id) === String(myId) ? '' : `<div class="meta">${repBtns(e.id, 'submission', r.id, r.name).trim()}</div>`}
             ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
             ${r.url ? `<div class="share" style="margin-top:10px">${esc(r.url)}</div>` : ''}
-            ${(r.words_public || []).length ? `<div class="meta" style="margin-top:8px"><b>사람들이 남긴 말</b><br>${r.words_public.map(w => '“' + esc(w) + '”').join('<br>')}</div>` : ''}</div>`).join('')}`;
+            ${(r.words_public || []).length ? `<div class="meta" style="margin-top:8px"><b>사람들이 남긴 말</b><br>${r.words_public.map(w => '“' + esc(w) + '”').join('<br>')}</div>` : ''}</div>`).join('')}
+          ${blockedNote(e.id, madeAll.length - made.length)}`;
       })()}
 
       ${sup.rows.length ? `<h3>끝난 뒤에도 봐 드립니다</h3>
@@ -5917,6 +5945,28 @@ function wire() {
       setTimeout(() => location.reload(), 700);
     } catch (e) { flash(e.message, true); }
   };
+  document.querySelectorAll('[data-rep]').forEach(b => b.onclick = async () => {
+    try {
+      await api('/reports', { method: 'POST', body: { event: b.dataset.ev, kind: b.dataset.rep, ref: b.dataset.ref, reason: '불쾌하거나 부적절함', note: b.dataset.team } });
+      flash('신고했습니다. 운영자가 확인합니다');
+    } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-blk]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.ev + '|' + b.dataset.blk, l = blockList();
+    if (!l.includes(k)) l.push(k);
+    try { localStorage.setItem('hackon.block', JSON.stringify(l)); } catch (_) { return flash('이 브라우저는 차단 목록을 저장하지 못합니다', true); }
+    /* 차단도 신고로 남긴다 — 운영자가 «누가 막혔나» 를 본다. 신고가 실패해도 차단은 된다 */
+    try { await api('/reports', { method: 'POST', body: { event: b.dataset.ev, kind: b.dataset.kind, ref: b.dataset.ref, reason: '차단함', note: b.dataset.blk } }); } catch (_) {}
+    flash('차단했습니다. 이 기기에서 그 팀 글이 안 보입니다');
+    render();
+  });
+  document.querySelectorAll('[data-unblk]').forEach(b => b.onclick = () => {
+    try { localStorage.setItem('hackon.block', JSON.stringify(blockList().filter(k => !k.startsWith(b.dataset.unblk + '|')))); } catch (_) {}
+    render();
+  });
+  document.querySelectorAll('[data-repdone]').forEach(b => b.onclick = async () => {
+    try { await api(`/reports/${b.dataset.repdone}/done`, { method: 'POST', body: {} }); render(); } catch (e) { flash(e.message, true); }
+  });
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
