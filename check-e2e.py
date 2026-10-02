@@ -3457,10 +3457,10 @@ with sync_playwright() as pw:
         # 시간 통 — 날짜 스무 줄 대신 통 이름
         bks = pg.evaluate("[...document.querySelectorAll('#list h3.bk')].map(h => h.textContent.split(' ')[0])")
         A(bks and set(bks) <= {"오늘", "어제", "이번", "그전"}, f"시간 통이 아니라 날짜가 찍혀 있다: {bks[:5]}")
-        # 두껍게 그린 줄은 전부 «그래서 뭘 하나» 한 줄을 갖는다. 이게 이 화면의 값이다.
+        # 10/03 — «그래서 뭘 하나» 는 제목 신호가 있을 때만. 대신 두꺼운 줄은 «할 일» 이나 «바로 해 보기 명령» 중 하나는 있어야 쓸모가 있다
         fat = pg.evaluate("document.querySelectorAll('#list .it:not(.q)').length")
-        dos = pg.evaluate("document.querySelectorAll('#list .it:not(.q) .do').length")
-        A(0 < dos <= fat, f"«그래서 뭘 하나» 가 하나도 없다: 두꺼운 줄 {fat}, 한 줄 있는 것 {dos}")
+        useful = pg.evaluate("[...document.querySelectorAll('#list .it:not(.q)')].filter(it => it.querySelector('.do, .try, .zh, .ez')).length")
+        A(fat == 0 or useful > 0, f"두꺼운 줄 {fat} 개 중 할 일·명령·풀이가 붙은 줄이 하나도 없다")
         # 같은 문장이 잇달아 두 번 나오면 값이 아니라 채움말이다 — 둘째부터는 지운다.
         run = pg.evaluate("""() => {
           let worst = '';
