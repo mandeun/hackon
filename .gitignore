@@ -12,3 +12,8 @@ backlog/.locks/
 
 # 홍보 효과음 — 스크립트로 다시 만든다
 promo/sfx/
+
+# 스토어 스크린샷 — store/shots.py 가 만든다
+store/out/
+# 홍보 그림 — promo/ig_1031.py 가 만든다(HACKON_OUT 으로 바꿀 수 있다)
+promo/out/
