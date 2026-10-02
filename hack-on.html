@@ -4411,7 +4411,10 @@ const SCREEN = {
     const deals = mineFirst(rows.filter(r => r.kind === 'deal')).slice(0, 3);
     /* 새 모델·도구 — 소식 종류가 «새 도구» 이거나, 제목이 출시·공개를 말하는 것(새 모델 소식은 읽을거리 출처에서도 온다) */
     const LAUNCH = /출시|공개|새 모델|업데이트|launch|release|introduc|now available|\bGA\b/i;
-    const fresh = rows.filter(r => r.kind !== 'deal' && (r.kind === 'tool' || r.kind === 'pick' || LAUNCH.test(r.title || ''))).slice(0, 3);
+    /* 한자가 넷 넘게 이어지는 제목(중국어 저장소 소개 등)은 빼고, 출시·공개를 말하는 줄을 먼저 */
+    const readable = r => !/[\u4e00-\u9fff]{4,}/.test(r.title || '');
+    const fresh = rows.filter(r => r.kind !== 'deal' && readable(r) && (r.kind === 'tool' || r.kind === 'pick' || LAUNCH.test(r.title || '')))
+      .sort((a, b) => (LAUNCH.test(b.title || '') ? 1 : 0) - (LAUNCH.test(a.title || '') ? 1 : 0)).slice(0, 3);
     const tip = recipe ? String(recipe).split('\n').find(l => /^첫 작업/.test(l)) || String(recipe).split('\n')[0] : '';
     const day = new Date(now + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
     BRIEF_TEXT = ['☀️ HACK:ON 오늘 켤 것 — ' + day,

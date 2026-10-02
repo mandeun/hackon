@@ -104,12 +104,21 @@ def prep_judge(pg):
     pg.get_by_role("button", name="시작").click(); pg.wait_for_timeout(1200)
 
 
+def prep_brief(pg):
+    # 지갑에 마감 둘과 직무를 심고 다시 연다 — 브리핑은 이 기기에 있는 것으로 그린다(서버에 없음)
+    soon = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
+    pg.evaluate("""s => { localStorage.setItem('hackon.waljob', '개발');
+      localStorage.setItem('hackon.wallet', JSON.stringify([{name:'지원사업 서류 제출', kind:'due', date:s}, {name:'Cursor 무료 체험', kind:'trial', date:s}])); }""", soon)
+    pg.reload(wait_until="domcontentloaded"); pg.wait_for_selector("#br-work", timeout=8000); pg.wait_for_timeout(800)
+
+
 SHOTS = [  # (이름, 경로, 준비, 운영자 열쇠를 심나, 캡션 위, 캡션 아래, 가로 화면인가)
     ("make", "/app", prep_make, False, "이름 하나로", "대회를 엽니다", False),
     ("public", f"/e/{EID}", prep_public, False, "링크 하나로", "모집·신청까지", False),
     ("host", f"/app#{EID}", prep_host, True, "당일 운영은", "한 화면에서", False),
     ("tv", f"/tv/{EID}", prep_tv, False, "큰 화면은 프로젝터로,", "심사는 폰으로", True),
     ("qa", f"/e/{EID}", prep_qa, False, "묻고 답하기,", "신고·차단도 바로", False),
+    ("brief", "/brief", prep_brief, True, "아침마다", "오늘 켤 것 한 장", False),
 ]
 
 
