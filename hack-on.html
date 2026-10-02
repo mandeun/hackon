@@ -4334,6 +4334,35 @@ const SCREEN = {
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/setups">세팅 모음</a> · <a href="/news">해커온뉴스</a></p>`;
   },
 
+  /* 협찬·협업 안내 — 대회 하나가 아니라 해커온 전체에 주는 것. 대회별 자리·희망가는 /give/<id> 가 맡는다.
+     금액은 «제안가» 다 — 이야기해서 정한다. 개인정보는 동의한 참가자 것만, 동의 범위 안에서만 넘긴다.
+     이 앱은 돈을 받지 않는다 — 주고받는 것은 주최자와 직접 */
+  async partner() {
+    const tiers = [
+      ['현물', '간식·음료 · 장소 · 상품 · 도구 크레딧', '돈 대신 물건으로', ['대회 페이지·현장 큰 화면·결과 보고서에 이름', '크레딧은 결과물을 낸 팀에게만 — 실제로 쓰인 숫자를 보고서로', '현장 사진(촬영 동의한 사람만)']],
+      ['스위치', '10만~30만 원', '간식·상금 한 몫', ['위 셋 + 로고', '결과 보고서에 «함께한 곳» 한 줄과 감사 글', '해커온뉴스에 «이번 대회를 켠 곳» 한 줄']],
+      ['콘센트', '50만~100만 원', '상 하나를 맡기', ['위 전부 + «○○상» 이름으로 시상', '현장에서 2분 소개', '채용·협업 제안에 동의한 참가자에게 연락할 길(동의 범위 안에서만)']],
+      ['발전소', '300만 원~', '주제를 내고 결과를 먼저', ['위 전부 + 대회 주제(풀 문제) 내기', '심사위원 한 자리', '결과물 마감 직후 먼저 보기·우선 협업 제안', '분기 리포트(참가·완주·결과물·후기)']],
+      ['정기 후원', '월 10만 원~', '아침 브리핑·해커온뉴스', ['«오늘 켤 것»·뉴스에 «후원» 표시 한 줄(광고로 숨기지 않는다)', '분기 리포트', '그 분기 대회 전체에 이름']],
+      ['공동 주최', '돈 대신 사람·장소·홍보', '커뮤니티·학교·기관', ['공동 주최 표기, 운영 도구 무료', '심사·멘토 자리', '결과 보고서를 그대로 기관 실적에']],
+    ];
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">협찬·협업</span></div>
+        <h2>같이 켜기</h2>
+        <p class="sub" style="margin-bottom:0">주시는 것마다 받는 것을 한 장에. 금액은 <b>제안가</b>이고 이야기해서 정합니다. 해커온은 돈을 받아 두지 않습니다 — 주최자와 직접 주고받습니다.</p></section>
+      ${tiers.map(([name, price, sub, gets]) => `<div class="card" data-tier="${esc(name)}">
+          <div class="top" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h3 style="margin:0">${esc(name)}</h3><span class="pill">${esc(sub)}</span></div>
+          <div class="price">${esc(price)}<small>제안가</small></div>
+          <ul class="checks">${gets.map(g => `<li><span>${esc(g)}</span></li>`).join('')}</ul></div>`).join('')}
+      <div class="card"><h3>지키는 것</h3><ul class="checks">
+        <li><span>참가자 연락처는 <b>그 사람이 동의한 것만</b>, 동의한 목적으로만 넘깁니다. 언제든 끌 수 있습니다.</span></li>
+        <li><span>숫자는 행사 기록에서만 나옵니다. 못 센 것은 «모름» 으로 적습니다 — 부풀리지 않습니다.</span></li>
+        <li><span>후원 표시는 숨기지 않습니다. 소식·브리핑 속 후원은 «후원» 이라고 붙습니다.</span></li></ul></div>
+      <div class="card"><h3>이야기하기</h3><div class="meta">한 줄이면 됩니다 — 어떤 걸 주실 수 있는지, 언제쯤.</div>
+        <a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:10px" href="mailto:hi@mandeun.com?subject=${encodeURIComponent('[협찬·협업] ')}">hi@mandeun.com 으로 보내기</a>
+        <div class="meta" style="margin-top:8px">특정 대회의 자리별 희망가는 그 대회의 «협찬 안내» 에 있습니다. <a href="/give">줄 수 있는 것 고르기</a></div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/thanks">기여자</a></p>`;
+  },
+
   /* 기여자 — 코드·새 서비스·운영·콘텐츠로 해커온을 같이 켠 사람. 점수마다 «무엇을 했나» 한 줄이 같이 보인다 */
   async thanks() {
     let d = null; try { d = await api('/thanks'); } catch { d = null; }
@@ -7805,6 +7834,7 @@ const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파�
 const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
+const PTN = location.pathname === '/partner';    // 협찬·협업 안내 — 주시는 것별로 받는 것 한 장
 const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
 const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
@@ -7851,6 +7881,7 @@ else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'non
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (PTN) { tab = 'partner'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

@@ -4265,5 +4265,15 @@ with sync_playwright() as pw:
     A("해커온을 같이 켠 사람들" in _tt and "기여하는 길" in _tt, f"기여자 화면이 아니다: {_tt[:120]}")
     b.close()
 ok("기여자 장부 — 공개 화면, 운영자만 적고, 수익 나눔 계산도 운영자만")
+
+# ── 협찬·협업 안내 /partner — 주시는 것별 받는 것, 제안가, 지키는 것 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("partner: " + str(e)))
+    pg.goto(BASE + "/partner", wait_until="networkidle"); pg.wait_for_selector("[data-tier]")
+    _pt = pg.inner_text("#view")
+    A(pg.locator("[data-tier]").count() == 6 and "제안가" in _pt and "동의한 것만" in _pt and "공동 주최" in _pt, f"협찬·협업 안내가 덜 그려진다: {_pt[:200]}")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "협찬·협업 안내가 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("협찬·협업 안내 — 현물·금액·정기·공동 주최 여섯 갈래, 제안가, 개인정보는 동의한 것만")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
