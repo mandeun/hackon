@@ -4454,8 +4454,9 @@ ok("이번 주 확 뜬 것 — 7일 동안 는 만큼(+300), 하루치는 판 �
 with sync_playwright() as pw:
     b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
     pg.goto(BASE + "/", wait_until="networkidle")
-    _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !a.hidden && a.offsetParent).map(a => a.textContent.trim())")
-    A(len(_vis) <= 5, f"첫 화면 고리가 다섯을 넘는다: {_vis}")
+    # «있을 때만 뜨는 것»(id 가 nav- 로 시작 — 강의·마켓·순위·그날의 조건)은 자료가 생기면 켜진다. 늘 보이는 고리만 센다
+    _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
+    A(len(_vis) <= 5, f"첫 화면 늘 보이는 고리가 다섯을 넘는다: {_vis}")
     _groups = pg.evaluate("[...document.querySelectorAll('nav.sec .more-in .mg')].map(x => x.textContent.trim())")
     A(_groups == ["참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 셋이 아니다: {_groups}")
     _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
