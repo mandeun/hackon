@@ -4115,7 +4115,7 @@ with sync_playwright() as pw:
     # 해지 후보 — 구독에 «안 씀» 을 고르면 끊을 것과 아낄 금액이 뜬다
     pg.fill("#wl-name", "안 쓰는 구독"); pg.click('[data-wkind="renew"]'); pg.fill("#wl-date", "2099-06-01"); pg.select_option("#wl-every", "month")
     pg.fill("#wl-won", "14000"); pg.click("#wl-go"); pg.wait_for_timeout(500)
-    _sel = pg.locator("[data-wuse]").last; _sel.select_option("none"); pg.wait_for_timeout(500)
+    _sel = pg.locator("#wal-list > div", has_text="안 쓰는 구독").locator("[data-wuse]"); _sel.select_option("none"); pg.wait_for_timeout(500)
     _wl = pg.inner_text("#wal-list")
     A("해지 후보" in _wl and "14,000원 아낌" in _wl, f"«안 씀» 구독이 해지 후보·아낄 금액으로 안 뜬다: {_wl[:200]}")
     b.close()
