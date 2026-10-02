@@ -706,8 +706,10 @@ function ownsPerson(db, pid, tkey) {
     한글 숫자·o/O 를 숫자로 바꾸고 구분자를 지운 뒤 01X 로 시작하는 10~11자리를 본다. 메신저 이름 뒤 아이디도 막는다.
     완벽할 수는 없다 — 목표는 «긁어 가기 쉬운 꼴» 을 공개 칸에서 없애는 것이다 */
 const KO_DIGIT = { 공: '0', 영: '0', 일: '1', 이: '2', 삼: '3', 사: '4', 오: '5', 육: '6', 칠: '7', 팔: '8', 구: '9' };
+/* 보이지 않는 글자·전각 숫자·여러 가지 줄표로 거름을 피하던 것(레드팀 10/03 «010‑1234‑5678», «０１０…», 0폭 공백) — 먼저 펴서 본다 */
+const unhide = t => String(t || '').normalize('NFKC').replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, '').replace(/[\u2010-\u2015\u2212\uff0d]/g, '-');
 function looksContact(t) {
-  const s = String(t || '');
+  const s = unhide(t);
   if (/@|open\.kakao\.com|https?:\/\/(?!hackon\.kr)/i.test(s)) return true;
   if (/(카톡|카카오|kakao|오픈\s?채팅|텔레(그램)?|telegram|라인|\bline\b|디엠|\bdm\b|인스타|insta(gram)?|위챗|wechat)\s*(아이디|id)?\s*[:：]?\s*[a-z0-9_.-]{3,}/i.test(s)) return true;
   const digits = s.replace(/[공영일이삼사오육칠팔구]/g, c => KO_DIGIT[c]).replace(/[oO]/g, '0').replace(/[\s\-.()·]/g, '');
@@ -3472,6 +3474,7 @@ function open(file) {
     CREATE TABLE IF NOT EXISTS chapters(id INTEGER PRIMARY KEY, book TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, ord INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', ver INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS chapter_vers(chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, ver INTEGER NOT NULL, body TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(chapter, ver));
     CREATE TABLE IF NOT EXISTS edits(id INTEGER PRIMARY KEY, chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, base INTEGER NOT NULL, body TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '익명', status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL DEFAULT (datetime('now')), decided TEXT NOT NULL DEFAULT '');
+
     /* 게시판 — 주제(갤러리)별 글·댓글·추천. 디시·레딧식이지만 연락처는 안 싣는다(공개 칸 원칙 그대로).
        지우기 열쇠(bkey·ckey)는 쓴 사람 브라우저에만 — 헤더로만 받는다. 신고 셋이면 저절로 숨김. */
     CREATE TABLE IF NOT EXISTS board_posts(
@@ -3616,6 +3619,8 @@ function open(file) {
      «모름» 을 «있음» 으로 그리지 않는다(오답노트 E22). 동의는 본인이 켜야 생긴다. */
   try { db.exec("ALTER TABLE submissions ADD COLUMN show INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE submissions ADD COLUMN show_at TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 공동 집필 제안의 낸 사람 표(소금 친 IP 해시) — 한 사람이 한 장을 제안 50개로 메워 남이 못 내게 하던 것(레드팀 10/03) */
+  try { db.exec("ALTER TABLE edits ADD COLUMN ip TEXT NOT NULL DEFAULT ''"); } catch {}
   for (const c of ['aiuse', 'aidrop', 'stuck'])
     try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   /* 데모데이 제출 둘 — 1분 시연 영상(유튜브 id 11자만, 주소·iframe 은 안 받는다)과 발표 자료 주소 */
@@ -6446,7 +6451,8 @@ function chapterAdd(db, bookId, ekey, x) {
   return { id: Number(r.lastInsertRowid) };
 }
 /* 제안 — 어느 판 위에서 썼는지(base)를 같이 받는다. 지금 판과 똑같은 글은 제안이 아니다 */
-function editPropose(db, cid, x) {
+const EDIT_PER_PERSON = 3;   // 한 사람(IP 해시)이 한 장에 걸어 둘 수 있는 기다리는 제안
+function editPropose(db, cid, x, ip = '') {
   const c = chapterOf(db, cid);
   const body = bookText(x.body, BOOK_BODY_MAX);
   if (!body.trim()) throw new HttpError(400, '고쳐 쓴 글이 비었습니다');
@@ -6455,7 +6461,9 @@ function editPropose(db, cid, x) {
   if (base > c.ver || base < 0) throw new HttpError(400, '없는 판 위에서 쓴 제안입니다');
   if (db.prepare("SELECT COUNT(*) c FROM edits WHERE chapter=? AND status='pending'").get(c.id).c >= EDIT_PENDING_MAX)
     throw new HttpError(429, '이 장에 기다리는 제안이 너무 많습니다. 편집자가 정리한 뒤에 다시 내 주세요');
-  const r = db.prepare('INSERT INTO edits(chapter,base,body,note,author) VALUES(?,?,?,?,?)').run(c.id, base, body, plain(x.note, 140), plain(x.author, 30) || '익명');
+  if (ip && db.prepare("SELECT COUNT(*) c FROM edits WHERE chapter=? AND status='pending' AND ip=?").get(c.id, String(ip)).c >= EDIT_PER_PERSON)
+    throw new HttpError(429, `이 장에 내 제안이 ${EDIT_PER_PERSON}개 기다리고 있습니다. 편집자가 본 뒤에 더 내 주세요`);
+  const r = db.prepare('INSERT INTO edits(chapter,base,body,note,author,ip) VALUES(?,?,?,?,?,?)').run(c.id, base, body, plain(x.note, 140), plain(x.author, 30) || '익명', String(ip || ''));
   return { id: Number(r.lastInsertRowid), base };
 }
 /* 합치기 — 제안이 지금 판 위에서 쓰였을 때만. 그 사이 다른 제안이 합쳐졌으면 409(덮어쓰면 남의 고침이 사라진다) */
@@ -6502,7 +6510,7 @@ const BOARD_BEST = 10, BOARD_HIDE_AT = 3, BOARD_PAGE = 30;
 const BOARD_LIMIT = +(process.env.BOARD_LIMIT || 6);   // IP 하나가 10분에 쓸 수 있는 글 수(댓글은 ×3)
 /* 사칭 막기 — 운영자·해커온 이름으로 쓰지 못한다(레드팀 10/02) */
 const BOARD_RESERVED = /운영자|관리자|운영진|해커온|hack\s*:?\s*on|admin|공식/i;
-const boardNick = v => { const n = plain(v, 16).replace(/\s+/g, ' '); if (BOARD_RESERVED.test(n)) throw new HttpError(400, '그 닉네임은 쓸 수 없습니다(운영자 사칭 방지)'); return n || '익명'; };
+const boardNick = v => { const n = plain(v, 16).replace(/\s+/g, ' '); if (BOARD_RESERVED.test(unhide(n).replace(/\s+/g, ''))) throw new HttpError(400, '그 닉네임은 쓸 수 없습니다(운영자 사칭 방지)'); return n || '익명'; };
 /* 게시판의 연락처 거름 — 깃허브·데모 주소는 자랑·질문에 꼭 필요하다(전에는 바깥 주소를 다 막아 «자랑·데모» 에 링크를 못 붙였다).
    주소는 빼고 본다. 단 오픈 채팅방 주소는 연락처라 그대로 막는다 */
 const boardContact = t => /open\.kakao\.com/i.test(String(t || '')) || looksContact(String(t || '').replace(/https?:\/\/[^\s]+/gi, ' '));
@@ -6511,7 +6519,7 @@ const boardContact = t => /open\.kakao\.com/i.test(String(t || '')) || looksCont
 const IP_SALT = process.env.IP_SALT || crypto.randomBytes(16).toString('hex');
 const ipTag = ip => crypto.createHash('sha256').update(IP_SALT + '|' + String(ip || '')).digest('hex').slice(0, 16);
 function boardClean(title, body) {
-  const t = plain(title, 80), b = String(body == null || typeof body === 'object' ? '' : body).replace(/[<>]/g, '').trim().slice(0, 3000);
+  const t = plain(title, 80), b = String(body == null || typeof body === 'object' ? '' : body).replace(/[<>]/g, '').replace(/\r/g, '').replace(/\n{4,}/g, '\n\n\n').trim().slice(0, 3000);
   return { t, b };
 }
 function boardPost(db, x) {
@@ -6549,7 +6557,7 @@ function boardView(db, id, voter = '') {
 function boardComment(db, id, x) {
   const p = db.prepare('SELECT id FROM board_posts WHERE id=? AND hidden=0').get(+id);
   if (!p) throw new HttpError(404, '없거나 내려간 글입니다');
-  const b = String(x.body == null || typeof x.body === 'object' ? '' : x.body).replace(/[<>]/g, '').trim().slice(0, 1000);
+  const b = String(x.body == null || typeof x.body === 'object' ? '' : x.body).replace(/[<>]/g, '').replace(/\r/g, '').replace(/\n{4,}/g, '\n\n\n').trim().slice(0, 1000);
   if (!b) throw new HttpError(400, '댓글을 적어 주세요');
   if (boardContact(b)) throw new HttpError(400, '연락처는 공개 댓글에 적지 않습니다');
   const ckey = crypto.randomBytes(8).toString('hex');
@@ -8665,7 +8673,7 @@ function routes(db) {
         if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'POST') return json(res, 200, chapterSave(db, m[1], req.headers['x-ekey'] || '', await body(req)));
         if ((m = p.match(/^\/api\/chapters\/(\d+)\/edits$/)) && req.method === 'POST') {
           if (tooMany('ed:' + clientIp(req), BOARD_LIMIT * 3)) throw new HttpError(429, '제안을 너무 빨리 내고 있습니다. 잠시 뒤에 다시 해 주세요');
-          return json(res, 201, editPropose(db, m[1], await body(req)));
+          return json(res, 201, editPropose(db, m[1], await body(req), ipTag(clientIp(req))));
         }
         if ((m = p.match(/^\/api\/edits\/(\d+)\/merge$/)) && req.method === 'POST') return json(res, 200, editMerge(db, m[1], req.headers['x-ekey'] || ''));
         if ((m = p.match(/^\/api\/edits\/(\d+)\/close$/)) && req.method === 'POST') return json(res, 200, editClose(db, m[1], req.headers['x-ekey'] || ''));
@@ -12507,6 +12515,17 @@ async function selftest() {
      '할인·무료 — AI 모델 구독·크레딧 소식은 «무료·할인» 으로');
   ok(newsKindOf({ src: 'geek', title: '운동화 30% 할인 쿠폰' }) !== 'deal' && newsKindOf({ src: 'ph', title: '숙박 무료 체험 프로모션' }) !== 'deal',
      '할인·무료 — AI 와 상관없는 할인은 «무료·할인» 에 안 든다');
+  /* 레드팀 10/03 — 숨긴 글자·전각·여러 줄표로 연락처·사칭 거름 피하기 */
+  ok(looksContact('０１０-１２３４-５６７８') && looksContact('010‑1234‑5678') && looksContact('010​1234​5678') && !looksContact('2026년 10월 31일 오후 1시'),
+     '연락처 — 전각 숫자·다른 줄표·0폭 공백으로 피하지 못하고, 날짜는 안 잡는다');
+  { let bad = false; try { boardNick('ＨＡＣＫＯＮ'); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 전각 글자로 «HACKON» 사칭을 못 한다'); }
+  ok(boardClean('t', 'a' + '\n'.repeat(2500) + 'b').b === 'a\n\n\nb', '게시판 — 줄바꿈 폭탄은 세 줄로 줄인다');
+  {
+    const xdb = open(':memory:'), bk = bookCreate(xdb, { title: '막기' }), ch = bookView(xdb, bk.id).chapters[0].id;
+    for (let i = 0; i < EDIT_PER_PERSON; i++) editPropose(xdb, ch, { body: 'spam ' + i, base: 0 }, 'ipA');
+    let bad = false; try { editPropose(xdb, ch, { body: 'spam more', base: 0 }, 'ipA'); } catch (e) { bad = e.code === 429; }
+    ok(bad && editPropose(xdb, ch, { body: '다른 사람 제안', base: 0 }, 'ipB').id > 0, `공동 집필 — 한 사람은 한 장에 ${EDIT_PER_PERSON}개까지, 다른 사람은 그대로 낸다`);
+  }
   /* 시간 아끼기 — ⏱ 와 바로 해 보는 명령, 중국어 풀이 */
   ok(newsTry({ src: 'gh', url: 'https://github.com/acme/tool' }) === 'git clone https://github.com/acme/tool && cd tool'
      && newsTry({ src: 'hf', url: 'https://huggingface.co/acme/tiny-7b' }) === 'huggingface-cli download acme/tiny-7b'

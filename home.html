@@ -442,7 +442,17 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   function close() { sh.hidden = true; btn.setAttribute('aria-expanded', 'false'); document.body.style.overflow = ''; btn.focus(); }
   btn.addEventListener('click', open);
   sh.addEventListener('click', function (e) { if (e.target.closest('[data-menu-close]')) close(); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !sh.hidden) close(); });
+  /* Tab 이 판 밖(뒤 화면)으로 새지 않게 — 키보드·화면 읽기 사용자가 판 뒤에서 길을 잃었다(레드팀 10/03) */
+  document.addEventListener('keydown', function (e) {
+    if (sh.hidden) return;
+    if (e.key === 'Escape') { close(); return; }
+    if (e.key !== 'Tab') return;
+    var f = sh.querySelectorAll('a[href], button'); if (!f.length) return;
+    var first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    else if (!sh.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+  });
 })();
 ['nav-manual','manual-link2','foot-manual'].forEach(function(id){ document.getElementById(id).href = 매뉴얼; });
 var mailLink = document.getElementById('mail-link');

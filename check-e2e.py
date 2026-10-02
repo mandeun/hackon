@@ -4460,6 +4460,10 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "메뉴를 펴면 폰 폭에서 옆으로 밀린다")
     _tiles = pg.eval_on_selector_all("#menu-sheet .tiles a", "els => els.map(e => e.getBoundingClientRect()).filter(r => r.right > 391 || r.width < 120)")
     A(not _tiles, f"메뉴 타일이 화면 밖이거나 너무 좁다: {_tiles}")
+    _out = 0
+    for _ in range(40):
+        pg.keyboard.press("Tab"); _out += 0 if pg.evaluate("!!document.activeElement.closest('#menu-sheet')") else 1
+    A(_out == 0, f"메뉴를 연 채 Tab 을 누르면 판 밖으로 {_out}번 샌다(키보드·화면 읽기 사용자가 길을 잃는다)")
     pg.keyboard.press("Escape"); pg.wait_for_timeout(150)
     A(pg.locator("#menu-sheet").is_hidden() and pg.evaluate("document.activeElement.id") == "nav-menu", "Esc 로 안 닫히거나 포커스가 «메뉴» 로 안 돌아온다")
     b.close()
