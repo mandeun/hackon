@@ -26,7 +26,7 @@
   --paper:#FFFFFF;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;
+body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;word-break:keep-all;overflow-wrap:break-word;
      display:flex;justify-content:center;min-height:100dvh;
      -webkit-font-smoothing:antialiased}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;border:0;background:none}
@@ -1133,7 +1133,7 @@ async function sponsorPage() {
     <p class="sub">아래 금액은 <b>주최자가 정한 희망가</b>입니다. 확정 금액이 아니고, 이야기해서 정합니다. 자리에서 모인 돈이 그대로 <b>상금과 간식</b>이 됩니다.
       이 앱은 돈을 받지 않습니다 — 주고받는 것은 주최자와 직접 하십니다.</p>
     ${rows.length ? rows.map(n => `<div class="card" data-need-card="${esc(String(n.id))}">
-      <h3>${esc(needKind(n.kind))} · ${esc(n.label)}
+      <h3>${/* «장소 · 장소» 처럼 종류와 이름이 같으면 한 번만 */''}${String(n.label || '').startsWith(needKind(n.kind)) ? esc(n.label) : `${esc(needKind(n.kind))} · ${esc(n.label)}`}
         <span class="pill ${left(n) ? 'warn' : 'ok'}">${left(n) ? left(n) + '자리 남음' : '다 찼습니다'}</span></h3>
       <div class="price" data-price="${esc(String(n.id))}">${esc(priceText(n))}<small>희망가</small></div>
       ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
