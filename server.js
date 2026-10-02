@@ -3501,7 +3501,7 @@ function open(file) {
      «모름» 을 «있음» 으로 그리지 않는다(오답노트 E22). 동의는 본인이 켜야 생긴다. */
   try { db.exec("ALTER TABLE submissions ADD COLUMN show INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE submissions ADD COLUMN show_at TEXT NOT NULL DEFAULT ''"); } catch {}
-  for (const c of ['aiuse', 'aidrop'])
+  for (const c of ['aiuse', 'aidrop', 'stuck'])
     try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   /* 데모데이 제출 둘 — 1분 시연 영상(유튜브 id 11자만, 주소·iframe 은 안 받는다)과 발표 자료 주소 */
   for (const c of ['video', 'deck'])
@@ -4864,6 +4864,8 @@ function getEvent(db, id) {
   /* 그날의 조건은 오프닝에서 공개하는 것이다. 끝나기 전에 공개 응답에 실리면
      참가자가 미리 준비해 온다 — 그러면 «현장 조건» 이 아니다. 운영자에게만 따로 붙인다. */
   if (!closed({ due: e.due, ends: e.ends })) delete e.twist;
+  /* 막힌 곳 모음 — 제출이 끝난 뒤에만, 팀 이름 없이. 끝나기 전엔 «모름» 이라 아예 안 싣는다(빈 배열과 다르다) */
+  if (closed({ due: e.due, ends: e.ends })) e.stuck = stuckList(db, id);
   e.rubric = JSON.parse(e.rubric);
   for (const r of e.rubric) if (!r.hint && RUBRIC_HINT[r.key]) r.hint = RUBRIC_HINT[r.key];
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
@@ -4874,6 +4876,12 @@ function getEvent(db, id) {
   e.sponsors = db.prepare('SELECT * FROM sponsors WHERE event=? ORDER BY amount DESC').all(id);
   e.missing = ready(e);
   return e;
+}
+
+/* 이 대회 팀들이 남긴 «막힌 것» — 팀 이름·순위는 안 붙인다. 들어온 차례로 */
+function stuckList(db, event) {
+  return db.prepare(`SELECT s.stuck FROM submissions s JOIN teams t ON t.id = s.team
+                     WHERE t.event = ? AND s.stuck <> '' ORDER BY s.at, s.team`).all(event).map(r => r.stuck);
 }
 
 function joinTeam(db, event, b) {
@@ -4964,6 +4972,13 @@ function submit(db, team, b) {
     const v = String(b.video || '').trim(), id = v ? ytId(v) : '';
     if (v && !id) throw new HttpError(400, '시연 영상은 유튜브 주소로 넣어 주세요');
     db.prepare('UPDATE submissions SET video=? WHERE team=?').run(id, team);
+  }
+  /* 막힌 것 한 줄 — «실패도 자산»(가짜연구소). 끝난 뒤 공개 페이지에 팀 이름 없이 모인다.
+     안 보내면 그대로, 빈 값이면 지운다. 연락처처럼 보이면 막는다 — 이름 없이 모이는 곳이라 더 그렇다 */
+  if (b.stuck !== undefined) {
+    const st = plain(b.stuck, 200);
+    if (looksContact(st)) throw new HttpError(400, '막힌 것 칸에는 연락처를 적지 않습니다');
+    db.prepare('UPDATE submissions SET stuck=? WHERE team=?').run(st, team);
   }
   if (b.deck !== undefined) {
     const d = String(b.deck || '').trim(), u = d ? webUrl(d) : '';
@@ -5233,7 +5248,7 @@ function board(db, event, admin = false, mine = 0) {
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
            t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring, t.deposit, t.pick,
-           s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at, s.video, s.deck
+           s.url, s.note, s.aiuse, s.aidrop, s.stuck, s.show, s.show_at, s.video, s.deck
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
   /* 심사위원별 등수 보정(MLH 의 stack ranking 을 눈금으로). 관대한 심사위원의 90점과 짠 심사위원의 70점이
@@ -5320,6 +5335,8 @@ function board(db, event, admin = false, mine = 0) {
     if (!admin && mine && String(t.id) === String(mine)) { row.hasContact = !!t.contact; row.hasFound = !!t.found; }
     /* 예약금 상태는 돈 이야기다 — 운영자와 그 팀 자신에게만 */
     if (!admin && !(mine && String(t.id) === String(mine))) delete row.deposit;
+    /* 막힌 것은 팀 이름 없이만 공개한다(getEvent 의 stuck 목록). 순위표 줄에 붙으면 이름과 묶인다 — 운영자와 본인 줄에만 */
+    if (!admin && !(mine && String(t.id) === String(mine))) delete row.stuck;
     /* 선발 전·거절된 지원자의 연락처는 리더(운영자)에게도 안 간다 — 수락해야 받는다 */
     if (t.pick === 'applied' || t.pick === 'rejected') delete row.contact;
     if (e.kind === '프로젝트') {
@@ -9035,6 +9052,28 @@ async function selftest() {
       moreTeam(db, tb, { bring: 'record' }, { tkey: tk });
       ok(board(db, eb.id).rows[0].bring === 'record', '선언은 공개된다 (손님에게도 보인다)');
       db.prepare('DELETE FROM events WHERE id=?').run(eb.id);
+    }
+    /* 막힌 곳 모음 — 끝난 뒤에만, 팀 이름 없이. 순위표 줄에는 운영자·본인에게만 */
+    {
+      const ek = createEvent(db, { title: '막힌 곳 검사', starts: '2026-01-10', ends: '2026-01-10' });
+      db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T00:00', ek.id);
+      const k1 = joinTeam(db, ek.id, { name: '막힌팀이름', agree: true, email: 'k1@x.test' });
+      const k2 = joinTeam(db, ek.id, { name: '조용한팀', agree: true, email: 'k2@x.test' });
+      submit(db, k1, { url: 'https://example.com/k1', stuck: '로그인 붙이다 3시간 <b>날림</b>' });
+      submit(db, k2, { url: 'https://example.com/k2' });
+      ok(getEvent(db, ek.id).stuck === undefined, '막힌 곳 — 끝나기 전엔 공개 응답에 아예 안 싣는다(빈 목록과 다르다)');
+      let kc = false; try { submit(db, k2, { url: 'https://example.com/k2', stuck: '카톡 abc1234 로 물어보세요' }); } catch (e) { kc = e.code === 400; }
+      ok(kc, '막힌 곳 — 연락처처럼 보이면 막는다');
+      submit(db, k1, { url: 'https://example.com/k1b' });
+      ok(db.prepare('SELECT stuck FROM submissions WHERE team=?').get(k1).stuck === '로그인 붙이다 3시간 b날림/b', '막힌 곳 — 안 보내면 그대로, 꺾쇠는 빠진다');
+      db.prepare('UPDATE events SET due=? WHERE id=?').run('2026-01-10T00:00', ek.id);
+      const pub = getEvent(db, ek.id);
+      ok(Array.isArray(pub.stuck) && pub.stuck.length === 1 && pub.stuck[0].includes('3시간') && !JSON.stringify(pub.stuck).includes('막힌팀이름'),
+         '막힌 곳 — 끝난 뒤 팀 이름 없이 모인다');
+      const bpub = board(db, ek.id, false).rows, bmine = board(db, ek.id, false, k1).rows, badm = board(db, ek.id, true).rows;
+      ok(bpub.every(r => r.stuck === undefined), '막힌 곳 — 공개 순위표 줄에는 안 붙는다(이름과 묶이지 않게)');
+      ok(bmine.find(r => r.id === k1).stuck.includes('3시간') && bmine.filter(r => r.stuck !== undefined).length === 1, '막힌 곳 — 본인 줄에만 보인다');
+      ok(badm.find(r => r.id === k1).stuck.includes('3시간'), '막힌 곳 — 운영자는 본다');
     }
     /* 결과물 «넘길 수 있어요» — 마감 뒤 받는 화면에만 보인다. 만든 것 링크 — 주소 꼴만 남는다 */
     {

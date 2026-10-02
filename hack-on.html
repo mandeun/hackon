@@ -3789,6 +3789,9 @@ const SCREEN = {
                  : `<div class="gsteps" id="how3" style="margin:12px 0 0"><span class="on">① 신청</span><span class="sep">→</span><span>② 그날 와서 만들기</span><span class="sep">→</span><span>③ 제출</span></div>`}
       </section>
       ${(e.sponsors || []).length ? `<div class="card" id="spon-top" style="padding:14px 16px"><div class="meta" style="margin-bottom:6px">함께한 곳</div>${logoBand(e.sponsors).replace('class="logos"', 'class="logos big"')}</div>` : ''}
+      ${Array.isArray(e.stuck) && e.stuck.length ? `<div class="card" id="stuck"><h3>막힌 곳 모음 <span class="pill">${e.stuck.length}</span></h3>
+        <div class="meta">이 대회 팀들이 «여기서 막혔다» 고 남긴 것입니다. 팀 이름은 안 붙입니다 — 다음 대회의 지도로 씁니다.</div>
+        <ul style="margin:8px 0 0 18px">${e.stuck.map(x => `<li style="margin:4px 0">${esc(x)}</li>`).join('')}</ul></div>` : ''}
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
       ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
         <div class="meta">운영자 공지가 시각과 함께 남습니다. 메일·문자는 안 보내니 이 페이지를 열어 두세요.</div>
@@ -5736,6 +5739,10 @@ const SCREEN = {
         <label>버린 판단이 있으면 한 줄 <span class="pill">선택</span></label>
         <input id="s-aidrop" maxlength="200"
           placeholder="예) 추천 로직이 우리 문제와 안 맞아서 버렸습니다" value="${esc(t.aidrop || '')}">
+        <label>막힌 것 한 줄 — 다음 사람을 위해 <span class="pill">선택</span></label>
+        <input id="s-stuck" maxlength="200"
+          placeholder="예) 로그인 붙이다 3시간 날림 — 다음엔 로그인 없이 시작" value="${esc(t.stuck || '')}">
+        <div class="meta">대회가 끝나면 공개 페이지 «막힌 곳 모음» 에 <b>팀 이름 없이</b> 모입니다. 실패도 다음 사람의 지도입니다.</div>
         ${reqs.length ? `<label>어느 주제·요청으로 만들었나요 <span class="pill">선택</span></label>
           <select id="s-request"><option value="">자유 주제</option>${reqs.map(r => `<option value="${esc(r.id)}"${t.request === r.id ? ' selected' : ''}>${esc(r.kind === 'sponsor' ? '후원자' : '의뢰자')} · ${esc(r.topic || r.pain)}</option>`).join('')}</select>
           <div class="meta">고르면 마감 뒤 결과물을 받고 «됐다/아니다»를 답합니다.</div>` : ''}
@@ -6381,7 +6388,7 @@ function wire() {
     try {
       await api(`/teams/${curTeam}/submit`, { method: 'POST', tkey: tkeyOf(curTeam),
         body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim(),
-                aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(),
+                aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(), stuck: $('#s-stuck') ? $('#s-stuck').value.trim() : undefined,
                 show: $('#s-show') ? $('#s-show').checked : undefined,
                 sale: $('#s-sale') ? $('#s-sale').value.trim() : undefined,
                 video: $('#s-video') ? $('#s-video').value.trim() : undefined,

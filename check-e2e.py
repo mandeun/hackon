@@ -4470,5 +4470,20 @@ with sync_playwright() as pw:
     b.close()
 ok("첫 화면 고리 — 늘 보이는 것 다섯 이하, 더 보기는 셋으로 묶고 고리마다 200")
 
+# ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
+_, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
+post(f"/api/events/{_kev['id']}", {"due": "2099-01-01T00:00"}, key=_kev["owner"], method="PATCH")
+_, _kt = post(f"/api/events/{_kev['id']}/teams", {"name": "막힘검사팀이름", "email": "k@example.com", "agree": True})
+A(post(f"/api/teams/{_kt['id']}/submit", {"url": "https://k.example/x", "stuck": "배포 설정에서 두 시간 막힘"}, tkey=_kt["tkey"])[0] == 200, "막힌 것 한 줄을 못 낸다")
+post(f"/api/events/{_kev['id']}", {"due": "2026-01-10T00:00"}, key=_kev["owner"], method="PATCH")
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.on("pageerror", lambda e: errs.append("stuck: " + str(e)))
+    pg.goto(f"{BASE}/e/{_kev['id']}", wait_until="networkidle"); pg.wait_for_selector("#stuck")
+    _st = pg.inner_text("#stuck")
+    A("배포 설정에서 두 시간 막힘" in _st and "막힘검사팀이름" not in _st, f"막힌 곳 모음이 이상하다: {_st}")
+    b.close()
+ok("막힌 곳 모음 — 끝난 뒤 공개 페이지에 팀 이름 없이")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
