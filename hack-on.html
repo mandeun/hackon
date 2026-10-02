@@ -940,6 +940,34 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .perks li{font-size:13.5px;display:flex;gap:7px;align-items:flex-start;color:var(--ink2)}
 .perks li.hot{color:var(--ink);font-weight:700}
 .perks li span{flex:none;width:20px;text-align:center}
+.mechips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.mechips button{font-size:13px;font-weight:800;padding:7px 11px;border-radius:99px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
+.mechips button.on{background:#C8F53B;color:#0B1020;border-color:#C8F53B}
+.steps-day{display:grid;gap:8px;margin:0 0 12px}
+.steps-day .sd{display:flex;align-items:center;gap:10px;background:#fff;border-radius:16px;padding:13px 14px;text-decoration:none;color:var(--ink);border:1px solid var(--rule)}
+.steps-day .sd span{flex:none;font-size:12px;font-weight:800;color:#3F5A00;background:#F1FBD5;border-radius:99px;padding:3px 9px}
+.steps-day .sd b{flex:1;font-size:14.5px}
+.steps-day .sd em{font-style:normal;font-weight:800;color:var(--ink3)}
+.calhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.calhead b{font-size:17px}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.calgrid .cw{font-size:11.5px;font-weight:700;color:var(--ink3);text-align:center;padding:2px 0}
+.calgrid .cc{aspect-ratio:1/1;min-height:40px;border-radius:12px;background:var(--bg,#F4F6FA);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-weight:700;font-size:13.5px;color:var(--ink)}
+.calgrid .cc.empty{background:none}
+.calgrid .cc.has{background:#fff;border:1px solid var(--rule)}
+.calgrid .cc.today{background:#0B1020;color:#fff}
+.calgrid .cc.today .cn::after{content:"";display:block;width:4px;height:4px;border-radius:50%;background:#C8F53B;margin:2px auto 0}
+.calgrid .cc.sel{outline:2.5px solid #C8F53B;outline-offset:1px}
+.calgrid .cds{display:flex;gap:2px;min-height:6px}
+.calgrid .cds i,.callegend i,.cdot{display:inline-block;width:6px;height:6px;border-radius:50%}
+.c-day{background:#0B1020}.calgrid .cc.today .c-day{background:#C8F53B}.c-due{background:#E5484D}.c-check{background:#E8A317}.c-judge{background:#7C5CFF}.c-todo{background:#12A36B}
+.callegend{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--ink3)}
+.callegend span{display:inline-flex;align-items:center;gap:5px}
+.calrow{display:flex;align-items:center;gap:9px;padding:9px 0;border-top:1px solid var(--rule);text-decoration:none;color:var(--ink)}
+.calrow .ct{flex:1;min-width:0;font-size:14px}
+.calrow .ck{flex:none;font-size:11.5px;font-weight:700;color:var(--ink3)}
+.calrow .cdot{flex:none;width:9px;height:9px}
+.calday{font-size:11.5px;font-weight:800;color:var(--ink3);margin-top:8px}
 .inbox-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:#C8F53B;color:#0B1020;font-size:12px;font-weight:800;margin-left:4px}
 /* 고르는 칩 줄은 접어서 다 보인다. 옆으로 밀어야 보이는 칩은 폰에서 «잘린 것» 으로 읽힌다 */
 .htabs.wrap{flex-wrap:wrap;overflow:visible;position:static;row-gap:6px}
@@ -1769,6 +1797,20 @@ let PLAN_NOW = [];
 let vArea = '';   // 구하기 화면에서 고른 자치구
 let mineSeg = 'all';      // 내 대회 화면에서 고른 역할 칩
 /* 자리 매칭 — 고른 카드 종류, 내 카드(id.열쇠 — 이 기기에만), 요청 폼을 연 카드 */
+/* 내 달력 — 보고 있는 달·고른 날·나는 누구(이 기기에만) */
+let calMonth = '', calSel = '';
+const meOf = () => { try { return localStorage.getItem('hackon.me') || ''; } catch { return ''; } };
+/* 일상 입구 — 네 사람의 하루에 해커온이 끼는 자리. «앱을 여는 이유» 가 사람마다 다르다(docs/daily.md) */
+const PERSONA = {
+  worker:  { icon: '💼', name: '직장인', line: '출근길 3분 · 점심 30분 · 주말 하루', steps: [
+    ['출근길 3분', '이번 주 확 뜬 것 하나만', '/news'], ['점심 30분', '내 일 하나를 AI 로 줄이는 레시피', '/setups'], ['주말 하루', '가까운 하루 대회 찾기', '/#list']] },
+  vibe:    { icon: '⚡', name: '바이브코더', line: '아침 트렌드 · 낮 일감 · 저녁 공개', steps: [
+    ['아침', '별이 확 는 저장소 보기', '/news'], ['낮', '외주·의뢰에 손 들기', '/gigs'], ['저녁', '만든 것 올리고 별 받기', '/made']] },
+  student: { icon: '🎒', name: 'AI 입문 학생', line: '오늘 10분 · 이번 주 한 팀 · 한 학기 기록', steps: [
+    ['오늘 10분', '따라 하면 되는 세팅 하나', '/setups'], ['이번 주', '같이 할 사람과 첫 대회', '/#list'], ['한 학기', '실무 기록 1단계 → 2단계', '/cert']] },
+  shop:    { icon: '🏪', name: '사장님', line: '번거로운 일 하나를 동네가 대신', steps: [
+    ['오늘', '가장 번거로운 일 세 줄 올리기', '/ask'], ['이번 주', '풀린 문제·만든 것 구경', '/problems'], ['한 달', '우리 가게에 AI 도구 하나', '/biz']] },
+};
 let gvKind = '';
 let askOpen = 0;
 const myGiver = () => { try { const v = localStorage.getItem('hackon.giver') || ''; const m = /^(\d+)\.([0-9a-f]{16})$/.exec(v); return m ? { id: +m[1], gkey: m[2] } : null; } catch { return null; } };
@@ -4670,6 +4712,64 @@ const SCREEN = {
      내 일(연 대회의 할 일·D-day) · 내 일정(지갑의 마감 7일 안) · 새로 켜진 것(새 모델·도구) · 꺼지기 전에(할인·무료 기한)
      · 오늘의 스위치(내 직무 레시피 한 줄). 서버에 새로 적는 것은 없다 — 읽어 와서 이 기기에서 묶는다.
      못 읽은 칸은 «모름» 으로 그린다. 비어 있는 것과 못 읽은 것은 다른 말이다 */
+  /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
+     열쇠는 이 기기에 있으니 화면이 모아 보내고, 서버는 맞는 것만 내 일정으로 돌려준다(/api/cal). */
+  async cal() {
+    const now = new Date(), ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = ymd(now);
+    if (!calMonth) calMonth = today.slice(0, 7);
+    if (!calSel) calSel = today;
+    const body = {
+      hosts: keyIds('hackon.okey.').map(id => ({ event: id, okey: okeyOf(id) })),
+      teams: keyIds('hackon.team.').map(id => { const t = localStorage.getItem('hackon.team.' + id) || ''; return { event: id, team: t, tkey: tkeyOf(t) }; }),
+      judges: keyIds('hackon.jkey.').map(id => ({ event: id, jkey: jkeyOf(id) })),
+    };
+    const any = myKey() || body.hosts.length || body.teams.length || body.judges.length;
+    let d = { events: [], items: [] }, unknown = false;
+    if (LIVE && any) { try { d = await api('/cal', { method: 'POST', body }); } catch { unknown = true; } }
+    const me = PERSONA[meOf()] || null;
+    const day = new Date(today + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+    const KC = { day: 'c-day', due: 'c-due', check: 'c-check', judge: 'c-judge', todo: 'c-todo' };
+    const KN = { day: '대회', due: '마감', check: '답하기', judge: '심사', todo: '할 일' };
+    const at = date => d.items.filter(i => i.date === date);
+    const row = i => `<a class="calrow" href="/e/${esc(i.event)}"><span class="cdot ${KC[i.kind] || ''}"></span>
+      <span class="ct">${i.time ? `<b>${esc(i.time)}</b> ` : ''}${esc(i.title)}</span><span class="ck">${esc(KN[i.kind] || '')}</span></a>`;
+    const todays = at(today);
+    /* 달 칸 — 일요일부터. 점은 그날 일정 종류(최대 셋) */
+    const [Y, M] = calMonth.split('-').map(Number), first = new Date(Y, M - 1, 1), days = new Date(Y, M, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < first.getDay(); i++) cells.push('<span class="cc empty"></span>');
+    for (let n = 1; n <= days; n++) {
+      const ds = `${calMonth}-${String(n).padStart(2, '0')}`, its = at(ds);
+      cells.push(`<button type="button" class="cc${ds === today ? ' today' : ''}${ds === calSel ? ' sel' : ''}${its.length ? ' has' : ''}" data-calday="${ds}" aria-label="${M}월 ${n}일 일정 ${its.length}개">
+        <span class="cn">${n}</span><span class="cds">${[...new Set(its.map(i => i.kind))].slice(0, 3).map(k => `<i class="${KC[k] || ''}"></i>`).join('')}</span></button>`);
+    }
+    const next30 = d.items.filter(i => i.date > today && i.date <= ymd(new Date(now.getTime() + 30 * 86400000)));
+    const selItems = at(calSel);
+    return `<section class="mhero" id="cal-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi.svg" alt="" width="34" height="34">
+        <span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">오늘</span><span style="color:#C9CFDA">${esc(day)}</span></div>
+        <h2 style="margin-top:10px">${unknown ? '일정을 못 읽었습니다' : todays.length ? `오늘 <span class="lime">${todays.length}개</span> 켜져 있어요` : '오늘은 비어 있어요'}</h2>
+        <p>${me ? `${me.icon} ${esc(me.name)} — ${esc(me.line)}` : '나는 누구인가요? 고르면 하루에 맞춰 드립니다.'}</p>
+        <div class="mechips" id="me-chips">${Object.entries(PERSONA).map(([k, p]) => `<button type="button" data-me="${k}"${meOf() === k ? ' class="on"' : ''}>${p.icon} ${esc(p.name)}</button>`).join('')}</div></section>
+      ${me ? `<div class="steps-day" id="me-steps">${me.steps.map(([w, t, href]) => `<a href="${esc(href)}" class="sd"><span>${esc(w)}</span><b>${esc(t)}</b><em>›</em></a>`).join('')}</div>` : ''}
+      ${unknown ? '<div class="card"><div class="meta">일정을 지금 못 읽었습니다 — 일정이 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요.</div></div>'
+        : !any ? `<div class="card" id="cal-empty"><h3>아직 내 대회가 없어요</h3><div class="meta">대회를 열거나 신청하면 날짜·마감·답할 것이 여기 저절로 찍힙니다.</div>
+            <div class="shrow" style="margin-top:10px"><a class="btn sm" href="/#list">대회 찾기</a><a class="btn sec sm" href="/app">＋ 대회 열기</a></div></div>`
+        : todays.length ? `<div class="card" id="cal-today"><h3>오늘</h3>${todays.map(row).join('')}</div>` : ''}
+      <div class="card" id="cal-month">
+        <div class="calhead"><button type="button" class="btn sec sm" data-calmove="-1" aria-label="지난달">‹</button>
+          <b>${Y}년 ${M}월</b><button type="button" class="btn sec sm" data-calmove="1" aria-label="다음 달">›</button></div>
+        <div class="calgrid">${['일', '월', '화', '수', '목', '금', '토'].map(w => `<span class="cw">${w}</span>`).join('')}${cells.join('')}</div>
+        <div class="callegend">${Object.entries(KN).map(([k, n]) => `<span><i class="${KC[k]}"></i>${n}</span>`).join('')}</div>
+        <div id="cal-sel"><h3 style="margin:14px 0 4px">${Number(calSel.slice(5, 7))}월 ${Number(calSel.slice(8))}일</h3>
+          ${selItems.length ? selItems.map(row).join('') : '<div class="meta">이날은 일정이 없습니다.</div>'}</div></div>
+      ${next30.length ? `<div class="card" id="cal-next"><h3>다가오는 30일 <span class="pill">${next30.length}</span></h3>${next30.map(i => `<div class="calday">${esc(i.date.slice(5).replace('-', '/'))}</div>${row(i)}`).join('')}</div>` : ''}
+      ${d.events.length ? `<div class="card" id="cal-sub"><h3>폰 달력에도 <span class="meta">구독 — 바뀌면 저절로</span></h3>
+        <div class="meta">구글·애플 달력에 주소 하나만 넣으면 여기 일정이 따라갑니다. 주소에 열쇠는 안 들어갑니다.</div>
+        <div style="height:8px"></div><button class="btn sm" id="cal-subbtn">구독 주소 만들기</button><div id="cal-subout"></div></div>` : ''}
+      <div class="shrow" style="margin:6px 0 20px"><a class="btn sec sm" href="/brief">아침 브리핑</a><a class="btn sec sm" href="/wallet">AI 지갑</a><a class="btn sec sm" href="/app">내 대회</a></div>`;
+  },
+
   async brief() {
     const now = ymdLocal(), wk = walShift(now, 7);
     const dd = d => { const n = walDays(d, now); return n === null ? '' : n < 0 ? '지남' : n === 0 ? '오늘' : `D-${n}`; };
@@ -7310,6 +7410,31 @@ function wire() {
     const out = $('#resume-out'); out.textContent = t; out.hidden = false;   // 복사가 막혀도 눈으로 보고 고를 수 있게
     try { await navigator.clipboard.writeText(t); flash(b.dataset.resume === 'linkedin' ? '링크드인 «프로젝트» 칸에 붙여 넣으세요' : '대외활동 칸에 붙여 넣으세요'); } catch (_) {}
   });
+  /* ── 오늘 · 내 달력 ── */
+  document.querySelectorAll('[data-me]').forEach(b => b.onclick = () => {
+    try { localStorage.setItem('hackon.me', meOf() === b.dataset.me ? '' : b.dataset.me); } catch {}
+    render();
+  });
+  document.querySelectorAll('[data-calday]').forEach(b => b.onclick = () => { calSel = b.dataset.calday; render(); });
+  document.querySelectorAll('[data-calmove]').forEach(b => b.onclick = () => {
+    const [y, m] = calMonth.split('-').map(Number), t = new Date(y, m - 1 + Number(b.dataset.calmove), 1);
+    calMonth = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`; render();
+  });
+  const calSubBtn = $('#cal-subbtn');
+  if (calSubBtn) calSubBtn.onclick = async () => {
+    const body = {
+      hosts: keyIds('hackon.okey.').map(id => ({ event: id, okey: okeyOf(id) })),
+      teams: keyIds('hackon.team.').map(id => { const t = localStorage.getItem('hackon.team.' + id) || ''; return { event: id, team: t, tkey: tkeyOf(t) }; }),
+      judges: keyIds('hackon.jkey.').map(id => ({ event: id, jkey: jkeyOf(id) })),
+    };
+    try {
+      const r = await api('/cal/sub', { method: 'POST', body });
+      const url = `${location.origin}/api/cal/${r.token}.ics`, web = url.replace(/^https?:/, 'webcal:');
+      $('#cal-subout').innerHTML = `<div class="askbox"><div class="meta">이 주소를 달력 앱의 «구독 추가» 에 넣으세요.</div>
+        <input readonly value="${esc(url)}" id="cal-url" style="margin-top:6px"><div class="shrow" style="margin-top:8px">
+        <a class="btn sm" href="${esc(web)}">애플 달력에 바로</a><a class="btn sec sm" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/r?cid=${encodeURIComponent(web)}">구글 달력에</a></div></div>`;
+    } catch (e) { flash(e.message, true); }
+  };
   /* ── 자리 매칭 ── */
   document.querySelectorAll('[data-gvkind]').forEach(b => b.onclick = () => { gvKind = b.dataset.gvkind; render(); });
   document.querySelectorAll('[data-ask-open]').forEach(b => b.onclick = () => { askOpen = +b.dataset.askOpen; render(); });
@@ -8191,6 +8316,7 @@ if (location.pathname === '/card') {
   history.replaceState(null, '', '/app');
   tab = 'find'; findSide = 'give';
 }
+const CAL = location.pathname === '/cal';        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
 const PTN = location.pathname === '/partner';    // 협찬·협업 안내 — 주시는 것별로 받는 것 한 장
@@ -8242,6 +8368,7 @@ else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (PTN) { tab = 'partner'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

@@ -4512,5 +4512,37 @@ with sync_playwright() as pw:
     b.close()
 ok("자리 매칭 — 카드 올리기 → 요청 → /card 에서 수락 → 둘에게만 연락처, 자리 확정")
 
+# ── 오늘 · 내 달력 /cal — 연 대회·신청한 대회가 달력에, 나는 누구(사람별 한 걸음), 구독 주소 ──
+_d5 = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+_, _cev = post("/api/events", {"title": "달력 화면 검사", "starts": _d5, "ends": _d5})
+_, _cteam = post(f"/api/events/{_cev['id']}/teams", {"name": "달력검사팀", "email": "cal@example.com", "agree": True})
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("cal: " + str(e)))
+    # 비어 있을 때 — «없음» 으로(모름 아님)
+    pg.goto(BASE + "/cal", wait_until="networkidle"); pg.wait_for_selector("#cal-hero")
+    A(pg.query_selector("#cal-empty") is not None, "열쇠가 하나도 없는데 «아직 내 대회가 없어요» 가 안 뜬다")
+    # 신청한 팀 열쇠를 든 기기
+    pg.evaluate(f"localStorage.setItem('hackon.team.{_cev['id']}', '{_cteam['id']}'); localStorage.setItem('hackon.tkey.{_cteam['id']}', '{_cteam['tkey']}')")
+    pg.reload(wait_until="networkidle"); pg.wait_for_selector("#cal-month")
+    A(pg.query_selector(f'[data-calday="{_d5}"].has') is not None, f"신청한 대회 날({_d5})이 달력에 안 찍힌다")
+    pg.click(f'[data-calday="{_d5}"]'); pg.wait_for_timeout(300)
+    A("달력 화면 검사" in pg.inner_text("#cal-sel"), "날짜를 눌러도 그날 일정이 안 뜬다")
+    A("참석 답하기" in pg.inner_text("#cal-next"), "다가오는 30일에 «참석 답하기» 가 없다")
+    # 나는 누구 — 고르면 하루의 세 걸음이 바뀐다
+    pg.click('[data-me="shop"]'); pg.wait_for_selector("#me-steps")
+    A("번거로운 일" in pg.inner_text("#me-steps"), "사장님을 골랐는데 사장님 한 걸음이 아니다")
+    A(pg.evaluate("localStorage.getItem('hackon.me')") == "shop", "고른 사람이 이 기기에 안 남는다")
+    # 구독 주소 — 열쇠가 주소에 안 들어간다, 주소를 열면 달력 파일
+    pg.click("#cal-subbtn"); pg.wait_for_selector("#cal-url")
+    _url = pg.input_value("#cal-url")
+    A(_cteam["tkey"] not in _url and _url.endswith(".ics"), f"구독 주소가 이상하다: {_url}")
+    _ics = urllib.request.urlopen(_url.replace(BASE, BASE), timeout=10).read().decode()
+    A("BEGIN:VCALENDAR" in _ics and "달력 화면 검사" in _ics, "구독 주소가 달력 파일을 안 준다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "달력이 폰 폭에서 옆으로 밀린다")
+    pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-cal.png"), full_page=True)
+    b.close()
+ok("오늘 · 내 달력 — 비면 «없음», 신청한 대회·답하기가 달력에, 사람별 한 걸음, 구독 주소(열쇠 없음)")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
