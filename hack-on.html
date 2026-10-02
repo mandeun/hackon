@@ -778,6 +778,7 @@ async function api(path, opt) {
                ...(opt?.pkey ? { 'x-pkey': opt.pkey } : {}),
                ...(opt?.gkey ? { 'x-gkey': opt.gkey } : {}),
                ...(opt?.voter ? { 'x-voter': opt.voter } : {}),
+               ...(opt?.ekey ? { 'x-ekey': opt.ekey } : {}),
                ...(opt?.bkey ? { 'x-bkey': opt.bkey } : {}),
                ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
@@ -1017,6 +1018,12 @@ nav button.on::before{content:"";position:absolute;top:0;left:50%;width:22px;hei
 .bdmini{margin-left:auto;font-size:12px;color:var(--ink3);background:none;border:0;padding:2px 4px}
 .bdmini + .bdmini{margin-left:0}
 .bdform textarea{width:100%;resize:vertical}
+.wrbody{font-size:16px;line-height:1.8;margin-top:6px}
+.diff{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;background:var(--bg,#F4F6FA);border-radius:12px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;margin-top:8px}
+.df{padding:1px 4px;border-radius:4px}
+.dfa{background:#E3F5EC;color:#0A6E49}
+.dfd{background:#FDECEC;color:#B42318;text-decoration:line-through}
+.dfs{color:var(--ink3)}
 .inbox-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:#C8F53B;color:#0B1020;font-size:12px;font-weight:800;margin-left:4px}
 /* 고르는 칩 줄은 접어서 다 보인다. 옆으로 밀어야 보이는 칩은 폰에서 «잘린 것» 으로 읽힌다 */
 .htabs.wrap{flex-wrap:wrap;overflow:visible;position:static;row-gap:6px}
@@ -1850,6 +1857,21 @@ let mineSeg = 'all';      // 내 대회 화면에서 고른 역할 칩
 let calMonth = '', calSel = '';
 /* 게시판 — 고른 주제·정렬·쓰기 칸·보고 있는 글. 추천 표(voter)는 이 브라우저에만 */
 let bdTopic = '', bdSort = 'hot', bdWrite = false;
+/* 공동 집필 — 주소에서 책·장, 편집자 열쇠는 이 브라우저에만(hackon.ekey.<책>) */
+let wrEditing = false;
+const wrPath = () => { const m = /^\/w\/([0-9a-f]{8})(?:\/(\d+))?$/.exec(location.pathname); return m ? { book: m[1], ch: m[2] ? +m[2] : 0 } : null; };
+const ekeyOf = id => { try { return localStorage.getItem('hackon.ekey.' + id) || ''; } catch { return ''; } };
+/* 줄 단위 차이 — 같은 줄은 그대로, 빠진 줄은 빨강 취소선, 들어온 줄은 초록. 최장 공통 부분열(LCS) */
+function lineDiff(a, b) {
+  const A = String(a).split('\n'), B = String(b).split('\n'), n = A.length, m = B.length;
+  if (n * m > 4e6) return [{ t: '-', s: '(너무 길어 차이를 못 그립니다 — 아래 전체 글을 보세요)' }];
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n && j < m) { if (A[i] === B[j]) { out.push({ t: '=', s: A[i] }); i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) out.push({ t: '-', s: A[i++] }); else out.push({ t: '+', s: B[j++] }); }
+  while (i < n) out.push({ t: '-', s: A[i++] }); while (j < m) out.push({ t: '+', s: B[j++] });
+  return out;
+}
 const bdPostId = () => { const m = /^\/board\/(\d+)$/.exec(location.pathname); return m ? +m[1] : 0; };
 const voterTok = () => { try { let v = localStorage.getItem('hackon.voter'); if (!v || !/^[0-9a-z]{12,40}$/i.test(v)) { v = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('hackon.voter', v); } return v; } catch { return ''; } };
 const ago = t => { const m = Math.max(0, (Date.now() - Date.parse(String(t).replace(' ', 'T') + 'Z')) / 60000); return m < 1 ? '방금' : m < 60 ? Math.floor(m) + '분 전' : m < 1440 ? Math.floor(m / 60) + '시간 전' : Math.floor(m / 1440) + '일 전'; };
@@ -4775,6 +4797,57 @@ const SCREEN = {
      내 일(연 대회의 할 일·D-day) · 내 일정(지갑의 마감 7일 안) · 새로 켜진 것(새 모델·도구) · 꺼지기 전에(할인·무료 기한)
      · 오늘의 스위치(내 직무 레시피 한 줄). 서버에 새로 적는 것은 없다 — 읽어 와서 이 기기에서 묶는다.
      못 읽은 칸은 «모름» 으로 그린다. 비어 있는 것과 못 읽은 것은 다른 말이다 */
+  /* ── 공동 집필 — 책을 장으로 나누고, 누구나 고쳐 쓰기를 제안, 편집자가 차이를 보고 합친다 ── */
+  async write() {
+    const at = wrPath();
+    if (!at) {
+      const mine = keyIds('hackon.ekey.');
+      const books = await Promise.all(mine.map(id => api(`/books/${id}`).then(d => d.book).catch(() => null)));
+      return `<section class="mhero" id="wr-hero"><h2>같이 쓰는 <span class="lime">책</span></h2>
+          <p>장을 나눠 링크를 보내면, 누구나 고쳐 쓰기를 제안하고 편집자가 <b>합치기</b>를 누릅니다.</p>
+          <div class="steps3"><span>① 책 만들기</span><span>② 링크 보내기</span><span>③ 고친 것 합치기</span></div></section>
+        <div class="card" id="wr-new"><label>책 이름</label><input id="wr-title" maxlength="80" placeholder="예) 바이브코딩 첫걸음">
+          <label>한 줄 소개 <span class="pill">선택</span></label><input id="wr-about" maxlength="200" placeholder="누구를 위한 책인가요">
+          <label>편집자 이름</label><input id="wr-editor" maxlength="30" placeholder="합치기를 누를 사람">
+          <div style="height:12px"></div><button class="btn" id="wr-make">책 만들기</button></div>
+        ${books.filter(Boolean).length ? `<h3 class="calsec">내가 편집하는 책</h3>${books.filter(Boolean).map(b => `<a class="bdrow" href="/w/${esc(b.id)}"><span class="bdv"><i>📘</i></span><span class="bdr"><b class="bdt">${esc(b.title)}</b>${b.about ? `<span class="bdpeek">${esc(b.about)}</span>` : ''}</span></a>`).join('')}` : ''}`;
+    }
+    const ek = ekeyOf(at.book);
+    if (!at.ch) {
+      let d = null, gone = false; try { d = await api(`/books/${at.book}`, { ekey: ek }); } catch (e) { gone = e.status === 404; }
+      if (!d) return `<a class="bdback" href="/write">‹ 공동 집필</a><div class="card"><div class="meta">${gone ? '없는 책입니다.' : '지금 못 불러왔습니다.'}</div></div>`;
+      const pend = d.chapters.reduce((n, c) => n + c.pending, 0);
+      return `<a class="bdback" href="/write">‹ 공동 집필</a>
+        <section class="mhero" id="wr-book"><h2>${esc(d.book.title)}</h2>${d.book.about ? `<p>${esc(d.book.about)}</p>` : ''}
+          <p style="margin-top:8px">편집 ${esc(d.book.editor)}${d.people.length ? ' · 함께 쓴 사람 ' + d.people.map(x => esc(x.author)).join(', ') : ''}</p>
+          <div class="evacts"><button type="button" data-wrshare>↗ 링크 보내기</button><a href="/api/books/${esc(d.book.id)}.md" download><span aria-hidden="true">⬇</span>.md 내보내기</a></div></section>
+        ${d.isEditor && pend ? `<div class="card" style="border-color:#C8F53B"><b>합칠 제안 ${pend}개</b><div class="meta">장을 열면 차이가 보입니다.</div></div>` : ''}
+        <div id="wr-chs">${d.chapters.map(c => `<a class="bdrow" href="/w/${esc(d.book.id)}/${c.id}"><span class="bdv"><b>${c.ord}</b></span>
+          <span class="bdr"><b class="bdt">${esc(c.title)}</b><span class="bdmeta"><span>${c.chars.toLocaleString()}자 · ${c.ver}판</span>${c.pending ? `<span class="bdtopic">제안 ${c.pending}</span>` : ''}</span></span></a>`).join('')}</div>
+        ${d.isEditor ? `<div class="shrow" style="margin-top:8px"><input id="wr-chname" maxlength="60" placeholder="새 장 이름"><button class="btn sm" id="wr-chadd">장 더하기</button></div>` : ''}`;
+    }
+    let d = null; try { d = await api(`/chapters/${at.ch}`, { ekey: ek }); } catch { d = null; }
+    if (!d || d.book.id !== at.book) return `<a class="bdback" href="/w/${esc(at.book)}">‹ 책으로</a><div class="card"><div class="meta">없는 장이거나 지금 못 불러왔습니다.</div></div>`;
+    const c = d.chapter;
+    const diff = e => lineDiff(e.base_body ?? c.body, e.body).filter((x, i, arr) => x.t !== '=' || arr.slice(Math.max(0, i - 1), i + 2).some(y => y.t !== '=')).map(x => `<div class="df df${x.t === '+' ? 'a' : x.t === '-' ? 'd' : 's'}">${x.t === '+' ? '+ ' : x.t === '-' ? '− ' : '  '}${esc(x.s) || '&nbsp;'}</div>`).join('');
+    return `<a class="bdback" href="/w/${esc(d.book.id)}">‹ ${esc(d.book.title)}</a>
+      <article class="bdpost" id="wr-ch"><div class="bdmeta"><span class="bdtopic">${c.ord}장 · ${c.ver}판</span>${d.isEditor ? '<span class="bdbest">편집자</span>' : ''}</div>
+        <h1>${esc(c.title)}</h1>
+        ${wrEditing ? `<textarea id="wr-body" rows="16" style="width:100%">${esc(c.body)}</textarea>
+            <div class="row"><div><input id="wr-note" maxlength="140" placeholder="무엇을 고쳤나요 (한 줄)"></div><div><input id="wr-author" maxlength="30" placeholder="내 이름" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"></div></div>
+            <div class="shrow" style="margin-top:10px"><button class="btn sm" id="wr-send" data-base="${c.ver}">${d.isEditor ? '바로 저장' : '제안 보내기'}</button><button class="btn sec sm" id="wr-cancel">그만두기</button></div>`
+          : `${c.body ? `<div class="bdbody wrbody">${esc(c.body)}</div>` : '<div class="meta">아직 비어 있습니다. 첫 문단을 써 주세요.</div>'}
+            <div class="bdacts"><button type="button" id="wr-edit">✍️ ${d.isEditor ? '고치기' : '고쳐 쓰기 제안'}</button><button type="button" data-wrshare>↗ 링크</button></div>`}
+      </article>
+      ${d.edits.length ? `<h3 class="calsec">기다리는 제안 ${d.edits.length}</h3>${d.edits.map(e => `<div class="card wredit" data-edit="${e.id}">
+          <div class="bdmeta"><b>${esc(e.author)}</b><span>${esc(ago(e.created))}</span>${e.stale ? `<span class="gstate wait">옛 판(${e.base}판) 위 — 합칠 수 없음</span>` : ''}</div>
+          ${e.note ? `<div style="margin:6px 0;font-weight:700">${esc(e.note)}</div>` : ''}
+          <div class="diff">${diff(e)}</div>
+          ${d.isEditor ? `<div class="shrow" style="margin-top:10px">${e.stale ? '' : `<button class="btn sm" data-merge="${e.id}">합치기</button>`}<button class="btn sec sm" data-eclose="${e.id}">돌려보내기</button></div>` : ''}
+        </div>`).join('')}` : ''}
+      ${d.history.length ? `<details class="more"><summary>판 기록 ${d.history.length}</summary><div class="in">${d.history.map(h => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${h.ver}판</b><span>${esc(h.author)}</span><span>${esc(h.note)}</span><span>${esc(ago(h.at))}</span></div>`).join('')}</div></details>` : ''}`;
+  },
+
   /* ── 게시판 — 주제별로 떠들고, 켜 본 것 자랑하고, 막힌 걸 묻는 곳 ──
      연락처는 공개 글에 안 싣는다(서버가 막는다). 팀원 찾기는 대회 «같이 할 사람 추천» 의 서로 좋아요로 */
   async board() {
@@ -7538,6 +7611,37 @@ function wire() {
   });
   const evCal = $('#ev-cal');
   if (evCal) evCal.onclick = () => { const m = $('#ev-calm'), on = m.hidden; m.hidden = !on; evCal.setAttribute('aria-expanded', String(on)); };
+  /* ── 공동 집필 ── */
+  const wrMake = $('#wr-make');
+  if (wrMake) wrMake.onclick = async () => {
+    try { const r = await api('/books', { method: 'POST', body: { title: $('#wr-title').value, about: $('#wr-about').value, editor: $('#wr-editor').value } });
+      try { localStorage.setItem('hackon.ekey.' + r.id, r.ekey); } catch {}
+      location.href = '/w/' + r.id; } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-wrshare]').forEach(b => b.onclick = async () => {
+    const url = location.origin + location.pathname;
+    try { if (navigator.share) await navigator.share({ title: document.title, url }); else { await navigator.clipboard.writeText(url); flash('링크를 복사했습니다 — 같이 쓸 사람에게 보내세요'); } } catch {}
+  });
+  const wrChAdd = $('#wr-chadd');
+  if (wrChAdd) wrChAdd.onclick = async () => { const at = wrPath();
+    try { await api(`/books/${at.book}/chapters`, { method: 'POST', ekey: ekeyOf(at.book), body: { title: $('#wr-chname').value } }); render(); } catch (e) { flash(e.message, true); } };
+  const wrEdit = $('#wr-edit'); if (wrEdit) wrEdit.onclick = () => { wrEditing = true; render(); };
+  const wrCancel = $('#wr-cancel'); if (wrCancel) wrCancel.onclick = () => { wrEditing = false; render(); };
+  const wrSend = $('#wr-send');
+  if (wrSend) wrSend.onclick = async () => {
+    const at = wrPath(), ek = ekeyOf(at.book), author = $('#wr-author').value.trim();
+    try {
+      if (author) try { localStorage.setItem('hackon.nick', author); } catch {}
+      const body = { body: $('#wr-body').value, base: +wrSend.dataset.base, note: $('#wr-note').value, author };
+      const r = ek ? await api(`/chapters/${at.ch}`, { method: 'POST', ekey: ek, body }).catch(e => { if (e.status === 403) return null; throw e; }) : null;
+      if (!r) await api(`/chapters/${at.ch}/edits`, { method: 'POST', body });
+      wrEditing = false; flash(r ? '저장했습니다 — 새 판이 됐습니다' : '제안을 보냈습니다 — 편집자가 합치면 글에 들어갑니다'); render();
+    } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-merge]').forEach(b => b.onclick = async () => { const at = wrPath();
+    try { const r = await api(`/edits/${b.dataset.merge}/merge`, { method: 'POST', ekey: ekeyOf(at.book) }); flash(`합쳤습니다 — ${r.ver}판`); render(); } catch (e) { flash(e.message, true); } });
+  document.querySelectorAll('[data-eclose]').forEach(b => b.onclick = async () => { const at = wrPath();
+    try { await api(`/edits/${b.dataset.eclose}/close`, { method: 'POST', ekey: ekeyOf(at.book) }); flash('돌려보냈습니다'); render(); } catch (e) { flash(e.message, true); } });
   /* ── 게시판 ── */
   const bdNew = $('#bd-new'); if (bdNew) bdNew.onclick = () => { bdWrite = !bdWrite; render(); };
   document.querySelectorAll('[data-bdt]').forEach(b => b.onclick = () => { bdTopic = b.dataset.bdt; history.replaceState(null, '', '/board' + (bdTopic ? '?t=' + bdTopic : '')); render(); });
@@ -8486,6 +8590,7 @@ if (location.pathname === '/card') {
   history.replaceState(null, '', '/app');
   tab = 'find'; findSide = 'give';
 }
+const WRT = location.pathname === '/write' || /^\/w\/[0-9a-f]{8}(\/\d+)?$/.test(location.pathname);   // 공동 집필
 const BRD = location.pathname === '/board' || /^\/board\/\d+$/.test(location.pathname);   // 게시판 — 주제별 글·댓글·추천
 const CAL = location.pathname === '/cal' || location.pathname === '/brief';   /* 브리핑은 «오늘» 에 합쳤다(10/02) — /brief 주소는 살려 같은 화면으로 */        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
@@ -8539,6 +8644,7 @@ else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (WRT) { tab = 'write'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRD) { tab = 'board'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

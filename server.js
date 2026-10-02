@@ -6383,7 +6383,9 @@ function chapterOf(db, cid) {
 function chapterView(db, cid, ekey = '') {
   const c = chapterOf(db, cid), { b, editor } = bookOf(db, c.book, ekey);
   const edits = db.prepare(`SELECT id, base, body, note, author, status, created FROM edits WHERE chapter=? AND status='pending' ORDER BY id`).all(c.id)
-    .map(e => ({ ...e, stale: e.base !== c.ver }));
+    /* 차이는 «그 제안이 쓰인 판» 과 비교해야 한다. 지금 판과 비교하면 옛 판 위 제안이 «남의 고침을 지우는 것» 처럼 보인다 */
+    .map(e => ({ ...e, stale: e.base !== c.ver,
+      base_body: e.base === c.ver ? c.body : e.base === 0 ? '' : ((db.prepare('SELECT body FROM chapter_vers WHERE chapter=? AND ver=?').get(c.id, e.base) || {}).body || '') }));
   const history = db.prepare('SELECT ver, author, note, at FROM chapter_vers WHERE chapter=? ORDER BY ver DESC LIMIT 30').all(c.id);
   return { book: { id: b.id, title: b.title }, chapter: { id: c.id, ord: c.ord, title: c.title, body: c.body, ver: c.ver, updated: c.updated }, edits, history, isEditor: editor };
 }
@@ -9645,6 +9647,7 @@ async function selftest() {
       bad = false; try { editMerge(wdb, a.id, 'wrong'); } catch (e) { bad = e.code === 403; } ok(bad, '공동 집필 — 편집자만 합친다');
       ok(editMerge(wdb, a.id, bk.ekey).ver === 2 && chapterView(wdb, ch).chapter.body.includes('둘째 문단을 고쳤다'), '공동 집필 — 합치면 새 판이 되고 글이 바뀐다');
       ok(chapterView(wdb, ch).edits.find(e => e.id === b2.id).stale, '공동 집필 — 옛 판 위의 제안에는 «바뀜» 표시');
+      ok(chapterView(wdb, ch).edits.find(e => e.id === b2.id).base_body === '첫 문단.\n둘째 문단.', '공동 집필 — 옛 판 위 제안의 차이는 그 판과 비교한다');
       bad = false; try { editMerge(wdb, b2.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 그 사이 장이 바뀌었으면 합치지 않는다(남의 고침을 덮지 않게)');
       ok(chapterView(wdb, ch).chapter.body.includes('둘째 문단을 고쳤다'), '공동 집필 — 충돌난 제안은 글을 안 바꾼다');
       bad = false; try { editMerge(wdb, a.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 한 제안을 두 번 합치지 않는다');

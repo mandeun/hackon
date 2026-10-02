@@ -4613,5 +4613,37 @@ with sync_playwright() as pw:
     b.close()
 ok("게시판 — 글쓰기·추천 한 번(다시 누르면 취소)·연락처 댓글 막기·주제 거르기·긴 제목 다 보임·지우기")
 
+# ── 공동 집필 /write — 책 만들기 → 편집자 고치기 → 다른 사람 제안 → 차이 보고 합치기 → 충돌 제안은 «합칠 수 없음» → .md ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ed = b.new_context(viewport={"width": 390, "height": 844}).new_page(); ed.on("pageerror", lambda e: errs.append("write-ed: " + str(e)))
+    ed.goto(BASE + "/write", wait_until="networkidle"); ed.wait_for_selector("#wr-new")
+    ed.fill("#wr-title", "e2e 같이 쓰는 책"); ed.fill("#wr-editor", "편집e2e"); ed.click("#wr-make"); ed.wait_for_selector("#wr-chs")
+    _book = ed.url.rsplit("/", 1)[1]
+    ed.click("#wr-chs .bdrow"); ed.wait_for_selector("#wr-ch")
+    ed.click("#wr-edit"); ed.fill("#wr-body", "첫 문단.\n둘째 문단."); ed.click("#wr-send"); ed.wait_for_timeout(500)
+    A("둘째 문단." in ed.inner_text("#wr-ch") and "1판" in ed.inner_text("#wr-ch"), "편집자 고치기가 1판으로 안 들어간다")
+    _churl = ed.url
+    # 다른 사람 둘이 같은 1판 위에서 제안
+    for who, body in (("김e2e", "첫 문단.\n둘째 문단을 고쳤다."), ("박e2e", "첫 문단 고침.\n둘째 문단.")):
+        wp = b.new_context(viewport={"width": 390, "height": 844}).new_page(); wp.on("pageerror", lambda e: errs.append("write-w: " + str(e)))
+        wp.goto(_churl, wait_until="networkidle"); wp.wait_for_selector("#wr-edit")
+        A("합치기" not in wp.inner_text("#view"), "편집자 아닌 사람에게 «합치기» 가 보인다")
+        wp.click("#wr-edit"); wp.fill("#wr-body", body); wp.fill("#wr-author", who); wp.fill("#wr-note", who + " 고침"); wp.click("#wr-send"); wp.wait_for_timeout(500)
+        A("둘째 문단." in wp.inner_text("#wr-ch") and wp.locator(".wredit").count() >= 1, "제안이 글을 바로 바꾸거나 기다리는 제안에 안 뜬다")
+    ed.reload(wait_until="networkidle"); ed.wait_for_selector(".wredit")
+    A(ed.locator(".wredit").count() == 2 and ed.locator(".dfa").count() >= 1 and ed.locator(".dfd").count() >= 1, "편집자에게 차이(들어온 줄·빠진 줄)가 안 보인다")
+    ed.locator(".wredit", has_text="김e2e").locator("[data-merge]").click(); ed.wait_for_timeout(600)
+    A("둘째 문단을 고쳤다." in ed.inner_text("#wr-ch") and "2판" in ed.inner_text("#wr-ch"), "합치기 뒤 글·판이 안 바뀐다")
+    _stale = ed.locator(".wredit", has_text="박e2e")
+    A("합칠 수 없음" in _stale.inner_text() and _stale.locator("[data-merge]").count() == 0, "옛 판 위 제안에 «합칠 수 없음» 이 없거나 합치기 단추가 남아 있다")
+    A("둘째 문단을 고쳤다" not in _stale.locator(".diff").inner_text(), "옛 판 위 제안의 차이를 지금 판과 비교해 «남의 고침을 지우는 것» 처럼 그린다")
+    A(ed.evaluate("document.documentElement.scrollWidth") <= 391, "공동 집필이 폰 폭에서 옆으로 밀린다")
+    ed.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-write.png"), full_page=True)
+    _md = urllib.request.urlopen(BASE + f"/api/books/{_book}.md", timeout=10).read().decode()
+    A(_md.startswith("# e2e 같이 쓰는 책") and "둘째 문단을 고쳤다." in _md and "김e2e" in _md, "마크다운 내보내기가 이상하다")
+    b.close()
+ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
