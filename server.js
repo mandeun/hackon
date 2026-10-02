@@ -816,6 +816,90 @@ function publicListing(db, l) {
   return { id: l.id, title: l.title, price: l.price, license: l.license, refund: l.refund, buy_url: buy,
            repo: l.repo, scan: l.scan, demo, seller: sellerOf(db, l.person) };
 }
+/* ── 세팅 모음 (/setups) ──
+   낸 사람만 최신판을 받는다 — 받으려면 90일 안에 하나를 내야 한다(SETUP_WINDOW). 관리자는 늘 받는다.
+   세팅 본문은 관리자와 낸 사람만 본다. 공개되는 것은 «무엇을 묶었나»(판·메모·제목)뿐이다 */
+const SETUP_WINDOW = 90;
+const isCurator = (db, pack, owner) => !!(owner && db.prepare('SELECT 1 FROM pack_curators WHERE pack=? AND owner=?').get(+pack, owner));
+const giverOf = (db, pack, owner) => !!(owner && db.prepare(`SELECT 1 FROM setups WHERE pack=? AND owner=? AND at >= datetime('now','-${SETUP_WINDOW} days')`).get(+pack, owner));
+const needAcct = (db, owner) => { if (!owner || !db.prepare('SELECT 1 FROM owners WHERE id=?').get(owner)) throw new HttpError(401, '로그인한 뒤에 할 수 있습니다'); };
+function packList(db) {
+  return db.prepare(`SELECT p.id, p.title, p.topic, p.at,
+      (SELECT COUNT(DISTINCT owner) FROM setups s WHERE s.pack=p.id) AS givers,
+      (SELECT COUNT(*) FROM pack_curators c WHERE c.pack=p.id) AS curators,
+      (SELECT MAX(ver) FROM releases r WHERE r.pack=p.id) AS ver,
+      (SELECT MAX(at) FROM releases r WHERE r.pack=p.id) AS released
+    FROM packs p ORDER BY COALESCE(released, p.at) DESC LIMIT 200`).all();
+}
+function addPack(db, owner, b) {
+  needAcct(db, owner);
+  const title = plain(b.title, 60);
+  if (!title) throw new HttpError(400, '모음 이름을 적어 주세요');
+  if (db.prepare("SELECT COUNT(*) c FROM pack_curators c JOIN packs p ON p.id=c.pack WHERE c.owner=? AND p.at >= datetime('now','-1 day')").get(owner).c >= 3)
+    throw new HttpError(429, '모음은 하루 3개까지 열 수 있습니다');
+  const code = crypto.randomBytes(5).toString('hex');
+  const id = Number(db.prepare('INSERT INTO packs(title,topic,about,code) VALUES(?,?,?,?)').run(title, plain(b.topic, 60), plain(b.about, 400), code).lastInsertRowid);
+  db.prepare('INSERT INTO pack_curators(pack,owner) VALUES(?,?)').run(id, owner);
+  return { id, code };
+}
+function packView(db, id, owner) {
+  const p = db.prepare('SELECT * FROM packs WHERE id=?').get(+id);
+  if (!p) throw new HttpError(404, '없는 모음입니다');
+  const cur = isCurator(db, p.id, owner);
+  return {
+    id: p.id, title: p.title, topic: p.topic, about: p.about, window: SETUP_WINDOW,
+    curator: cur, giver: giverOf(db, p.id, owner), code: cur ? p.code : undefined,
+    releases: db.prepare('SELECT ver, notes, at FROM releases WHERE pack=? ORDER BY ver DESC').all(p.id),
+    /* 관리자에게만 낸 것 전부(본문 포함), 낸 사람에게는 자기 것만 */
+    setups: cur ? db.prepare('SELECT id, title, tool, body, picked, at FROM setups WHERE pack=? ORDER BY id DESC').all(p.id)
+         : owner ? db.prepare('SELECT id, title, tool, body, picked, at FROM setups WHERE pack=? AND owner=? ORDER BY id DESC').all(p.id, owner) : [],
+    givers: db.prepare('SELECT COUNT(DISTINCT owner) c FROM setups WHERE pack=?').get(p.id).c,
+  };
+}
+function joinPack(db, id, owner, code) {
+  needAcct(db, owner);
+  const p = db.prepare('SELECT code FROM packs WHERE id=?').get(+id);
+  if (!p) throw new HttpError(404, '없는 모음입니다');
+  const got = String(code || '');
+  if (got.length !== p.code.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(p.code))) throw new HttpError(403, '초대 코드가 다릅니다');
+  db.prepare('INSERT OR IGNORE INTO pack_curators(pack,owner) VALUES(?,?)').run(+id, owner);
+  return { ok: true };
+}
+function addSetup(db, id, owner, b) {
+  needAcct(db, owner);
+  if (!db.prepare('SELECT 1 FROM packs WHERE id=?').get(+id)) throw new HttpError(404, '없는 모음입니다');
+  const title = plain(b.title, 80), body = String(b.body || '').replace(/\r/g, '').slice(0, 8000).trim();
+  if (!title || body.length < 20) throw new HttpError(400, '제목과 세팅 내용(20자 이상)을 적어 주세요');
+  /* 남의 키가 모음에 섞이면 그 사람이 돈을 잃는다. 흔한 비밀값 꼴이 보이면 받지 않는다 */
+  const hit = SECRET_RULES.find(([, re]) => re.test(body));
+  if (hit) throw new HttpError(400, `${hit[0]} 같은 값이 들어 있습니다. 지우고 다시 내 주세요`);
+  if (db.prepare("SELECT COUNT(*) c FROM setups WHERE owner=? AND at >= datetime('now','-1 day')").get(owner).c >= 5)
+    throw new HttpError(429, '세팅은 하루 5개까지 낼 수 있습니다');
+  return { id: Number(db.prepare('INSERT INTO setups(pack,owner,title,tool,body) VALUES(?,?,?,?,?)').run(+id, owner, title, plain(b.tool, 40), body).lastInsertRowid) };
+}
+/* 최신판 내기 — 관리자가 고른 세팅을 한 벌 마크다운으로 묶는다. 이름은 안 싣는다(본인 동의를 따로 받지 않았다) */
+function releasePack(db, id, owner, b) {
+  if (!isCurator(db, id, owner)) throw new HttpError(403, '이 모음의 관리자만 최신판을 냅니다');
+  const ids = [...new Set((Array.isArray(b.picks) ? b.picks : []).map(Number).filter(Boolean))];
+  const rows = ids.length ? db.prepare(`SELECT id, title, tool, body FROM setups WHERE pack=? AND id IN (${ids.map(() => '?').join(',')}) ORDER BY id`).all(+id, ...ids) : [];
+  if (!rows.length) throw new HttpError(400, '묶을 세팅을 하나 이상 고르세요');
+  const p = db.prepare('SELECT title FROM packs WHERE id=?').get(+id);
+  const ver = (db.prepare('SELECT MAX(ver) v FROM releases WHERE pack=?').get(+id).v || 0) + 1;
+  const notes = plain(b.notes, 300);
+  const body = `# ${p.title} — ${ver}판 (${today()})\n\n${notes ? notes + '\n\n' : ''}`
+    + rows.map(r => `## ${r.title}${r.tool ? ` · ${r.tool}` : ''}\n\n${r.body}\n`).join('\n');
+  db.prepare('INSERT INTO releases(pack,ver,notes,body) VALUES(?,?,?,?)').run(+id, ver, notes, body);
+  db.prepare(`UPDATE setups SET picked=1 WHERE pack=? AND id IN (${rows.map(() => '?').join(',')})`).run(+id, ...rows.map(r => r.id));
+  return { ver, count: rows.length };
+}
+function latestPack(db, id, owner) {
+  const r = db.prepare('SELECT ver, notes, body, at FROM releases WHERE pack=? ORDER BY ver DESC LIMIT 1').get(+id);
+  if (!r) throw new HttpError(404, '아직 낸 최신판이 없습니다');
+  if (!isCurator(db, id, owner) && !giverOf(db, id, owner))
+    throw new HttpError(403, `세팅을 하나 내면 최신판을 받습니다 (낸 날부터 ${SETUP_WINDOW}일)`);
+  return r;
+}
+
 /* ── 모아 보기 (/around) ──
    등록 안 해도 보인다 → 주최자가 확인을 청한다 → 운영자가 넘긴다 → 그 자리에서 HACK:ON 으로 운영.
    제보는 로그인한 사람만(누가 올렸는지 운영자가 알아야 지운다), 하루 10건. 공개 목록엔 제보자·청한 사람이 안 나간다 */
@@ -2963,6 +3047,34 @@ function open(file) {
       claim_note TEXT NOT NULL DEFAULT '',    -- 주최자임을 어떻게 보이나(공식 메일·계정)
       event   TEXT NOT NULL DEFAULT '',       -- 넘긴 뒤 생긴 HACK:ON 대회
       at      TEXT NOT NULL DEFAULT (datetime('now')))`);
+  /* 세팅 모음 — 잘 쓰는 사람의 AI 도구 세팅을 모아, 고른 것을 «최신판» 으로 묶어 돌려준다.
+     낸 사람만 최신판을 받는다(3개월). 모음은 누구나 열 수 있고, 연 사람이 초대 코드로 공동 관리자를 부른다 —
+     운영진이 다 고르지 않게 권한을 나눠 몸집을 키운다 */
+  db.exec(`CREATE TABLE IF NOT EXISTS packs(
+      id     INTEGER PRIMARY KEY,
+      title  TEXT NOT NULL,
+      topic  TEXT NOT NULL DEFAULT '',        -- 어떤 도구·어떤 일(예: Claude Code · 프런트엔드)
+      about  TEXT NOT NULL DEFAULT '',
+      code   TEXT NOT NULL,                   -- 공동 관리자 초대 코드. 관리자에게만 보인다
+      at     TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS pack_curators(pack INTEGER NOT NULL REFERENCES packs(id) ON DELETE CASCADE, owner TEXT NOT NULL, PRIMARY KEY(pack, owner))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS setups(
+      id     INTEGER PRIMARY KEY,
+      pack   INTEGER NOT NULL REFERENCES packs(id) ON DELETE CASCADE,
+      owner  TEXT NOT NULL,
+      title  TEXT NOT NULL,
+      tool   TEXT NOT NULL DEFAULT '',        -- 도구와 판(예: Claude Code 2.3)
+      body   TEXT NOT NULL,                   -- 설정·규칙·프롬프트·쓰는 법. 관리자와 낸 사람만 본다
+      picked INTEGER NOT NULL DEFAULT 0,      -- 최신판에 들어간 적이 있나
+      at     TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS releases(
+      id    INTEGER PRIMARY KEY,
+      pack  INTEGER NOT NULL REFERENCES packs(id) ON DELETE CASCADE,
+      ver   INTEGER NOT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      body  TEXT NOT NULL,                    -- 고른 세팅을 묶은 마크다운 한 벌
+      at    TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(pack, ver))`);
   /* 연락 대장 «다음 연락일». 비면 보낸 날 +3일로 본다 */
   try { db.exec("ALTER TABLE leads ADD COLUMN next_at TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
@@ -3422,6 +3534,9 @@ function mergeOwners(db, from, into) {
     db.prepare('UPDATE news SET owner=? WHERE owner=?').run(into, from);
     db.prepare('UPDATE spots SET by=? WHERE by=?').run(into, from);
     db.prepare('UPDATE spots SET claim_by=? WHERE claim_by=?').run(into, from);
+    db.prepare('UPDATE setups SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE OR IGNORE pack_curators SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('DELETE FROM pack_curators WHERE owner=?').run(from);
     db.prepare('UPDATE logins SET owner=? WHERE owner=?').run(into, from);
     /* 사이트 운영자 자격도 따라간다. 둘 다 운영자면 한 줄만 남아야 해서 OR REPLACE 를 쓴다
        — 그냥 UPDATE 면 PRIMARY KEY 가 부딪혀 합치기 전체가 굴러떨어진다. */
@@ -3458,6 +3573,9 @@ async function deleteAccount(db, owner, b, notify) {
     db.prepare("UPDATE spots SET by='' WHERE by=?").run(owner);
     db.prepare("UPDATE spots SET state='open', claim_by='', claim_note='' WHERE claim_by=? AND state='pending'").run(owner);
     db.prepare("UPDATE spots SET claim_by='' WHERE claim_by=?").run(owner);
+    /* 세팅 모음 — 낸 세팅은 그 사람 글이라 같이 지운다. 이미 묶인 최신판은 이름 없이 묶였으니 그대로 */
+    db.prepare('DELETE FROM setups WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM pack_curators WHERE owner=?').run(owner);
     db.prepare('DELETE FROM logins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM site_admins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM owners WHERE id=?').run(owner);
@@ -6271,6 +6389,14 @@ function routes(db) {
           return json(res, 200, reviewOutside(db, m[1], !!(await body(req)).ok, { siteAdmin }));
         /* 마켓 — 읽기는 누구나, 판매 등록은 본인(팀·짝 열쇠), 확인·내리기·검사는 사이트 운영자 */
         if (p === '/api/market' && req.method === 'GET') return json(res, 200, { rows: marketList(db) });
+        /* 세팅 모음. 보는 것(목록·판 이력)은 누구나, 내기·열기·최신판 받기는 계정으로 */
+        if (p === '/api/packs' && req.method === 'GET') return json(res, 200, { rows: packList(db), window: SETUP_WINDOW, loggedIn: !!owner });
+        if (p === '/api/packs' && req.method === 'POST') return json(res, 201, addPack(db, owner, await body(req)));
+        if ((m = p.match(/^\/api\/packs\/(\d+)$/)) && req.method === 'GET') return json(res, 200, packView(db, m[1], owner));
+        if ((m = p.match(/^\/api\/packs\/(\d+)\/join$/)) && req.method === 'POST') return json(res, 200, joinPack(db, m[1], owner, (await body(req)).code));
+        if ((m = p.match(/^\/api\/packs\/(\d+)\/setups$/)) && req.method === 'POST') return json(res, 201, addSetup(db, m[1], owner, await body(req)));
+        if ((m = p.match(/^\/api\/packs\/(\d+)\/release$/)) && req.method === 'POST') return json(res, 201, releasePack(db, m[1], owner, await body(req)));
+        if ((m = p.match(/^\/api\/packs\/(\d+)\/latest$/)) && req.method === 'GET') return json(res, 200, latestPack(db, m[1], owner));
         /* 모아 보기. 보는 것은 누구나, 제보·확인 요청은 로그인(쿠키)한 계정으로만 — 열쇠(x-owner)로는 안 받는다 */
         if (p === '/api/spots' && req.method === 'GET') return json(res, 200, { kinds: SPOT_KINDS, rows: spotsList(db, q), loggedIn: !!cookieOwner });
         if (p === '/api/spots' && req.method === 'POST') return json(res, 201, addSpot(db, cookieOwner, await body(req)));
@@ -7238,7 +7364,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -7539,8 +7665,8 @@ async function selftest() {
     const owned = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
       .map((t) => t.name)
       .filter((n) => db.prepare('SELECT COUNT(*) c FROM pragma_table_info(?) WHERE name=\'owner\'').get(n).c);
-    ok(owned.join(',') === 'event_trash,events,logins,news,site_admins',
-       'owner 를 가진 표는 다섯 — 늘었으면 mergeOwners 도 고쳐야 한다: ' + owned.join(','));
+    ok(owned.join(',') === 'event_trash,events,logins,news,pack_curators,setups,site_admins',
+       'owner 를 가진 표는 일곱 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
     /* 소식(제보)도 따라간다 */
     const o1 = crypto.randomBytes(6).toString('hex'), o2 = crypto.randomBytes(6).toString('hex');
     db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o1, '갑');
@@ -7564,6 +7690,9 @@ async function selftest() {
     db.prepare("INSERT INTO event_trash(event,owner,title,json) VALUES('gone2',?,'지운 대회','{}')").run(a);
     db.prepare("INSERT INTO news(src,key,title,url,owner) VALUES('제보',?,'제보 한 줄','https://x.test',?)").run('k-del-' + a, a);
     db.prepare("INSERT INTO spots(kind,name,url,by,state,claim_by,claim_note) VALUES('해커톤','지울사람 제보',?,?,'pending',?,'메일')").run('https://del-' + a + '.example', a, a);
+    const dpk = Number(db.prepare("INSERT INTO packs(title,code) VALUES('지울 모음','c0de')").run().lastInsertRowid);
+    db.prepare('INSERT INTO pack_curators(pack,owner) VALUES(?,?)').run(dpk, a);
+    db.prepare("INSERT INTO setups(pack,owner,title,body) VALUES(?,?,'내 세팅','지울 사람의 세팅 본문입니다')").run(dpk, a);
     let code = 0; try { await deleteAccount(db, a, {}); } catch (e) { code = e.code; }
     ok(code === 409 && db.prepare('SELECT 1 FROM owners WHERE id=?').get(a), '계정 지우기: «탈퇴» 라고 안 적으면 안 지운다');
     const r = await deleteAccount(db, a, { confirm: '탈퇴' }, async () => 0);
@@ -7578,6 +7707,9 @@ async function selftest() {
     const spd = db.prepare('SELECT by, claim_by, state FROM spots WHERE url=?').get('https://del-' + a + '.example');
     ok(spd && spd.by === '' && spd.claim_by === '' && spd.state === 'open', '계정 지우기: 모아 보기 제보는 남기고 제보자·확인 요청을 지운다');
     db.prepare('DELETE FROM spots WHERE url=?').run('https://del-' + a + '.example');
+    ok(!db.prepare('SELECT 1 FROM setups WHERE owner=?').get(a) && !db.prepare('SELECT 1 FROM pack_curators WHERE owner=?').get(a),
+       '계정 지우기: 낸 세팅과 모음 관리자 자리도 지운다');
+    db.prepare('DELETE FROM packs WHERE id=?').run(dpk);
     ok(db.prepare('SELECT 1 FROM owners WHERE id=?').get(other) && db.prepare('SELECT 1 FROM events WHERE id=?').get(eo.id),
        '계정 지우기: 남의 계정과 대회는 그대로다');
     code = 0; try { await deleteAccount(db, a, { confirm: '탈퇴' }); } catch (e) { code = e.code; }
@@ -7603,6 +7735,34 @@ async function selftest() {
     ok(bad === 400, '활동 보고서: 시작이 끝보다 늦으면 400');
     for (const r of db.prepare('SELECT id FROM events WHERE owner=?').all(ow)) db.prepare('DELETE FROM events WHERE id=?').run(r.id);
     db.prepare('DELETE FROM owners WHERE id=?').run(ow);
+  }
+  /* 세팅 모음 — 낸 사람만 최신판, 관리자는 초대 코드로 늘린다, 비밀값은 안 받는다 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const [cu, co, gv, lu] = ['pc', 'pd', 'pg', 'pl'].map(x => x + crypto.randomBytes(5).toString('hex'));
+    for (const o of [cu, co, gv, lu]) db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o, o);
+    ok(raises(() => addPack(db, '', { title: 'x' }), 401), '세팅: 계정 없이 모음을 못 연다');
+    const pk = addPack(db, cu, { title: 'Claude Code 프런트엔드', topic: 'Claude Code' });
+    ok(packList(db).some(r => r.id === pk.id && r.curators === 1), '세팅: 연 사람이 첫 관리자다');
+    ok(raises(() => joinPack(db, pk.id, co, 'zzzzzzzzzz'), 403), '세팅: 틀린 초대 코드는 막는다');
+    joinPack(db, pk.id, co, pk.code);
+    ok(packView(db, pk.id, co).curator && packView(db, pk.id, co).code === pk.code && packView(db, pk.id, gv).code === undefined,
+       '세팅: 초대 코드로 공동 관리자가 되고, 코드는 관리자에게만 보인다');
+    ok(raises(() => addSetup(db, pk.id, gv, { title: '키 섞임', body: 'export ANTHROPIC_API_KEY=sk-ant-' + 'a'.repeat(40) }), 400), '세팅: 비밀 키가 섞인 세팅은 받지 않는다');
+    const s1 = addSetup(db, pk.id, gv, { title: '컴포넌트 먼저 쪼개기', tool: 'Claude Code 2.3', body: 'CLAUDE.md 에 «컴포넌트는 100줄 안» 규칙을 둔다. 화면부터 그리게 한다.' }).id;
+    ok(packView(db, pk.id, lu).setups.length === 0 && packView(db, pk.id, gv).setups.length === 1 && packView(db, pk.id, cu).setups.length === 1,
+       '세팅: 본문은 관리자와 낸 사람만 본다');
+    ok(raises(() => releasePack(db, pk.id, gv, { picks: [s1] }), 403), '세팅: 관리자가 아니면 최신판을 못 낸다');
+    ok(raises(() => latestPack(db, pk.id, gv), 404), '세팅: 낸 최신판이 없으면 모름이 아니라 «없음»(404)');
+    const rl = releasePack(db, pk.id, co, { picks: [s1], notes: '10월판' });
+    ok(rl.ver === 1 && latestPack(db, pk.id, gv).body.includes('컴포넌트 먼저 쪼개기') && !latestPack(db, pk.id, gv).body.includes(gv),
+       '세팅: 낸 사람은 최신판을 받고, 판에는 이름이 안 실린다');
+    ok(raises(() => latestPack(db, pk.id, lu), 403), '세팅: 안 낸 사람은 최신판을 못 받는다');
+    db.prepare("UPDATE setups SET at=datetime('now','-91 days') WHERE id=?").run(s1);
+    ok(raises(() => latestPack(db, pk.id, gv), 403) && !!latestPack(db, pk.id, cu), '세팅: 낸 지 90일이 지나면 다시 내야 받는다(관리자는 늘 받는다)');
+    ok(releasePack(db, pk.id, cu, { picks: [s1] }).ver === 2, '세팅: 판 번호가 올라간다');
+    db.prepare('DELETE FROM packs WHERE id=?').run(pk.id);
+    for (const o of [cu, co, gv, lu]) db.prepare('DELETE FROM owners WHERE id=?').run(o);
   }
   /* 모아 보기 — 등록 안 해도 보이고, 주최자가 확인하면 그 자리에서 HACK:ON 대회가 된다 */
   {

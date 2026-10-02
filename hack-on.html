@@ -1583,6 +1583,7 @@ function moreForm(t) {
 }
 let msg = null;
 let ARD_KIND = '', ARD_Q = '';
+let SETP = 0, SETLATEST = null;   // 세팅 모음 — 열어 본 모음, 받아 온 최신판
 const TERM = { from: '', to: '' };   // 학기 활동 보고서 기간
 const ymdLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };   // 모아 보기 — 고른 종류·찾는 말
 let TPL = null;   // 열기 탭에서 누른 유형
@@ -3987,6 +3988,65 @@ const SCREEN = {
       <div class="no-print" style="display:flex;gap:8px;margin:10px 0"><button class="btn" id="tm-print">인쇄 · PDF 저장</button><button class="btn sec" id="tm-back">돌아가기</button></div>`;
   },
 
+  /* 세팅 모음. 잘 쓰는 사람의 AI 도구 세팅을 모아 관리자가 고른 것을 «최신판» 으로 묶는다.
+     최신판은 세팅을 낸 사람만 받는다(90일). 모음은 누구나 열고, 연 사람이 초대 코드로 공동 관리자를 부른다 */
+  async setups() {
+    const acct = (AUTH && AUTH.loggedIn) || !!myKey();
+    const loginBox = `<div class="meta" style="margin-top:8px">누가 냈는지 알아야 최신판을 돌려드릴 수 있어서 로그인한 뒤에 받습니다.</div>${loginBtns('', 'margin-top:8px')}`;
+    if (!SETP) {
+      let d = null; try { d = await api('/packs'); } catch { d = null; }
+      return `<section class="hero"><div class="top"><span class="pill">세팅 모음</span></div>
+          <h2>잘 쓰는 사람의 세팅, 계속 최신으로</h2>
+          <p class="sub" style="margin-bottom:0">Claude Code·Codex·Cursor 를 잘 쓰는 사람들의 규칙·설정·프롬프트를 모읍니다.
+            관리자가 좋은 것을 골라 <b>최신판</b>으로 묶어 냅니다. <b>세팅을 하나 내면</b> ${d ? d.window : 90}일 동안 최신판을 받습니다.</p></section>
+        ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+          : !d.rows.length ? '<div class="card"><h3>아직 열린 모음이 없습니다</h3><div class="meta">첫 모음을 열어 보세요. 연 사람이 관리자가 됩니다.</div></div>'
+          : d.rows.map(r => `<a class="card" href="#" data-pack="${r.id}" style="display:block;text-decoration:none;color:inherit">
+              <div class="top">${r.topic ? `<span class="pill">${esc(r.topic)}</span>` : ''}${r.ver ? `<span class="pill ok">${r.ver}판</span>` : '<span class="pill">아직 판 없음</span>'}</div>
+              <h3 style="margin:6px 0 2px">${esc(r.title)}</h3>
+              <div class="meta">낸 사람 ${r.givers} · 관리자 ${r.curators}${r.released ? ` · 최근 ${esc(String(r.released).slice(0, 10))}` : ''}</div></a>`).join('')}
+        <details class="card" id="pk-new"><summary style="cursor:pointer;font-weight:700">모음 열기 — 내가 관리자</summary>
+          ${!acct ? loginBox : `<label>이름</label><input id="pk-title" maxlength="60" placeholder="예) Claude Code 로 앱 처음 만드는 사람">
+          <label>도구·분야</label><input id="pk-topic" maxlength="60" placeholder="예) Claude Code · 프런트엔드">
+          <label>무엇을 모으나</label><textarea id="pk-about" rows="3" maxlength="400" placeholder="어떤 세팅을 받고, 어떤 기준으로 고르는지"></textarea>
+          <button class="btn sm" id="pk-go" style="margin-top:10px">열기</button>
+          <div class="meta" style="margin-top:6px">연 뒤 초대 코드를 주면 공동 관리자가 함께 고릅니다.</div>`}</details>
+        <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/around">모아 보기</a> · <a href="/learn">강의</a></p>`;
+    }
+    let p; try { p = await api(`/packs/${SETP}`); }
+    catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없는 모음입니다' : '불러오지 못했습니다'}</h3><button class="btn sec sm" id="pk-back">목록으로</button></div>`; }
+    const can = p.curator || p.giver;
+    return `<section class="hero"><div class="top"><span class="pill">세팅 모음</span>${p.topic ? `<span class="pill">${esc(p.topic)}</span>` : ''}${p.curator ? '<span class="pill ok">내가 관리자</span>' : ''}</div>
+        <h2>${esc(p.title)}</h2>${p.about ? `<p class="sub" style="margin-bottom:0">${esc(p.about)}</p>` : ''}
+        <div class="meta" style="margin-top:6px">낸 사람 ${p.givers} · 판 ${p.releases.length}</div></section>
+      <div class="card" id="pk-latest"><h3>최신판${p.releases[0] ? ` <span class="pill ok">${p.releases[0].ver}판 · ${esc(String(p.releases[0].at).slice(0, 10))}</span>` : ''}</h3>
+        ${!p.releases.length ? '<div class="meta">아직 낸 판이 없습니다. 세팅이 모이면 관리자가 묶어 냅니다.</div>'
+          : can ? `${SETLATEST && SETLATEST.pack === p.id ? `<pre style="white-space:pre-wrap;max-height:420px;overflow:auto;background:var(--soft,#F4F6F8);padding:12px;border-radius:10px;font-size:13px">${esc(SETLATEST.body)}</pre>
+              <button class="btn sm" id="pk-dl">.md 로 내려받기</button>` : '<button class="btn sm" id="pk-get">최신판 받기</button>'}`
+          : `<div class="meta">세팅을 하나 내면 ${p.window}일 동안 최신판을 받습니다. 판마다 무엇이 바뀌었는지는 아래에 공개돼 있습니다.</div>`}
+        ${p.releases.length ? `<div style="margin-top:10px">${p.releases.map(r => `<div class="meta">· ${r.ver}판 ${esc(String(r.at).slice(0, 10))}${r.notes ? ' — ' + esc(r.notes) : ''}</div>`).join('')}</div>` : ''}
+      </div>
+      <div class="card" id="pk-give"><h3>내 세팅 내기</h3>
+        ${!acct ? loginBox : `<label>제목</label><input id="st-title" maxlength="80" placeholder="예) 화면부터 그리게 하는 CLAUDE.md">
+        <label>도구와 판</label><input id="st-tool" maxlength="40" placeholder="예) Claude Code 2.3">
+        <label>세팅</label><textarea id="st-body" rows="8" maxlength="8000" placeholder="규칙·설정 파일·프롬프트·쓰는 순서. API 키는 지우고 넣으세요"></textarea>
+        <button class="btn sm" id="st-go" style="margin-top:10px">내기</button>
+        <div class="meta" style="margin-top:6px">본문은 관리자만 봅니다. 최신판에 들어가도 이름은 안 실립니다.</div>`}
+        ${p.setups.length && !p.curator ? `<div class="meta" style="margin-top:10px"><b>내가 낸 것</b> ${p.setups.map(x => esc(x.title) + (x.picked ? ' ✓' : '')).join(' · ')}</div>` : ''}
+      </div>
+      ${p.curator ? `<div class="card" id="pk-cur"><h3>관리 — 최신판 묶기</h3>
+        <div class="meta">공동 관리자 초대 코드 <code>${esc(p.code)}</code> — 이 코드를 받은 사람이 이 화면에서 «관리자 되기» 를 누릅니다.</div>
+        ${p.setups.length ? p.setups.map(x => `<label class="ck" style="margin-top:8px"><input type="checkbox" data-spick="${x.id}"${x.picked ? '' : ' checked'}>
+            <span><b>${esc(x.title)}</b> <span class="meta">${esc(x.tool || '')}${x.picked ? ' · 지난 판에 들어감' : ''}</span>
+            <details><summary class="meta" style="cursor:pointer">본문</summary><pre style="white-space:pre-wrap;font-size:12.5px">${esc(x.body)}</pre></details></span></label>`).join('')
+          : '<div class="meta" style="margin-top:8px">아직 들어온 세팅이 없습니다.</div>'}
+        <label>이번 판 메모</label><input id="rl-notes" maxlength="300" placeholder="예) Claude Code 2.3 에 맞춰 권한 설정을 바꿈">
+        <button class="btn sm" id="rl-go" style="margin-top:10px">최신판 내기</button></div>`
+      : acct ? `<details class="card"><summary style="cursor:pointer;font-weight:700">초대 코드를 받았어요 — 관리자 되기</summary>
+          <div class="shrow" style="margin-top:8px"><input id="jn-code" maxlength="20" placeholder="초대 코드" style="flex:1"><button class="btn sec sm" id="jn-pack">관리자 되기</button></div></details>` : ''}
+      <button class="btn sec sm" id="pk-back" style="margin:10px 0">모음 목록</button>`;
+  },
+
   async market() {
     let rows = null;
     if (LIVE) { try { rows = (await api('/market')).rows; } catch { rows = null; } } else rows = [];
@@ -6159,6 +6219,35 @@ function wire() {
   if (tmGo) tmGo.onclick = () => { TERM.from = $('#tm-from').value; TERM.to = $('#tm-to').value; render(); };
   if ($('#tm-print')) $('#tm-print').onclick = () => window.print();
   if ($('#tm-back')) $('#tm-back').onclick = () => { tab = 'home'; render(); };
+  document.querySelectorAll('[data-pack]').forEach(a => a.onclick = (ev) => { ev.preventDefault(); SETP = +a.dataset.pack; SETLATEST = null; render(); });
+  if ($('#pk-back')) $('#pk-back').onclick = () => { SETP = 0; SETLATEST = null; render(); };
+  if ($('#pk-go')) $('#pk-go').onclick = async () => {
+    try { const r = await api('/packs', { method: 'POST', body: { title: $('#pk-title').value.trim(), topic: $('#pk-topic').value.trim(), about: $('#pk-about').value.trim() } });
+          SETP = r.id; flash('모음을 열었습니다. 초대 코드는 관리 칸에 있습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#st-go')) $('#st-go').onclick = async () => {
+    try { await api(`/packs/${SETP}/setups`, { method: 'POST', body: { title: $('#st-title').value.trim(), tool: $('#st-tool').value.trim(), body: $('#st-body').value } });
+          flash('냈습니다. 이제 최신판을 받을 수 있습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#pk-get')) $('#pk-get').onclick = async () => {
+    try { SETLATEST = { pack: SETP, ...(await api(`/packs/${SETP}/latest`)) }; render(); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#pk-dl')) $('#pk-dl').onclick = () => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([SETLATEST.body], { type: 'text/markdown' }));
+    a.download = `hackon-setup-${SETP}-v${SETLATEST.ver}.md`; a.click(); URL.revokeObjectURL(a.href);
+  };
+  if ($('#rl-go')) $('#rl-go').onclick = async () => {
+    const picks = [...document.querySelectorAll('[data-spick]')].filter(c => c.checked).map(c => +c.dataset.spick);
+    try { const r = await api(`/packs/${SETP}/release`, { method: 'POST', body: { picks, notes: $('#rl-notes').value.trim() } }); SETLATEST = null; flash(`${r.ver}판을 냈습니다 (${r.count}개)`); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#jn-pack')) $('#jn-pack').onclick = async () => {
+    try { await api(`/packs/${SETP}/join`, { method: 'POST', body: { code: $('#jn-code').value.trim() } }); flash('공동 관리자가 됐습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -6975,6 +7064,7 @@ const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 —
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
+const SET = location.pathname === '/setups';     // 세팅 모음 — 잘 쓰는 사람의 세팅을 모아 최신판으로 돌려준다
 const ARD = location.pathname === '/around';     // 모아 보기 — 주최자가 안 올려도 보이는 대회·동아리·스터디·공공 과제
 const MIT = location.pathname.match(/^\/m\/(\d+)$/);   // 마켓 상세 /m/<번호>
 const CRT = location.pathname.match(/^\/c\/([0-9a-f]{12})$/);   // 수료 확인 /c/<번호>
@@ -7013,6 +7103,7 @@ if (TVM) {
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (SET) { tab = 'setups'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (ARD) { tab = 'around'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MKT || MIT) { tab = MIT ? 'mitem' : 'market'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RNK) { tab = 'rank'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
