@@ -1042,6 +1042,13 @@ nav button.on::before{content:"";position:absolute;top:0;left:50%;width:22px;hei
 .bdmini + .bdmini{margin-left:0}
 .bdform textarea{width:100%;resize:vertical}
 .wrbody{font-size:16px;line-height:1.8;margin-top:6px}
+.wrdoc{font-size:17px;line-height:1.85;margin-top:10px;max-width:680px;color:var(--ink)}
+.wrdoc p{margin:0 0 .9em}.wrdoc h2{font-size:21px;margin:1.2em 0 .5em;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+.wrdoc h3{font-size:18px;margin:1em 0 .4em}.wrdoc h4{font-size:16px;margin:.9em 0 .3em}
+.wrdoc ul{margin:0 0 .9em 1.2em}.wrdoc li{margin:.2em 0}
+.wrdoc blockquote{margin:0 0 .9em;padding:6px 12px;border-left:3px solid #C8F53B;background:var(--bg);color:var(--ink2)}
+.wrdoc code{font-family:ui-monospace,Menlo,monospace;font-size:.9em;background:var(--bg2);padding:1px 5px;border-radius:5px}
+.wrstamp{font-size:12.5px;color:var(--ink3);margin-top:10px;padding-top:8px;border-top:1px dashed var(--rule)}
 .diff{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;background:var(--bg,#F4F6FA);border-radius:12px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;margin-top:8px}
 .df{padding:1px 4px;border-radius:4px}
 .dfa{background:#E3F5EC;color:#0A6E49}
@@ -1885,6 +1892,23 @@ let wrEditing = false;
 const wrPath = () => { const m = /^\/w\/([0-9a-f]{8})(?:\/(\d+))?$/.exec(location.pathname); return m ? { book: m[1], ch: m[2] ? +m[2] : 0 } : null; };
 const ekeyOf = id => { try { return localStorage.getItem('hackon.ekey.' + id) || ''; } catch { return ''; } };
 /* 줄 단위 차이 — 같은 줄은 그대로, 빠진 줄은 빨강 취소선, 들어온 줄은 초록. 최장 공통 부분열(LCS) */
+/* 집필 본문 — 공공 문서처럼 읽히게. 먼저 글자를 전부 이스케이프하고, 그 위에 머리글(# ##)·목록(-)·굵게(**)·인용(>)만 입힌다.
+   링크·그림·HTML 은 안 받는다(남의 글에 스크립트가 끼지 않게) */
+function wrMd(src) {
+  const inl = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  const out = []; let list = false;
+  for (const raw of String(src || '').split('\n')) {
+    const l = raw.trimEnd(), li = /^\s*[-*] (.+)/.exec(l);
+    if (!li && list) { out.push('</ul>'); list = false; }
+    if (li) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${inl(li[1])}</li>`); continue; }
+    const hd = /^(#{1,3}) (.+)/.exec(l);
+    if (hd) { out.push(`<h${hd[1].length + 1}>${inl(hd[2])}</h${hd[1].length + 1}>`); continue; }
+    if (/^> /.test(l)) { out.push(`<blockquote>${inl(l.slice(2))}</blockquote>`); continue; }
+    out.push(l.trim() ? `<p>${inl(l)}</p>` : '');
+  }
+  if (list) out.push('</ul>');
+  return out.join('');
+}
 function lineDiff(a, b) {
   const A = String(a).split('\n'), B = String(b).split('\n'), n = A.length, m = B.length;
   if (n * m > 4e6) return [{ t: '-', s: '(너무 길어 차이를 못 그립니다 — 아래 전체 글을 보세요)' }];
@@ -4867,7 +4891,12 @@ const SCREEN = {
         ${d.isEditor && pend ? `<div class="card" style="border-color:#C8F53B"><b>합칠 제안 ${pend}개</b><div class="meta">장을 열면 차이가 보입니다.</div></div>` : ''}
         <div id="wr-chs">${d.chapters.map(c => `<a class="bdrow" href="/w/${esc(d.book.id)}/${c.id}"><span class="bdv"><b>${c.ord}</b></span>
           <span class="bdr"><b class="bdt">${esc(c.title)}</b><span class="bdmeta"><span>${c.chars.toLocaleString()}자 · ${c.ver}판</span>${c.pending ? `<span class="bdtopic">제안 ${c.pending}</span>` : ''}</span></span></a>`).join('')}</div>
-        ${d.isEditor ? `<div class="shrow" style="margin-top:8px"><input id="wr-chname" maxlength="60" placeholder="새 장 이름"><button class="btn sm" id="wr-chadd">장 더하기</button></div>` : ''}`;
+        ${d.isEditor ? `<div class="shrow" style="margin-top:8px"><input id="wr-chname" maxlength="60" placeholder="새 장 이름"><button class="btn sm" id="wr-chadd">장 더하기</button></div>` : ''}
+        ${d.isOwner ? `<div class="card" id="wr-co" style="margin-top:12px"><h3>같이 편집할 사람 <span class="pill">${d.editors.length}/5</span></h3>
+          <div class="meta">초대 링크를 받은 사람도 합치기·되돌리기·직접 고치기를 할 수 있어요. 빼면 그 링크는 바로 끝납니다.</div>
+          ${d.editors.map(e => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${esc(e.name)}</b><span>${esc(ago(e.created))}</span><button type="button" class="bdmini" data-coremove="${e.id}">빼기</button></div>`).join('')}
+          ${d.editors.length < 5 ? `<div class="shrow" style="margin-top:8px"><input id="wr-coname" maxlength="30" placeholder="초대할 사람 이름"><button class="btn sm" id="wr-coadd">초대 링크 만들기</button></div>` : ''}<div id="wr-coout"></div></div>`
+        : d.isEditor ? `<div class="meta" style="margin:10px 4px">공동 편집자 <b>${esc(d.me)}</b> 로 편집 중</div>` : ''}`;
     }
     let d = null; try { d = await api(`/chapters/${at.ch}`, { ekey: ek }); } catch { d = null; }
     if (!d || d.book.id !== at.book) return `<a class="bdback" href="/w/${esc(at.book)}">‹ 책으로</a><div class="card"><div class="meta">없는 장이거나 지금 못 불러왔습니다.</div></div>`;
@@ -4879,7 +4908,7 @@ const SCREEN = {
         ${wrEditing ? `<textarea id="wr-body" rows="16" style="width:100%">${esc(c.body)}</textarea>
             <div class="row"><div><input id="wr-note" maxlength="140" placeholder="무엇을 고쳤나요 (한 줄)"></div><div><input id="wr-author" maxlength="30" placeholder="내 이름" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"></div></div>
             <div class="shrow" style="margin-top:10px"><button class="btn sm" id="wr-send" data-base="${c.ver}">${d.isEditor ? '바로 저장' : '제안 보내기'}</button><button class="btn sec sm" id="wr-cancel">그만두기</button></div>`
-          : `${c.body ? `<div class="bdbody wrbody">${esc(c.body)}</div>` : '<div class="meta">아직 비어 있습니다. 첫 문단을 써 주세요.</div>'}
+          : `${c.body ? `<div class="wrdoc" id="wr-doc">${wrMd(c.body)}</div><div class="wrstamp">${c.ver}판 · ${esc(ago(c.updated))} 고침${d.history[0] ? ` · ${esc(d.history[0].author)}` : ''} · 누구나 고쳐 쓰기를 제안할 수 있는 공개 문서</div>` : '<div class="meta">아직 비어 있습니다. 첫 문단을 써 주세요.</div>'}
             <div class="bdacts"><button type="button" id="wr-edit">✍️ ${d.isEditor ? '고치기' : '고쳐 쓰기 제안'}</button><button type="button" data-wrshare>↗ 링크</button></div>`}
       </article>
       ${d.edits.length ? `<h3 class="calsec">기다리는 제안 ${d.edits.length}</h3>${d.edits.map(e => `<div class="card wredit" data-edit="${e.id}">
@@ -7701,6 +7730,22 @@ function wire() {
     const url = location.origin + location.pathname;
     try { if (navigator.share) await navigator.share({ title: document.title, url }); else { await navigator.clipboard.writeText(url); flash('링크를 복사했습니다 — 같이 쓸 사람에게 보내세요'); } } catch {}
   });
+  const wrCoAdd = $('#wr-coadd');
+  if (wrCoAdd) wrCoAdd.addEventListener('click', async () => {
+    const at = wrPath(), name = ($('#wr-coname').value || '').trim();
+    if (!name) return flash('초대할 사람 이름을 적어 주세요', true);
+    try {
+      const r = await api(`/books/${at.book}/editors`, { method: 'POST', body: { name }, ekey: ekeyOf(at.book) });
+      const link = `${location.origin}/w/${at.book}#ek=${r.ekey}`;
+      $('#wr-coout').innerHTML = `<div class="meta" style="margin-top:8px"><b>${esc(r.name)}</b> 님에게만 보내세요 — 이 링크가 편집 열쇠입니다.</div><input id="wr-colink" readonly value="${esc(link)}"><button class="btn sec sm" id="wr-cocopy" style="margin-top:6px">링크 복사</button>`;
+      $('#wr-cocopy').addEventListener('click', () => { try { navigator.clipboard.writeText(link); flash('복사했습니다'); } catch { $('#wr-colink').select(); } });
+    } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-coremove]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('빼면 그 사람의 편집 링크가 바로 끝납니다. 뺄까요?')) return;
+    const at = wrPath();
+    try { await api(`/books/${at.book}/editors/${b.dataset.coremove}/remove`, { method: 'POST', ekey: ekeyOf(at.book) }); flash('뺐습니다'); render(); } catch (e) { flash(e.message, true); }
+  }));
   const wrChAdd = $('#wr-chadd');
   if (wrChAdd) wrChAdd.onclick = async () => { const at = wrPath();
     try { await api(`/books/${at.book}/chapters`, { method: 'POST', ekey: ekeyOf(at.book), body: { title: $('#wr-chname').value } }); render(); } catch (e) { flash(e.message, true); } };
@@ -8673,6 +8718,9 @@ const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파�
 const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
 /* 대회 공개 페이지에서는 위 오른쪽 단추가 «대회 열기» 가 아니라 «오늘» — 참가자에게 대회 열기는 엉뚱하다(10/02) */
 if (/^\/(e|board|w|write)(\/|$)/.test(location.pathname)) document.addEventListener('DOMContentLoaded', () => { const g = document.getElementById('g-open'); if (g) { g.textContent = '오늘'; g.href = '/cal'; } });
+/* /w/<책>#ek=<열쇠> — 공동 편집자 초대 링크. 열쇠는 # 뒤라 서버에 안 가고, 넣자마자 주소에서 지운다 */
+{ const m = /^\/w\/([0-9a-f]{8})/.exec(location.pathname), k = /^#ek=([0-9a-f]{20})$/.exec(location.hash || '');
+  if (m && k) { try { if (!localStorage.getItem('hackon.ekey.' + m[1])) localStorage.setItem('hackon.ekey.' + m[1], k[1]); } catch {} history.replaceState(null, '', location.pathname); } }
 /* /card#<id>.<열쇠> — 카드 열쇠를 이 기기에 넣고 «자리 → 드려요» 로. 열쇠는 # 뒤라 서버에 안 간다 */
 if (location.pathname === '/card') {
   const m = /^#(\d+)\.([0-9a-f]{16})$/.exec(location.hash || '');

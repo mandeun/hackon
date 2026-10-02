@@ -4686,8 +4686,26 @@ with sync_playwright() as pw:
     ed.on("dialog", lambda d: d.accept())
     ed.click("details.more summary"); ed.click('[data-revert="1"]'); ed.wait_for_timeout(600)
     A("둘째 문단을 고쳤다." not in ed.inner_text("#wr-ch") and "3판" in ed.inner_text("#wr-ch"), "1판으로 되돌렸는데 글·판이 안 바뀐다")
+    # 공공 문서처럼 — 머리글·목록·굵게는 입히고, 꺾쇠는 글자로
+    ed.click("#wr-edit"); ed.fill("#wr-body", "## 준비물\n- 노트북\n- **충전기**\n<img src=x onerror=alert(1)>"); ed.click("#wr-send"); ed.wait_for_timeout(600)
+    A(ed.locator("#wr-doc h3").inner_text() == "준비물" and ed.locator("#wr-doc li").count() == 2 and ed.locator("#wr-doc b").inner_text() == "충전기", "본문 머리글·목록·굵게가 문서처럼 안 그려진다")
+    A(ed.locator("#wr-doc img").count() == 0 and "<img" in ed.inner_text("#wr-doc"), "본문 HTML 이 화면에 그대로 박힌다")
+    A("공개 문서" in ed.inner_text(".wrstamp"), "판·고친 사람 도장이 없다")
+    # 공동 편집자 — 처음 편집자가 초대 링크, 받은 사람은 합치기·되돌리기, 주소에서 열쇠가 지워진다, 빼면 끝
+    ed.goto(BASE + f"/w/{_book}", wait_until="networkidle"); ed.wait_for_selector("#wr-co")
+    ed.fill("#wr-coname", "부편집e2e"); ed.click("#wr-coadd"); ed.wait_for_selector("#wr-colink")
+    _inv = ed.input_value("#wr-colink")
+    A("#ek=" in _inv and f"/w/{_book}" in _inv, f"초대 링크가 이상하다: {_inv}")
+    cp = b.new_context(viewport={"width": 390, "height": 844}).new_page(); cp.on("pageerror", lambda e: errs.append("write-co: " + str(e)))
+    cp.goto(_inv, wait_until="networkidle"); cp.wait_for_selector("#wr-chs")
+    A("#ek=" not in cp.url, "초대 링크 열쇠가 주소창에 남는다")
+    A("부편집e2e" in cp.inner_text("#view") and cp.query_selector("#wr-chadd") is not None and cp.query_selector("#wr-co") is None, "공동 편집자가 편집자로 안 열리거나 초대 칸까지 보인다")
+    ed.reload(wait_until="networkidle"); ed.wait_for_selector("[data-coremove]")
+    ed.click("[data-coremove]"); ed.wait_for_timeout(600)
+    cp.reload(wait_until="networkidle"); cp.wait_for_selector("#wr-chs")
+    A(cp.query_selector("#wr-chadd") is None, "뺀 공동 편집자가 아직 편집자다")
     b.close()
-ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md")
+ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md, 되돌리기, 공공 문서 보기, 공동 편집자 초대·빼기")
 
 # ── 삽 공구함 /tools — 키 새는 곳 찾기(진짜 키 잡고 process.env 는 안 잡음)·규칙 파일·.env.example, 서버로 안 보냄 ──
 with sync_playwright() as pw:

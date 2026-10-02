@@ -3507,6 +3507,8 @@ function open(file) {
        편집자 열쇠(ekey)는 만든 브라우저에만 — 헤더 x-ekey 로만 받는다. */
     CREATE TABLE IF NOT EXISTS books(id TEXT PRIMARY KEY, title TEXT NOT NULL, about TEXT NOT NULL DEFAULT '', editor TEXT NOT NULL DEFAULT '', ekey TEXT NOT NULL, created TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS chapters(id INTEGER PRIMARY KEY, book TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, ord INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', ver INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL DEFAULT (datetime('now')));
+    /* 공동 편집자 — 처음 편집자(books.ekey)가 이름 붙여 초대한다. 처음 편집자만 더하고 뺀다. 빼면 그 열쇠는 바로 못 쓴다 */
+    CREATE TABLE IF NOT EXISTS book_editors(id INTEGER PRIMARY KEY, book TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, name TEXT NOT NULL, ekey TEXT NOT NULL UNIQUE, created TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS chapter_vers(chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, ver INTEGER NOT NULL, body TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(chapter, ver));
     CREATE TABLE IF NOT EXISTS edits(id INTEGER PRIMARY KEY, chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, base INTEGER NOT NULL, body TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '익명', status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL DEFAULT (datetime('now')), decided TEXT NOT NULL DEFAULT '');
 
@@ -6461,15 +6463,38 @@ function bookCreate(db, x) {
 function bookOf(db, id, ekey = '') {
   const b = db.prepare('SELECT * FROM books WHERE id=?').get(String(id));
   if (!b) throw new HttpError(404, '없는 책입니다');
-  return { b, editor: !!ekey && String(ekey) === b.ekey };
+  const owner = !!ekey && String(ekey) === b.ekey;
+  const co = !owner && /^[0-9a-f]{20}$/.test(String(ekey || '')) ? db.prepare('SELECT id, name FROM book_editors WHERE book=? AND ekey=?').get(b.id, String(ekey)) : null;
+  return { b, editor: owner || !!co, owner, who: owner ? b.editor : co ? co.name : '' };
 }
 function needEditor(db, id, ekey) { const r = bookOf(db, id, ekey); if (!r.editor) throw new HttpError(403, '편집자만 할 수 있습니다'); return r.b; }
+const BOOK_CO_MAX = 5;
+function bookEditorAdd(db, id, ekey, x) {
+  const r = bookOf(db, id, ekey);
+  if (!r.owner) throw new HttpError(403, '처음 편집자만 공동 편집자를 초대합니다');
+  const name = plain(x && x.name, 30);
+  if (!name) throw new HttpError(400, '초대할 사람 이름을 적어 주세요');
+  if (hasSlur(name)) throw new HttpError(400, SLUR_MSG);
+  if (db.prepare('SELECT COUNT(*) c FROM book_editors WHERE book=?').get(r.b.id).c >= BOOK_CO_MAX) throw new HttpError(429, `공동 편집자는 ${BOOK_CO_MAX}명까지입니다`);
+  const key = crypto.randomBytes(10).toString('hex');
+  const q = db.prepare('INSERT INTO book_editors(book,name,ekey) VALUES(?,?,?)').run(r.b.id, name, key);
+  return { id: Number(q.lastInsertRowid), name, ekey: key };
+}
+function bookEditorDel(db, id, ekey, eid) {
+  const r = bookOf(db, id, ekey);
+  if (!r.owner) throw new HttpError(403, '처음 편집자만 공동 편집자를 뺍니다');
+  const q = db.prepare('DELETE FROM book_editors WHERE id=? AND book=?').run(+eid, r.b.id);
+  if (!q.changes) throw new HttpError(404, '없는 공동 편집자입니다');
+  return { ok: true };
+}
 function bookView(db, id, ekey = '') {
-  const { b, editor } = bookOf(db, id, ekey);
+  const { b, editor, owner, who } = bookOf(db, id, ekey);
   const chapters = db.prepare(`SELECT c.id, c.ord, c.title, c.ver, c.updated, length(c.body) AS chars,
       (SELECT COUNT(*) FROM edits e WHERE e.chapter = c.id AND e.status = 'pending') AS pending FROM chapters c WHERE c.book=? ORDER BY c.ord, c.id`).all(b.id);
   const people = db.prepare(`SELECT author, COUNT(*) n FROM chapter_vers v JOIN chapters c ON c.id = v.chapter WHERE c.book=? AND author<>'' GROUP BY author ORDER BY n DESC`).all(b.id);
-  return { book: { id: b.id, title: b.title, about: b.about, editor: b.editor, created: b.created }, chapters, people, isEditor: editor };
+  const co = db.prepare('SELECT id, name, created FROM book_editors WHERE book=? ORDER BY id').all(b.id);
+  return { book: { id: b.id, title: b.title, about: b.about, editor: b.editor, created: b.created, coEditors: co.map(e => e.name) }, chapters, people,
+    isEditor: editor, isOwner: owner, me: editor ? who : '', editors: owner ? co : undefined };
 }
 function chapterOf(db, cid) {
   const c = db.prepare('SELECT * FROM chapters WHERE id=?').get(+cid);
@@ -6535,20 +6560,21 @@ function chapterSave(db, cid, ekey, x) {
   const c = chapterOf(db, cid); needEditor(db, c.book, ekey);
   if (x.title !== undefined) db.prepare('UPDATE chapters SET title=? WHERE id=?').run(plain(x.title, 60) || c.title, c.id);
   if (x.body === undefined) return { ver: c.ver };
-  const e = editPropose(db, cid, { body: x.body, base: x.base, note: x.note || '편집자 직접 고침', author: bookOf(db, c.book).b.editor });
+  const e = editPropose(db, cid, { body: x.body, base: x.base, note: x.note || '편집자 직접 고침', author: bookOf(db, c.book, ekey).who });
   return editMerge(db, e.id, ekey);
 }
 /* 되돌리기 — 편집자가 판 기록에서 고른 판의 글을 «새 판» 으로 다시 올린다. 지우지 않는다(되돌린 것도 또 되돌릴 수 있게).
    0판은 «처음 빈 장» 이다. 지금 글과 같으면 판을 만들지 않는다 */
 function chapterRevert(db, cid, ekey, ver) {
-  const c = chapterOf(db, cid), b = needEditor(db, c.book, ekey);
+  const c = chapterOf(db, cid); needEditor(db, c.book, ekey);
+  const who = bookOf(db, c.book, ekey).who;
   const v = parseInt(ver, 10);
   if (!(v >= 0 && v < c.ver)) throw new HttpError(400, '되돌릴 판을 골라 주세요');
   const body = v === 0 ? '' : ((db.prepare('SELECT body FROM chapter_vers WHERE chapter=? AND ver=?').get(c.id, v) || {}).body);
   if (body === undefined) throw new HttpError(404, '없는 판입니다');
   if (body === c.body) throw new HttpError(400, '지금 글과 같습니다');
   const nv = c.ver + 1;
-  db.prepare('INSERT INTO chapter_vers(chapter,ver,body,author,note) VALUES(?,?,?,?,?)').run(c.id, nv, body, b.editor, `${v}판으로 되돌림`);
+  db.prepare('INSERT INTO chapter_vers(chapter,ver,body,author,note) VALUES(?,?,?,?,?)').run(c.id, nv, body, who, `${v}판으로 되돌림`);
   db.prepare("UPDATE chapters SET body=?, ver=?, updated=datetime('now') WHERE id=?").run(body, nv, c.id);
   return { ver: nv };
 }
@@ -6764,7 +6790,7 @@ function meStats(db, b, owner, voter) {
   for (const k of list('comments')) { const r = db.prepare("SELECT id, created FROM board_comments WHERE id=? AND ckey=? AND ckey<>'' AND hidden=0").get(+k.id || 0, String(k.key || '')); if (r) comments.set(r.id, r); }
   const votes = /^[0-9a-z]{12,40}$/i.test(String(voter || '')) ? db.prepare('SELECT COUNT(*) c FROM board_votes WHERE voter=?').get(String(voter)).c : 0;
   const edits = tag ? db.prepare('SELECT status, created FROM edits WHERE atag=?').all(tag) : [];
-  const books = list('books', 50).map(k => db.prepare("SELECT id, created FROM books WHERE id=? AND ekey=? AND ekey<>''").get(String(k.id || ''), String(k.key || ''))).filter(Boolean);
+  const books = list('books', 50).map(k => db.prepare("SELECT id, created FROM books b WHERE id=? AND ?<>'' AND (ekey=? OR EXISTS(SELECT 1 FROM book_editors e WHERE e.book=b.id AND e.ekey=?))").get(String(k.id || ''), String(k.key || ''), String(k.key || ''), String(k.key || ''))).filter(Boolean);
   let giver = 0, asksOk = 0;
   const g = b.giver && typeof b.giver === 'object' ? db.prepare("SELECT id, created FROM givers WHERE id=? AND gkey=? AND gkey<>'' AND hidden=0").get(+b.giver.id || 0, String(b.giver.key || '')) : null;
   if (g) { giver = 1; day(g.created); asksOk = db.prepare("SELECT COUNT(*) c FROM asks WHERE giver=? AND status='ok'").get(g.id).c; }
@@ -8808,6 +8834,8 @@ function routes(db) {
           res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="hackon-book-${m[1]}.md"` });
           return res.end(bookMd(db, m[1]));
         }
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\/editors$/)) && req.method === 'POST') return json(res, 201, bookEditorAdd(db, m[1], req.headers['x-ekey'] || '', await body(req)));
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\/editors\/(\d+)\/remove$/)) && req.method === 'POST') return json(res, 200, bookEditorDel(db, m[1], req.headers['x-ekey'] || '', m[2]));
         if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\/chapters$/)) && req.method === 'POST') return json(res, 201, chapterAdd(db, m[1], req.headers['x-ekey'] || '', await body(req)));
         if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'GET') return json(res, 200, chapterView(db, m[1], req.headers['x-ekey'] || ''));
         if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'POST') return json(res, 200, chapterSave(db, m[1], req.headers['x-ekey'] || '', await body(req)));
@@ -9888,6 +9916,25 @@ async function selftest() {
       ok(chapterRevert(wdb, ch, bk.ekey, cur.ver).ver === cur.ver + 2 && chapterView(wdb, ch).chapter.body === cur.body, '공동 집필 — 되돌린 것도 다시 되돌릴 수 있다');
       bad = false; try { chapterRevert(wdb, ch, bk.ekey, 99); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 없는 판(지금 판 이상)으로는 못 되돌린다');
       ok(!bookText('<script>alert(1)</script>본문', 100).includes('<script'), '공동 집필 — 스크립트 꼬리표는 벗긴다(화면은 글자로만 그린다)');
+      /* 공동 편집자 — 처음 편집자만 초대·빼기, 공동 편집자는 합치기·되돌리기·직접 고침(이름이 판 기록에), 빼면 바로 끝 */
+      bad = false; try { bookEditorAdd(wdb, bk.id, 'wrong', { name: '남' }); } catch (e) { bad = e.code === 403; } ok(bad, '공동 편집자 — 아무나 초대 못 한다');
+      const co = bookEditorAdd(wdb, bk.id, bk.ekey, { name: '부편집' });
+      ok(/^[0-9a-f]{20}$/.test(co.ekey) && bookView(wdb, bk.id, co.ekey).isEditor && !bookView(wdb, bk.id, co.ekey).isOwner && bookView(wdb, bk.id, co.ekey).me === '부편집', '공동 편집자 — 받은 열쇠로 편집자, 처음 편집자는 아님');
+      bad = false; try { bookEditorAdd(wdb, bk.id, co.ekey, { name: '또' }); } catch (e) { bad = e.code === 403; } ok(bad, '공동 편집자 — 공동 편집자는 남을 초대 못 한다');
+      ok(bookView(wdb, bk.id).editors === undefined && bookView(wdb, bk.id, bk.ekey).editors.length === 1 && !JSON.stringify(bookView(wdb, bk.id, bk.ekey)).includes(co.ekey), '공동 편집자 — 목록은 처음 편집자에게만, 열쇠는 안 나간다');
+      const cv = chapterView(wdb, ch).chapter.ver;
+      chapterSave(wdb, ch, co.ekey, { body: '부편집이 고친 글', base: cv });
+      ok(chapterView(wdb, ch).history[0].author === '부편집', '공동 편집자 — 직접 고친 판에 공동 편집자 이름');
+      ok(chapterRevert(wdb, ch, co.ekey, cv).ver === cv + 2 && chapterView(wdb, ch).history[0].author === '부편집', '공동 편집자 — 되돌리기도 되고 이름이 남는다');
+      const ce = editPropose(wdb, ch, { body: '누군가의 제안', base: cv + 2 }); ok(editMerge(wdb, ce.id, co.ekey).ver === cv + 3, '공동 편집자 — 제안을 합칠 수 있다');
+      bad = false; try { bookEditorDel(wdb, bk.id, co.ekey, co.id); } catch (e) { bad = e.code === 403; } ok(bad, '공동 편집자 — 스스로나 남을 못 뺀다(처음 편집자만)');
+      bookEditorDel(wdb, bk.id, bk.ekey, co.id);
+      bad = false; try { chapterSave(wdb, ch, co.ekey, { body: '빠진 뒤', base: cv + 3 }); } catch (e) { bad = e.code === 403; } ok(bad, '공동 편집자 — 빼면 그 열쇠로 바로 못 고친다');
+      for (let i = 0; i < 5; i++) bookEditorAdd(wdb, bk.id, bk.ekey, { name: '편' + i });
+      bad = false; try { bookEditorAdd(wdb, bk.id, bk.ekey, { name: '여섯째' }); } catch (e) { bad = e.code === 429; } ok(bad, '공동 편집자 — 다섯 명까지');
+      const other = bookCreate(wdb, { title: '다른 책' });
+      const oco = bookEditorAdd(wdb, other.id, other.ekey, { name: 'x' });
+      ok(bookOf(wdb, other.id, oco.ekey).editor && !bookOf(wdb, bk.id, oco.ekey).editor, '공동 편집자 — 다른 책 열쇠로는 이 책 편집자가 아니다');
     }
     /* 화면(SCREEN) 이름이 겹치면 뒤엣것이 앞엣것을 조용히 덮는다 — 게시판 board() 가 순위표 board() 를 덮어
        대회를 만들면 운영 화면 대신 게시판이 떴다(10/02 e2e 가 잡음). 파일에서 이름을 세어 막는다 */
