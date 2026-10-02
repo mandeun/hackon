@@ -8582,7 +8582,7 @@ const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부�
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
 const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
 /* 대회 공개 페이지에서는 위 오른쪽 단추가 «대회 열기» 가 아니라 «오늘» — 참가자에게 대회 열기는 엉뚱하다(10/02) */
-if (/^\/e\//.test(location.pathname)) document.addEventListener('DOMContentLoaded', () => { const g = document.getElementById('g-open'); if (g) { g.textContent = '오늘'; g.href = '/cal'; } });
+if (/^\/(e|board|w|write)(\/|$)/.test(location.pathname)) document.addEventListener('DOMContentLoaded', () => { const g = document.getElementById('g-open'); if (g) { g.textContent = '오늘'; g.href = '/cal'; } });
 /* /card#<id>.<열쇠> — 카드 열쇠를 이 기기에 넣고 «자리 → 드려요» 로. 열쇠는 # 뒤라 서버에 안 간다 */
 if (location.pathname === '/card') {
   const m = /^#(\d+)\.([0-9a-f]{16})$/.exec(location.hash || '');

@@ -3448,7 +3448,7 @@ function open(file) {
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS board_votes(post INTEGER NOT NULL, voter TEXT NOT NULL, PRIMARY KEY(post, voter));
-    CREATE TABLE IF NOT EXISTS board_reports(kind TEXT NOT NULL, ref INTEGER NOT NULL, voter TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', PRIMARY KEY(kind, ref, voter));
+    CREATE TABLE IF NOT EXISTS board_reports(kind TEXT NOT NULL, ref INTEGER NOT NULL, voter TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', PRIMARY KEY(kind, ref, voter));
     /* 내 달력 구독 — 폰 달력이 주기적으로 읽어 가는 주소(/cal/<token>.ics). 열쇠 대신 «어느 대회에 무슨 역할» 만 적어 둔다.
        열쇠를 주소에 싣지 않으려고 만든 표다 — 토큰이 새도 드러나는 것은 공개 대회 날짜뿐이다. */
     CREATE TABLE IF NOT EXISTS cal_subs(
@@ -6451,7 +6451,16 @@ const BOARD_TOPICS = [['free', '자유'], ['vibe', '바이브코딩'], ['ai', 'A
 const BOARD_TOPIC_KEYS = BOARD_TOPICS.map(t => t[0]);
 const BOARD_BEST = 10, BOARD_HIDE_AT = 3, BOARD_PAGE = 30;
 const BOARD_LIMIT = +(process.env.BOARD_LIMIT || 6);   // IP 하나가 10분에 쓸 수 있는 글 수(댓글은 ×3)
-const boardNick = v => plain(v, 16).replace(/\s+/g, ' ') || '익명';
+/* 사칭 막기 — 운영자·해커온 이름으로 쓰지 못한다(레드팀 10/02) */
+const BOARD_RESERVED = /운영자|관리자|운영진|해커온|hack\s*:?\s*on|admin|공식/i;
+const boardNick = v => { const n = plain(v, 16).replace(/\s+/g, ' '); if (BOARD_RESERVED.test(n)) throw new HttpError(400, '그 닉네임은 쓸 수 없습니다(운영자 사칭 방지)'); return n || '익명'; };
+/* 게시판의 연락처 거름 — 깃허브·데모 주소는 자랑·질문에 꼭 필요하다(전에는 바깥 주소를 다 막아 «자랑·데모» 에 링크를 못 붙였다).
+   주소는 빼고 본다. 단 오픈 채팅방 주소는 연락처라 그대로 막는다 */
+const boardContact = t => /open\.kakao\.com/i.test(String(t || '')) || looksContact(String(t || '').replace(/https?:\/\/[^\s]+/gi, ' '));
+/* 신고를 «서로 다른 사람» 으로 세려면 표(브라우저가 만든 값)만으로는 안 된다 — 한 사람이 표 셋을 만들어 남의 글을 내릴 수 있었다.
+   그래서 IP 를 소금 친 해시로 같이 적고, 서로 다른 해시가 셋일 때만 숨긴다. 날 IP 는 저장하지 않는다 */
+const IP_SALT = process.env.IP_SALT || crypto.randomBytes(16).toString('hex');
+const ipTag = ip => crypto.createHash('sha256').update(IP_SALT + '|' + String(ip || '')).digest('hex').slice(0, 16);
 function boardClean(title, body) {
   const t = plain(title, 80), b = String(body == null || typeof body === 'object' ? '' : body).replace(/[<>]/g, '').trim().slice(0, 3000);
   return { t, b };
@@ -6462,7 +6471,7 @@ function boardPost(db, x) {
   const { t, b } = boardClean(x.title, x.body);
   if (!t) throw new HttpError(400, '제목을 적어 주세요');
   if (notWriting(t) && !b) throw new HttpError(400, '글이 아닌 것 같습니다 — 한 줄이라도 적어 주세요');
-  if (looksContact(t) || looksContact(b)) throw new HttpError(400, '연락처는 공개 글에 적지 않습니다 — 팀원은 대회 «같이 할 사람 추천» 의 서로 좋아요로 이어집니다');
+  if (boardContact(t) || boardContact(b)) throw new HttpError(400, '연락처는 공개 글에 적지 않습니다 — 팀원은 대회 «같이 할 사람 추천» 의 서로 좋아요로 이어집니다');
   const bkey = crypto.randomBytes(8).toString('hex');
   const r = db.prepare('INSERT INTO board_posts(topic,title,body,nick,bkey) VALUES(?,?,?,?,?)').run(topic, t, b, boardNick(x.nick), bkey);
   return { id: Number(r.lastInsertRowid), bkey };
@@ -6493,7 +6502,7 @@ function boardComment(db, id, x) {
   if (!p) throw new HttpError(404, '없거나 내려간 글입니다');
   const b = String(x.body == null || typeof x.body === 'object' ? '' : x.body).replace(/[<>]/g, '').trim().slice(0, 1000);
   if (!b) throw new HttpError(400, '댓글을 적어 주세요');
-  if (looksContact(b)) throw new HttpError(400, '연락처는 공개 댓글에 적지 않습니다');
+  if (boardContact(b)) throw new HttpError(400, '연락처는 공개 댓글에 적지 않습니다');
   const ckey = crypto.randomBytes(8).toString('hex');
   const r = db.prepare('INSERT INTO board_comments(post,body,nick,ckey) VALUES(?,?,?,?)').run(p.id, b, boardNick(x.nick), ckey);
   db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(p.id, p.id);
@@ -6513,13 +6522,13 @@ function boardVote(db, id, voter) {
   return { up, voted: !had };
 }
 /* 신고 — 서로 다른 셋이면 저절로 숨김(운영자가 보기 전에). 같은 사람 연타는 한 번 */
-function boardReport(db, kind, id, voter, reason) {
+function boardReport(db, kind, id, voter, reason, ip = '') {
   const v = String(voter || '');
   if (!/^[0-9a-z]{12,40}$/i.test(v)) throw new HttpError(400, '신고 표가 없습니다');
   const tbl = kind === 'c' ? 'board_comments' : 'board_posts';
   if (!db.prepare(`SELECT 1 FROM ${tbl} WHERE id=?`).get(+id)) throw new HttpError(404, '없는 글입니다');
-  db.prepare('INSERT OR IGNORE INTO board_reports(kind,ref,voter,reason) VALUES(?,?,?,?)').run(kind === 'c' ? 'c' : 'p', +id, v, plain(reason, 100));
-  const n = db.prepare('SELECT COUNT(*) c FROM board_reports WHERE kind=? AND ref=?').get(kind === 'c' ? 'c' : 'p', +id).c;
+  db.prepare('INSERT OR IGNORE INTO board_reports(kind,ref,voter,ip,reason) VALUES(?,?,?,?,?)').run(kind === 'c' ? 'c' : 'p', +id, v, String(ip || v), plain(reason, 100));
+  const n = db.prepare('SELECT COUNT(DISTINCT ip) c FROM board_reports WHERE kind=? AND ref=?').get(kind === 'c' ? 'c' : 'p', +id).c;
   if (n >= BOARD_HIDE_AT) db.prepare(`UPDATE ${tbl} SET hidden=1 WHERE id=?`).run(+id);
   if (n >= BOARD_HIDE_AT && kind === 'c') { const c = db.prepare('SELECT post FROM board_comments WHERE id=?').get(+id); db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(c.post, c.post); }
   return { reports: n, hidden: n >= BOARD_HIDE_AT };
@@ -6575,7 +6584,7 @@ function calItems(db, refs) {
 function calIcs(db, refs, base) {
   const { items } = calItems(db, refs);
   const d = s => String(s).replace(/-/g, '');
-  const esc = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\;');
+  const esc = s => String(s || '').replace(/\r/g, '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
   const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
   const ev = items.filter(i => i.kind !== 'day' || items.findIndex(x => x.kind === 'day' && x.event === i.event) === items.indexOf(i)).map((i, n) => {
     const e = i.kind === 'day' ? db.prepare('SELECT starts, ends FROM events WHERE id=?').get(i.event) : null;
@@ -6875,7 +6884,7 @@ function questionsOf(db, event) {
 function icsOf(e, base) {
   const d = s => String(s || '').replace(/-/g, '');
   const next = s => { const t = new Date(s + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10).replace(/-/g, ''); };
-  const esc = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
+  const esc = s => String(s || '').replace(/\r/g, '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//HACK:ON//KO', 'BEGIN:VEVENT',
     'UID:hackon-' + e.id + '@hackon.mandeun.com',
     'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z',
@@ -8622,17 +8631,22 @@ function routes(db) {
           if (tooMany('bc:' + clientIp(req), BOARD_LIMIT * 3)) throw new HttpError(429, '댓글을 너무 빨리 달고 있습니다. 잠시 뒤에 다시 해 주세요');
           return json(res, 201, boardComment(db, m[1], await body(req)));
         }
-        if ((m = p.match(/^\/api\/board\/(\d+)\/up$/)) && req.method === 'POST')
+        if ((m = p.match(/^\/api\/board\/(\d+)\/up$/)) && req.method === 'POST') {
+          /* 표는 브라우저가 만든다 — 새 표를 계속 만들어 추천을 부풀리는 것을 IP 상한으로 묶는다(레드팀 10/02) */
+          if (tooMany('bv:' + clientIp(req), BOARD_LIMIT * 10)) throw new HttpError(429, '추천을 너무 많이 눌렀습니다. 잠시 뒤에 다시 해 주세요');
           return json(res, 200, boardVote(db, m[1], req.headers['x-voter']));
+        }
         if ((m = p.match(/^\/api\/board\/(p|c)\/(\d+)\/report$/)) && req.method === 'POST')
-          return json(res, 200, boardReport(db, m[1], m[2], req.headers['x-voter'], (await body(req)).reason));
+          return json(res, 200, boardReport(db, m[1], m[2], req.headers['x-voter'], (await body(req)).reason, ipTag(clientIp(req))));
         if ((m = p.match(/^\/api\/board\/(p|c)\/(\d+)\/delete$/)) && req.method === 'POST')
           return json(res, 200, boardDelete(db, m[1], m[2], req.headers['x-bkey'] || '', siteAdmin));
         /* 자리 매칭 — 카드(공개 목록·올리기·내 카드)와 요청(보내기·답하기·거두기) */
         if (p === '/api/givers' && req.method === 'GET')
           return json(res, 200, giversList(db, { kind: NEED_KINDS.includes(q.kind) ? q.kind : '', event: /^[a-z0-9]+$/.test(q.event || '') ? q.event : '' }));
-        if (p === '/api/givers' && req.method === 'POST')
+        if (p === '/api/givers' && req.method === 'POST') {
+          if (tooMany('gv:' + clientIp(req), BOARD_LIMIT)) throw new HttpError(429, '카드를 너무 빨리 올리고 있습니다. 잠시 뒤에 다시 해 주세요');
           return json(res, 201, addGiver(db, await body(req), cookieOwner || ''));
+        }
         if ((m = p.match(/^\/api\/givers\/(\d+)$/)) && req.method === 'GET')
           return json(res, 200, giverInbox(db, m[1], String(req.headers['x-gkey'] || '')));
         if ((m = p.match(/^\/api\/givers\/(\d+)$/)) && req.method === 'POST')
@@ -9692,6 +9706,14 @@ async function selftest() {
       ok(boardList(bdb).rows.some(r => r.id === p2.id), '게시판 — 같은 사람이 여러 번 신고해도 한 번(아직 안 숨김)');
       ok(boardReport(bdb, 'p', p2.id, 'r'.repeat(14), '').hidden && !boardList(bdb).rows.some(r => r.id === p2.id), `게시판 — 서로 다른 ${BOARD_HIDE_AT}명이 신고하면 숨김`);
       bad = false; try { boardView(bdb, p2.id); } catch (e) { bad = e.code === 404; } ok(bad, '게시판 — 숨긴 글은 열리지 않는다');
+      /* 레드팀 10/02 — 한 사람(같은 IP)이 표를 셋 만들어도 남의 글을 못 내린다 */
+      const pz = boardPost(bdb, { topic: 'free', title: '내려가면 안 되는 글', body: '멀쩡' });
+      for (let i = 0; i < 5; i++) boardReport(bdb, 'p', pz.id, 'z' + String(i).padStart(12, '0'), '', 'same-ip');
+      ok(boardList(bdb).rows.some(r => r.id === pz.id), '게시판 — 같은 IP 에서 표를 여러 개 만들어 신고해도 안 내려간다');
+      ok(boardReport(bdb, 'p', pz.id, 'y'.repeat(12), '', 'ip-2').hidden === false && boardReport(bdb, 'p', pz.id, 'x'.repeat(12), '', 'ip-3').hidden === true, '게시판 — 서로 다른 IP 셋이면 내려간다');
+      ok(boardPost(bdb, { topic: 'show', title: '데모 켰어요', body: '여기서 눌러 보세요 https://github.com/acme/demo · https://acme.vercel.app' }).id > 0, '게시판 — 깃허브·데모 주소는 붙일 수 있다');
+      bad = false; try { boardPost(bdb, { topic: 'team', title: '팀원', body: 'https://open.kakao.com/o/abc 로 와요' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 오픈 채팅 주소는 연락처라 막는다');
+      bad = false; try { boardPost(bdb, { topic: 'free', title: '공지', body: '본문', nick: '해커온 운영자' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 운영자·해커온 이름으로 못 쓴다(사칭)');
       /* 인기: 오래된 추천 많은 글보다 방금 올라온 추천 몇 개 글이 위로 갈 수 있어야 한다(영원히 고정 안 됨) */
       bdb.prepare("UPDATE board_posts SET created=datetime('now','-10 days') WHERE id=?").run(p1.id);
       const p3 = boardPost(bdb, { topic: 'show', title: '방금 켰습니다', body: '데모' });
@@ -9726,6 +9748,9 @@ async function selftest() {
          '내 달력 — 구독 주소는 날짜·마감을 싣고 열쇠는 안 싣는다');
       ok((ics.match(/SUMMARY:(\d\d:\d\d )?달력 검사\r/g) || []).length === 1, '내 달력 — 구독에서 이틀짜리 대회는 한 줄(이틀 걸침)');
       let bad = false; try { calSub(db, []); } catch (e) { bad = e.code === 400; } ok(bad, '내 달력 — 빈 구독은 안 만든다');
+      db.prepare('UPDATE events SET title=? WHERE id=?').run('주입\rATTENDEE:evil@x.test\r\nX-EVIL:1', ch.id);
+      const ics2 = calIcs(db, refs, 'https://x.test');
+      ok(!/\r(?!\n)/.test(ics2) && !/\r\nATTENDEE/.test(ics2) && !/\r\nX-EVIL/.test(ics2), '내 달력 — 제목의 줄바꿈으로 달력 파일에 줄을 끼워 넣지 못한다');
     }
     /* 대회 혜택 — 확정된 것만, 끝난 대회·비공개 대회는 빼고 */
     {
