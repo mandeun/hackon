@@ -3680,6 +3680,8 @@ function open(file) {
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   /* 그날의 조건 — 13시 오프닝에서 현장 공개한 제약 한 줄. 끝난 뒤에만 밖으로 나간다 */
   try { db.exec("ALTER TABLE events ADD COLUMN twist TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 연습용 대회. 해 보려고 연 것 — 목록에 안 오르고 SAMPLE_DAYS 뒤 휴지통으로 간다 */
+  try { db.exec('ALTER TABLE events ADD COLUMN sample INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
   try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(로그인 별명)
   try { db.exec("ALTER TABLE news ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}    // 제보자 계정 — 하루 5건 상한      // 별점 옆 한 줄
@@ -4304,6 +4306,52 @@ function moreTeam(db, id, b, can) {
   return { filled: set.length };
 }
 
+/* 연습용 대회 — «해 보려고» 연 것은 사람이 치우지 않으면 첫 화면·검색에 남아 진짜 대회를 가린다.
+   연습용은 목록에 못 올리고, SAMPLE_DAYS 가 지나면 휴지통으로 간다(휴지통 30일 안엔 되살린다).
+   이름으로 고르는 규칙은 좁게 둔다 — «연습 없이 실전 해커톤» 같은 진짜 대회를 지우면 안 되니
+   [테스트]·(연습) 처럼 괄호로 달았거나, 이름이 통째로 «테스트»·«test 2» 인 것만 연습용으로 본다. */
+const SAMPLE_DAYS = 3;
+const SAMPLE_WORDS = '테스트|test|연습|더미|dummy|샘플|sample|시험용';
+const SAMPLE_RE = new RegExp(`^\\s*(?:[\\[(【]\\s*(?:${SAMPLE_WORDS})\\s*[\\])】]|(?:${SAMPLE_WORDS})\\s*\\d*\\s*$)`, 'i');
+const isSampleTitle = (t) => SAMPLE_RE.test(String(t || ''));
+
+/** 연습용 중 기한이 지난 것을 휴지통으로. 알림은 안 보낸다 — 연습용에 신청한 사람은 연 사람 자신이거나 시험 계정이다. */
+async function sweepSamples(db, days = SAMPLE_DAYS) {
+  const old = db.prepare(`SELECT id, title FROM events WHERE sample=1 AND created < datetime('now', ?)`).all(`-${days} days`);
+  for (const e of old) await deleteEvent(db, e.id, { confirm: e.title }, async () => 0);
+  return old.length;
+}
+
+/** 사이트 운영자의 «한꺼번에 치우기». 대회는 남길 것만 고르고 나머지를 휴지통으로(30일 안엔 되살린다).
+    만든 것·외주는 지우지 않고 내린다(hidden) — 남의 글을 운영자가 통째로 지우면 되돌릴 길이 없다.
+    숫자를 그대로 받아 적게 한다(«3개 지우기») — 몇 개가 사라지는지 안 보고 누르는 일을 막는다. */
+function cleanupList(db, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 봅니다');
+  return {
+    events: db.prepare(`SELECT e.id, e.title, e.host, e.starts, e.ends, e.created, e.listed, e.sample,
+                          (SELECT COUNT(*) FROM teams t WHERE t.event=e.id) teams
+                        FROM events e ORDER BY e.starts DESC, e.created DESC`).all(),
+    works: db.prepare('SELECT id, title, at FROM works WHERE hidden=0 ORDER BY id DESC').all(),
+    gigs: db.prepare('SELECT id, title, kind, at FROM gigs WHERE hidden=0 ORDER BY id DESC').all(),
+  };
+}
+async function cleanupRun(db, b, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 치웁니다');
+  const ids = (x) => new Set((Array.isArray(x) ? x : []).map(String));
+  const keepE = ids(b.keepEvents), keepW = ids(b.keepWorks), keepG = ids(b.keepGigs);
+  const evs = db.prepare('SELECT id, title FROM events').all().filter(e => !keepE.has(e.id));
+  const wks = db.prepare('SELECT id FROM works WHERE hidden=0').all().filter(w => !keepW.has(String(w.id)));
+  const gis = db.prepare('SELECT id FROM gigs WHERE hidden=0').all().filter(g => !keepG.has(String(g.id)));
+  const n = evs.length + wks.length + gis.length;
+  if (!n) return { events: 0, works: 0, gigs: 0 };
+  if (String(b.confirm || '').trim() !== `${n}개 지우기`)
+    throw new HttpError(409, `${n}개가 사라집니다. 맞으면 «${n}개 지우기» 라고 그대로 적어 보내세요`);
+  for (const e of evs) await deleteEvent(db, e.id, { confirm: e.title }, async () => 0);
+  for (const w of wks) db.prepare('UPDATE works SET hidden=1 WHERE id=?').run(w.id);
+  for (const g of gis) db.prepare('UPDATE gigs SET hidden=1 WHERE id=?').run(g.id);
+  return { events: evs.length, works: wks.length, gigs: gis.length };
+}
+
 function createEvent(db, b) {
   b.title = plain(b.title, 80);
   if (!b.title) throw new HttpError(400, '대회 이름이 필요합니다');
@@ -4330,6 +4378,7 @@ function createEvent(db, b) {
     db.prepare("UPDATE owners SET name=? WHERE id=? AND name=''").run(b.host, owner);
   }
   db.prepare('UPDATE events SET owner=? WHERE id=?').run(owner, id);
+  if (b.sample || isSampleTitle(b.title)) db.prepare('UPDATE events SET sample=1 WHERE id=?').run(id);
   db.prepare('UPDATE events SET kind=?, deposit=?, weeks=?, meet=?, pick=? WHERE id=?')
     .run(kindOf(b.kind), Math.min(1000000, Math.max(0, Math.floor(+b.deposit || 0))),
          kindOf(b.kind) === '프로젝트' ? Math.min(WEEKS_MAX, Math.max(1, Math.floor(+b.weeks || 4))) : 0,
@@ -5048,6 +5097,9 @@ function board(db, event, admin = false, mine = 0) {
     if (!admin) { delete row.contact; delete row.found; delete row.agreed;
                   delete row.photo; delete row.came; delete row.apply;
                   delete row.show_at; }
+    /* 그 팀 자신에게는 «받았다» 만 돌려준다(값은 안 준다). 안 주면 신청 때 적은 이메일을
+       «조금만 더» 칸이 또 묻는다 — 같은 것을 두 번 묻는 화면이 됐다 */
+    if (!admin && mine && String(t.id) === String(mine)) { row.hasContact = !!t.contact; row.hasFound = !!t.found; }
     /* 예약금 상태는 돈 이야기다 — 운영자와 그 팀 자신에게만 */
     if (!admin && !(mine && String(t.id) === String(mine))) delete row.deposit;
     /* 선발 전·거절된 지원자의 연락처는 리더(운영자)에게도 안 간다 — 수락해야 받는다 */
@@ -6500,6 +6552,7 @@ function routes(db) {
             src = getEvent(db, String(b.from));
             b.rubric = src.rubric; b.topic = b.topic || src.topic; b.cap = src.cap; b.plan = src.plan;   // 상금·날짜는 안 가져온다 — 새로 정할 것
           }
+          if (req.headers['x-sample']) b.sample = 1;   // 시험 스크립트·에이전트가 넣는 대회는 이 머리로 연습용이 된다
           const made = createEvent(db, b);
           /* «이 문제로 내 대회 열기» — 열린 의뢰(어느 대회에도 안 붙은 것)를 새 대회의 첫 주제로 붙인다.
              의뢰자가 자기 문제로 여는 길이자, 남의 문제를 보고 여는 길. 이미 붙은 의뢰는 조용히 건너뛴다. */
@@ -6840,6 +6893,8 @@ function routes(db) {
         if ((m = p.match(/^\/api\/ref\/(\d+)\/next$/)) && req.method === 'POST') { needAcct(db, owner); return json(res, 200, nextRefCode(db, m[1], owner)); }
         if ((m = p.match(/^\/api\/ref\/code\/(\d+)\/used$/)) && req.method === 'POST') return json(res, 200, usedRefCode(db, m[1], owner));
         if ((m = p.match(/^\/api\/ref\/code\/(\d+)\/dead$/)) && req.method === 'POST') return json(res, 200, deadRefCode(db, m[1], owner));
+        if (p === '/api/admin/cleanup' && req.method === 'GET') return json(res, 200, cleanupList(db, { siteAdmin }));
+        if (p === '/api/admin/cleanup' && req.method === 'POST') return json(res, 200, await cleanupRun(db, await body(req), { siteAdmin }));
         if (p === '/api/admin/ref' && req.method === 'GET') { if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 봅니다'); return json(res, 200, { rows: db.prepare('SELECT * FROM ref_services WHERE ok=0 ORDER BY id DESC').all() }); }
         if ((m = p.match(/^\/api\/admin\/ref\/(\d+)$/)) && req.method === 'POST') return json(res, 200, okService(db, m[1], { siteAdmin }));
         /* 외주 — 보는 것은 누구나, 올리기·제안은 계정으로, 제안 내용은 올린 사람만 */
@@ -7108,8 +7163,17 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/list$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner, siteAdmin);
           const b = await body(req);
+          if (b.list !== false && db.prepare('SELECT sample FROM events WHERE id=?').get(m[1])?.sample)
+            throw new HttpError(409, `연습용 대회는 목록에 올리지 않습니다. ${SAMPLE_DAYS}일 뒤 휴지통으로 갑니다 — 진짜로 열려면 «연습용 풀기» 를 먼저 누르세요`);
           db.prepare('UPDATE events SET listed=? WHERE id=?')
             .run(b.list === false ? 0 : 1, m[1]);
+          return json(res, 200, getEvent(db, m[1]));
+        }
+        /* 연습용 표시를 켜고 끈다. 끄면 목록에 올릴 수 있고 저절로 안 지워진다 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/sample$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner, siteAdmin);
+          const on = (await body(req)).sample !== false;
+          db.prepare('UPDATE events SET sample=?' + (on ? ', listed=0' : '') + ' WHERE id=?').run(on ? 1 : 0, m[1]);
           return json(res, 200, getEvent(db, m[1]));
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/open$/)) && req.method === 'POST') {
@@ -9437,6 +9501,55 @@ async function selftest() {
       .run(tEv.id, tOwner, '휴지통검사', tRow.json).lastInsertRowid);
     let tDup = 0; try { untrashEvent(db, again, tOwner); } catch (e) { tDup = e.code; }
     ok(tDup === 409, '같은 id 의 대회가 살아 있으면 409');
+    {
+      /* 연습용 대회와 한꺼번에 치우기 — 남은 검사를 안 건드리게 따로 연 DB 에서 */
+      const cf = path.join(ROOT, 'data', 'test-clean.db');
+      for (const f of [cf, cf + '-wal', cf + '-shm']) fs.rmSync(f, { force: true });
+      const cdb = open(cf);
+      ok(isSampleTitle('[테스트] 해커톤') && isSampleTitle('test 2') && isSampleTitle('(연습)밤샘') && isSampleTitle('더미'),
+         '괄호 단 이름·이름이 통째로 «테스트» 면 연습용');
+      ok(!isSampleTitle('연습 없이 실전 해커톤') && !isSampleTitle('테스트 자동화 공모전') && !isSampleTitle('Testing Day') && !isSampleTitle('10/31 선릉 바이브코딩'),
+         '진짜 대회 이름은 연습용으로 안 잡힌다');
+      const real = createEvent(cdb, { title: '10/31 선릉 바이브코딩', starts: '2026-10-31' });
+      const s1 = createEvent(cdb, { title: '[테스트] 아무거나' });
+      const s2 = createEvent(cdb, { title: '내가 해 본 것', sample: 1 });
+      const s3 = createEvent(cdb, { title: '어제 만든 연습', sample: 1 });
+      const smp = (id) => cdb.prepare('SELECT sample FROM events WHERE id=?').get(id)?.sample;
+      ok(smp(real.id) === 0 && smp(s1.id) === 1 && smp(s2.id) === 1, '이름 규칙·표시로 연습용이 붙고 진짜 대회는 안 붙는다');
+      cdb.prepare("UPDATE events SET created=datetime('now','-4 days') WHERE id IN (?,?)").run(s1.id, real.id);
+      cdb.prepare("UPDATE events SET created=datetime('now','-1 days') WHERE id=?").run(s3.id);
+      ok(await sweepSamples(cdb) === 1 && !cdb.prepare('SELECT 1 FROM events WHERE id=?').get(s1.id),
+         '기한 지난 연습용만 치운다');
+      ok(cdb.prepare('SELECT 1 FROM events WHERE id=?').get(real.id) && cdb.prepare('SELECT 1 FROM events WHERE id=?').get(s3.id),
+         '진짜 대회와 아직 기한 안 된 연습용은 남는다');
+      ok(cdb.prepare('SELECT 1 FROM event_trash WHERE event=?').get(s1.id), '치운 연습용은 휴지통에 남아 되살릴 수 있다');
+
+      {
+        /* 신청 때 적은 이메일을 «조금만 더» 가 또 묻지 않게 — 그 팀에게만 «받았다» 를 주고 값은 안 준다 */
+        const jt = joinTeam(cdb, real.id, { name: '물음팀', agree: true, email: 'q@x.test' });
+        const jid = jt.id || jt;
+        const own = board(cdb, real.id, false, jid).rows.find(r => String(r.id) === String(jid));
+        const other = board(cdb, real.id, false, 0).rows.find(r => String(r.id) === String(jid));
+        ok(own.hasContact === true && !('contact' in own), '내 팀은 연락처를 «받았다» 로만 본다(값은 없음)');
+        ok(!('hasContact' in other) && !('contact' in other), '남의 팀은 연락처를 받았는지조차 안 보인다');
+      }
+      cdb.prepare("INSERT INTO works(owner,title,demo) VALUES(?,'만든 것 하나','https://w.example')").run(real.owner);
+      cdb.prepare("INSERT INTO gigs(owner,kind,title,scope) VALUES(?,'의뢰','의뢰 하나','범위')").run(real.owner);
+      let cAuth = 0; try { cleanupList(cdb, {}); } catch (e) { cAuth = e.code; }
+      let cAuth2 = 0; try { await cleanupRun(cdb, { confirm: '9개 지우기' }, {}); } catch (e) { cAuth2 = e.code; }
+      ok(cAuth === 403 && cAuth2 === 403, '사이트 운영자가 아니면 못 보고 못 치운다 (403)');
+      const cl = cleanupList(cdb, { siteAdmin: true });
+      ok(cl.events.length === 3 && cl.works.length === 1 && cl.gigs.length === 1, '치울 목록에 대회·만든 것·외주가 다 보인다');
+      let cNum = 0; try { await cleanupRun(cdb, { keepEvents: [real.id], confirm: '지우기' }, { siteAdmin: true }); } catch (e) { cNum = e.code; }
+      ok(cNum === 409 && cdb.prepare('SELECT COUNT(*) c FROM events').get().c === 3, '사라질 개수를 그대로 안 적으면 하나도 안 지운다 (409)');
+      const cr = await cleanupRun(cdb, { keepEvents: [real.id], confirm: '4개 지우기' }, { siteAdmin: true });
+      ok(cr.events === 2 && cr.works === 1 && cr.gigs === 1, '남길 것 하나 빼고 나머지를 치운다');
+      ok(cdb.prepare('SELECT id FROM events').all().map(r => r.id).join() === real.id, '남기기로 고른 대회만 남는다');
+      ok(cdb.prepare('SELECT hidden FROM works').get().hidden === 1 && cdb.prepare('SELECT hidden FROM gigs').get().hidden === 1,
+         '만든 것·외주는 지우지 않고 내린다');
+      cdb.close();
+      for (const f of [cf, cf + '-wal', cf + '-shm']) fs.rmSync(f, { force: true });
+    }
     /* 30일 — 어제 지운 것은 남고, 31일 전에 지운 것은 purgeOld 가 지운다 */
     db.prepare("UPDATE event_trash SET at = datetime('now','-31 days') WHERE id=?").run(again);
     const keep = Number(db.prepare("INSERT INTO event_trash(event,owner,title,json,at) VALUES(?,?,?,?,datetime('now','-1 days'))")
@@ -11145,6 +11258,8 @@ function main() {
   setInterval(tick, 10 * 60 * 1000).unref();
   try { purgeOld(db); } catch (e) { console.error('purge', e.message); }
   setInterval(() => { try { purgeOld(db); } catch (e) { console.error('purge', e.message); } }, 60 * 60 * 1000).unref();
+  const sweep = () => sweepSamples(db).catch(e => console.error('sample sweep', e.message));
+  sweep(); setInterval(sweep, 60 * 60 * 1000).unref();
   /* 해커온뉴스 — 켜지고 15초 뒤 한 번, 그 뒤 6시간마다. 밖이 죽어도 앱은 산다. */
   setTimeout(() => newsTick(db).catch(() => {}), 15000).unref();
   setInterval(() => newsTick(db).catch(() => {}), 3 * 60 * 60 * 1000).unref();

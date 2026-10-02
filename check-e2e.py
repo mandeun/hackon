@@ -4132,5 +4132,21 @@ _lt = urllib.request.urlopen(BASE + "/llms.txt").read().decode()
 A(_lt.startswith("# HACK:ON") and "/news.md" in _lt, f"/llms.txt 가 안내문이 아니다: {_lt[:80]}")
 A(urllib.request.urlopen(BASE + "/e/zzzzzz9").status == 200, "없는 대회 주소가 화면을 못 낸다")
 ok("검색·AI — 대회 화면 og 딱지(website), 목록 대회는 Event, /llms.txt")
+
+# ── 운영자 열쇠 없는 참가자 폰 — 신청 때 적은 이메일을 또 묻지 않는다, 첫 화면이 옆으로 안 밀린다 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.on("pageerror", lambda e: errs.append("guest-apply: " + str(e)))
+    pg.goto(BASE + "/", wait_until="networkidle"); pg.wait_for_timeout(600)
+    _sw = pg.evaluate("document.documentElement.scrollWidth")
+    A(_sw <= 391, f"첫 화면이 폰 폭에서 옆으로 밀린다: {_sw}px")
+    _ng = post("/api/events", {"title": "손님 신청 검사"})[1]
+    pg.goto(BASE + f"/e/{_ng['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-name")
+    pg.fill("#t-name", "손님팀"); pg.fill("#t-email", "guest@example.com"); pg.check("#t-agree"); pg.click("#t-join")
+    pg.wait_for_selector("#m-save", timeout=8000)
+    A(pg.query_selector("#m-contact") is None, "참가자 폰에서 신청 때 적은 이메일을 «조금만 더» 가 또 묻는다")
+    b.close()
+ok("참가자 폰 — 신청 때 받은 이메일을 다시 안 묻고, 첫 화면이 옆으로 안 밀린다")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
