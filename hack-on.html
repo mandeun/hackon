@@ -1640,6 +1640,7 @@ function pasteDates(text, now = ymdLocal()) {
 }
 const walShift = (day, n) => { const d = new Date(day + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 let WAL_FOUND = null;   // 붙여 넣기에서 건진 것 — 넣기 전에 사람이 본다
+let BRIEF_TEXT = '';   // 아침 브리핑 한 장(카톡에 붙일 글)
 /* 직무별 추천. «무엇을 구독하나» 를 사람이 다 적게 하지 않고, 직무 하나 고르면 먼저 권한다.
    값은 적지 않는다 — 가격은 달마다 바뀌어서 화면에 박으면 거짓말이 된다. 무료인 것만 «무료» 라고 붙인다 */
 const WAL_REC = {
@@ -4297,6 +4298,72 @@ const SCREEN = {
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/setups">세팅 모음</a> · <a href="/news">해커온뉴스</a></p>`;
   },
 
+  /* 아침 브리핑 — «오늘 켤 것». 노랑이(콘센트)가 하루를 켜는 한 장.
+     내 일(연 대회의 할 일·D-day) · 내 일정(지갑의 마감 7일 안) · 새로 켜진 것(새 모델·도구) · 꺼지기 전에(할인·무료 기한)
+     · 오늘의 스위치(내 직무 레시피 한 줄). 서버에 새로 적는 것은 없다 — 읽어 와서 이 기기에서 묶는다.
+     못 읽은 칸은 «모름» 으로 그린다. 비어 있는 것과 못 읽은 것은 다른 말이다 */
+  async brief() {
+    const now = ymdLocal(), wk = walShift(now, 7);
+    const dd = d => { const n = walDays(d, now); return n === null ? '' : n < 0 ? '지남' : n === 0 ? '오늘' : `D-${n}`; };
+    let my = null, mineErr = false;
+    if (LIVE && myKey()) { try { my = await api('/mine'); } catch { mineErr = true; } }
+    const evs = my ? (my.events || []).filter(e => String(e.ends || e.starts).slice(0, 10) >= now).slice(0, 3) : [];
+    const work = await Promise.all(evs.map(async e => {
+      let todo = null, pub = null;
+      try { todo = (await api(`/events/${e.id}/todo`)).items || []; } catch { todo = null; }
+      try { pub = await api(`/events/${e.id}`); } catch { pub = null; }
+      return { e, pub, todo: todo === null ? null : todo.filter(t => !t.done && (!t.due || t.due <= wk)).slice(0, 3) };
+    }));
+    const wal = walLoad().map(it => ({ ...it, next: walNext(it) })).filter(it => it.next && it.next >= now && it.next <= wk)
+      .sort((a, b) => a.next < b.next ? -1 : 1).slice(0, 5);
+    const tools = walLoad().map(it => String(it.name).toLowerCase().split(/\s+/)[0]).filter(k => k.length > 1);
+    /* 소식은 직무로 거르지 않고 다 받는다(직무로 거르면 일반 소식이 빠진다). 직무는 «오늘의 스위치» 레시피만 따로 */
+    const [news, recipe] = await Promise.all([api('/news').catch(() => null),
+      WAL_JOB ? api(`/news?job=${encodeURIComponent(WAL_JOB)}`).then(d => d.setup || '').catch(() => '') : Promise.resolve('')]);
+    const rows = news ? news.rows : [];
+    const mineFirst = l => l.slice().sort((a, b) => (tools.some(k => (b.title || '').toLowerCase().includes(k)) ? 1 : 0) - (tools.some(k => (a.title || '').toLowerCase().includes(k)) ? 1 : 0));
+    const deals = mineFirst(rows.filter(r => r.kind === 'deal')).slice(0, 3);
+    /* 새 모델·도구 — 소식 종류가 «새 도구» 이거나, 제목이 출시·공개를 말하는 것(새 모델 소식은 읽을거리 출처에서도 온다) */
+    const LAUNCH = /출시|공개|새 모델|업데이트|launch|release|introduc|now available|\bGA\b/i;
+    const fresh = rows.filter(r => r.kind !== 'deal' && (r.kind === 'tool' || r.kind === 'pick' || LAUNCH.test(r.title || ''))).slice(0, 3);
+    const tip = recipe ? String(recipe).split('\n').find(l => /^첫 작업/.test(l)) || String(recipe).split('\n')[0] : '';
+    const day = new Date(now + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+    BRIEF_TEXT = ['☀️ HACK:ON 오늘 켤 것 — ' + day,
+      ...(work.length ? ['', '[켜 둔 일]', ...work.map(w => `· ${w.e.title} ${dd(String(w.e.starts).slice(0, 10))}${w.pub ? ` · 신청 ${w.pub.teams}팀` : ''}${w.todo && w.todo.length ? ` · 할 일: ${w.todo[0].title}` : ''}`)] : []),
+      ...(wal.length ? ['', '[꺼지기 전에]', ...wal.map(it => `· ${it.name} ${WAL_KIND[it.kind] || ''} ${dd(it.next)}`)] : []),
+      ...(fresh.length ? ['', '[새로 켜진 것]', ...fresh.map(r => `· ${r.title}`)] : []),
+      ...(deals.length ? ['', '[할인·무료]', ...deals.map(r => `· ${r.title}`)] : []),
+      ...(tip ? ['', '[오늘의 스위치] ' + tip.replace(/^첫 작업:\s*/, '')] : []),
+      '', `${location.origin}/brief`].join('\n');
+    const item = (t, sub, href) => `<div style="padding:9px 0;border-top:1px solid var(--rule)">${href ? `<a href="${esc(href)}" target="_blank" rel="noopener" style="font-weight:700">${esc(t)}</a>` : `<b>${esc(t)}</b>`}${sub ? `<div class="meta">${sub}</div>` : ''}</div>`;
+    const unk = '<div class="meta">못 읽었습니다 — 있는지 없는지 모릅니다.</div>';
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">아침 브리핑</span><span>${esc(day)}</span></div>
+        <h2>오늘 켤 것</h2>
+        <p class="sub" style="margin-bottom:0">내 대회·마감·새 모델·할인을 한 장에. 아침에 한 번 열고 닫으면 됩니다.</p></section>
+      <div class="card" id="br-work"><h3>켜 둔 일</h3>
+        ${!myKey() ? '<div class="meta">연 대회가 없거나 이 기기에 열쇠가 없습니다. <a href="/app">대회 열기</a> · <a href="/app?login=1">로그인</a></div>'
+          : mineErr ? unk
+          : !work.length ? '<div class="meta">다가오는 대회가 없습니다.</div>'
+          : work.map(w => item(`${w.e.title} · ${dd(String(w.e.starts).slice(0, 10))}`,
+              `${w.pub ? `신청 ${w.pub.teams}팀${w.pub.cap ? ` / 정원 ${w.pub.cap}` : ''}` : '신청 수 모름'}${
+                w.todo === null ? ' · 할 일 모름' : w.todo.length ? ' · ' + w.todo.map(t => `${esc(t.title)}${t.due ? ` (${esc(dd(t.due))})` : ''}`).join(' · ') : ' · 이번 주 할 일 없음'}
+               · <a href="/app#${esc(w.e.id)}">운영 화면</a>`)).join('')}</div>
+      <div class="card" id="br-cal"><h3>꺼지기 전에 <span class="meta">7일 안</span></h3>
+        ${wal.length ? wal.map(it => item(`${it.name} — ${WAL_KIND[it.kind] || ''}`, `${esc(dd(it.next))} · ${esc(it.next.slice(5).replace('-', '/'))}${it.memo ? ' · ' + esc(it.memo) : ''}`)).join('')
+          : '<div class="meta">7일 안에 다가오는 마감이 없습니다. 메일·공지를 <a href="/wallet">AI 지갑</a>에 붙여 넣으면 여기 뜹니다.</div>'}</div>
+      <div class="card" id="br-new"><h3>새로 켜진 것 <span class="meta">새 모델·도구</span></h3>
+        ${news === null ? unk : fresh.length ? fresh.map(r => item(r.title, r.note ? esc(r.note) : '', r.url)).join('') : '<div class="meta">오늘은 새 소식이 없습니다.</div>'}</div>
+      <div class="card" id="br-deal"><h3>할인·무료</h3>
+        ${news === null ? unk : deals.length ? deals.map(r => item(r.title, r.note ? esc(r.note) : '', r.url)).join('') : '<div class="meta">지금 모인 할인 소식이 없습니다.</div>'}</div>
+      <div class="card" id="br-tip"><h3>오늘의 스위치 <span class="meta">${WAL_JOB ? esc(WAL_JOB) : '직무를 고르면 맞춰 드립니다'}</span></h3>
+        <div class="gchips">${Object.keys(WAL_REC).map(j => `<button type="button" class="pick${WAL_JOB === j ? ' on' : ''}" data-wjob="${esc(j)}">${esc(j)}</button>`).join('')}</div>
+        ${tip ? `<div style="margin-top:10px;font-weight:700">${esc(tip.replace(/^첫 작업:\s*/, ''))}</div><div class="meta" style="margin-top:4px"><a href="/news">레시피 전체</a></div>` : ''}</div>
+      <div class="card"><div class="shrow" style="flex-wrap:wrap;gap:8px"><button class="btn" id="br-copy">한 장 복사(카톡용)</button><button class="btn sec" id="br-ics">매일 아침 8:30 알림 받기</button></div>
+        <pre id="br-out" hidden style="white-space:pre-wrap;user-select:all;font-size:13px;margin-top:10px"></pre>
+        <div class="meta" style="margin-top:6px">알림은 달력 앱이 겁니다. 이 주소를 매일 아침 열어 주는 반복 일정이라 서버에 아무것도 안 남습니다.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/wallet">AI 지갑</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
   /* 모집공고. 지원은 그 프로젝트의 공개 페이지에서 — 지원자 카드에 HACK:ON 기록(완주율·매너·수료)이 붙는다.
      HACK:ON 은 돈·계약에 끼지 않는다. «유급» 은 모집자가 적은 조건을 그대로 보여 줄 뿐이다 */
   async recruit() {
@@ -6701,6 +6768,19 @@ function wire() {
     if (!walSave(l)) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
     flash(`${b.dataset.wrecadd} 를 넣었습니다. 갱신일을 알면 아래에서 고치세요`);
   });
+  if ($('#br-copy')) $('#br-copy').onclick = async () => {
+    const out = $('#br-out'); out.textContent = BRIEF_TEXT; out.hidden = false;
+    try { await navigator.clipboard.writeText(BRIEF_TEXT); $('#br-copy').textContent = '복사했습니다 ✓'; } catch (_) {}
+  };
+  /* 매일 아침 반복 일정 하나. 열면 /brief 가 뜬다 — 푸시 서버 없이 달력 앱이 알림을 건다 */
+  if ($('#br-ics')) $('#br-ics').onclick = () => {
+    const d = ymdLocal().replace(/-/g, '');
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//HACK:ON//아침 브리핑//KO', 'BEGIN:VEVENT', `UID:hackon-brief-${d}@hackon.kr`,
+      `DTSTAMP:${d}T000000Z`, `DTSTART:${d}T083000`, `DTEND:${d}T084000`, 'RRULE:FREQ=DAILY', 'SUMMARY:☀️ HACK:ON 오늘 켤 것',
+      `URL:${location.origin}/brief`, `DESCRIPTION:${location.origin}/brief`, 'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:오늘 켤 것', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+    a.download = 'HACKON-아침브리핑.ics'; a.click(); URL.revokeObjectURL(a.href);
+  };
   if ($('#wl-parse')) $('#wl-parse').onclick = () => { WAL_FOUND = pasteDates($('#wl-paste').value); render(); };
   if ($('#wl-addall')) $('#wl-addall').onclick = () => {
     const pick = [...document.querySelectorAll('[data-wfound]:checked')].map(c => WAL_FOUND.found[+c.dataset.wfound]);
@@ -7640,6 +7720,7 @@ const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
 const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
+const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
 const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
@@ -7684,6 +7765,7 @@ else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

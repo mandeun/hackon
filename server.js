@@ -7593,7 +7593,7 @@ function routes(db) {
         /* 줄은 이미 «합쳐지고 점수 매겨지고 종류가 붙은» 채로 나간다 — 화면은 그리기만 한다(server.js 의 newsEnrich).
            providers 도 같이 싣는다 — 제보 칸의 로그인 단추를 그리는 데 쓴다. 소식 화면이 /api/auth 를 또 부르지 않게.
            kinds·pick 도 함께 내려보낸다. 묶음 이름과 «꼭 볼 것» 개수 규칙이 화면에 또 적히면 둘이 어긋난다. */
-        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, kinds: NEWS_KINDS, buckets: NEWS_BUCKETS, pick: { n: NEWS_PICK_N, min: NEWS_PICK_MIN, per: NEWS_PICK_PER_SRC, perKind: NEWS_PICK_PER_KIND }, full: NEWS_FULL, rows: newsFeed(db, JOBS.includes(q.job) ? q.job : ''), loggedIn: !!cookieOwner, providers: loginMenu() });
+        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, kinds: NEWS_KINDS, buckets: NEWS_BUCKETS, pick: { n: NEWS_PICK_N, min: NEWS_PICK_MIN, per: NEWS_PICK_PER_SRC, perKind: NEWS_PICK_PER_KIND }, full: NEWS_FULL, rows: newsFeed(db, JOBS.includes(q.job) ? q.job : ''), setup: JOBS.includes(q.job) ? (SETUP[q.job] || '') : '', loggedIn: !!cookieOwner, providers: loginMenu() });
         if (p === '/api/news/tip' && req.method === 'POST') {
           if (!cookieOwner) throw new HttpError(401, '제보는 로그인이 필요합니다');
           const o = db.prepare('SELECT name FROM owners WHERE id=?').get(cookieOwner);
@@ -7932,7 +7932,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면

@@ -4207,5 +4207,27 @@ with sync_playwright() as pw:
     A("활동명: 낸 대회" in _lk and "기관: HACK:ON" in _lk, f"링커리어용 칸 꼴이 아니다: {_lk}")
     b.close()
 ok("이력서에 붙일 글 — 링크드인·링커리어 꼴, 끝난 대회에서 왔거나 낸 것만")
+
+# ── 아침 브리핑 /brief — 내 대회 D-day·신청 수, 7일 안 마감, 오늘의 스위치, 카톡용 한 장, 서버에 안 씀 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+    _bv = post("/api/events", {"title": "브리핑 검사 대회", "starts": (datetime.now() + timedelta(days=10)).strftime("%Y-%m-%d")})[1]
+    _soon3 = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("brief: " + str(e)))
+    pg.add_init_script(f"localStorage.setItem('hackon.owner','{_bv['owner']}');localStorage.setItem('hackon.waljob','개발');"
+                       f"localStorage.setItem('hackon.wallet', JSON.stringify([{{name:'브리핑 마감',kind:'due',date:'{_soon3}'}},{{name:'먼 마감',kind:'due',date:'2099-01-01'}}]))")
+    _w = []; pg.on("request", lambda r: _w.append(r.url) if "/api/" in r.url and r.method != "GET" else None)
+    pg.goto(BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#br-work")
+    A("브리핑 검사 대회" in pg.inner_text("#br-work") and "D-10" in pg.inner_text("#br-work"), f"켜 둔 일에 내 대회 D-day 가 없다: {pg.inner_text('#br-work')}")
+    _bc = pg.inner_text("#br-cal")
+    A("브리핑 마감" in _bc and "D-3" in _bc and "먼 마감" not in _bc, f"7일 안 마감만 떠야 한다: {_bc}")
+    A("재현" in pg.inner_text("#br-tip"), "고른 직무(개발)의 오늘의 스위치가 없다")
+    pg.click("#br-copy"); pg.wait_for_timeout(300)
+    _bt = pg.evaluate("navigator.clipboard.readText()")
+    A(_bt.startswith("☀️ HACK:ON 오늘 켤 것") and "[켜 둔 일]" in _bt and "[꺼지기 전에]" in _bt and "/brief" in _bt, f"카톡용 한 장이 이상하다: {_bt}")
+    A(not _w, f"브리핑이 서버에 쓴다: {_w}")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "브리핑이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("아침 브리핑 — 내 대회 D-day·7일 안 마감·직무 레시피 한 줄·카톡용 한 장, 서버에 안 씀")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
