@@ -4395,7 +4395,8 @@ con = _sq.connect(_hdb)
 for _src, _u, _t, _note, _job in (("gh", "https://github.com/e2e/agent-kit", "e2e/agent-kit — MCP agent 도구", "★ 1500", "개발"),
                                   ("hf", "https://huggingface.co/e2e/tiny", "e2e/tiny", "♥ 40", ""),
                                   ("geek", "https://geek.example/1", "e2e 읽을거리 한 줄", "", "")):
-    con.execute("INSERT INTO news(src,key,title,url,note,job,at) VALUES(?,?,?,?,?,?,?)", (_src, _u, _t, _u, _note, _job, _today))
+    con.execute("INSERT INTO news(src,key,title,url,note,job,at,meta) VALUES(?,?,?,?,?,?,?,?)", (_src, _u, _t, _u, _note, _job, _today,
+                '{"lang":"TypeScript","topics":["mcp","agent"],"license":"MIT"}' if _src == "gh" else ""))
 con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://github.com/e2e/agent-kit", _d3, 1200))
 con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://github.com/e2e/agent-kit", _today, 1500))
 con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://huggingface.co/e2e/tiny", _today, 40))
@@ -4417,6 +4418,13 @@ with sync_playwright() as pw:
     _try = pg.locator(".it .try code").first.inner_text()
     A(_try.startswith("git clone https://github.com/e2e/agent-kit"), f"깃허브 줄에 바로 해 보기 명령이 없다: {_try}")
     A(pg.locator(".it .do").filter(has_text="README").count() == 0, "출처마다 같던 «할 일» 문장이 아직 붙는다")
+    # 무슨 프로그램인가 — 언어·주제·라이선스, «상업 OK 만» 거르기(10/04)
+    _w = pg.locator("#list .it", has_text="e2e/agent-kit").locator(".what").inner_text()
+    A("TypeScript 프로그램" in _w and "상업 OK" in _w and "MIT" in _w, f"프로그램 설명·라이선스가 없다: {_w}")
+    A("라이선스 모름" in pg.locator("#list .it", has_text="e2e/tiny").inner_text(), "라이선스 없는 모델을 «모름» 으로 안 그린다")
+    pg.check("#com-ok"); pg.wait_for_timeout(200)
+    A("e2e/tiny" not in pg.inner_text("#list") and "e2e/agent-kit" in pg.inner_text("#list") and "e2e 읽을거리" in pg.inner_text("#list"), "«상업 OK 만» 이 프로그램만 거르지 않는다")
+    pg.uncheck("#com-ok"); pg.wait_for_timeout(200)
     A("누구나 보고 고쳐 쓸 수 있게" not in pg.inner_text("#view, body"), "출처 종류로 붙이던 뻔한 «쉽게» 문장이 아직 있다")
     _all = pg.evaluate("document.querySelector('.chip[data-k=\"all\"]').dataset.n")
     A(int(_all) == pg.locator("#list .it").count(), "확 뜬 것 판이 칩 수와 목록 줄 수를 어긋나게 한다")
@@ -4466,8 +4474,18 @@ with sync_playwright() as pw:
     A(_out == 0, f"메뉴를 연 채 Tab 을 누르면 판 밖으로 {_out}번 샌다(키보드·화면 읽기 사용자가 길을 잃는다)")
     pg.keyboard.press("Escape"); pg.wait_for_timeout(150)
     A(pg.locator("#menu-sheet").is_hidden() and pg.evaluate("document.activeElement.id") == "nav-menu", "Esc 로 안 닫히거나 포커스가 «메뉴» 로 안 돌아온다")
+    # «나» 카드·최근 간 곳 — 처음엔 숫자를 지어내지 않고, /me 를 연 뒤의 요약과 이 기기에 적힌 곳만. 열쇠 든 주소는 안 보인다
+    A("Lv." not in pg.inner_text("#menu-me") and pg.locator("#menu-recent").is_hidden(), "/me 를 안 열었는데 레벨이 뜨거나, 간 곳이 없는데 «최근» 이 뜬다")
+    pg.evaluate("""localStorage.setItem('hackon.melv', JSON.stringify({level: 3, title: '삽질꾼', xp: 160, to: 300, next: {icon: '🔥', name: '개념글', have: 4, goal: 10}}));
+      localStorage.setItem('hackon.recent', JSON.stringify([{p: '/j/secretjudgekey', t: '심사'}, {p: '/board', t: 'x'}, {p: '/me', t: 'y'}, {p: '/e/abc123', t: '동네 해커톤'}]))""")
+    pg.reload(wait_until="networkidle"); pg.click("#nav-menu"); pg.wait_for_selector("#menu-recent:not([hidden])")
+    _mc, _rc = pg.inner_text("#menu-me"), pg.eval_on_selector_all("#menu-recent a", "l => l.map(a => a.getAttribute('href') + '=' + a.textContent)")
+    A("Lv.3" in _mc and "삽질꾼" in _mc and "개념글 4/10" in _mc, f"메뉴 «나» 카드에 레벨·다음 목표가 없다: {_mc}")
+    A(_rc == ["/board=게시판", "/me=나", "/e/abc123=동네 해커톤"], f"최근 간 곳이 이상하다(열쇠 든 주소가 보이거나 이름이 틀림): {_rc}")
+    A(pg.inner_text("#nav-me-lv") == "Lv.3", "위 막대 «나» 에 레벨이 안 뜬다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "«나»·최근 줄을 더하니 폰 폭에서 옆으로 밀린다")
     b.close()
-ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식) + 메뉴 판(묶음 넷·타일·Esc·포커스), 고리마다 200")
+ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식) + 메뉴 판(묶음 넷·타일·Esc·포커스·«나» 카드·최근 간 곳), 고리마다 200")
 
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
@@ -4609,6 +4627,17 @@ with sync_playwright() as pw:
     A("커서로 하루 만에" not in pg.inner_text("#bd-list"), "다른 주제 글이 섞여 나온다")
     pg.click('[data-bdt="vibe"]'); pg.wait_for_timeout(300)
     A("커서로 하루 만에" in pg.inner_text("#bd-list"), "고른 주제의 글이 안 나온다")
+    # App Store 1.2 — 다른 사람 글을 차단하면 이 기기에서 안 보이고, 화면마다 연락처·신고 처리 시한
+    A("24시간 안에" in pg.inner_text("#view") and "hi@mandeun.com" in pg.inner_text("#view"), "게시판에 신고 처리 시한·연락처가 없다")
+    _o = b.new_context(viewport={"width": 390, "height": 844}).new_page(); _o.on("dialog", lambda d: d.accept())
+    _o.goto(BASE + "/board", wait_until="networkidle"); _o.click("#bd-new"); _o.wait_for_selector("#bd-form")
+    _o.click('[data-bdft="vibe"]'); _o.fill("#bdf-title", "차단될 사람의 글"); _o.fill("#bdf-body", "광고 같은 글"); _o.click("#bdf-send"); _o.wait_for_selector("#bd-post")
+    pg.reload(wait_until="networkidle"); pg.wait_for_selector("#bd-list")
+    pg.locator(".bdrow", has_text="차단될 사람의 글").click(); pg.wait_for_selector("#bd-post")
+    pg.click("[data-bdblock]"); pg.wait_for_timeout(300)
+    pg.goto(BASE + "/board?t=vibe", wait_until="networkidle"); pg.wait_for_selector("#bd-list")
+    A("차단될 사람의 글" not in pg.inner_text("#bd-list") and "커서로 하루 만에" in pg.inner_text("#bd-list"), "차단한 사람 글이 아직 보이거나 내 글까지 숨겨졌다")
+    A("숨겼습니다" in pg.inner_text("#view"), "차단으로 숨긴 글 수가 안 보인다")
     pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-board.png"), full_page=True)
     # 지우기 — 쓴 브라우저만
     pg.click(".bdrow"); pg.wait_for_selector("#bd-post")
@@ -4637,6 +4666,7 @@ with sync_playwright() as pw:
     # 다른 사람 둘이 같은 1판 위에서 제안
     for who, body in (("김e2e", "첫 문단.\n둘째 문단을 고쳤다."), ("박e2e", "첫 문단 고침.\n둘째 문단.")):
         wp = b.new_context(viewport={"width": 390, "height": 844}).new_page(); wp.on("pageerror", lambda e: errs.append("write-w: " + str(e)))
+        wp.on("dialog", lambda d: d.accept())   # 첫 제안 전 «이용 규칙» 동의(App Store 1.2)
         wp.goto(_churl, wait_until="networkidle"); wp.wait_for_selector("#wr-edit")
         A("합치기" not in wp.inner_text("#view"), "편집자 아닌 사람에게 «합치기» 가 보인다")
         wp.click("#wr-edit"); wp.fill("#wr-body", body); wp.fill("#wr-author", who); wp.fill("#wr-note", who + " 고침"); wp.click("#wr-send"); wp.wait_for_timeout(500)
@@ -4652,6 +4682,10 @@ with sync_playwright() as pw:
     ed.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-write.png"), full_page=True)
     _md = urllib.request.urlopen(BASE + f"/api/books/{_book}.md", timeout=10).read().decode()
     A(_md.startswith("# e2e 같이 쓰는 책") and "둘째 문단을 고쳤다." in _md and "김e2e" in _md, "마크다운 내보내기가 이상하다")
+    # 되돌리기 — 편집자가 판 기록에서 1판으로(새 판이 되고 글이 돌아온다)
+    ed.on("dialog", lambda d: d.accept())
+    ed.click("details.more summary"); ed.click('[data-revert="1"]'); ed.wait_for_timeout(600)
+    A("둘째 문단을 고쳤다." not in ed.inner_text("#wr-ch") and "3판" in ed.inner_text("#wr-ch"), "1판으로 되돌렸는데 글·판이 안 바뀐다")
     b.close()
 ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md")
 
@@ -4678,6 +4712,42 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "공구함이 폰 폭에서 옆으로 밀린다")
     b.close()
 ok("삽 공구함 — 키 잡고 process.env 는 안 잡음·가림, 규칙 파일, .env.example 값 지움, 서버로 안 보냄")
+
+# ── 나 /me — 열쇠·표로 서버가 센다(우겨도 안 늚), 배지·다음 목표·켜진 날, 못 읽으면 «모름», 폰 폭 ──
+_d6 = (datetime.now() + timedelta(days=6)).strftime("%Y-%m-%d")
+_, _mev = post("/api/events", {"title": "나 화면 검사", "starts": _d6, "ends": _d6})
+_, _mteam = post(f"/api/events/{_mev['id']}/teams", {"name": "나검사팀", "email": "me@example.com", "agree": True})
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("me: " + str(e)))
+    pg.goto(BASE + "/me", wait_until="networkidle"); pg.wait_for_selector("#me-next")
+    A("Lv.1" in pg.inner_text("#me-hero") and pg.locator(".bdg.got").count() == 0, "아무것도 안 했는데 배지가 있다")
+    A(pg.locator("#me-next .mgoal").count() == 3, "다음 목표가 셋이 아니다")
+    # 신청한 팀 열쇠 + 남의 대회 가짜 열쇠 + 게시판 글 하나(이 기기 표로)
+    pg.evaluate(f"""localStorage.setItem('hackon.team.{_mev['id']}', '{_mteam['id']}'); localStorage.setItem('hackon.tkey.{_mteam['id']}', '{_mteam['tkey']}');
+      localStorage.setItem('hackon.okey.{_mev['id']}', 'forged-okey'); localStorage.setItem('hackon.ekey.deadbeef', 'forged')""")
+    _st = pg.evaluate("""async () => (await fetch('/api/board', {method: 'POST', headers: {'content-type': 'application/json', 'x-voter': voterTok()},
+      body: JSON.stringify({topic: 'free', title: '나 화면 검사 글', body: '배지 확인', agree: true})})).status""")
+    A(_st == 201, f"게시판 글이 안 써진다: {_st}")
+    pg.reload(wait_until="networkidle"); pg.wait_for_selector("#me-badges")
+    _got = pg.eval_on_selector_all(".bdg.got", "l => l.map(x => x.dataset.badge)")
+    A("join" in _got and "talk" in _got and "first" in _got, f"신청·첫 글 배지가 안 켜진다: {_got}")
+    A("host" not in _got and "author" not in _got, f"가짜 열쇠로 «판 깔기»·«책 열기» 가 켜진다: {_got}")
+    A(pg.locator(".dgrid i.on").count() >= 1 and "1일" in pg.inner_text("#me-days"), "오늘 한 일이 켜진 날에 안 찍힌다")
+    _lv = pg.evaluate("JSON.parse(localStorage.getItem('hackon.melv') || 'null')")
+    A(_lv and _lv["level"] >= 1 and _lv["next"], f"메뉴 «나» 카드용 요약이 안 남는다: {_lv}")
+    pg.wait_for_timeout(1400)
+    A('"/me"' in (pg.evaluate("localStorage.getItem('hackon.recent')") or ""), "연 화면이 «최근 간 곳» 에 안 적힌다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "나 화면이 폰 폭에서 옆으로 밀린다")
+    from axe_playwright_python.sync_playwright import Axe as _AxeMe
+    _bad = [v for v in _AxeMe().run(pg).response["violations"] if v["impact"] in ("critical", "serious")]
+    A(not _bad, "접근성 /me: " + "; ".join(f"{v['id']}x{len(v['nodes'])}({v['nodes'][0]['target'][0][:40]})" for v in _bad))
+    pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-me.png"), full_page=True)
+    # 서버가 안 되면 «0개» 가 아니라 «모름»
+    pg.route("**/api/me", lambda r: r.abort()); pg.reload(wait_until="networkidle"); pg.wait_for_selector("#me-hero")
+    A("모릅니다" in pg.inner_text("#me-hero") and pg.query_selector("#me-badges") is None, "못 읽었는데 빈 배지판을 그린다(없음과 모름이 섞임)")
+    b.close()
+ok("나 — 열쇠·표로 센 배지(가짜 열쇠는 안 셈)·다음 목표 셋·켜진 날·메뉴용 요약, 못 읽으면 «모름», 접근성")
 
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

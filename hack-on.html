@@ -946,6 +946,29 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .mechips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
 .mechips button{font-size:13px;font-weight:800;padding:7px 11px;border-radius:99px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
 .mechips button.on{background:#C8F53B;color:#0B1020;border-color:#C8F53B}
+.lvbar{height:10px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden;margin:12px 0 6px}
+.lvbar span{display:block;height:100%;background:#C8F53B;border-radius:99px}
+.mgoal{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--rule);text-decoration:none;color:var(--ink)}
+.mgoal:first-of-type{border-top:0}
+.mgoal .mi{font-size:24px;width:32px;text-align:center}
+.mgoal .mt{flex:1;min-width:0;display:grid;gap:2px}
+.mgoal .mt em{font-style:normal;font-size:13px;color:var(--ink3)}
+.mbar{height:6px;border-radius:99px;background:var(--rule);overflow:hidden;margin-top:4px}
+.mbar span{display:block;height:100%;background:#7FB800}
+.mgoal .mn{font-weight:800;font-size:13px}
+.dgrid{display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:3px;margin-top:10px;overflow-x:auto;padding-bottom:4px}
+.dgrid i{border-radius:3px;background:var(--rule)}
+.dgrid i.on{background:#C8F53B;box-shadow:inset 0 0 0 1px #7FB800}
+.bgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:8px}
+.bdg{display:grid;justify-items:center;text-align:center;gap:2px;padding:10px 6px;border-radius:14px;border:1px dashed var(--rule);text-decoration:none;color:var(--ink3)}
+.bdg .bi{font-size:24px;filter:grayscale(1);opacity:.6}
+.bdg b{font-size:13px;color:var(--ink)}
+.bdg em{font-style:normal;font-size:11px;line-height:1.3}
+.bdg.got{border:1px solid #C8F53B;background:rgba(200,245,59,.12);color:var(--ink)}
+.bdg.got .bi{filter:none;opacity:1}
+.mstats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+.mstats div{display:grid;justify-items:center;padding:8px 0;border-radius:12px;background:var(--bg2,#f4f5f7)}
+.mstats b{font-size:18px}.mstats em{font-style:normal;font-size:11px;color:var(--ink2)}
 .steps-day{display:grid;gap:8px;margin:0 0 12px}
 .steps-day .sd{display:flex;align-items:center;gap:10px;background:#fff;border-radius:16px;padding:13px 14px;text-decoration:none;color:var(--ink);border:1px solid var(--rule)}
 .steps-day .sd span{flex:none;font-size:12px;font-weight:800;color:#3F5A00;background:#F1FBD5;border-radius:99px;padding:3px 9px}
@@ -1874,6 +1897,12 @@ function lineDiff(a, b) {
 }
 const bdPostId = () => { const m = /^\/board\/(\d+)$/.exec(location.pathname); return m ? +m[1] : 0; };
 const voterTok = () => { try { let v = localStorage.getItem('hackon.voter'); if (!v || !/^[0-9a-z]{12,40}$/i.test(v)) { v = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('hackon.voter', v); } return v; } catch { return ''; } };
+/* App Store 1.2 — 첫 글 전에 이용 규칙 한 번, 차단한 글쓴이(이 기기에만) */
+const RULES_TEXT = '이용 규칙\n· 욕설·비방·차별·성적인 글 금지(올리기 전에 막힙니다)\n· 연락처·광고 금지\n· 신고 셋이면 저절로 내려가고, 운영자가 24시간 안에 확인합니다\n· 어기면 글이 지워지고 쓰기가 막힐 수 있습니다\n\n동의하고 올릴까요?';
+const needRules = () => { try { if (localStorage.getItem('hackon.rules') === '1') return true; } catch {} if (!confirm(RULES_TEXT)) return false; try { localStorage.setItem('hackon.rules', '1'); } catch {} return true; };
+const blockedSet = () => { try { return new Set(JSON.parse(localStorage.getItem('hackon.blocked') || '[]')); } catch { return new Set(); } };
+const setBlocked = set => { try { localStorage.setItem('hackon.blocked', JSON.stringify([...set].slice(-500))); } catch {} };
+const SAFETY_LINE = '<p class="meta" style="margin:16px 4px">신고는 24시간 안에 확인합니다 · 문의 <a href="mailto:hi@mandeun.com">hi@mandeun.com</a> · <a href="/privacy">개인정보</a></p>';
 const ago = t => { const m = Math.max(0, (Date.now() - Date.parse(String(t).replace(' ', 'T') + 'Z')) / 60000); return m < 1 ? '방금' : m < 60 ? Math.floor(m) + '분 전' : m < 1440 ? Math.floor(m / 60) + '시간 전' : Math.floor(m / 1440) + '일 전'; };
 const meOf = () => { try { return localStorage.getItem('hackon.me') || ''; } catch { return ''; } };
 /* 일상 입구 — 네 사람의 하루에 해커온이 끼는 자리. «앱을 여는 이유» 가 사람마다 다르다(docs/daily.md) */
@@ -2435,6 +2464,20 @@ const ownedCard = e => `<div class="card ev" role="button" tabindex="0" data-ope
 </div>`;
 /* 이 브라우저가 든 열쇠를 접두사별로 모은다. localStorage 를 못 읽는 브라우저(사생활 모드)면 빈 목록 */
 const keyIds = pre => { try { return Object.keys(localStorage).filter(k => k.startsWith(pre)).map(k => k.slice(pre.length)).filter(Boolean); } catch (_) { return []; } };
+/* 나(/me) — 이 기기에 든 열쇠를 모아 보낸다. 서버가 하나씩 맞춰 보고 맞는 것만 센다 */
+const meBody = () => {
+  const kv = pre => { try { return keyIds(pre).map(id => ({ id, key: localStorage.getItem(pre + id) || '' })).slice(-200); } catch { return []; } };
+  const g = myGiver();
+  return {
+    hosts: keyIds('hackon.okey.').map(id => ({ event: id, okey: okeyOf(id) })),
+    teams: keyIds('hackon.team.').map(id => { const t = localStorage.getItem('hackon.team.' + id) || ''; return { event: id, team: t, tkey: tkeyOf(t) }; }),
+    judges: keyIds('hackon.jkey.').map(id => ({ event: id, jkey: jkeyOf(id) })),
+    posts: kv('hackon.bkey.'), comments: kv('hackon.ckey.'), books: kv('hackon.ekey.'),
+    giver: g ? { id: g.id, key: g.gkey } : null,
+  };
+};
+/* 메뉴 판 «나» 카드가 쓰는 요약 — 마지막으로 /me 를 연 때의 것. 없으면 «아직 모름» */
+const meSave = m => { try { localStorage.setItem('hackon.melv', JSON.stringify({ level: m.level, title: m.title, xp: m.xp, to: m.lvTo, next: m.next[0] ? { icon: m.next[0].icon, name: m.next[0].name, have: m.next[0].have, goal: m.next[0].goal } : null })); } catch {} };
 
 const SCREEN = {
   async home() {
@@ -4843,9 +4886,10 @@ const SCREEN = {
           <div class="bdmeta"><b>${esc(e.author)}</b><span>${esc(ago(e.created))}</span>${e.stale ? `<span class="gstate wait">옛 판(${e.base}판) 위 — 합칠 수 없음</span>` : ''}</div>
           ${e.note ? `<div style="margin:6px 0;font-weight:700">${esc(e.note)}</div>` : ''}
           <div class="diff">${diff(e)}</div>
-          ${d.isEditor ? `<div class="shrow" style="margin-top:10px">${e.stale ? '' : `<button class="btn sm" data-merge="${e.id}">합치기</button>`}<button class="btn sec sm" data-eclose="${e.id}">돌려보내기</button></div>` : ''}
+          ${d.isEditor ? `<div class="shrow" style="margin-top:10px">${e.stale ? '' : `<button class="btn sm" data-merge="${e.id}">합치기</button>`}<button class="btn sec sm" data-eclose="${e.id}">돌려보내기</button></div>` : `<div style="margin-top:8px"><button type="button" class="bdmini" style="margin:0" data-bdreport="e:${e.id}">신고</button></div>`}
         </div>`).join('')}` : ''}
-      ${d.history.length ? `<details class="more"><summary>판 기록 ${d.history.length}</summary><div class="in">${d.history.map(h => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${h.ver}판</b><span>${esc(h.author)}</span><span>${esc(h.note)}</span><span>${esc(ago(h.at))}</span></div>`).join('')}</div></details>` : ''}`;
+      ${SAFETY_LINE}
+      ${d.history.length ? `<details class="more"><summary>판 기록 ${d.history.length}</summary><div class="in">${d.history.map(h => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${h.ver}판</b><span>${esc(h.author)}</span><span>${esc(h.note)}</span><span>${esc(ago(h.at))}</span>${d.isEditor && h.ver !== c.ver ? `<button type="button" class="bdmini" data-revert="${h.ver}">이 판으로</button>` : ''}</div>`).join('')}</div></details>` : ''}`;
   },
 
   /* ── 게시판 — 주제별로 떠들고, 켜 본 것 자랑하고, 막힌 걸 묻는 곳 ──
@@ -4856,6 +4900,7 @@ const SCREEN = {
       let d = null, gone = false;
       try { d = await api(`/board/${id}`, { voter: voterTok() }); } catch (e) { gone = e.status === 404; }
       if (!d) return `<a class="bdback" href="/board">‹ 게시판</a><div class="card"><div class="meta">${gone ? '없거나 내려간 글입니다.' : '지금 못 불러왔습니다 — 잠시 뒤 다시 열어 주세요.'}</div></div>`;
+      if (d.post.atag && blockedSet().has(d.post.atag)) return `<a class="bdback" href="/board">‹ 게시판</a><div class="card"><div class="meta">차단한 사람의 글입니다.</div><button type="button" class="btn sec sm" data-bdunblock="${esc(d.post.atag)}" style="margin-top:8px">차단 풀고 보기</button></div>`;
       const p = d.post, tn = Object.fromEntries(d.topics), mine = (() => { try { return localStorage.getItem('hackon.bkey.' + p.id) || ''; } catch { return ''; } })();
       return `<a class="bdback" href="/board${p.topic ? '?t=' + esc(p.topic) : ''}">‹ ${esc(tn[p.topic] || '게시판')}</a>
         <article class="bdpost" id="bd-post">
@@ -4866,16 +4911,17 @@ const SCREEN = {
             <button type="button" class="bdup${p.voted ? ' on' : ''}" data-bdup="${p.id}" aria-pressed="${p.voted}">▲ <b id="bd-upn">${p.up}</b></button>
             <button type="button" data-bdshare="${p.id}">↗ 공유</button>
             <button type="button" data-bdreport="p:${p.id}">신고</button>
+            ${p.atag ? `<button type="button" data-bdblock="${esc(p.atag)}">차단</button>` : ''}
             ${mine ? `<button type="button" data-bddel="p:${p.id}">지우기</button>` : ''}
           </div>
         </article>
         <h3 class="calsec">댓글 ${d.comments.length}</h3>
-        <div id="bd-comments">${d.comments.map(c => { const ck = (() => { try { return localStorage.getItem('hackon.ckey.' + c.id) || ''; } catch { return ''; } })();
+        <div id="bd-comments">${d.comments.filter(c => !(c.atag && blockedSet().has(c.atag))).map(c => { const ck = (() => { try { return localStorage.getItem('hackon.ckey.' + c.id) || ''; } catch { return ''; } })();
           return `<div class="bdc"><div class="bdmeta"><b>${esc(c.nick)}</b><span>${esc(ago(c.created))}</span>
-            <button type="button" class="bdmini" data-bdreport="c:${c.id}">신고</button>${ck ? `<button type="button" class="bdmini" data-bddel="c:${c.id}">지우기</button>` : ''}</div>
+            <button type="button" class="bdmini" data-bdreport="c:${c.id}">신고</button>${c.atag ? `<button type="button" class="bdmini" data-bdblock="${esc(c.atag)}">차단</button>` : ''}${ck ? `<button type="button" class="bdmini" data-bddel="c:${c.id}">지우기</button>` : ''}</div>
             <div class="bdbody">${esc(c.body)}</div></div>`; }).join('') || '<div class="meta" style="padding:6px 4px">첫 댓글을 남겨 주세요.</div>'}</div>
         <div class="card bdform" id="bd-cform"><textarea id="bdc-body" maxlength="1000" rows="3" placeholder="댓글 — 연락처는 적지 않습니다"></textarea>
-          <div class="shrow" style="margin-top:8px"><input id="bdc-nick" maxlength="16" placeholder="닉네임(비우면 익명)" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"><button class="btn sm" id="bdc-send">달기</button></div></div>`;
+          <div class="shrow" style="margin-top:8px"><input id="bdc-nick" maxlength="16" placeholder="닉네임(비우면 익명)" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"><button class="btn sm" id="bdc-send">달기</button></div></div>${SAFETY_LINE}`;
     }
     const qt = new URLSearchParams(location.search).get('t');
     if (qt && !bdTopic) bdTopic = qt;
@@ -4894,17 +4940,49 @@ const SCREEN = {
     const tn = Object.fromEntries(topics);
     return head + write + `<div class="htabs" id="bd-topics"><button type="button" data-bdt=""${bdTopic ? '' : ' class="on"'}>전체</button>${topics.map(([k, t]) => `<button type="button" data-bdt="${k}"${bdTopic === k ? ' class="on"' : ''}>${esc(t)}</button>`).join('')}</div>
       <div class="bdsort" id="bd-sort">${[['hot', '🔥 인기'], ['new', '🆕 최신'], ['top', '🏆 주간 TOP']].map(([k, t]) => `<button type="button" data-bds="${k}"${bdSort === k ? ' class="on"' : ''}>${t}</button>`).join('')}</div>
+      ${(() => { const bl = blockedSet(), hid = d.rows.filter(r => r.atag && bl.has(r.atag)).length; d.rows = d.rows.filter(r => !(r.atag && bl.has(r.atag))); return hid ? `<div class="meta" style="margin:0 4px 8px">차단한 사람의 글 ${hid}개를 숨겼습니다 · <button type="button" class="bdmini" id="bd-unblock" style="margin:0">차단 모두 풀기</button></div>` : ''; })()}
       <div id="bd-list">${d.rows.length ? d.rows.map(r => `<a class="bdrow" href="/board/${r.id}">
           <span class="bdv" aria-label="추천 ${r.up}"><i>▲</i><b>${r.up}</b></span>
           <span class="bdr"><span class="bdmeta"><span class="bdtopic">${esc(tn[r.topic] || '')}</span>${r.best ? '<span class="bdbest">개념</span>' : ''}</span>
             <b class="bdt">${esc(r.title)}</b>
             ${r.peek ? `<span class="bdpeek">${esc(r.peek)}</span>` : ''}
             <span class="bdmeta"><span>${esc(r.nick)} · ${esc(ago(r.created))}</span><span>💬 ${r.comments}</span></span></span></a>`).join('')
-        : `<div class="card"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>`;
+        : `<div class="card"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>${SAFETY_LINE}`;
   },
 
   /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
      열쇠는 이 기기에 있으니 화면이 모아 보내고, 서버는 맞는 것만 내 일정으로 돌려준다(/api/cal). */
+  async mypage() {
+    let m = null, unknown = false;
+    if (LIVE) { try { m = await api('/me', { method: 'POST', body: meBody(), voter: voterTok() }); meSave(m); } catch { unknown = true; } }
+    else unknown = true;
+    if (!m) return `<section class="mhero" id="me-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi.svg" alt="" width="34" height="34"><span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">나</span></div>
+        <h2 style="margin-top:10px">지금은 못 읽었습니다</h2><p>모은 배지가 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요 — 모은 것은 사라지지 않습니다.</p></section>`;
+    const c = m.counts, pct = Math.max(0, Math.min(100, Math.round((m.xp - m.lvFrom) / Math.max(1, m.lvTo - m.lvFrom) * 100)));
+    const got = m.badges.filter(b => b.got).length;
+    /* 켜진 날 — 16주. 연속이 끊겨도 줄지 않는다(벌 없음) */
+    const on = new Set(m.days), t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const cells = []; for (let d = new Date(t0.getTime() - 111 * 86400000); d <= t0; d.setDate(d.getDate() + 1)) { const k = ymd(d); cells.push(`<i class="${on.has(k) ? 'on' : ''}" title="${k}"></i>`); }
+    const stat = [['🏁', '연 대회', c.hosted], ['🎟️', '신청', c.joined], ['🚀', '제출', c.submitted], ['💬', '글', c.posts], ['🗨️', '댓글', c.comments], ['🔥', '받은 추천', c.upsGot], ['✍️', '합쳐진 고침', c.editsMerged], ['🤝', '연결', c.asksOk]];
+    return `<section class="mhero" id="me-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi-on.svg" alt="" width="40" height="40">
+        <span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">Lv.${m.level}</span><b style="color:#fff">${esc(m.title)}</b></div>
+        <h2 style="margin-top:10px" id="me-lv">${got ? `배지 <span class="lime">${got}</span> / ${m.badges.length}` : '첫 배지까지 한 걸음'}</h2>
+        <div class="lvbar" role="progressbar" aria-label="다음 레벨까지" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
+        <p>${m.xp} XP · 다음 레벨까지 <b>${Math.max(0, m.lvTo - m.xp)} XP</b></p></section>
+      <div class="card" id="me-next"><h3>다음 목표</h3>
+        ${m.next.map(b => `<a class="mgoal" href="${esc(b.href)}"><span class="mi">${b.icon}</span><span class="mt"><b>${esc(b.name)}</b><em>${esc(b.how)}</em>
+          <span class="mbar"><span style="width:${Math.round(b.have / b.goal * 100)}%"></span></span></span><span class="mn">${b.have}/${b.goal}</span><span aria-hidden="true">›</span></a>`).join('') || '<div class="meta">배지를 다 모았습니다. 전설입니다.</div>'}</div>
+      <div class="card" id="me-days"><h3>켜진 날 <span class="pill">${m.days.length}일</span></h3>
+        <div class="meta">무엇이든 한 날에 불이 켜집니다. 쉬었다 와도 줄지 않아요.</div>
+        <div class="dgrid" aria-label="최근 16주 켜진 날">${cells.join('')}</div></div>
+      <div class="card" id="me-badges"><h3>배지</h3><div class="bgrid">
+        ${m.badges.map(b => `<a class="bdg${b.got ? ' got' : ''}" href="${esc(b.href)}" data-badge="${esc(b.id)}"><span class="bi">${b.got ? b.icon : '🔒'}</span><b>${esc(b.name)}</b><em>${b.got ? '얻음' : esc(b.how)}</em></a>`).join('')}</div></div>
+      <div class="card" id="me-stats"><h3>모은 것</h3><div class="mstats">${stat.map(([i, n, v]) => `<div><span>${i}</span><b>${v}</b><em>${n}</em></div>`).join('')}</div>
+        <div class="meta" style="margin-top:8px">이 기기에 든 열쇠로 셉니다. 다른 폰에서 한 것은 그 폰에서 보입니다. 순위표는 없습니다 — 남과 견주지 않고 어제의 나와만.</div></div>
+      <div class="shrow" style="margin:6px 0 20px"><a class="btn sm" href="/cal">오늘</a><a class="btn sec sm" href="/board">게시판</a><a class="btn sec sm" href="/#list">대회 찾기</a></div>`;
+  },
+
   async cal() {
     const now = new Date(), ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const today = ymd(now);
@@ -7635,10 +7713,13 @@ function wire() {
       if (author) try { localStorage.setItem('hackon.nick', author); } catch {}
       const body = { body: $('#wr-body').value, base: +wrSend.dataset.base, note: $('#wr-note').value, author };
       const r = ek ? await api(`/chapters/${at.ch}`, { method: 'POST', ekey: ek, body }).catch(e => { if (e.status === 403) return null; throw e; }) : null;
-      if (!r) await api(`/chapters/${at.ch}/edits`, { method: 'POST', body });
+      if (!r) { if (!needRules()) return; await api(`/chapters/${at.ch}/edits`, { method: 'POST', body: { ...body, agree: true }, voter: voterTok() }); }
       wrEditing = false; flash(r ? '저장했습니다 — 새 판이 됐습니다' : '제안을 보냈습니다 — 편집자가 합치면 글에 들어갑니다'); render();
     } catch (e) { flash(e.message, true); }
   };
+  document.querySelectorAll('[data-revert]').forEach(b => b.onclick = async () => { const at = wrPath();
+    if (!confirm(`${b.dataset.revert}판으로 되돌릴까요? 지금 글은 판 기록에 그대로 남습니다.`)) return;
+    try { const r = await api(`/chapters/${at.ch}/revert`, { method: 'POST', ekey: ekeyOf(at.book), body: { ver: +b.dataset.revert } }); flash(`되돌렸습니다 — ${r.ver}판`); render(); } catch (e) { flash(e.message, true); } });
   document.querySelectorAll('[data-merge]').forEach(b => b.onclick = async () => { const at = wrPath();
     try { const r = await api(`/edits/${b.dataset.merge}/merge`, { method: 'POST', ekey: ekeyOf(at.book) }); flash(`합쳤습니다 — ${r.ver}판`); render(); } catch (e) { flash(e.message, true); } });
   document.querySelectorAll('[data-eclose]').forEach(b => b.onclick = async () => { const at = wrPath();
@@ -7652,7 +7733,8 @@ function wire() {
   if (bdfSend) bdfSend.onclick = async () => {
     const tp = document.querySelector('[data-bdft].on'), nick = $('#bdf-nick').value.trim();
     try {
-      const r = await api('/board', { method: 'POST', body: { topic: tp ? tp.dataset.bdft : 'free', title: $('#bdf-title').value, body: $('#bdf-body').value, nick } });
+      if (!needRules()) return;
+      const r = await api('/board', { method: 'POST', voter: voterTok(), body: { topic: tp ? tp.dataset.bdft : 'free', title: $('#bdf-title').value, body: $('#bdf-body').value, nick, agree: true } });
       try { localStorage.setItem('hackon.bkey.' + r.id, r.bkey); if (nick) localStorage.setItem('hackon.nick', nick); } catch {}
       location.href = '/board/' + r.id;
     } catch (e) { flash(e.message, true); }
@@ -7676,10 +7758,17 @@ function wire() {
     const url = location.origin + '/board/' + b.dataset.bdshare, title = ($('#bd-post h1') || {}).textContent || 'HACK:ON 게시판';
     try { if (navigator.share) await navigator.share({ title, url }); else { await navigator.clipboard.writeText(url); flash('주소를 복사했습니다'); } } catch {}
   });
+  document.querySelectorAll('[data-bdblock]').forEach(b => b.onclick = () => {
+    if (!confirm('이 사람을 차단할까요? 이 기기에서 그 사람의 글·댓글이 안 보입니다.')) return;
+    const set = blockedSet(); set.add(b.dataset.bdblock); setBlocked(set); flash('차단했습니다'); render();
+  });
+  document.querySelectorAll('[data-bdunblock]').forEach(b => b.onclick = () => { const set = blockedSet(); set.delete(b.dataset.bdunblock); setBlocked(set); render(); });
+  const bdUnblock = $('#bd-unblock'); if (bdUnblock) bdUnblock.onclick = () => { setBlocked(new Set()); render(); };
   const bdcSend = $('#bdc-send');
   if (bdcSend) bdcSend.onclick = async () => {
     const nick = $('#bdc-nick').value.trim();
-    try { const r = await api(`/board/${bdPostId()}/comments`, { method: 'POST', body: { body: $('#bdc-body').value, nick } });
+    if (!needRules()) return;
+    try { const r = await api(`/board/${bdPostId()}/comments`, { method: 'POST', voter: voterTok(), body: { body: $('#bdc-body').value, nick, agree: true } });
       try { localStorage.setItem('hackon.ckey.' + r.id, r.ckey); if (nick) localStorage.setItem('hackon.nick', nick); } catch {}
       render(); } catch (e) { flash(e.message, true); }
   };
@@ -8593,6 +8682,7 @@ if (location.pathname === '/card') {
 }
 const WRT = location.pathname === '/write' || /^\/w\/[0-9a-f]{8}(\/\d+)?$/.test(location.pathname);   // 공동 집필
 const BRD = location.pathname === '/board' || /^\/board\/\d+$/.test(location.pathname);   // 게시판 — 주제별 글·댓글·추천
+const MYP = location.pathname === '/me';   // 나 — 배지·레벨·다음 목표·켜진 날(열쇠로 서버가 센다)
 const CAL = location.pathname === '/cal' || location.pathname === '/brief';   /* 브리핑은 «오늘» 에 합쳤다(10/02) — /brief 주소는 살려 같은 화면으로 */        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
@@ -8647,6 +8737,7 @@ else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'n
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (WRT) { tab = 'write'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRD) { tab = 'forum'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (MYP) { tab = 'mypage'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
@@ -8765,6 +8856,21 @@ applyWide();
 addEventListener('resize', applyWide);
 render();
 if (LIVE && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+</script>
+<script>
+/* 최근 간 곳 — 첫 화면 메뉴 판 «최근» 줄에 쓴다. 이 기기에만, 공개 주소만(열쇠 든 주소는 안 적는다) */
+(function () {
+  var OK = /^\/(cal|news|tools|wallet|board|write|club|card|recruit|made|cert|setups|problems|gigs|around|me|learn|market|rank|e\/[a-z0-9]+|board\/\d+|w\/[0-9a-f]{8})$/;
+  function rec() {
+    try {
+      var p = location.pathname; if (!OK.test(p)) return;
+      var h = document.querySelector('main h1, main h2, h1, h2'), t = ((h && h.textContent) || document.title.split(/ [—·|] /)[0] || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+      var l = JSON.parse(localStorage.getItem('hackon.recent') || '[]').filter(function (x) { return x && x.p !== p; });
+      l.unshift({ p: p, t: t }); localStorage.setItem('hackon.recent', JSON.stringify(l.slice(0, 6)));
+    } catch (e) {}
+  }
+  setTimeout(rec, 1200); addEventListener('pagehide', rec);
+})();
 </script>
 </body>
 </html>
