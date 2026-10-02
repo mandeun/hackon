@@ -702,6 +702,17 @@ function ownsPerson(db, pid, tkey) {
   return !!db.prepare("SELECT 1 FROM teams WHERE (tkey=? AND tkey<>'' AND person=?) OR (mate_key=? AND mate_key<>'' AND mate=?)")
     .get(tk, pid, tk, pid);
 }
+/** 공개 칸에 연락처가 섞였나. 레드팀(10/03)에서 «o1o-1234-5678»·«공일공 1234 5678»·«카톡 abc123» 이 빠져나갔다.
+    한글 숫자·o/O 를 숫자로 바꾸고 구분자를 지운 뒤 01X 로 시작하는 10~11자리를 본다. 메신저 이름 뒤 아이디도 막는다.
+    완벽할 수는 없다 — 목표는 «긁어 가기 쉬운 꼴» 을 공개 칸에서 없애는 것이다 */
+const KO_DIGIT = { 공: '0', 영: '0', 일: '1', 이: '2', 삼: '3', 사: '4', 오: '5', 육: '6', 칠: '7', 팔: '8', 구: '9' };
+function looksContact(t) {
+  const s = String(t || '');
+  if (/@|open\.kakao\.com|https?:\/\/(?!hackon\.kr)/i.test(s)) return true;
+  if (/(카톡|카카오|kakao|오픈\s?채팅|텔레(그램)?|telegram|라인|\bline\b|디엠|\bdm\b|인스타|insta(gram)?|위챗|wechat)\s*(아이디|id)?\s*[:：]?\s*[a-z0-9_.-]{3,}/i.test(s)) return true;
+  const digits = s.replace(/[공영일이삼사오육칠팔구]/g, c => KO_DIGIT[c]).replace(/[oO]/g, '0').replace(/[\s\-.()·]/g, '');
+  return /01[016789]\d{7,8}/.test(digits);
+}
 /** 첫 입장 세 칸. 본인(그 사람의 팀·짝 열쇠)만 고친다. 연락처·주소처럼 보이는 것은 받지 않는다 — 이 세 칸은 공개라서 */
 const INTRO_KEYS = ['intro', 'doing', 'seeking'];
 function setIntro(db, pid, tkey, b) {
@@ -711,7 +722,7 @@ function setIntro(db, pid, tkey, b) {
   for (const k of INTRO_KEYS) {
     if (b[k] === undefined) continue;
     const t = plain(b[k], 80);
-    if (/@|\b01[016789][-\s]?\d{3,4}[-\s]?\d{4}\b|open\.kakao\.com/i.test(t)) throw new HttpError(400, '공개되는 칸이라 연락처는 적지 마세요 — 연락처는 서로 좋아요일 때 열립니다');
+    if (looksContact(t)) throw new HttpError(400, '공개되는 칸이라 연락처는 적지 마세요 — 연락처는 서로 좋아요일 때 열립니다');
     v[k] = t;
   }
   const ks = Object.keys(v);
@@ -9878,6 +9889,10 @@ async function selftest() {
         let ic = 0; try { setIntro(cdb, b.person, b.tkey, { seeking: '연락 주세요 010-1234-5678' }); } catch (e) { ic = e.code; }
         let ie = 0; try { setIntro(cdb, b.person, b.tkey, { intro: 'me@x.com 으로' }); } catch (e) { ie = e.code; }
         ok(ic === 400 && ie === 400, '공개 칸에 전화·이메일은 못 적는다 (400)');
+        ok(['o1o-1234-5678', '공일공 1234 5678', '카톡 abc123', 'kakao id: my_id', '텔레그램 @x', 'https://open.kakao.com/o/abc'].every(looksContact),
+           '레드팀: 바꿔 쓴 전화번호·메신저 아이디도 연락처로 본다');
+        ok(!['기획하는 직장인, 바이브코딩 2주차', '2026년 10월 데모데이', '디자인 3년 차', '오늘 일 끝내기'].some(looksContact),
+           '평범한 소개는 연락처로 잘못 막지 않는다');
         let self = 0; try { likeMatch(cdb, me.id, a.tkey, a.id); } catch (e) { self = e.code; }
         ok(self === 400, '내 팀은 고를 수 없다 (400)');
       }
