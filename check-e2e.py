@@ -4544,5 +4544,18 @@ with sync_playwright() as pw:
     b.close()
 ok("오늘 · 내 달력 — 비면 «없음», 신청한 대회·답하기가 달력에, 사람별 한 걸음, 구독 주소(열쇠 없음)")
 
+# ── ON 클럽 /club — 바이브코더 문화 한 장. 노랑이 새 자세 둘, 다가오는 밤(없음·모름 가르기), 폰 폭 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.on("pageerror", lambda e: errs.append("club: " + str(e)))
+    pg.goto(BASE + "/club", wait_until="networkidle"); pg.wait_for_timeout(400)
+    for _img in pg.eval_on_selector_all("img", "els => els.map(e => e.getAttribute('src'))"):
+        A(urllib.request.urlopen(BASE + _img, timeout=10).status == 200, f"ON 클럽 그림 {_img} 이 안 열린다")
+    A(pg.evaluate("[...document.images].every(i => i.complete && i.naturalWidth > 0)"), "ON 클럽 그림이 깨진다")
+    A("불러오는 중" not in pg.inner_text("#club-ev"), "다가오는 밤이 «불러오는 중» 에서 멈췄다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "ON 클럽이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("ON 클럽 — 노랑이 새 자세 둘, 다가오는 밤, 폰 폭")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

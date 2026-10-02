@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  노랑이 — 바이브코딩 자세
+  헤드폰을 끼고 노트북 앞에 앉았다. 화면이 라임으로 켜져 있다 — «켜짐» 한 점은 화면이 맡는다.
+  색: 먹 #0B1020, 노랑 #FFB020, 라임 #C8F53B(화면 한 곳에만)
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="노랑이 — 바이브코딩">
+  <title>노랑이 — 바이브코딩</title>
+  <desc>콘센트 머리에 헤드폰을 쓴 노랑이가 라임빛 노트북을 두드린다.</desc>
+  <g id="팔다리" fill="none" stroke="#FFB020" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path id="몸통" d="M52 58 V82"/>
+    <path id="팔-왼" d="M52 66 L66 80"/>
+    <path id="팔-오른" d="M52 66 L74 74"/>
+    <path id="다리" d="M52 82 L76 98"/>
+  </g>
+  <g id="노트북">
+    <rect x="64" y="56" width="44" height="30" rx="4" fill="#0B1020" transform="rotate(-8 86 71)"/>
+    <rect x="68" y="60" width="36" height="22" rx="2" fill="#C8F53B" transform="rotate(-8 86 71)"/>
+    <path d="M78 70 l-5 4 5 4 M94 67 l5 4 -5 4 M88 64 l-5 15" fill="none" stroke="#0B1020" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" transform="rotate(-8 86 71)"/>
+    <rect x="58" y="90" width="56" height="7" rx="3.5" fill="#0B1020"/>
+  </g>
+  <g id="머리">
+    <rect id="콘센트" x="26" y="8" width="52" height="50" rx="19" fill="#FFB020"/>
+    <rect id="눈-왼" x="39" y="25" width="7" height="17" rx="3.5" fill="#0B1020"/>
+    <rect id="눈-오른" x="58" y="25" width="7" height="17" rx="3.5" fill="#0B1020"/>
+  </g>
+  <!-- 헤드폰 테두리 — 먹 바탕 위에서도 보이게 흰 선을 밑에 한 겹 -->
+  <g id="헤드폰-테두리" fill="none" stroke="#FFFFFF" stroke-width="8.5" stroke-linecap="round" opacity=".9">
+    <path d="M22 34 C22 6 82 6 82 34"/>
+  </g>
+  <g id="헤드폰-귀-테두리" fill="#FFFFFF" opacity=".9">
+    <rect x="14.5" y="26.5" width="14" height="21" rx="6.5"/>
+    <rect x="75.5" y="26.5" width="14" height="21" rx="6.5"/>
+  </g>
+  <g id="헤드폰" fill="none" stroke="#0B1020" stroke-width="5" stroke-linecap="round">
+    <path d="M22 34 C22 6 82 6 82 34"/>
+  </g>
+  <g id="헤드폰-귀" fill="#0B1020">
+    <rect x="16" y="28" width="11" height="18" rx="5"/>
+    <rect x="77" y="28" width="11" height="18" rx="5"/>
+  </g>
+</svg>

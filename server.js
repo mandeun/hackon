@@ -3027,7 +3027,7 @@ function visitsOf(db, days) {
 
 function sitemap(db) {
   const base = CANON();
-  const urls = ['/', '/en', '/manual', '/launch', '/biz', '/partner', '/crew'].concat(
+  const urls = ['/', '/en', '/club', '/manual', '/launch', '/biz', '/partner', '/crew'].concat(
     db.prepare('SELECT 1 FROM lectures LIMIT 1').get() ? ['/learn'] : [],
     db.prepare("SELECT 1 FROM listings WHERE ok=1 AND off='' LIMIT 1").get() ? ['/market'] : [],
     db.prepare("SELECT 1 FROM spots WHERE state<>'hidden' LIMIT 1").get() ? ['/around'] : [],
@@ -7034,6 +7034,8 @@ const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 
   'hero.jpg', 'og.png',
   /* 노랑이. 평면 SVG 라 셋 합쳐 5KB 가 안 된다 — 그림 파일로 두면 색을 고칠 때마다 다시 만들어야 한다 */
   'norangi.svg', 'norangi-run.svg', 'norangi-hi.svg', 'story-norangi.svg',
+  /* 노랑이 새 자세 둘 — 바이브코딩(헤드폰·노트북), 켜짐(두 팔·라임 눈). ON 클럽 페이지 */
+  'norangi-vibe.svg', 'norangi-on.svg', 'club.html',
   'brand.html',
   /* 계정 삭제 안내 — 구글 플레이가 앱 밖 주소를 요구한다(/delete-account) */
   'delete-account.html']);
@@ -8638,7 +8640,7 @@ function routes(db) {
         return res.end(fs.readFileSync(path.join(ROOT, 'home.html'), 'utf8')
           .replace('<link rel="canonical"', `<meta name="naver-site-verification" content="${nv}">\n<link rel="canonical"`));
       }
-      const name = p === '/' ? 'home.html' : p === '/en' ? 'en.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
+      const name = p === '/' ? 'home.html' : p === '/en' ? 'en.html' : p === '/club' ? 'club.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
       if (!STATIC_OK.has(name)) throw new HttpError(404, '없습니다');
       const f = path.join(ROOT, name);
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
