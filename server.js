@@ -2214,6 +2214,7 @@ function newsList(db, days = 9, job = '') {
    화면(news.html)과 /news.md 와 MCP 가 전부 이 함수 하나를 쓴다. 규칙이 두 곳에 적히면
    어느 날 화면과 마크다운이 다른 소리를 한다. */
 const NEWS_KINDS = [['pick', '오늘 꼭 볼 것', '이 몇 개만 보고 닫아도 됩니다'],
+                    ['deal', '무료·할인·리셋', '지금 받으면 이득인 것 — 기한부터 봅니다'],
                     ['tool', '새로 나온 도구', '오늘 깔거나 눌러 볼 수 있는 것'],
                     ['read', '읽을거리', '흐름만 아는 데 3분'],
                     ['ours', '우리 대회에서 나온 것', '해커온 우승작과 같은 일 하는 사람의 제보']];
@@ -2231,6 +2232,10 @@ const NEWS_FULL = 10;
 function newsSplit(g) { return [g.slice(0, NEWS_FULL), g.slice(NEWS_FULL)]; }
 const NEWS_KIND_OF = { hackon: 'ours', tip: 'ours', hf: 'tool', space: 'tool', ds: 'tool', gh: 'tool', ph: 'tool', show: 'tool' };
 const newsKind = src => NEWS_KIND_OF[src] || 'read';
+/* 혜택 — 무료 크레딧·할인·사용 한도 리셋. 출처가 아니라 제목으로 가른다(어느 매체에서든 나온다).
+   논문·데이터셋은 뺀다 — «credit assignment» 같은 말이 걸린다. «free» 는 혼자 쓰면 오픈소스까지 다 걸려 뒤에 무엇이 붙을 때만 */
+const DEAL_RE = /무료로|무료 ?(체험|제공|크레딧|플랜|이용)|할인|공짜|크레딧|쿠폰|프로모션|리셋|초기화|한도 ?(상향|늘|두 배|2배)|free (tier|plan|credits?|trial|for|access)|\bdiscount|\d+ ?% off|\bcredits\b|\bpromo(tion)?\b|giveaway|(rate|usage) limits?|price (cut|drop)|half[- ]price/i;
+const newsKindOf = r => (!['paper', 'ds', 'hf'].includes(r.src) && DEAL_RE.test(String(r.title || ''))) ? 'deal' : newsKind(r.src);
 /* 출처 무게 — «읽고 나서 오늘 할 일이 생기는 정도». 보는 사람이 한국에서 일하는 사람이라
    한국어로 읽히고 바로 손에 잡히는 곳이 높다. 제보·우승작이 가장 높다(우리 사람이 써 본 것).
    2026-09-27 실측으로 한 번 고쳤다: 논문(paper)이 12 였을 때 ▲수가 붙어 «오늘 꼭 볼 것» 다섯 자리 중
@@ -2323,7 +2328,7 @@ function newsEnrich(rows, now = today()) {
     const at = c.map(x => x.at).sort().slice(-1)[0];
     const m = /(\d[\d,]*)/.exec(rep.note || ''), num = m ? +m[1].replace(/,/g, '') : 0;
     const bucket = newsBucket(at, now);
-    const o = { ...rep, at, also, num, bucket, kind: newsKind(rep.src), dup: c.length };
+    const o = { ...rep, at, also, num, bucket, kind: newsKindOf(rep), dup: c.length };
     o.score = (NEWS_W[rep.src] || 0)
       + Math.round(Math.log10(1 + num) * 10)                                             /* 반응 수는 로그로 — 별 2만 개가 나머지를 다 덮지 않게 */
       + (bucket === '오늘' ? 25 : bucket === '어제' ? 12 : bucket === '이번 주' ? 4 : 0)
@@ -10291,6 +10296,15 @@ async function selftest() {
     const tiny = newsEnrich([{ id: 1, src: 'ai', title: '[속보]', url: 'https://a.example/1', note: '', at: T, job: '' },
                              { id: 2, src: 'ai', title: '[단독]', url: 'https://a.example/2', note: '', at: T, job: '' }], T);
     ok(tiny.length === 2, '제목이 짧다고 서로 다른 글이 하나로 뭉쳤다');
+    /* 혜택 묶음 — 무료 크레딧·할인·한도 리셋은 출처와 상관없이 «무료·할인·리셋» 으로 간다 */
+    const dl = newsEnrich([{ id: 1, src: 'geek', title: 'Claude Code 사용 한도 리셋 — 주간 한도 두 배', url: 'https://d.example/1', note: '', at: T, job: '' },
+                           { id: 2, src: 'ph', title: 'Get $50 free credits for new users', url: 'https://d.example/2', note: '', at: T, job: '' },
+                           { id: 3, src: 'paper', title: 'Credits assignment for free agents', url: 'https://d.example/3', note: '', at: T, job: '' },
+                           { id: 4, src: 'gh', title: 'A free and open source note app', url: 'https://d.example/4', note: '', at: T, job: '' }], T);
+    const kk = Object.fromEntries(dl.map(r => [r.id, r.kind]));
+    ok(kk[1] === 'deal' && kk[2] === 'deal' && kk[3] !== 'deal' && kk[4] !== 'deal',
+       '혜택: 한도 리셋·무료 크레딧은 «무료·할인·리셋», 논문의 credit·오픈소스 «free» 는 아니다: ' + JSON.stringify(kk));
+    ok(NEWS_KINDS[1][0] === 'deal', '혜택: «오늘 꼭 볼 것» 바로 아래에 둔다');
   }
   ok(newsBucket('2026-09-27', '2026-09-27') === '오늘' && newsBucket('2026-09-26', '2026-09-27') === '어제'
      && newsBucket('2026-09-23', '2026-09-27') === '이번 주' && newsBucket('2026-09-10', '2026-09-27') === '그전',
