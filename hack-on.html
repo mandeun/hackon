@@ -5943,6 +5943,9 @@ function wire() {
         agree: true } });
       if (r.waiting) { flash(`정원이 찼습니다. 대기 ${r.waiting}번째 — 자리가 나면 이메일로 팀 링크를 보냅니다`); return; }
       localStorage.setItem('hackon.team.' + cur, r.id);   // 두 번째 칸을 보여 주려고 기억한다
+      /* 신청 때 받은 이메일을 이 기기에 둔다. 전에는 두 번째 칸의 «연락처» 를 채울 때 저장됐는데,
+         이제 그 칸을 다시 안 물으니 여기서 둔다 — 다음 대회 신청 칸이 이걸로 채워진다 */
+      if (email) try { localStorage.setItem('hackon.contact', email); } catch (_) {}
       /* 팀 열쇠. 이 브라우저가 그 팀 사람이라는 증거다 - 서버가 여기서 한 번만 준다.
          대회 열쇠(hackon.okey.*)와 같은 방식이다. */
       if (r.tkey) localStorage.setItem('hackon.tkey.' + r.id, r.tkey);
