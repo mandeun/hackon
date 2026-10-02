@@ -216,7 +216,7 @@ const HOW = {
       ${o.tight || !r.easy ? '' : `<div class="ez"><b>쉽게:</b> ${esc(r.easy)}</div>`}
       ${o.tight || !r.zh ? '' : `<div class="zh">🇨🇳 ${esc(r.zh)}</div>`}
       ${o.tight || o.sameDo || !r.do ? '' : `<div class="do">→ ${esc(r.do)}</div>`}
-      ${o.tight || !r.try ? '' : `<div class="try"><span class="tm">⏱ ${esc(r.mins)}분</span><code>${esc(r.try)}</code><button type="button" class="cp" data-copy="${esc(r.try)}" aria-label="명령 복사">복사</button></div>`}
+      ${o.tight || !r.try ? '' : `<div class="try"><span class="tm">⏱ ${esc(r.mins)}분</span><code tabindex="0" aria-label="바로 해 보는 명령">${esc(r.try)}</code><button type="button" class="cp" data-copy="${esc(r.try)}" aria-label="명령 복사">복사</button></div>`}
       ${meta.length ? `<div class="n">${o.rank ? esc(srcName(r.src)) + ' · ' : ''}${meta.join(' · ')}</div>` : (o.rank ? `<div class="n">${esc(srcName(r.src))}</div>` : '')}
     </div></div>`;
   }
