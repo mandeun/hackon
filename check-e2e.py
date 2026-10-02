@@ -4120,5 +4120,17 @@ with sync_playwright() as pw:
     A("해지 후보" in _wl and "14,000원 아낌" in _wl, f"«안 씀» 구독이 해지 후보·아낄 금액으로 안 뜬다: {_wl[:200]}")
     b.close()
 ok("AI 지갑 — 날짜순·날짜 모름은 맨 뒤·달력 파일(하루 전 알림)·서버로 안 보냄·안 쓰는 구독은 해지 후보")
+# ── 검색·AI 답변 — 대회 공개 화면 머리 딱지, Event 한 장, /llms.txt ──
+_h = urllib.request.urlopen(BASE + f"/e/{ev}").read().decode()
+A(f'og:url" content="' in _h and f'/e/{ev}"' in _h and 'og:type" content="website"' in _h, "대회 공개 화면에 og 딱지가 없다")
+_t = re.search(r'og:title" content="([^"]*)"', _h).group(1)
+if "application/ld+json" in _h:
+    _ld = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>', _h).group(1))
+    import html as _html
+    A(_ld["@type"] == "Event" and _html.unescape(_t).startswith(_ld["name"]), f"Event 이름과 딱지 제목이 다르다: {_ld}")
+_lt = urllib.request.urlopen(BASE + "/llms.txt").read().decode()
+A(_lt.startswith("# HACK:ON") and "/news.md" in _lt, f"/llms.txt 가 안내문이 아니다: {_lt[:80]}")
+A(urllib.request.urlopen(BASE + "/e/zzzzzz9").status == 200, "없는 대회 주소가 화면을 못 낸다")
+ok("검색·AI — 대회 화면 og 딱지(website), 목록 대회는 Event, /llms.txt")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

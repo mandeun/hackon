@@ -1684,9 +1684,9 @@ function rawBody(req, max) {
 }
 
 /** 링크 미리보기 딱지. 사람마다 다른 그림이 붙어야 두 번째 링크도 눌린다. */
-function ogTags({ title, desc, url, image }) {
+function ogTags({ title, desc, url, image, type = 'profile' }) {
   const t = xmlEsc(title), d = xmlEsc(desc), u = xmlEsc(url), i = xmlEsc(image);
-  return `<meta property="og:type" content="profile">`
+  return `<meta property="og:type" content="${xmlEsc(type)}">`
     + `<meta property="og:site_name" content="HACK:ON">`
     + `<meta property="og:locale" content="ko_KR">`
     + `<meta property="og:title" content="${t}">`
@@ -1708,6 +1708,59 @@ function appHtml() {
 const OG_ANCHOR = '<link rel="manifest" href="/manifest.webmanifest">';
 /** 머리에 딱지를 끼워 넣는다. 자리를 못 찾으면 원본 그대로 돌려준다 — 화면이 먼저다. */
 const withOg = (html, tags) => html.includes(OG_ANCHOR) ? html.replace(OG_ANCHOR, OG_ANCHOR + tags) : html;
+
+/** 구글 «행사» 칸과 AI 답변이 읽는 대회 한 장(schema.org Event).
+    목록에 올린 대회만 낸다 — 링크로만 도는 대회가 검색에 걸리면 연 사람이 놀란다.
+    모르는 칸(장소·주제)은 빼고 보낸다. 빈 문자열을 «장소 없음» 으로 읽게 두지 않는다. */
+function eventLd(ev, base) {
+  if (!ev || !ev.listed) return '';
+  const online = ev.mode === 'online';
+  const ld = {
+    '@context': 'https://schema.org', '@type': 'Event',
+    name: ev.title, url: base + '/e/' + ev.id,
+    startDate: ev.starts, endDate: ev.ends || ev.starts,
+    eventStatus: 'https://schema.org/EventScheduled',
+    eventAttendanceMode: 'https://schema.org/' + (online ? 'Online' : 'Offline') + 'EventAttendanceMode',
+    organizer: { '@type': 'Organization', name: ev.host },
+  };
+  if (ev.topic) ld.description = ev.topic;
+  if (online) ld.location = { '@type': 'VirtualLocation', url: base + '/e/' + ev.id };
+  else if (ev.place) ld.location = { '@type': 'Place', name: ev.place, address: ev.place };
+  /* </script> 로 빠져나가지 못하게 < 를 바꾼다 — 대회 이름은 누구나 적는 칸이다 */
+  return '<script type="application/ld+json">' + JSON.stringify(ld).replace(/</g, '\\u003c') + '</script>';
+}
+
+/** AI 답변 엔진(ChatGPT·Claude·Perplexity)이 먼저 찾는 안내문(llmstxt.org 형식).
+    무엇이 어디 있는지만 적는다. 연락처·열쇠·참가자 이름은 여기 오지 않는다. */
+function llmsTxt(db) {
+  const base = CANON() || mailSite();
+  const evs = db.prepare(`SELECT id, title, host, starts, ends, topic FROM events
+                          WHERE listed=1 AND ends >= date('now') ORDER BY starts LIMIT 30`).all();
+  const line = (x) => String(x || '').replace(/\s+/g, ' ').slice(0, 120);
+  return [
+    '# HACK:ON',
+    '',
+    '> 해커톤·공모전·동아리 대회를 이름 하나로 열고, 신청·제출·심사·결과까지 한 곳에서 굴리는 한국어 서비스. AI 로 무언가를 만드는 사람들이 모이는 곳.',
+    '',
+    '## 화면',
+    `- [첫 화면](${base}/): 지금 열린 대회 목록`,
+    `- [AI 소식](${base}/news): 직무별 AI 도구·할인·무료 소식`,
+    `- [만든 것](${base}/made): 사람들이 만든 앱. 써 보고 같이 할 사람을 구한다`,
+    `- [외주](${base}/gigs): 맡기고 싶은 일과 할 수 있는 일`,
+    `- [사람 구함](${base}/recruit): 직장인·학생 프로젝트 팀원 모집`,
+    `- [추천인 코드](${base}/ref): 남의 코드를 써 준 만큼 내 코드가 앞에 선다`,
+    `- [운영 매뉴얼](${base}/manual): 대회를 여는 방법`,
+    '',
+    '## 기계가 읽는 주소',
+    `- [소식 마크다운](${base}/news.md): 직무별은 ?job=개발 처럼 붙인다`,
+    `- [사이트맵](${base}/sitemap.xml)`,
+    '',
+    '## 열린 대회',
+    ...(evs.length ? evs.map(e => `- [${line(e.title)}](${base}/e/${e.id}): ${line(e.host)} · ${e.starts}~${e.ends}${e.topic ? ' · ' + line(e.topic) : ''}`)
+                   : ['- 지금 목록에 올라온 대회가 없다']),
+    '',
+  ].join('\n');
+}
 
 /** «그날의 조건» 아카이브. 현장에서 공개한 제약 한 줄을 대회마다 쌓는다.
     조건이 하나뿐이면 아카이브가 아니라 한 줄이다 — 둘부터 화면을 낸다.
@@ -2814,6 +2867,10 @@ function sitemap(db) {
     db.prepare('SELECT 1 FROM lectures LIMIT 1').get() ? ['/learn'] : [],
     db.prepare("SELECT 1 FROM listings WHERE ok=1 AND off='' LIMIT 1").get() ? ['/market'] : [],
     db.prepare("SELECT 1 FROM spots WHERE state<>'hidden' LIMIT 1").get() ? ['/around'] : [],
+    db.prepare('SELECT 1 FROM works WHERE hidden=0 LIMIT 1').get() ? ['/made'] : [],
+    db.prepare('SELECT 1 FROM gigs WHERE hidden=0 AND closed=0 LIMIT 1').get() ? ['/gigs'] : [],
+    recruitList(db).length ? ['/recruit'] : [],
+    db.prepare('SELECT 1 FROM ref_codes LIMIT 1').get() ? ['/ref'] : [],
     db.prepare("SELECT id FROM events WHERE listed=1 AND ends >= date('now') ORDER BY ends").all()
       .map((r) => '/e/' + r.id));
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -6349,6 +6406,10 @@ function routes(db) {
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
         return res.end(robots());
       }
+      if (p === '/llms.txt') {
+        res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' });
+        return res.end(llmsTxt(db));
+      }
       if (p === '/sitemap.xml') {
         res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'no-cache' });
         return res.end(sitemap(db));
@@ -7749,6 +7810,22 @@ function routes(db) {
           })));
         }
       }
+      /* 대회 공개 화면도 딱지를 갈아 끼운다. 카톡 미리보기에 대회 이름이 떠야 누르고,
+         목록에 올린 대회는 구글·AI 가 읽는 Event 한 장을 같이 싣는다 */
+      if ((m = p.match(/^\/e\/([a-z0-9]+)$/)) && req.method === 'GET') {
+        const ev = db.prepare('SELECT * FROM events WHERE id=?').get(m[1]);
+        if (ev) {
+          const base = CANON() || mailSite();
+          const when = ev.starts === ev.ends || !ev.ends ? ev.starts : `${ev.starts} ~ ${ev.ends}`;
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-cache', ...SEC_HEADERS });
+          return res.end(withOg(appHtml(), ogTags({
+            type: 'website', title: `${ev.title} — HACK:ON`,
+            desc: [ev.host, when, ev.topic].filter(Boolean).join(' · '),
+            url: `${base}/e/${ev.id}`, image: `${base}/og.png`,
+          }) + eventLd(ev, base)));
+        }
+      }
       /* 개인정보 처리방침 — 앱스토어가 요구한다. 앱과 웹이 같은 것을 받는다 */
       if (p === '/privacy') {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
@@ -8567,6 +8644,30 @@ async function selftest() {
       db.prepare("UPDATE events SET ends='2020-01-01' WHERE id=?").run(evR.id);
       ok(!sitemap(db).includes(evR.id), '끝난 대회는 sitemap 에서 빠진다');
       db.prepare('UPDATE events SET listed=0, ends=? WHERE id=?').run(db.prepare('SELECT starts FROM events WHERE id=?').get(evR.id).starts, evR.id);
+    }
+    {
+      /* 구글·AI 가 읽는 것 — 목록에 올린 것만, 모르는 칸은 빼고, 이름 칸으로 스크립트를 못 닫게 */
+      const ev = { id: 'x1', title: '밤샘</script><b>', host: '동아리', topic: '', starts: '2026-10-31', ends: '2026-10-31', mode: 'onsite', place: '', listed: 1 };
+      ok(eventLd({ ...ev, listed: 0 }, 'https://hackon.kr') === '', '목록에 안 올린 대회는 Event 를 안 낸다');
+      const ld = eventLd(ev, 'https://hackon.kr');
+      ok(!ld.slice(0, -9).includes('</script>') && ld.endsWith('</script>'), '대회 이름으로 script 를 닫고 나갈 수 있다');
+      const j = JSON.parse(ld.replace(/^<script[^>]*>|<\/script>$/g, ''));
+      ok(j['@type'] === 'Event' && j.name === ev.title && j.startDate === '2026-10-31' && j.url === 'https://hackon.kr/e/x1', 'Event 기본 칸');
+      ok(!('location' in j) && !('description' in j), '장소·주제를 모르면 빈 값 대신 칸을 뺀다');
+      ok(j.eventAttendanceMode.endsWith('OfflineEventAttendanceMode'), '현장 대회는 Offline');
+      const j2 = JSON.parse(eventLd({ ...ev, mode: 'online' }, 'https://hackon.kr').replace(/^<script[^>]*>|<\/script>$/g, ''));
+      ok(j2.eventAttendanceMode.endsWith('OnlineEventAttendanceMode') && j2.location['@type'] === 'VirtualLocation', '온라인 대회는 VirtualLocation');
+      ok(JSON.parse(eventLd({ ...ev, place: '선릉' }, 'x').replace(/^<script[^>]*>|<\/script>$/g, '')).location.name === '선릉', '장소를 알면 Place');
+      ok(ogTags({ title: 'a', desc: 'b', url: 'c', image: 'd', type: 'website' }).includes('og:type" content="website"'), '대회 딱지는 website');
+      ok(ogTags({ title: 'a', desc: 'b', url: 'c', image: 'd' }).includes('og:type" content="profile"'), '사람 딱지는 그대로 profile');
+
+      const before = llmsTxt(db);
+      ok(before.startsWith('# HACK:ON') && before.includes('/news.md') && before.includes('/sitemap.xml'), 'llms.txt 머리와 기계용 주소');
+      ok(!before.includes(evR.id), 'llms.txt — 목록에 안 올린 대회는 안 실린다');
+      db.prepare('UPDATE events SET listed=1 WHERE id=?').run(evR.id);
+      ok(llmsTxt(db).includes('/e/' + evR.id), 'llms.txt — 목록에 올린 대회는 실린다');
+      ok(!/okey|jkey|pkey|tel|@/.test(llmsTxt(db).replace(/news\.md|@context/g, '')), 'llms.txt 에 열쇠·연락처가 없다');
+      db.prepare('UPDATE events SET listed=0 WHERE id=?').run(evR.id);
     }
     SITES.length = 0; SITES.push(...saved);
   }
