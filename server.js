@@ -719,6 +719,24 @@ function setIntro(db, pid, tkey, b) {
   const r = db.prepare('SELECT intro, doing, seeking FROM people WHERE id=?').get(pid);
   return { intro: r.intro, doing: r.doing, seeking: r.seeking };
 }
+/* ── 실무 기록 단계 ─────────────────────────────────
+   «자격증» 이 아니다. 자격기본법상 등록 안 한 민간자격을 «자격» 으로 부르거나 팔면 안 된다 — 그래서 «기록 단계» 라 부른다.
+   시험이 아니라 대회 기록에서만 나온다: 완주 수, 수상, 살아 있는 결과물, 동료 실력 평가, 가르친 것.
+   등록(민간자격)을 하면 같은 기준을 검정 기준으로 옮긴다(docs/cert.md). 사람이 손으로 올려 줄 칸은 없다 */
+const CERT_STEPS = [
+  { level: 1, name: '켠 사람', rule: '대회 1번 완주' },
+  { level: 2, name: '만든 사람', rule: '3번 완주 + 수상 1번 또는 30일 넘게 살아 있는 결과물' },
+  { level: 3, name: '켜 주는 사람', rule: '2단계 + 동료 실력 평가 4.0 이상(3건 넘게) + 강의 1개 이상' },
+];
+function certOf(pr) {
+  const alive30 = (pr.history || []).some(h => h.open === '열림' && h.age && h.age.days >= 30);
+  const l1 = (pr.finished || 0) >= 1;
+  const l2 = l1 && (pr.finished || 0) >= 3 && ((pr.wins || 0) >= 1 || alive30);
+  const l3 = l2 && pr.skill && pr.skill.show && pr.skill.score >= 4 && (pr.lectures || []).length >= 1;
+  const level = l3 ? 3 : l2 ? 2 : l1 ? 1 : 0;
+  const next = CERT_STEPS.find(x => x.level === level + 1);
+  return { level, name: level ? CERT_STEPS[level - 1].name : '', next: next ? `${next.name} — ${next.rule}` : '' };
+}
 const OUTSIDE_MAX = 20;
 function outsideOf(db, pid, { self, admin } = {}) {
   const all = self || admin;
@@ -1404,7 +1422,7 @@ function profile(db, pid) {
   const skillAvg = rt.length ? rt.reduce((a, r) => a + r.skill, 0) / rt.length : 0;
   const tier = rankOf(made, wins, skillAvg, rt.length);
 
-  return {
+  const out = {
     id: me.id, handle: me.handle, level: me.level, intro: me.intro || '', doing: me.doing || '', seeking: me.seeking || '',
     events: past.length, wins, tier, xp: xpOf(db, pid),
     /* 이번 시즌 기여. 통산과 «같이» 낸다 — 시즌만 두면 지난 기록이 사라진 것처럼 보인다 */
@@ -1426,6 +1444,7 @@ function profile(db, pid) {
     outside: outsideOf(db, pid, {}),
     /* 배치 중 - 몇 번 안 나온 사람은 등급을 안 붙인다. */
     placed: past.length >= 2,
+    /* 실무 기록 단계(cert)는 아래 history 를 보고 정하므로 객체를 다 만든 뒤 붙인다 */
     /* 만든 것. 주소가 «공개» 로 나가는 문 셋은 쇼케이스와 똑같다 —
        본인 동의(show) · 마감 지남 · 주소 검사. 셋 중 하나라도 안 맞으면 주소를 안 싣는다.
        프로필은 아무나 열 수 있는 주소라 여기가 새면 쇼케이스 동의가 뜻을 잃는다. */
@@ -1442,6 +1461,8 @@ function profile(db, pid) {
                open: pub ? openLabel(st) : '', age: pub ? ageOf(r.ends, st) : null };
     }),
   };
+  out.cert = certOf(out);
+  return out;
 }
 
 /* ── 시즌 ─────────────────────────────────────────────
@@ -8138,7 +8159,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -9974,6 +9995,19 @@ async function selftest() {
       ok(!어딘가(주소), '6개월 지난 연락처가 아직 어딘가 남아 있다: ' + 주소);
   }
   ok(privacyPage().includes('개인정보 처리방침') && privacyPage().includes('6개월') && !privacyPage().includes('undefined'), '개인정보 처리방침 페이지가 있다');
+  {
+    /* 실무 기록 단계 — 대회 기록에서만, 단계마다 조건 */
+    const alive = days => ({ open: '열림', age: { days } });
+    ok(certOf({ finished: 0 }).level === 0 && certOf({ finished: 0 }).next.startsWith('켠 사람'), '완주가 없으면 단계 없음, 다음은 «켠 사람»');
+    ok(certOf({ finished: 1 }).level === 1, '1번 완주면 1단계');
+    ok(certOf({ finished: 3 }).level === 1, '3번 완주만으로는 2단계가 아니다(수상·살아 있는 결과물 필요)');
+    ok(certOf({ finished: 3, history: [alive(10)] }).level === 1 && certOf({ finished: 3, history: [alive(31)] }).level === 2, '30일 넘게 살아 있는 결과물이 있어야 2단계');
+    ok(certOf({ finished: 3, wins: 1 }).level === 2, '수상 1번이면 2단계');
+    ok(certOf({ finished: 2, wins: 1, history: [alive(40)] }).level === 1, '수상·살아 있는 결과물이 있어도 완주가 3번 안 되면 1단계');
+    const l3 = { finished: 3, wins: 1, skill: { show: true, score: 4.2 }, lectures: [{}] };
+    ok(certOf(l3).level === 3 && certOf({ ...l3, skill: { show: false, score: 5 } }).level === 2 && certOf({ ...l3, lectures: [] }).level === 2,
+       '3단계는 동료 실력 4.0(건수 충분)과 강의 둘 다');
+  }
   ok(privacyPage().includes('서로 «좋아요»를 누른 두 참가자') && privacyPage().includes('그 기기에만'), '처리방침이 팀원 추천의 연락처 공개와 기기에만 두는 지갑을 적는다');
   const dl = ledgerOf(db, dEv0 = createEvent(db, { title: '장부표시' }).id);
   ok(dl.length === 0, '빈 장부');

@@ -4208,6 +4208,17 @@ with sync_playwright() as pw:
     b.close()
 ok("이력서에 붙일 글 — 링크드인·링커리어 꼴, 끝난 대회에서 왔거나 낸 것만")
 
+# ── 실무 기록 단계 /cert — «자격» 이라 부르지 않는다, 기준 셋, 링크드인 복사에 단계가 붙는다 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("cert: " + str(e)))
+    pg.goto(BASE + "/cert", wait_until="networkidle"); pg.wait_for_selector("#cert-steps")
+    _ct = pg.inner_text("#view")
+    A(_ct.count("단계 ·") >= 3 and "아직 아닙니다" in _ct and "자격기본법" in _ct, f"실무 기록 단계 안내가 이상하다: {_ct[:200]}")
+    _li = pg.evaluate("resumeText({id:'abc123abc123',finished:1,wins:0,finishRate:100,cert:{level:1,name:'켠 사람'},history:[{title:'낸 대회',ends:'2026-10-01',came:true,made:true}]}, 'linkedin', '2026-11-05')")
+    A("실무 기록 1단계(켠 사람)" in _li, f"링크드인 복사에 실무 기록 단계가 안 붙는다: {_li}")
+    b.close()
+ok("실무 기록 단계 — 기준 셋, «자격» 아님을 밝힘, 링크드인 복사에 단계")
+
 # ── 아침 브리핑 /brief — 내 대회 D-day·신청 수, 7일 안 마감, 오늘의 스위치, 카톡용 한 장, 서버에 안 씀 ──
 with sync_playwright() as pw:
     b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); ctx.grant_permissions(["clipboard-read", "clipboard-write"])

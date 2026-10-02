@@ -1723,7 +1723,7 @@ function resumeText(d, kind, now = ymdLocal()) {
   const did = h => [h.made ? '결과물 제출(완주)' : '참가', h.role ? `역할 ${h.role}` : '', h.mate ? `${h.mate} 와 함께` : ''].filter(Boolean).join(' · ');
   if (!rows.length) return '';
   if (kind === 'linkedin') return [
-    `HACK:ON 해커톤·프로젝트 기록 — 완주 ${d.finished}회 · 수상 ${d.wins || 0}회${d.finishRate !== null && d.finishRate !== undefined ? ` · 완주율 ${d.finishRate}%` : ''}`,
+    `HACK:ON 해커톤·프로젝트 기록 — 완주 ${d.finished}회 · 수상 ${d.wins || 0}회${d.finishRate !== null && d.finishRate !== undefined ? ` · 완주율 ${d.finishRate}%` : ''}${d.cert && d.cert.level ? ` · 실무 기록 ${d.cert.level}단계(${d.cert.name})` : ''}`,
     ...rows.map(h => `• ${ym(h.ends)} ${h.title} — ${did(h)}${h.url ? ` · ${h.url}` : ''}`),
     `검증된 기록: ${link}`].join('\n');
   return rows.map(h => [`활동명: ${h.title}`, `기관: HACK:ON (hackon.kr)`, `기간: ${ym(h.ends)}`,
@@ -4367,6 +4367,24 @@ const SCREEN = {
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/partner">협찬·협업</a> · <a href="/launch">시작하면 받는 것</a></p>`;
   },
 
+  /* 실무 기록 단계 — 시험지가 아니라 대회 기록. «자격» 이라 부르지 않는다(등록 전에는 법이 막는다).
+     이름이 levels 인 까닭: cert() 는 수료 확인(/c/<번호>) 화면이 이미 쓴다 */
+  async levels() {
+    const steps = [['1', '켠 사람', '대회 1번 완주(결과물 제출)'], ['2', '만든 사람', '3번 완주 + 수상 1번 또는 30일 넘게 살아 있는 결과물'],
+                   ['3', '켜 주는 사람', '2단계 + 동료 실력 평가 4.0 이상(3건 넘게) + 강의 1개 이상']];
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">실무 기록 단계</span></div>
+        <h2>시험 말고, 만든 기록으로</h2>
+        <p class="sub" style="margin-bottom:0">바이브코딩 실력은 문제지로 안 보입니다. 대회에서 끝까지 낸 것, 지금도 열리는 것, 같이 한 사람의 평가로 단계를 매깁니다.</p></section>
+      <div class="card" id="cert-steps">${steps.map(([n, name, rule]) => `<div style="padding:10px 0;border-top:1px solid var(--rule)"><b>${n}단계 · ${esc(name)}</b><div class="meta">${esc(rule)}</div></div>`).join('')}</div>
+      <div class="card"><h3>어떻게 확인하나</h3><ul class="checks">
+        <li><span>각자 프로필(<code>hackon.kr/p/…</code>)에 단계가 뜹니다. 그 주소가 곧 확인서입니다 — 누구나 열어 봅니다.</span></li>
+        <li><span>사람이 손으로 올려 줄 칸은 없습니다. 기록이 바뀌면 단계도 바뀝니다.</span></li>
+        <li><span>링크드인·링커리어로 복사할 때 단계가 같이 붙습니다.</span></li></ul></div>
+      <div class="card"><h3>자격증인가요?</h3><div class="meta">아직 아닙니다. 민간자격으로 등록하기 전에는 «자격» 이라고 부를 수 없습니다(자격기본법).
+        등록을 준비하고 있고, 등록하면 이 기준이 그대로 검정 기준이 됩니다. 기업 교육·채용에서 쓰시려면 <a href="/biz">기업·기관</a>으로 이야기해 주세요.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/launch">시작하면 받는 것</a></p>`;
+  },
+
   /* 해커온 크루 — 대외활동. 학생에게는 «스펙», 해커온에게는 손. 받는 것을 기록으로 준다(기여자 장부·명찰·추천서) */
   async crew() {
     const tracks = [['홍보', '인스타·숏폼·커뮤니티 방장 협조', '방마다 초대 링크로 몇 명 데려왔는지가 성과로 남습니다'],
@@ -5227,6 +5245,8 @@ const SCREEN = {
         <div class="meta">HACK:ON 티어</div>
         <div style="font-size:34px;font-weight:900;color:${TC};letter-spacing:-.02em;line-height:1.1;margin:4px 0">${esc(T.name)}</div>
         <div class="meta">완주 ${d.finished} · 수상 ${d.wins || 0}${d.skill && d.skill.show ? ' · 동료 실력 ' + d.skill.score : ''}</div>
+        ${d.cert ? `<div id="p-cert" style="margin-top:10px">${d.cert.level ? `<span class="pill ok">실무 기록 ${d.cert.level}단계 · ${esc(d.cert.name)}</span>` : '<span class="pill">실무 기록 단계 없음</span>'}
+          ${d.cert.next ? `<div class="meta" style="margin-top:4px">다음: ${esc(d.cert.next)} · <a href="/cert">기준</a></div>` : ''}</div>` : ''}
         ${d.intro || d.doing || d.seeking ? `<div id="p-intro" style="margin-top:10px;text-align:left">${d.intro ? `<div style="font-weight:700">${esc(d.intro)}</div>` : ''}${d.doing ? `<div class="meta">지금 하는 일 · ${esc(d.doing)}</div>` : ''}${d.seeking ? `<div class="meta">찾는 사람 · ${esc(d.seeking)}</div>` : ''}</div>` : ''}
         ${T.next ? `<div class="meta" style="margin-top:6px">${esc(T.next)}</div>` : ''}
         <div class="meta" style="margin-top:10px;font-family:var(--mono,monospace)">${esc(location.host)}/p/${esc(d.id)}</div>
@@ -7930,6 +7950,7 @@ const PTN = location.pathname === '/partner';    // 협찬·협업 안내 — �
 const LCH = location.pathname === '/launch';     // 해커온에서 시작하면 받는 것 — 바이브코딩 금광의 삽
 const BIZ = location.pathname === '/biz';        // 기업·기관·전통 산업·스타트업 — AI 도입을 해커톤 하루로
 const CRW = location.pathname === '/crew';       // 해커온 크루 모집 — 홍보·운영·개발
+const LVL = location.pathname === '/cert';       // 실무 기록 단계 — 자격증 아님, 대회 기록에서만(수료 확인 /c/ 와 다른 것)
 const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
 const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
@@ -7972,7 +7993,7 @@ if (TVM) {
 }
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
-else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
@@ -7980,6 +8001,7 @@ else if (PTN) { tab = 'partner'; document.querySelector('nav').style.display = '
 else if (LCH) { tab = 'launch'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BIZ) { tab = 'biz'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CRW) { tab = 'crew'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
