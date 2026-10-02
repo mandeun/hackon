@@ -4445,7 +4445,8 @@ with sync_playwright() as pw:
     _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
     A(len(_vis) <= 3, f"첫 화면 늘 보이는 고리가 셋을 넘는다: {_vis}")
     _groups = pg.evaluate("[...document.querySelectorAll('#menu-sheet .mg')].map(x => x.textContent.trim())")
-    A(_groups == ["매일", "같이", "참가", "열기"], f"전체 메뉴 묶음이 다르다: {_groups}")
+    A(_groups == ["매일", "같이", "만들기", "그 밖에"], f"전체 메뉴 묶음이 다르다: {_groups}")
+    A(pg.locator("#menu-sheet .tiles a").count() <= 12, "메뉴 타일이 열둘을 넘는다 — 덜 쓰는 것은 «그 밖에» 로")
     _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"], #menu-sheet a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
     for _h in _hrefs:
         try:

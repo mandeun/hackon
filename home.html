@@ -114,11 +114,15 @@ input::placeholder{color:var(--mute)}
 #menu-sheet .tiles b{display:block;font-size:14.5px;line-height:1.25}
 #menu-sheet .tiles small{display:block;font-size:12px;color:var(--mute);font-weight:500;line-height:1.3}
 #menu-sheet .tiles a.hot .ic{background:#C8F53B}
+#menu-sheet .morelinks{display:flex;flex-wrap:wrap;gap:4px 14px;padding:0 4px 4px}
+#menu-sheet .morelinks a{font-size:13.5px;color:var(--mute);text-decoration:none;min-height:36px;display:inline-flex;align-items:center}
+#menu-sheet .morelinks a:hover{color:var(--ink)}
 @media (min-width:720px){#menu-sheet{align-items:flex-start;justify-content:flex-end;padding:64px 24px 0}
   #menu-sheet .bd{background:rgba(11,16,32,.18)}
   #menu-sheet .pn{width:560px;border-radius:22px;max-height:80vh;box-shadow:0 24px 60px rgba(11,16,32,.25)}
   #menu-sheet .grip{display:none}
-  #menu-sheet .tiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+  #menu-sheet .tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+  #menu-sheet .pn{width:640px}}
 .top nav.tools{display:flex;gap:12px;align-items:center}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
@@ -300,14 +304,14 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     </nav>
   </div>
 </header>
-<!-- 전체 메뉴 판(10/02) — «더 보기» 펼치기가 한 줄로 쏟아져 고르기 어려웠다. 묶음 넷 · 타일마다 한 줄 -->
+<!-- 전체 메뉴 판 — 10/03 23칸 → 12칸. 매일 여는 것·같이 하는 것·만드는 것 셋, 네 칸씩. 나머지는 아래 «그 밖에» 글자 고리(주소는 그대로) -->
 <div id="menu-sheet" hidden role="dialog" aria-modal="true" aria-label="전체 메뉴"><div class="bd" data-menu-close></div><div class="pn">
   <div class="grip" aria-hidden="true"></div>
-  <div class="mh"><b>전체 메뉴</b><button type="button" data-menu-close aria-label="닫기">✕</button></div>
-  <b class="mg">매일</b><nav class="tiles" aria-label="매일"><a href="/cal" class="hot"><span class="ic" aria-hidden="true">📅</span><span><b>오늘</b><small>내 일정·브리핑</small></span></a><a href="/news"><span class="ic" aria-hidden="true">📰</span><span><b>소식</b><small>이번 주 확 뜬 것</small></span></a><a href="/wallet"><span class="ic" aria-hidden="true">👛</span><span><b>AI 지갑</b><small>구독·크레딧 마감</small></span></a><a href="/made"><span class="ic" aria-hidden="true">🛠️</span><span><b>만든 것</b><small>남이 켠 것 구경</small></span></a><a href="/setups"><span class="ic" aria-hidden="true">⚙️</span><span><b>세팅 모음</b><small>그대로 따라 하기</small></span></a></nav>
-  <b class="mg">같이</b><nav class="tiles" aria-label="같이"><a href="/board" class="hot"><span class="ic" aria-hidden="true">💬</span><span><b>게시판</b><small>주제별 이야기</small></span></a><a href="/write"><span class="ic" aria-hidden="true">✍️</span><span><b>공동 집필</b><small>같이 쓰고 합치기</small></span></a><a href="/club"><span class="ic" aria-hidden="true">🔌</span><span><b>ON 클럽</b><small>매달 켜 보는 밤</small></span></a><a href="/card"><span class="ic" aria-hidden="true">🤝</span><span><b>드릴 수 있는 것</b><small>심사·장소·크레딧</small></span></a><a href="/crew"><span class="ic" aria-hidden="true">🧑‍🚀</span><span><b>크루</b><small>같이 이끌기</small></span></a></nav>
-  <b class="mg">참가</b><nav class="tiles" aria-label="참가"><a href="/recruit"><span class="ic" aria-hidden="true">📣</span><span><b>모집공고</b><small>팀·프로젝트</small></span></a><a href="/problems"><span class="ic" aria-hidden="true">🧩</span><span><b>문제 은행</b><small>풀어 달라는 일</small></span></a><a href="/gigs"><span class="ic" aria-hidden="true">💼</span><span><b>외주</b><small>일감에 손 들기</small></span></a><a href="/cert"><span class="ic" aria-hidden="true">📜</span><span><b>실무 기록</b><small>완주가 이력</small></span></a><a href="/ref"><span class="ic" aria-hidden="true">🎟️</span><span><b>추천 코드</b><small>품앗이</small></span></a></nav>
-  <b class="mg">열기</b><nav class="tiles" aria-label="열기"><a href="/app?make=1"><span class="ic" aria-hidden="true">⚡</span><span><b>대회 열기</b><small>이름 하나면</small></span></a><a href="#" id="nav-manual"><span class="ic" aria-hidden="true">📘</span><span><b>운영 매뉴얼</b><small>처음 여는 사람</small></span></a><a href="/around"><span class="ic" aria-hidden="true">🗺️</span><span><b>모아 보기</b><small>다른 곳 대회</small></span></a><a href="/launch"><span class="ic" aria-hidden="true">🚀</span><span><b>시작하면 받는 것</b><small>첫 대회 혜택</small></span></a><a href="/partner"><span class="ic" aria-hidden="true">🏷️</span><span><b>협찬 안내</b><small>주면 받는 것</small></span></a><a href="/biz"><span class="ic" aria-hidden="true">🏢</span><span><b>기업·기관</b><small>사내 해커톤</small></span></a><a href="/thanks"><span class="ic" aria-hidden="true">🙏</span><span><b>기여자</b><small>같이 켠 사람</small></span></a><a href="/en"><span class="ic" aria-hidden="true">🌏</span><span><b>English</b><small>For visitors</small></span></a></nav>
+  <div class="mh"><b>메뉴</b><button type="button" data-menu-close aria-label="닫기">✕</button></div>
+  <b class="mg">매일</b><nav class="tiles" aria-label="매일"><a href="/cal" class="hot"><span class="ic" aria-hidden="true">📅</span><span><b>오늘</b><small>일정·브리핑</small></span></a><a href="/news"><span class="ic" aria-hidden="true">📰</span><span><b>소식</b><small>⏱ 바로 해 보기</small></span></a><a href="/tools" class="hot"><span class="ic" aria-hidden="true">🔑</span><span><b>삽 공구함</b><small>키 검사·CLAUDE.md</small></span></a><a href="/wallet"><span class="ic" aria-hidden="true">👛</span><span><b>AI 지갑</b><small>구독 마감</small></span></a></nav>
+  <b class="mg">같이</b><nav class="tiles" aria-label="같이"><a href="/board"><span class="ic" aria-hidden="true">💬</span><span><b>게시판</b><small>주제별 수다</small></span></a><a href="/write"><span class="ic" aria-hidden="true">✍️</span><span><b>공동 집필</b><small>제안→합치기</small></span></a><a href="/club"><span class="ic" aria-hidden="true">🔌</span><span><b>ON 클럽</b><small>매달 켜 보기</small></span></a><a href="/card"><span class="ic" aria-hidden="true">🤝</span><span><b>매칭</b><small>심사·장소·크레딧</small></span></a></nav>
+  <b class="mg">만들기</b><nav class="tiles" aria-label="만들기"><a href="/app?make=1"><span class="ic" aria-hidden="true">⚡</span><span><b>대회 열기</b><small>이름 하나면</small></span></a><a href="/recruit"><span class="ic" aria-hidden="true">📣</span><span><b>모집·외주</b><small>팀·일감</small></span></a><a href="/made"><span class="ic" aria-hidden="true">🛠️</span><span><b>만든 것</b><small>구경·별</small></span></a><a href="/cert"><span class="ic" aria-hidden="true">📜</span><span><b>실무 기록</b><small>완주가 이력</small></span></a></nav>
+  <b class="mg">그 밖에</b><nav class="morelinks" aria-label="그 밖에"><a href="/setups">세팅 모음</a><a href="/problems">문제 은행</a><a href="/gigs">외주</a><a href="/ref">추천 코드</a><a href="#" id="nav-manual">운영 매뉴얼</a><a href="/around">모아 보기</a><a href="/launch">시작하면 받는 것</a><a href="/partner">협찬 안내</a><a href="/biz">기업·기관</a><a href="/crew">크루</a><a href="/thanks">기여자</a><a href="/en">English</a></nav>
 </div></div>
 
 
