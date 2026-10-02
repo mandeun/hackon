@@ -777,6 +777,8 @@ async function api(path, opt) {
                ...(opt?.rkey ? { 'x-rkey': opt.rkey } : {}),
                ...(opt?.pkey ? { 'x-pkey': opt.pkey } : {}),
                ...(opt?.gkey ? { 'x-gkey': opt.gkey } : {}),
+               ...(opt?.voter ? { 'x-voter': opt.voter } : {}),
+               ...(opt?.bkey ? { 'x-bkey': opt.bkey } : {}),
                ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
@@ -988,6 +990,33 @@ nav button.on::before{content:"";position:absolute;top:0;left:50%;width:22px;hei
 .mhero .evcal-m a,.evcal-m a{padding:13px 14px;border-radius:10px;color:#0B1020!important;font-weight:700;text-decoration:none}
 .evcal-m a:hover,.evcal-m a:focus{background:#F1FBD5}
 .calsec{margin:18px 4px 8px;font-size:13px;font-weight:800;letter-spacing:.04em;color:var(--ink3)}
+.bdhero{padding:18px}
+.bdhero p{color:#C9CFDA;margin:0;font-size:14px}
+.bdsort{display:flex;gap:6px;margin:0 0 10px}
+.bdsort button{flex:1;min-height:40px;border-radius:12px;background:#fff;border:1px solid var(--rule);font-weight:800;font-size:13.5px;color:var(--ink2)}
+.bdsort button.on{background:#0B1020;color:#C8F53B;border-color:#0B1020}
+.bdrow{display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid var(--rule);border-radius:16px;padding:12px 14px;margin-bottom:8px;text-decoration:none;color:var(--ink)}
+.bdv{flex:none;width:42px;display:flex;flex-direction:column;align-items:center;gap:1px;padding-top:2px;color:var(--ink3)}
+.bdv i{font-style:normal;font-size:13px}
+.bdv b{font-size:15px;color:var(--ink)}
+.bdr{flex:1;min-width:0;display:grid;gap:4px}
+.bdt{font-size:15.5px;line-height:1.4;letter-spacing:-.01em}
+.bdpeek{font-size:13.5px;color:var(--ink2);line-height:1.5}
+.bdmeta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12.5px;color:var(--ink3)}
+.bdtopic{font-weight:800;color:#3F5A00;background:#F1FBD5;border-radius:99px;padding:2px 8px}
+.bdbest{font-weight:800;color:#C8F53B;background:#0B1020;border-radius:99px;padding:2px 8px}
+.bdback{display:inline-block;margin:4px 2px 10px;font-weight:800;text-decoration:none;color:var(--ink2)}
+.bdpost{background:#fff;border-radius:20px;padding:18px;border:1px solid var(--rule)}
+.bdpost h1{font-size:21px;line-height:1.35;margin:8px 0 10px;letter-spacing:-.02em}
+.bdbody{white-space:pre-wrap;font-size:15px;line-height:1.65;color:var(--ink)}
+.bdacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.bdacts button{min-height:40px;padding:0 14px;border-radius:12px;background:var(--bg,#F4F6FA);border:1px solid var(--rule);font-weight:800;font-size:13.5px;color:var(--ink2)}
+.bdacts .bdup.on{background:#C8F53B;border-color:#C8F53B;color:#0B1020}
+.bdc{background:#fff;border:1px solid var(--rule);border-radius:14px;padding:12px 14px;margin-bottom:8px}
+.bdc .bdbody{font-size:14.5px;margin-top:4px}
+.bdmini{margin-left:auto;font-size:12px;color:var(--ink3);background:none;border:0;padding:2px 4px}
+.bdmini + .bdmini{margin-left:0}
+.bdform textarea{width:100%;resize:vertical}
 .inbox-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:#C8F53B;color:#0B1020;font-size:12px;font-weight:800;margin-left:4px}
 /* 고르는 칩 줄은 접어서 다 보인다. 옆으로 밀어야 보이는 칩은 폰에서 «잘린 것» 으로 읽힌다 */
 .htabs.wrap{flex-wrap:wrap;overflow:visible;position:static;row-gap:6px}
@@ -1819,6 +1848,11 @@ let mineSeg = 'all';      // 내 대회 화면에서 고른 역할 칩
 /* 자리 매칭 — 고른 카드 종류, 내 카드(id.열쇠 — 이 기기에만), 요청 폼을 연 카드 */
 /* 내 달력 — 보고 있는 달·고른 날·나는 누구(이 기기에만) */
 let calMonth = '', calSel = '';
+/* 게시판 — 고른 주제·정렬·쓰기 칸·보고 있는 글. 추천 표(voter)는 이 브라우저에만 */
+let bdTopic = '', bdSort = 'hot', bdWrite = false;
+const bdPostId = () => { const m = /^\/board\/(\d+)$/.exec(location.pathname); return m ? +m[1] : 0; };
+const voterTok = () => { try { let v = localStorage.getItem('hackon.voter'); if (!v || !/^[0-9a-z]{12,40}$/i.test(v)) { v = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('hackon.voter', v); } return v; } catch { return ''; } };
+const ago = t => { const m = Math.max(0, (Date.now() - Date.parse(String(t).replace(' ', 'T') + 'Z')) / 60000); return m < 1 ? '방금' : m < 60 ? Math.floor(m) + '분 전' : m < 1440 ? Math.floor(m / 60) + '시간 전' : Math.floor(m / 1440) + '일 전'; };
 const meOf = () => { try { return localStorage.getItem('hackon.me') || ''; } catch { return ''; } };
 /* 일상 입구 — 네 사람의 하루에 해커온이 끼는 자리. «앱을 여는 이유» 가 사람마다 다르다(docs/daily.md) */
 const PERSONA = {
@@ -4741,6 +4775,61 @@ const SCREEN = {
      내 일(연 대회의 할 일·D-day) · 내 일정(지갑의 마감 7일 안) · 새로 켜진 것(새 모델·도구) · 꺼지기 전에(할인·무료 기한)
      · 오늘의 스위치(내 직무 레시피 한 줄). 서버에 새로 적는 것은 없다 — 읽어 와서 이 기기에서 묶는다.
      못 읽은 칸은 «모름» 으로 그린다. 비어 있는 것과 못 읽은 것은 다른 말이다 */
+  /* ── 게시판 — 주제별로 떠들고, 켜 본 것 자랑하고, 막힌 걸 묻는 곳 ──
+     연락처는 공개 글에 안 싣는다(서버가 막는다). 팀원 찾기는 대회 «같이 할 사람 추천» 의 서로 좋아요로 */
+  async board() {
+    const id = bdPostId();
+    if (id) {
+      let d = null, gone = false;
+      try { d = await api(`/board/${id}`, { voter: voterTok() }); } catch (e) { gone = e.status === 404; }
+      if (!d) return `<a class="bdback" href="/board">‹ 게시판</a><div class="card"><div class="meta">${gone ? '없거나 내려간 글입니다.' : '지금 못 불러왔습니다 — 잠시 뒤 다시 열어 주세요.'}</div></div>`;
+      const p = d.post, tn = Object.fromEntries(d.topics), mine = (() => { try { return localStorage.getItem('hackon.bkey.' + p.id) || ''; } catch { return ''; } })();
+      return `<a class="bdback" href="/board${p.topic ? '?t=' + esc(p.topic) : ''}">‹ ${esc(tn[p.topic] || '게시판')}</a>
+        <article class="bdpost" id="bd-post">
+          <div class="bdmeta"><span class="bdtopic">${esc(tn[p.topic] || '')}</span>${p.best ? '<span class="bdbest">개념</span>' : ''}<span>${esc(p.nick)} · ${esc(ago(p.created))}</span></div>
+          <h1>${esc(p.title)}</h1>
+          ${p.body ? `<div class="bdbody">${esc(p.body)}</div>` : ''}
+          <div class="bdacts">
+            <button type="button" class="bdup${p.voted ? ' on' : ''}" data-bdup="${p.id}" aria-pressed="${p.voted}">▲ <b id="bd-upn">${p.up}</b></button>
+            <button type="button" data-bdshare="${p.id}">↗ 공유</button>
+            <button type="button" data-bdreport="p:${p.id}">신고</button>
+            ${mine ? `<button type="button" data-bddel="p:${p.id}">지우기</button>` : ''}
+          </div>
+        </article>
+        <h3 class="calsec">댓글 ${d.comments.length}</h3>
+        <div id="bd-comments">${d.comments.map(c => { const ck = (() => { try { return localStorage.getItem('hackon.ckey.' + c.id) || ''; } catch { return ''; } })();
+          return `<div class="bdc"><div class="bdmeta"><b>${esc(c.nick)}</b><span>${esc(ago(c.created))}</span>
+            <button type="button" class="bdmini" data-bdreport="c:${c.id}">신고</button>${ck ? `<button type="button" class="bdmini" data-bddel="c:${c.id}">지우기</button>` : ''}</div>
+            <div class="bdbody">${esc(c.body)}</div></div>`; }).join('') || '<div class="meta" style="padding:6px 4px">첫 댓글을 남겨 주세요.</div>'}</div>
+        <div class="card bdform" id="bd-cform"><textarea id="bdc-body" maxlength="1000" rows="3" placeholder="댓글 — 연락처는 적지 않습니다"></textarea>
+          <div class="shrow" style="margin-top:8px"><input id="bdc-nick" maxlength="16" placeholder="닉네임(비우면 익명)" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"><button class="btn sm" id="bdc-send">달기</button></div></div>`;
+    }
+    const qt = new URLSearchParams(location.search).get('t');
+    if (qt && !bdTopic) bdTopic = qt;
+    let d = null;
+    try { d = await api(`/board?topic=${encodeURIComponent(bdTopic)}&sort=${bdSort}`); } catch { d = null; }
+    const topics = d ? d.topics : [];
+    const head = `<section class="mhero bdhero"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div><h2 style="margin:0">게시판</h2><p style="margin-top:4px">떠들고 · 자랑하고 · 묻는 곳</p></div>
+        <button type="button" class="btn sm" id="bd-new" style="flex:none">${bdWrite ? '닫기' : '✍️ 글쓰기'}</button></div></section>`;
+    const write = bdWrite ? `<div class="card bdform" id="bd-form">
+        <div class="picks" id="bdf-topic">${topics.map(([k, t], i) => `<button type="button" class="pick${(bdTopic || 'free') === k ? ' on' : ''}" data-bdft="${k}">${esc(t)}</button>`).join('')}</div>
+        <input id="bdf-title" maxlength="80" placeholder="제목" style="margin-top:10px">
+        <textarea id="bdf-body" maxlength="3000" rows="6" placeholder="내용 — 연락처는 적지 않습니다" style="margin-top:8px"></textarea>
+        <div class="shrow" style="margin-top:8px"><input id="bdf-nick" maxlength="16" placeholder="닉네임(비우면 익명)" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"><button class="btn sm" id="bdf-send">올리기</button></div></div>` : '';
+    if (!d) return head + write + `<div class="card"><div class="meta">글 목록을 못 불러왔습니다 — 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요.</div></div>`;
+    const tn = Object.fromEntries(topics);
+    return head + write + `<div class="htabs" id="bd-topics"><button type="button" data-bdt=""${bdTopic ? '' : ' class="on"'}>전체</button>${topics.map(([k, t]) => `<button type="button" data-bdt="${k}"${bdTopic === k ? ' class="on"' : ''}>${esc(t)}</button>`).join('')}</div>
+      <div class="bdsort" id="bd-sort">${[['hot', '🔥 인기'], ['new', '🆕 최신'], ['top', '🏆 주간 TOP']].map(([k, t]) => `<button type="button" data-bds="${k}"${bdSort === k ? ' class="on"' : ''}>${t}</button>`).join('')}</div>
+      <div id="bd-list">${d.rows.length ? d.rows.map(r => `<a class="bdrow" href="/board/${r.id}">
+          <span class="bdv" aria-label="추천 ${r.up}"><i>▲</i><b>${r.up}</b></span>
+          <span class="bdr"><span class="bdmeta"><span class="bdtopic">${esc(tn[r.topic] || '')}</span>${r.best ? '<span class="bdbest">개념</span>' : ''}</span>
+            <b class="bdt">${esc(r.title)}</b>
+            ${r.peek ? `<span class="bdpeek">${esc(r.peek)}</span>` : ''}
+            <span class="bdmeta"><span>${esc(r.nick)} · ${esc(ago(r.created))}</span><span>💬 ${r.comments}</span></span></span></a>`).join('')
+        : `<div class="card"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>`;
+  },
+
   /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
      열쇠는 이 기기에 있으니 화면이 모아 보내고, 서버는 맞는 것만 내 일정으로 돌려준다(/api/cal). */
   async cal() {
@@ -7449,6 +7538,46 @@ function wire() {
   });
   const evCal = $('#ev-cal');
   if (evCal) evCal.onclick = () => { const m = $('#ev-calm'), on = m.hidden; m.hidden = !on; evCal.setAttribute('aria-expanded', String(on)); };
+  /* ── 게시판 ── */
+  const bdNew = $('#bd-new'); if (bdNew) bdNew.onclick = () => { bdWrite = !bdWrite; render(); };
+  document.querySelectorAll('[data-bdt]').forEach(b => b.onclick = () => { bdTopic = b.dataset.bdt; history.replaceState(null, '', '/board' + (bdTopic ? '?t=' + bdTopic : '')); render(); });
+  document.querySelectorAll('[data-bds]').forEach(b => b.onclick = () => { bdSort = b.dataset.bds; render(); });
+  document.querySelectorAll('[data-bdft]').forEach(b => b.onclick = () => document.querySelectorAll('[data-bdft]').forEach(x => x.classList.toggle('on', x === b)));
+  const bdfSend = $('#bdf-send');
+  if (bdfSend) bdfSend.onclick = async () => {
+    const tp = document.querySelector('[data-bdft].on'), nick = $('#bdf-nick').value.trim();
+    try {
+      const r = await api('/board', { method: 'POST', body: { topic: tp ? tp.dataset.bdft : 'free', title: $('#bdf-title').value, body: $('#bdf-body').value, nick } });
+      try { localStorage.setItem('hackon.bkey.' + r.id, r.bkey); if (nick) localStorage.setItem('hackon.nick', nick); } catch {}
+      location.href = '/board/' + r.id;
+    } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-bdup]').forEach(b => b.onclick = async () => {
+    try { const r = await api(`/board/${b.dataset.bdup}/up`, { method: 'POST', voter: voterTok() });
+      b.classList.toggle('on', r.voted); b.setAttribute('aria-pressed', String(r.voted)); $('#bd-upn').textContent = r.up; } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-bdreport]').forEach(b => b.onclick = async () => {
+    const [k, id] = b.dataset.bdreport.split(':');
+    if (!confirm('신고할까요? 서로 다른 세 명이 신고하면 저절로 내려갑니다.')) return;
+    try { const r = await api(`/board/${k}/${id}/report`, { method: 'POST', voter: voterTok(), body: {} }); flash(r.hidden ? '내려갔습니다' : '신고했습니다'); if (r.hidden) render(); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-bddel]').forEach(b => b.onclick = async () => {
+    const [k, id] = b.dataset.bddel.split(':');
+    if (!confirm('지울까요? 되돌릴 수 없습니다.')) return;
+    let key = ''; try { key = localStorage.getItem((k === 'c' ? 'hackon.ckey.' : 'hackon.bkey.') + id) || ''; } catch {}
+    try { await api(`/board/${k}/${id}/delete`, { method: 'POST', bkey: key }); flash('지웠습니다'); if (k === 'p') location.href = '/board'; else render(); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-bdshare]').forEach(b => b.onclick = async () => {
+    const url = location.origin + '/board/' + b.dataset.bdshare, title = ($('#bd-post h1') || {}).textContent || 'HACK:ON 게시판';
+    try { if (navigator.share) await navigator.share({ title, url }); else { await navigator.clipboard.writeText(url); flash('주소를 복사했습니다'); } } catch {}
+  });
+  const bdcSend = $('#bdc-send');
+  if (bdcSend) bdcSend.onclick = async () => {
+    const nick = $('#bdc-nick').value.trim();
+    try { const r = await api(`/board/${bdPostId()}/comments`, { method: 'POST', body: { body: $('#bdc-body').value, nick } });
+      try { localStorage.setItem('hackon.ckey.' + r.id, r.ckey); if (nick) localStorage.setItem('hackon.nick', nick); } catch {}
+      render(); } catch (e) { flash(e.message, true); }
+  };
   /* ── 오늘 · 내 달력 ── */
   document.querySelectorAll('[data-me]').forEach(b => b.onclick = () => {
     try { localStorage.setItem('hackon.me', meOf() === b.dataset.me ? '' : b.dataset.me); } catch {}
@@ -8357,6 +8486,7 @@ if (location.pathname === '/card') {
   history.replaceState(null, '', '/app');
   tab = 'find'; findSide = 'give';
 }
+const BRD = location.pathname === '/board' || /^\/board\/\d+$/.test(location.pathname);   // 게시판 — 주제별 글·댓글·추천
 const CAL = location.pathname === '/cal' || location.pathname === '/brief';   /* 브리핑은 «오늘» 에 합쳤다(10/02) — /brief 주소는 살려 같은 화면으로 */        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
@@ -8409,6 +8539,7 @@ else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (BRD) { tab = 'board'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

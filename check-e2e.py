@@ -4570,5 +4570,48 @@ with sync_playwright() as pw:
     b.close()
 ok("ON 클럽 — 노랑이 새 자세 둘, 다가오는 밤, 폰 폭")
 
+# ── 게시판 /board — 글쓰기·추천(한 번)·댓글·주제 거르기·연락처 막기·지우기, 폰 폭 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("board: " + str(e)))
+    pg.on("dialog", lambda d: d.accept())
+    pg.goto(BASE + "/board", wait_until="networkidle"); pg.wait_for_selector("#bd-sort")
+    pg.click("#bd-new"); pg.wait_for_selector("#bd-form")
+    pg.click('[data-bdft="vibe"]'); pg.fill("#bdf-title", "커서로 하루 만에 예약 앱 켰습니다 — 아주 긴 제목이 잘리지 않고 다 보이는지 확인하려고 길게 씁니다")
+    pg.fill("#bdf-body", "후기\n막힌 곳: 로그인"); pg.fill("#bdf-nick", "e2e닉")
+    pg.click("#bdf-send"); pg.wait_for_selector("#bd-post")
+    A("/board/" in pg.url, f"글을 올렸는데 글 화면으로 안 간다: {pg.url}")
+    A("e2e닉" in pg.inner_text("#bd-post") and "막힌 곳: 로그인" in pg.inner_text("#bd-post"), "올린 글이 안 보인다")
+    pg.click("[data-bdup]"); pg.wait_for_timeout(300)
+    A(pg.inner_text("#bd-upn") == "1", "추천이 안 올라간다")
+    pg.click("[data-bdup]"); pg.wait_for_timeout(300)
+    A(pg.inner_text("#bd-upn") == "0", "다시 누르면 추천이 취소돼야 한다")
+    pg.fill("#bdc-body", "010-9999-8888 로 연락 주세요"); pg.click("#bdc-send"); pg.wait_for_timeout(300)
+    A("010-9999-8888" not in pg.inner_text("#bd-comments"), "연락처 댓글이 올라갔다")
+    pg.fill("#bdc-body", "축하해요! 로그인은 세션부터"); pg.click("#bdc-send"); pg.wait_for_timeout(500)
+    A("축하해요" in pg.inner_text("#bd-comments"), "댓글이 안 달린다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "글 화면이 폰 폭에서 옆으로 밀린다")
+    pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-board-post.png"), full_page=True)
+    # 목록 — 주제 거르기, 제목이 안 잘린다
+    pg.goto(BASE + "/board", wait_until="networkidle"); pg.wait_for_selector("#bd-list")
+    A("잘리지 않고 다 보이는지" in pg.inner_text("#bd-list"), "긴 제목이 목록에서 잘린다")
+    pg.click('[data-bdt="qna"]'); pg.wait_for_timeout(300)
+    A("커서로 하루 만에" not in pg.inner_text("#bd-list"), "다른 주제 글이 섞여 나온다")
+    pg.click('[data-bdt="vibe"]'); pg.wait_for_timeout(300)
+    A("커서로 하루 만에" in pg.inner_text("#bd-list"), "고른 주제의 글이 안 나온다")
+    pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-board.png"), full_page=True)
+    # 지우기 — 쓴 브라우저만
+    pg.click(".bdrow"); pg.wait_for_selector("#bd-post")
+    _bid = pg.url.rsplit("/", 1)[1]
+    pg.click('[data-bddel^="p:"]'); pg.wait_for_url("**/board")
+    st = urllib.request.urlopen(urllib.request.Request(BASE + f"/api/board/{_bid}"), timeout=5) if False else None
+    try:
+        urllib.request.urlopen(BASE + f"/api/board/{_bid}", timeout=5); _gone = False
+    except urllib.error.HTTPError as e:
+        _gone = e.code == 404
+    A(_gone, "지운 글이 아직 열린다")
+    b.close()
+ok("게시판 — 글쓰기·추천 한 번(다시 누르면 취소)·연락처 댓글 막기·주제 거르기·긴 제목 다 보임·지우기")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
