@@ -816,6 +816,25 @@ function publicListing(db, l) {
   return { id: l.id, title: l.title, price: l.price, license: l.license, refund: l.refund, buy_url: buy,
            repo: l.repo, scan: l.scan, demo, seller: sellerOf(db, l.person) };
 }
+/* ── 모집공고 (/recruit) ──
+   목록에 올린(listed) 선발형 프로젝트만. 끝난 것은 안 보인다. 지원은 그 프로젝트 공개 페이지의 기존 «지원» 으로 —
+   지원자 카드에 HACK:ON 기록(완주율·매너·수료)이 붙는 것이 이 게시판의 값이다(그냥 이력서와 다르다) */
+function recruitList(db, q = {}) {
+  const job = JOBS.includes(q.job) ? q.job : '', rw = REWARDS.includes(q.reward) ? q.reward : '';
+  return db.prepare(`SELECT id, title, host, topic, roles, reward, salary, hours, weeks, meet, starts, ends, owner FROM events
+                     WHERE kind='프로젝트' AND pick=1 AND listed=1 AND (ends='' OR substr(ends,1,10) >= ?) ORDER BY starts`).all(today())
+    .filter(e => (!job || e.roles.split(',').includes(job)) && (!rw || e.reward === rw))
+    .map(e => {
+      const rec = e.owner ? (() => { try { return record(db, e.id); } catch { return null; } })() : null;
+      return { id: e.id, title: e.title, host: e.host, topic: e.topic, roles: e.roles ? e.roles.split(',') : [],
+               reward: e.reward, salary: e.reward === '유급' ? e.salary : 0, hours: e.hours, weeks: e.weeks, meet: e.meet, starts: e.starts,
+               applied: db.prepare("SELECT COUNT(*) c FROM teams WHERE event=? AND pick='applied'").get(e.id).c,
+               accepted: db.prepare("SELECT COUNT(*) c FROM teams WHERE event=? AND pick='accepted'").get(e.id).c,
+               /* 모집자 이력 — 지난 행사가 있어야 붙는다. 없으면 null(«처음 여는 분»), 0% 가 아니다 */
+               host_record: rec ? { events: rec.events, finishRate: rec.finishRate } : null };
+    });
+}
+
 /* ── 세팅 모음 (/setups) ──
    낸 사람만 최신판을 받는다 — 받으려면 90일 안에 하나를 내야 한다(SETUP_WINDOW). 관리자는 늘 받는다.
    세팅 본문은 관리자와 낸 사람만 본다. 공개되는 것은 «무엇을 묶었나»(판·메모·제목)뿐이다 */
@@ -3124,6 +3143,10 @@ function open(file) {
       body  TEXT NOT NULL,                    -- 고른 세팅을 묶은 마크다운 한 벌
       at    TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(pack, ver))`);
+  /* 모집공고 — 직장인이 직무별로 사람을 모아 같이 만드는 프로젝트(선발형). 필요한 직무·보상·주당 시간을 공개한다.
+     보상이 «유급» 이어도 HACK:ON 은 돈과 계약에 끼지 않는다 — 조건은 모집자와 지원자가 직접 정한다(직업소개를 하지 않는다) */
+  for (const [c, t] of [['roles', "TEXT NOT NULL DEFAULT ''"], ['reward', "TEXT NOT NULL DEFAULT ''"], ['salary', 'INTEGER NOT NULL DEFAULT 0'], ['hours', 'INTEGER NOT NULL DEFAULT 0']])
+    try { db.exec(`ALTER TABLE events ADD COLUMN ${c} ${t}`); } catch {}
   /* 연락 대장 «다음 연락일». 비면 보낸 날 +3일로 본다 */
   try { db.exec("ALTER TABLE leads ADD COLUMN next_at TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
@@ -3789,6 +3812,17 @@ const RUBRICS = {
 const DEFAULT_RUBRIC = RUBRICS['만들기'].rows;
 
 /** 대회를 만든 뒤 나머지를 채운다. 처음부터 다 물으면 만들다가 그만둔다. */
+/* 모집 칸 다듬기. 직무는 JOBS 안의 것만 쉼표로(직무 탭과 같은 말을 써야 거를 수 있다) */
+const REWARDS = ['무급', '수익 나눔', '유급'];
+const recruitFields = (b) => {
+  const out = {};
+  if (b.roles !== undefined) out.roles = [...new Set(String(Array.isArray(b.roles) ? b.roles.join(',') : b.roles || '').split(',').map(x => x.trim()).filter(x => JOBS.includes(x)))].join(',');
+  if (b.reward !== undefined) out.reward = REWARDS.includes(b.reward) ? b.reward : '';
+  if (b.salary !== undefined) out.salary = Math.min(100000000, Math.max(0, Math.floor(+b.salary || 0)));
+  if (b.hours !== undefined) out.hours = Math.min(60, Math.max(0, Math.floor(+b.hours || 0)));
+  if (out.reward !== undefined && out.reward !== '유급') out.salary = 0;   // 무급·수익 나눔에 월 금액이 남아 있으면 «유급» 처럼 읽힌다
+  return out;
+};
 const EDITABLE = ['title', 'host', 'topic', 'starts', 'ends', 'prize', 'cap', 'due', 'wifi', 'place'];
 function editEvent(db, id, b) {
   const set = [], val = [];
@@ -3809,6 +3843,7 @@ function editEvent(db, id, b) {
   if (b.weeks !== undefined) { set.push('weeks=?'); val.push(Math.min(WEEKS_MAX, Math.max(0, Math.floor(+b.weeks || 0)))); }
   if (b.meet !== undefined) { set.push('meet=?'); val.push(plain(b.meet, 40)); }
   if (b.pick !== undefined) { set.push('pick=?'); val.push(b.pick ? 1 : 0); }
+  for (const [k, v] of Object.entries(recruitFields(b))) { set.push(`${k}=?`); val.push(v); }
   /* 그날의 조건. 현장에서 공개한 제약을 운영자가 적어 둔다 — 아카이브의 원본이 이것뿐이다 */
   if (b.twist !== undefined) { set.push('twist=?'); val.push(plain(b.twist, 120)); }
   /* 취소 규칙 한 줄. 공개 페이지와 신청 뒤 카드에 접지 않고 그대로 나간다 */
@@ -3947,6 +3982,8 @@ function createEvent(db, b) {
     .run(kindOf(b.kind), Math.min(1000000, Math.max(0, Math.floor(+b.deposit || 0))),
          kindOf(b.kind) === '프로젝트' ? Math.min(WEEKS_MAX, Math.max(1, Math.floor(+b.weeks || 4))) : 0,
          plain(b.meet, 40), b.pick ? 1 : 0, id);
+  { const rf = recruitFields(b); const ks = Object.keys(rf);
+    if (ks.length) db.prepare(`UPDATE events SET ${ks.map(k => k + '=?').join(',')} WHERE id=?`).run(...ks.map(k => rf[k]), id); }
   db.prepare('UPDATE events SET okey=?, jkey=?, vkey=?, plan=? WHERE id=?')
     .run(okey, jkey, vkey, JSON.stringify(Array.isArray(b.plan) && b.plan.length ? b.plan : DEFAULT_PLAN), id);
   /* 예산을 «주었을 때만» 산식을 돌린다. 이름 하나로 여는 길은 전과 똑같이 현장 대회·자리 없음이다.
@@ -6440,6 +6477,7 @@ function routes(db) {
           return json(res, 200, reviewOutside(db, m[1], !!(await body(req)).ok, { siteAdmin }));
         /* 마켓 — 읽기는 누구나, 판매 등록은 본인(팀·짝 열쇠), 확인·내리기·검사는 사이트 운영자 */
         if (p === '/api/market' && req.method === 'GET') return json(res, 200, { rows: marketList(db) });
+        if (p === '/api/recruits' && req.method === 'GET') return json(res, 200, { jobs: JOBS, rewards: REWARDS, rows: recruitList(db, q) });
         /* 세팅 모음. 보는 것(목록·판 이력)은 누구나, 내기·열기·최신판 받기는 계정으로 */
         if (p === '/api/packs' && req.method === 'GET') return json(res, 200, { rows: packList(db), window: SETUP_WINDOW, loggedIn: !!owner });
         if (p === '/api/packs' && req.method === 'POST') return json(res, 201, addPack(db, owner, await body(req)));
@@ -7418,7 +7456,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -7812,6 +7850,26 @@ async function selftest() {
     ok(bad === 400, '활동 보고서: 시작이 끝보다 늦으면 400');
     for (const r of db.prepare('SELECT id FROM events WHERE owner=?').all(ow)) db.prepare('DELETE FROM events WHERE id=?').run(r.id);
     db.prepare('DELETE FROM owners WHERE id=?').run(ow);
+  }
+  /* 모집공고 — 목록에 올린 선발형 프로젝트만, 직무·보상으로 거르고, 유급이 아니면 월 금액을 지운다 */
+  {
+    const fut = addDays(today(), 30), past = addDays(today(), -30);
+    const r1 = createEvent(db, { title: '사내 회의록 자동화 사이드', kind: '프로젝트', weeks: 6, pick: 1, starts: today(), ends: fut,
+                                 roles: '개발,기획,없는직무', reward: '유급', salary: 800000, hours: 6 });
+    const r2 = createEvent(db, { title: '쇼핑몰 상세페이지 AI', kind: '프로젝트', weeks: 4, pick: 1, starts: today(), ends: fut, roles: ['디자인'], reward: '수익 나눔', salary: 999 });
+    const r3 = createEvent(db, { title: '목록 안 올린 것', kind: '프로젝트', pick: 1, starts: today(), ends: fut, roles: '개발', reward: '무급' });
+    const r4 = createEvent(db, { title: '끝난 모집', kind: '프로젝트', pick: 1, starts: past, ends: past, roles: '개발', reward: '무급' });
+    for (const e of [r1, r2, r4]) db.prepare('UPDATE events SET listed=1 WHERE id=?').run(e.id);
+    const ids = recruitList(db).map(r => r.id);
+    ok(ids.includes(r1.id) && ids.includes(r2.id) && !ids.includes(r3.id) && !ids.includes(r4.id), '모집: 목록에 올린·안 끝난 선발형만 보인다');
+    const a1 = recruitList(db).find(r => r.id === r1.id);
+    ok(a1.roles.join() === '개발,기획' && a1.salary === 800000 && a1.hours === 6, '모집: 직무는 정한 말만, 유급이면 월 금액이 붙는다');
+    ok(recruitList(db).find(r => r.id === r2.id).salary === 0, '모집: 유급이 아니면 월 금액을 지운다');
+    ok(recruitList(db, { job: '디자인' }).map(r => r.id).join() === r2.id && recruitList(db, { reward: '유급' }).every(r => r.reward === '유급'), '모집: 직무·보상으로 거른다');
+    ok(a1.host_record === null, '모집: 지난 행사가 없는 모집자는 이력 «없음» 이 아니라 null');
+    editEvent(db, r1.id, { reward: '무급' });
+    ok(getEvent(db, r1.id).salary === 0, '모집: 유급을 무급으로 바꾸면 월 금액도 지운다');
+    for (const e of [r1, r2, r3, r4]) db.prepare('DELETE FROM events WHERE id=?').run(e.id);
   }
   /* 세팅 모음 — 낸 사람만 최신판, 관리자는 초대 코드로 늘린다, 비밀값은 안 받는다 */
   {

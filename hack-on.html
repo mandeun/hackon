@@ -836,6 +836,8 @@ const TEMPLATES = [
   { chip: '온라인 1주',     title: '일주일 만들기 온라인 대회',      cap: 30, hours: '7일', kind: '온라인 1주', topic: '', note: '모이지 않는다. 각자 만들고 마지막 날 발표' },
   /* 동아리 데모데이 — 10/31 선릉 바이브코딩 해커톤 꼴. 루키가 각자 하던 프로젝트를 MVP 까지 만들어 오고,
      1분 시연 영상(유튜브)과 발표 자료를 낸 뒤 그날은 이그나이트 2분 발표만 한다 */
+  /* 직장인 모집 — 퇴근 뒤·주말에 직무별로 사람을 모아 몇 주 같이 만든다. 선발형이라 지원자 카드에 기록이 붙는다 */
+  { chip: '직장인 모집', title: '퇴근 뒤 같이 만들 사람 모집', cap: 6, hours: '6주', kind: '프로젝트', topic: '회사에서 매주 반복하는 일 하나를 자동화', note: '6명 · 6주 · 주 1회. 직무·보상은 만든 뒤 설정에서 — 목록에 올리면 /recruit 에 뜹니다', pick: true },
   { chip: '동아리 데모데이', title: '바이브코딩 데모데이',            cap: 30, hours: '2시간', kind: '데모데이', topic: '각자 하던 프로젝트를 MVP 까지', note: '30명 · 2시간. 미리 만들어 오고 1분 시연 영상과 발표 자료를 냅니다. 그날은 2분 발표(제목 5초 + 8장 × 15초)만' },
 ];
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
@@ -1586,6 +1588,7 @@ function moreForm(t) {
 let msg = null;
 let ARD_KIND = '', ARD_Q = '';
 let SETP = 0, SETLATEST = null;
+let RCT_JOB = '', RCT_RW = '';   // 모집공고 — 고른 직무·보상
 /* AI 지갑. 서버에 안 보낸다 — 무엇을 구독하는지는 그 사람 일이다. 사생활 모드에서 localStorage 가 던지면 빈 지갑 */
 const WAL_KEY = 'hackon.wallet';
 const walLoad = () => { try { return JSON.parse(localStorage.getItem(WAL_KEY) || '[]'); } catch (_) { return []; } };
@@ -3060,7 +3063,12 @@ const SCREEN = {
           <div><label>주 수</label><input id="e-weeks" type="number" min="1" max="16" value="${+e.weeks || 4}"></div>
           <div><label>정기 모임</label><input id="e-meet" maxlength="40" value="${esc(e.meet || '')}" placeholder="예) 매주 화 20시 · 디스코드"></div>
         </div>
-        <label class="ck"><input type="checkbox" id="e-pick"${e.pick ? ' checked' : ''}><span>선발형 — 신청을 «지원» 으로 받고 리더가 수락합니다</span></label>` : ''}
+        <label class="ck"><input type="checkbox" id="e-pick"${e.pick ? ' checked' : ''}><span>선발형 — 신청을 «지원» 으로 받고 리더가 수락합니다</span></label>
+        <div class="meta" style="margin-top:8px"><b>모집공고</b> — 선발형이고 «목록에 올리기» 를 하면 /recruit 에 뜹니다.</div>
+        <label>필요한 직무</label><div class="gchips" id="e-roles">${['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'].map(j => `<button type="button" class="pick${String(e.roles || '').split(',').includes(j) ? ' on' : ''}" data-erole="${j}">${j}</button>`).join('')}</div>
+        <div class="row"><div><label>보상</label><select id="e-reward"><option value="">안 정함</option>${['무급', '수익 나눔', '유급'].map(r => `<option${e.reward === r ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
+          <div><label>유급이면 월(원)</label><input id="e-salary" type="number" min="0" step="10000" value="${+e.salary || 0}"></div>
+          <div><label>주당 시간</label><input id="e-hours" type="number" min="0" max="60" value="${+e.hours || 0}"></div></div>` : ''}
         <div class="meta">노쇼를 줄이려고 받는 돈입니다. <b>HACK:ON 은 돈을 받지 않습니다</b> — 주최자가 따로 받고,
           등록 데스크에서 팀마다 «받음·돌려줌·안 돌려줌» 만 표시합니다. 상태는 그 팀과 운영자만 봅니다.</div>
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
@@ -4109,6 +4117,30 @@ const SCREEN = {
       <div class="card"><h3>지금 받을 수 있는 혜택</h3><div class="meta">무료 크레딧·할인·한도 리셋 소식은 해커온뉴스 «무료·할인·리셋» 에 모입니다.</div>
         <a class="btn sec sm" href="/news" style="margin-top:8px;text-decoration:none">혜택 소식 보기</a></div>
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/setups">세팅 모음</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
+  /* 모집공고. 지원은 그 프로젝트의 공개 페이지에서 — 지원자 카드에 HACK:ON 기록(완주율·매너·수료)이 붙는다.
+     HACK:ON 은 돈·계약에 끼지 않는다. «유급» 은 모집자가 적은 조건을 그대로 보여 줄 뿐이다 */
+  async recruit() {
+    let d = null; try { d = await api(`/recruits?job=${encodeURIComponent(RCT_JOB)}&reward=${encodeURIComponent(RCT_RW)}`); } catch { d = null; }
+    const jobs = (d && d.jobs) || [], rws = (d && d.rewards) || ['무급', '수익 나눔', '유급'];
+    const pay = r => r.reward === '유급' ? `<span class="pill ok">유급${r.salary ? ' · 월 ' + won(r.salary) : ''}</span>` : r.reward ? `<span class="pill">${esc(r.reward)}</span>` : '';
+    return `<section class="hero"><div class="top"><span class="pill">모집공고</span></div>
+        <h2>같이 만들 사람, 직무로 찾기</h2>
+        <p class="sub" style="margin-bottom:0">직장인이 퇴근 뒤·주말에 같이 만들 사람을 모읍니다. 지원하면 <b>지난 대회·프로젝트 기록</b>(완주율·동료 평가)이 이력서 대신 붙습니다.</p></section>
+      <div class="htabs" id="rc-jobs">${['', ...jobs].map(j => `<button type="button" data-rcj="${esc(j)}"${RCT_JOB === j ? ' class="on"' : ''}>${j ? esc(j) : '모든 직무'}</button>`).join('')}</div>
+      <div class="gchips" style="margin-bottom:10px">${['', ...rws].map(r => `<button type="button" class="pick${RCT_RW === r ? ' on' : ''}" data-rcr="${esc(r)}">${r ? esc(r) : '보상 전부'}</button>`).join('')}</div>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? `<div class="card"><h3>${RCT_JOB || RCT_RW ? '맞는 모집이 아직 없습니다' : '아직 열린 모집이 없습니다'}</h3><div class="meta">첫 모집을 내 보세요.</div></div>`
+        : d.rows.map(r => `<a class="card" href="/e/${esc(r.id)}" style="display:block;text-decoration:none;color:inherit">
+            <div class="top">${r.roles.map(j => `<span class="pill">${esc(j)}</span>`).join('')}${pay(r)}</div>
+            <h3 style="margin:6px 0 2px">${esc(r.title)}</h3>
+            <div class="meta">${[r.host, r.weeks ? r.weeks + '주' : '', r.hours ? '주 ' + r.hours + '시간' : '', r.meet].filter(Boolean).map(esc).join(' · ')}</div>
+            <div class="meta" style="margin-top:4px">지원 ${r.applied} · 함께하는 사람 ${r.accepted}${r.host_record ? ` · 모집자 지난 행사 ${r.host_record.events}번, 완주율 ${r.host_record.finishRate}%` : ' · 처음 여는 모집자'}</div></a>`).join('')}
+      <div class="card"><h3>모집공고 내기</h3><div class="meta">«열기» 에서 <b>직장인 모집</b> 을 고르고, 운영 화면 설정에서 직무·보상·주당 시간을 적은 뒤 «목록에 올리기» 를 누르세요.</div>
+        <a class="btn sm" href="/app" style="margin-top:8px;text-decoration:none">모집 열기</a>
+        <div class="meta" style="margin-top:8px">유급이어도 HACK:ON 은 돈과 계약에 끼지 않습니다. 근로 조건은 모집자와 직접 정하세요.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/around">모아 보기</a> · <a href="/setups">세팅 모음</a></p>`;
   },
 
   async market() {
@@ -5504,6 +5536,10 @@ function wire() {
         weeks: $('#e-weeks') ? $('#e-weeks').value : undefined,
         meet: $('#e-meet') ? $('#e-meet').value.trim() : undefined,
         pick: $('#e-pick') ? $('#e-pick').checked : undefined,
+        roles: $('#e-roles') ? [...document.querySelectorAll('[data-erole].on')].map(b => b.dataset.erole).join(',') : undefined,
+        reward: $('#e-reward') ? $('#e-reward').value : undefined,
+        salary: $('#e-salary') ? $('#e-salary').value : undefined,
+        hours: $('#e-hours') ? $('#e-hours').value : undefined,
         deposit: $('#e-deposit') ? $('#e-deposit').value : undefined,
         twist: $('#e-twist') ? $('#e-twist').value.trim() : undefined,
         host: $('#e-host') ? $('#e-host').value.trim() : undefined,
@@ -5550,6 +5586,8 @@ function wire() {
     if (MAKE_REQ) b.req = MAKE_REQ;   // 의뢰에서 들어왔으면 첫 주제로 붙인다
     if ($('#f-kind') && $('#f-kind').value === '모임·수업') b.kind = '모임';   // 제출·심사·순위를 끈 모임
     if ($('#f-kind') && $('#f-kind').value === '프로젝트') { b.kind = '프로젝트'; b.weeks = 4; }   // 주 수·선발형은 만든 뒤 설정에서
+    /* «직장인 모집» 칩은 처음부터 선발형·6주로 — 지원자 카드가 이 유형의 값이다 */
+    if (TPL && TPL.pick && b.kind === '프로젝트') { b.pick = 1; b.weeks = parseInt(TPL.hours, 10) || 6; }
     /* 유형과 심사 기준은 고르는 것이라 손이 안 간다. 그래서 첫 화면에 같이 둔다. */
     if (!b.title) return flash('대회 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
@@ -6335,6 +6373,9 @@ function wire() {
     try { if (navigator.share) await navigator.share({ title: 'AI 지갑', text }); else { await navigator.clipboard.writeText(text); flash('복사했습니다. 붙여 넣어 보내세요'); } }
     catch (_) {}
   };
+  document.querySelectorAll('[data-rcj]').forEach(b => b.onclick = () => { RCT_JOB = b.dataset.rcj; render(); });
+  document.querySelectorAll('[data-rcr]').forEach(b => b.onclick = () => { RCT_RW = b.dataset.rcr; render(); });
+  document.querySelectorAll('[data-erole]').forEach(b => b.onclick = () => b.classList.toggle('on'));
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -7151,6 +7192,7 @@ const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 —
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
+const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
 const WAL = location.pathname === '/wallet';     // AI 지갑 — 구독 갱신·크레딧 만료·한도 리셋을 한 장에. 이 기기에만 저장
 const SET = location.pathname === '/setups';     // 세팅 모음 — 잘 쓰는 사람의 세팅을 모아 최신판으로 돌려준다
 const ARD = location.pathname === '/around';     // 모아 보기 — 주최자가 안 올려도 보이는 대회·동아리·스터디·공공 과제
@@ -7191,6 +7233,7 @@ if (TVM) {
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (WAL) { tab = 'wallet'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (SET) { tab = 'setups'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (ARD) { tab = 'around'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
