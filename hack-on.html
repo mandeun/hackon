@@ -776,6 +776,7 @@ async function api(path, opt) {
                   한 번에 읽으므로 cur 에 매인 위쪽 헤더로는 안 된다 — 줄마다 제 열쇠를 들고 온다 */
                ...(opt?.rkey ? { 'x-rkey': opt.rkey } : {}),
                ...(opt?.pkey ? { 'x-pkey': opt.pkey } : {}),
+               ...(opt?.gkey ? { 'x-gkey': opt.gkey } : {}),
                ...(myKey() ? { 'x-owner': myKey() } : {}) },
     body: opt?.body ? JSON.stringify(opt.body) : undefined,
   });
@@ -914,6 +915,69 @@ document.head.insertAdjacentHTML('beforeend', `<style>
   -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);
           mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent)}
 .htabs::-webkit-scrollbar{display:none}
+/* ── 매칭 카드 — 잉크 바탕 위 라임 한 점. 해커온 «켜짐» 의 말투를 카드에도 ── */
+.gcard{display:flex;gap:12px;align-items:flex-start;background:#fff;border-radius:18px;padding:14px;margin-bottom:10px;border:1px solid var(--rule);transition:transform .12s}
+.gcard:active{transform:scale(.99)}
+.gcard .gi{flex:none;width:46px;height:46px;border-radius:14px;background:#0B1020;display:grid;place-items:center;font-size:22px;position:relative}
+.gcard .gi::after{content:"";position:absolute;right:-2px;top:-2px;width:10px;height:10px;border-radius:50%;background:#C8F53B;border:2px solid #fff}
+.gcard .gb{flex:1;min-width:0}
+.gcard h3{margin:0;font-size:16px;letter-spacing:-.01em}
+.gcard .gm{font-size:13px;color:var(--ink3);margin-top:2px}
+.gcard .gintro{font-size:14px;margin-top:6px;line-height:1.5}
+.gfit{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.gfit span{font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:99px;background:#F1FBD5;color:#3F5A00}
+.gstate{font-size:12px;font-weight:800;padding:3px 9px;border-radius:99px;background:#0B1020;color:#C8F53B;white-space:nowrap}
+.gstate.no{background:#EEF0F4;color:#5C6474}
+.gstate.wait{background:#FFF3D6;color:#8A5A00}
+.mhero{background:#0B1020;color:#fff;border-radius:22px;padding:20px 18px;margin:4px 0 14px;position:relative;overflow:hidden}
+.mhero h2{color:#fff;margin:0 0 6px;font-size:22px;letter-spacing:-.02em}
+.mhero p{color:#C9CFDA;margin:0;font-size:14px;line-height:1.55}
+.mhero .lime{color:#C8F53B}
+.mhero .steps3{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.mhero .steps3 span{font-size:12px;font-weight:800;padding:5px 10px;border-radius:99px;background:rgba(200,245,59,.12);color:#C8F53B;border:1px solid rgba(200,245,59,.35)}
+.askbox{background:var(--bg2,#EAEEF5);border-radius:14px;padding:12px;margin-top:10px}
+.perks{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px}
+.perks li{font-size:13.5px;display:flex;gap:7px;align-items:flex-start;color:var(--ink2)}
+.perks li.hot{color:var(--ink);font-weight:700}
+.perks li span{flex:none;width:20px;text-align:center}
+.mechips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.mechips button{font-size:13px;font-weight:800;padding:7px 11px;border-radius:99px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
+.mechips button.on{background:#C8F53B;color:#0B1020;border-color:#C8F53B}
+.steps-day{display:grid;gap:8px;margin:0 0 12px}
+.steps-day .sd{display:flex;align-items:center;gap:10px;background:#fff;border-radius:16px;padding:13px 14px;text-decoration:none;color:var(--ink);border:1px solid var(--rule)}
+.steps-day .sd span{flex:none;font-size:12px;font-weight:800;color:#3F5A00;background:#F1FBD5;border-radius:99px;padding:3px 9px}
+.steps-day .sd b{flex:1;font-size:14.5px}
+.steps-day .sd em{font-style:normal;font-weight:800;color:var(--ink3)}
+.calhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.calhead b{font-size:17px}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.calgrid .cw{font-size:11.5px;font-weight:700;color:var(--ink3);text-align:center;padding:2px 0}
+.calgrid .cc{aspect-ratio:1/1;min-height:40px;border-radius:12px;background:var(--bg,#F4F6FA);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-weight:700;font-size:13.5px;color:var(--ink)}
+.calgrid .cc.empty{background:none}
+.calgrid .cc.has{background:#fff;border:1px solid var(--rule)}
+.calgrid .cc.today{background:#0B1020;color:#fff}
+.calgrid .cc.today .cn::after{content:"";display:block;width:4px;height:4px;border-radius:50%;background:#C8F53B;margin:2px auto 0}
+.calgrid .cc.sel{outline:2.5px solid #C8F53B;outline-offset:1px}
+.calgrid .cds{display:flex;gap:2px;min-height:6px}
+.calgrid .cds i,.callegend i,.cdot{display:inline-block;width:6px;height:6px;border-radius:50%}
+.c-day{background:#0B1020}.calgrid .cc.today .c-day{background:#C8F53B}.c-due{background:#E5484D}.c-check{background:#E8A317}.c-judge{background:#7C5CFF}.c-todo{background:#12A36B}
+.callegend{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--ink3)}
+.callegend span{display:inline-flex;align-items:center;gap:5px}
+.calrow{display:flex;align-items:center;gap:9px;padding:9px 0;border-top:1px solid var(--rule);text-decoration:none;color:var(--ink)}
+.calrow .ct{flex:1;min-width:0;font-size:14px}
+.calrow .ck{flex:none;font-size:11.5px;font-weight:700;color:var(--ink3)}
+.calrow .cdot{flex:none;width:9px;height:9px}
+.calday{font-size:11.5px;font-weight:800;color:var(--ink3);margin-top:8px}
+/* ── 힙 레이어(10/02) — 해커온 말투를 모든 화면에: 먹 + 라임 한 점. 고른 갈래는 먹 바탕에 라임 글자,
+   아래 탭의 켜진 칸엔 라임 막대, 글을 고르면 라임. 대비는 라임/먹 13:1 이라 axe 를 통과한다 ── */
+.htabs button.on{background:#0B1020;border-color:#0B1020;color:#C8F53B}
+nav button{position:relative}
+nav button.on::before{content:"";position:absolute;top:0;left:50%;width:22px;height:3px;margin-left:-11px;border-radius:0 0 3px 3px;background:#C8F53B}
+::selection{background:#C8F53B;color:#0B1020}
+.card.ev{transition:transform .12s, box-shadow .12s}
+.card.ev:active{transform:scale(.99)}
+@media (hover:hover){.card.ev:hover{box-shadow:0 6px 18px rgba(11,16,32,.08)}}
+.inbox-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:#C8F53B;color:#0B1020;font-size:12px;font-weight:800;margin-left:4px}
 /* 고르는 칩 줄은 접어서 다 보인다. 옆으로 밀어야 보이는 칩은 폰에서 «잘린 것» 으로 읽힌다 */
 .htabs.wrap{flex-wrap:wrap;overflow:visible;position:static;row-gap:6px}
 .htabs button{flex:0 0 auto;scroll-snap-align:start;border:1px solid var(--rule,#DDE1E6);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink,#1A1E1D);cursor:pointer;touch-action:manipulation}
@@ -1741,14 +1805,34 @@ document.addEventListener('keydown', e => { if (TVM && (e.key === 'l' || e.key =
 let PLAN_NOW = [];
 let vArea = '';   // 구하기 화면에서 고른 자치구
 let mineSeg = 'all';      // 내 대회 화면에서 고른 역할 칩
+/* 자리 매칭 — 고른 카드 종류, 내 카드(id.열쇠 — 이 기기에만), 요청 폼을 연 카드 */
+/* 내 달력 — 보고 있는 달·고른 날·나는 누구(이 기기에만) */
+let calMonth = '', calSel = '';
+const meOf = () => { try { return localStorage.getItem('hackon.me') || ''; } catch { return ''; } };
+/* 일상 입구 — 네 사람의 하루에 해커온이 끼는 자리. «앱을 여는 이유» 가 사람마다 다르다(docs/daily.md) */
+const PERSONA = {
+  worker:  { icon: '💼', name: '직장인', line: '출근길 3분 · 점심 30분 · 주말 하루', steps: [
+    ['출근길 3분', '이번 주 확 뜬 것 하나만', '/news'], ['점심 30분', '내 일 하나를 AI 로 줄이는 레시피', '/setups'], ['주말 하루', '가까운 하루 대회 찾기', '/#list']] },
+  vibe:    { icon: '⚡', name: '바이브코더', line: '아침 트렌드 · 낮 일감 · 저녁 공개', steps: [
+    ['아침', '별이 확 는 저장소 보기', '/news'], ['낮', '외주·의뢰에 손 들기', '/gigs'], ['저녁', 'ON 나이트에서 2분 켜 보기', '/club']] },
+  student: { icon: '🎒', name: 'AI 입문 학생', line: '오늘 10분 · 이번 주 한 팀 · 한 학기 기록', steps: [
+    ['오늘 10분', '따라 하면 되는 세팅 하나', '/setups'], ['이번 주', '같이 할 사람과 첫 대회', '/#list'], ['한 학기', '실무 기록 1단계 → 2단계', '/cert']] },
+  shop:    { icon: '🏪', name: '사장님', line: '번거로운 일 하나를 동네가 대신', steps: [
+    ['오늘', '가장 번거로운 일 세 줄 올리기', '/ask'], ['이번 주', '풀린 문제·만든 것 구경', '/problems'], ['한 달', '우리 가게에 AI 도구 하나', '/biz']] },
+};
+let gvKind = '';
+let askOpen = 0;
+const myGiver = () => { try { const v = localStorage.getItem('hackon.giver') || ''; const m = /^(\d+)\.([0-9a-f]{16})$/.exec(v); return m ? { id: +m[1], gkey: m[2] } : null; } catch { return null; } };
+const GV_ICON = { venue: '🏠', cash: '💸', credit: '🔋', judge: '⚖️', prize: '🎁', mentor: '🧭', snack: '🍩', other: '✨' };
+const GV_NAME = { venue: '장소', cash: '후원금', credit: '크레딧', judge: '심사', prize: '상품', mentor: '멘토', snack: '간식', other: '기타' };
 let findSide = 'get';     // 자리 탭의 방향 — get 구해요(주최자) | give 드려요(기여자)
 /* 혜택 탭의 갈래. **기본이 «전체»가 아니라 «장학금»이다** — 자료는 체험·활동이
    3,765건이고 장학금은 65건이라(2026-09-28), 전체로 두면 장학금이 묻힌다.
    그런데 사람들이 찾는 것은 장학금 쪽이다(실측: 국가장학금 2147 · 청년 지원금 407,
    앵커 차례상=100 기준 · docs/수요측정_20260928.md). 공급 순서가 아니라 수요 순서로 둔다. */
-let benSeg = 'scholarship';
+let benSeg = 'all';
 let openKind = '';        // «드려요» 에서 고른 자리 종류
-let findSeg = 'people';   // 구하기 화면의 갈래 — 사람 | 장소 | 연락한 곳. 기본은 사람이다
+let findSeg = 'match';    // 구하기 화면의 갈래 — 매칭 | 사람 | 장소 | 연락한 곳. 기본은 매칭(앱 안에서 요청·수락)이다
 /* 처음에 본인이 고르는 실력. 서버의 LEVELS 와 같아야 한다. */
 const LEVELS = ['처음', '해 봤음', '만들 줄 앎', '가르칠 수 있음'];
 let toastTimer = null;
@@ -2240,29 +2324,6 @@ function dday(starts) {
   return n === 0 ? '오늘' : n > 0 ? 'D-' + n : '';
 }
 
-/* 혜택 마감까지 며칠. 지난 것은 «지남»이라고 적는다 — 빈칸으로 두면 열려 있는 것처럼 보인다. */
-function benDday(end) {
-  const d0 = new Date(String(end || '').slice(0, 10) + 'T00:00:00');
-  if (isNaN(+d0)) return '';
-  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-  const n = Math.round((d0 - t0) / 86400000);
-  return n === 0 ? '오늘 마감' : n > 0 ? 'D-' + n : '지남';
-}
-
-/* 지역 표시. **없으면 «전국»이라고 단정하지 않는다** — 안 적힌 것과 전국은 다른 말이다 (E22).
-   'all' 은 자료가 실제로 «전국»이라고 적은 것이라 그때만 전국이라 쓴다. */
-const BEN_REGION = {
-  seoul: '서울', busan: '부산', daegu: '대구', incheon: '인천', gwangju: '광주', daejeon: '대전',
-  ulsan: '울산', sejong: '세종', gyeonggi: '경기', gangwon: '강원', chungbuk: '충북', chungnam: '충남',
-  jeonbuk: '전북', jeonnam: '전남', gyeongbuk: '경북', gyeongnam: '경남', jeju: '제주', all: '전국',
-};
-function benWhere(regions) {
-  const rs = Array.isArray(regions) ? regions.filter(Boolean) : [];
-  if (!rs.length) return '';                                  // 모름 — 아무것도 안 적는다
-  const names = rs.map(r => BEN_REGION[r] || r);
-  return names.length > 3 ? names.slice(0, 3).join('·') + ` 외 ${names.length - 3}곳` : names.join('·');
-}
-
 /* 목록 카드의 둘째 줄. 여기 있는 것은 전부 서버가 이미 세어서 보내는 값이다(/api/events) —
    전에는 다 버리고 띠·주최자·상금만 그렸다. 고를 근거가 카드에 없으면 아무도 안 들어가 본다. */
 function evLine(e) {
@@ -2735,6 +2796,56 @@ const SCREEN = {
   /* «드려요» — 대회를 안 고르고도 들어오는 문.
      지금까지 자리는 대회 안에만 있었다. 무엇을 줄 수 있는지만 아는 사람은
      어느 대회에 그 자리가 있는지 몰라서 못 들어왔다(기여형 설계 §2-1). */
+  /* 내 카드 — «드릴 수 있는 것» 을 한 번 올려 두면 주최자가 요청을 보낸다. 받은 요청에 수락·거절.
+     열쇠는 이 기기(localStorage)에만. 다른 기기는 «내 카드 주소» 로 옮긴다(# 뒤라 서버 기록에 안 남는다). */
+  async myCard() {
+    const me = myGiver();
+    let d = null, gone = false;
+    if (me && LIVE) { try { d = await api(`/givers/${me.id}`, { gkey: me.gkey }); } catch (e) { gone = e.status === 403 || e.status === 404; } }
+    if (me && !d && !gone) return `<div class="card"><div class="meta">내 카드를 못 읽었습니다 — 받은 요청이 있는지 <b>모릅니다</b>. 잠시 뒤 다시 보세요.</div></div>`;
+    if (!d) {
+      const kinds = ['judge', 'mentor', 'venue', 'credit', 'cash', 'prize', 'snack', 'other'];
+      return `<div class="mhero" id="gv-new"><h2>드릴 수 있는 걸 <span class="lime">한 번만</span> 올려 두세요</h2>
+          <p>대회마다 찾아다니지 않아도 됩니다. 맞는 대회의 주최자가 요청을 보내고, <b>수락할 때만</b> 연락처가 갑니다.</p></div>
+        <div class="card" id="gv-form">
+          <label>무엇을 드릴 수 있나요</label>
+          <div class="picks" id="gv-kind">${kinds.map((k, i) => `<button type="button" class="pick${i === 0 ? ' on' : ''}" data-gvk="${k}">${GV_ICON[k]} ${GV_NAME[k]}</button>`).join('')}</div>
+          <div class="row"><div><label>이름 <span class="pill">공개</span></label><input id="gv-name" maxlength="40" placeholder="김해커"></div>
+            <div><label>소속 <span class="pill">공개 · 선택</span></label><input id="gv-org" maxlength="60" placeholder="회사·학교·가게"></div></div>
+          <div class="row"><div><label>동네 <span class="pill">공개</span></label><input id="gv-area" maxlength="30" placeholder="마포구 · 온라인"></div>
+            <div><label>되는 때 <span class="pill">공개</span></label><input id="gv-days" maxlength="40" placeholder="주말 오후"></div></div>
+          <div id="gv-capw" hidden><label>몇 명까지 (장소)</label><input id="gv-cap" type="number" min="0" placeholder="40"></div>
+          <label>한 줄 소개 <span class="pill">공개</span></label><input id="gv-intro" maxlength="120" placeholder="예) AI 서비스 기획 8년 · 데모 2분 심사 자신 있어요">
+          <label>연락처 <span class="pill ok">수락한 주최자에게만</span></label><input id="gv-ct" maxlength="100" placeholder="메일이면 요청이 오면 알려 드립니다">
+          <div style="height:12px"></div><button class="btn" id="gv-save">카드 올리기</button>
+        </div>`;
+    }
+    const c = d.card, wait = d.asks.filter(a => a.status === 'pending');
+    const askRow = a => `<div class="gcard" data-ask="${a.id}"><div class="gi" aria-hidden="true">📨</div><div class="gb">
+        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between"><h3>${esc(a.title)}</h3>
+          <span class="gstate${a.status === 'pending' ? ' wait' : a.status === 'no' ? ' no' : ''}">${a.status === 'ok' ? '수락함' : a.status === 'no' ? '거절함' : '새 요청'}</span></div>
+        <div class="gm">${esc(String(a.starts || '').slice(0, 10))}${a.place ? ' · ' + esc(a.place) : ''} · ${esc(a.host)} · ${esc(a.need_label || GV_NAME[c.kind] || '')}</div>
+        ${a.msg ? `<div class="gintro">“${esc(a.msg)}” <span class="meta">— ${esc(a.from_name)}</span></div>` : `<div class="gm">${esc(a.from_name)} 님의 요청</div>`}
+        ${a.status === 'ok' ? `<div class="gfit"><span>연락처 ${esc(a.from_contact || '')}</span></div>` : ''}
+        ${a.status === 'pending' ? `<div class="shrow" style="margin-top:10px"><button class="btn sm" data-ask-yes="${a.id}">수락 — 연락처 열기</button><button class="btn sec sm" data-ask-no="${a.id}">이번엔 어려워요</button></div>` : ''}
+        <div class="meta" style="margin-top:6px"><a href="/e/${esc(a.event)}" target="_blank" rel="noopener">대회 보기 ›</a></div>
+      </div></div>`;
+    return `<div class="mhero" id="gv-mine"><h2>${GV_ICON[c.kind] || '✨'} 내 카드 ${wait.length ? `<span class="inbox-n">${wait.length}</span>` : ''}</h2>
+        <p><b class="lime">${esc(c.name)}</b>${c.org ? ' · ' + esc(c.org) : ''} — ${esc(GV_NAME[c.kind] || '')}${c.area ? ' · ' + esc(c.area) : ''}${c.days ? ' · ' + esc(c.days) : ''}${c.hidden ? ' · <b>숨김</b>' : ''}</p>
+        ${c.intro ? `<p style="margin-top:6px">${esc(c.intro)}</p>` : ''}</div>
+      <h3 style="margin:4px 0 8px">받은 요청 ${d.asks.length ? `<span class="pill">${d.asks.length}</span>` : ''}</h3>
+      ${d.asks.length ? d.asks.map(askRow).join('') : `<div class="card"><div class="meta">아직 받은 요청이 없습니다. 맞는 대회가 열리면 주최자가 여기로 보냅니다.</div></div>`}
+      <details class="more" id="gv-edit"><summary>카드 고치기 · 숨기기 · 다른 기기로</summary><div class="in">
+        <div class="row"><div><label>동네</label><input id="gve-area" maxlength="30" value="${esc(c.area)}"></div><div><label>되는 때</label><input id="gve-days" maxlength="40" value="${esc(c.days)}"></div></div>
+        <label>한 줄 소개</label><input id="gve-intro" maxlength="120" value="${esc(c.intro)}">
+        <label>연락처</label><input id="gve-ct" maxlength="100" value="${esc(c.contact)}">
+        <div class="shrow" style="margin-top:10px"><button class="btn sm" id="gve-save">저장</button>
+          <button class="btn sec sm" id="gve-hide" data-hidden="${c.hidden ? 0 : 1}">${c.hidden ? '다시 보이기' : '잠시 숨기기'}</button>
+          <button class="btn sec sm" id="gve-link">다른 기기용 주소 복사</button></div>
+        <div class="meta" style="margin-top:6px">주소에 카드 열쇠가 들어 있습니다. 남에게 보내지 마세요.</div></div></details>
+      <h3 style="margin:18px 0 8px">지금 사람을 기다리는 자리</h3>`;
+  },
+
   async giveSide() {
     /* 한 번만 받아서 종류 거르기는 여기서 한다. 칩 개수와 목록이 같은 응답에서 나와야
        «심사 3» 을 눌렀는데 두 개가 나오는 일이 안 생긴다. */
@@ -2791,43 +2902,31 @@ const SCREEN = {
         맡은 것은 <b>내 대회</b> 탭에 남습니다. 대회가 끝나면 공개 장부와 결과 보고서에 이름이 오릅니다.</div></div>`;
   },
 
-  /* 혜택 — 지금 신청할 수 있는 장학금·지원금·활동. 대회를 가로지르는 화면이라
-     «자리»와 같은 층에 둔다(한 대회 안의 화면이 아니다).
-     자료는 서버 /api/benefits 가 **공공 출처만** 걸러 준 것이다. 여기서 다시 안 고른다. */
+  /* 대회 혜택 — 지금 열린 대회에 참가하면 받는 것. 장학금·지원금 목록은 해커톤과 상관이 없어 이 탭에서 뺐다
+     (자료 수집 /api/benefits 는 그대로 둔다). 확정된 후원만 «받는 것» 으로 적는다 — 서버 perksOf. */
   async benefit() {
-    if (!LIVE) return `<h2 id="ben-h">혜택</h2><p class="sub">서버로 열어야 합니다.</p>`;
-    const b = await api(`/benefits?type=${encodeURIComponent(benSeg === 'all' ? '' : benSeg)}`)
-      .catch(() => null);
-    if (!b) return `<h2 id="ben-h">혜택</h2>
-      <p class="sub" id="ben-off">혜택 자료를 지금 못 가져왔습니다. 잠시 뒤에 다시 열어 주세요.</p>
-      <div class="meta">이 화면만 비어 있고 다른 탭은 그대로 됩니다.</div>`;
-
-    const segs = [['scholarship', '장학금'], ['support', '지원금'], ['experience', '활동·봉사'], ['all', '전체']];
-    const segHtml = `<div class="htabs" id="ben-segs">${segs.map(([k, t]) =>
-      `<button type="button" data-bseg="${k}"${k === benSeg ? ' class="on"' : ''}>${t}</button>`).join('')}</div>`;
-
-    const rows = b.rows.slice(0, 60);
-    const list = rows.length ? rows.map(r => {
-      const d = benDday(r.end);
-      /* 지역이 비었으면 «전국»이라고 단정하지 않는다 — 모르는 것이다 (E22) */
-      const where = benWhere(r.regions);
-      const head = r.url
-        ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>`
-        : esc(r.title);
-      return `<div class="card">
-        <h3 style="margin:0">${head}</h3>
-        <div class="meta" style="margin-top:6px">${esc(r.provider || '어디서 주는지 안 적혀 있음')}${where ? ' · ' + esc(where) : ''}</div>
-        <div class="meta" style="margin-top:4px">${d ? `<b>${esc(d)}</b> · ` : ''}마감 ${esc(r.end || '모름')}</div>
-      </div>`;
-    }).join('') : `<div class="card"><div class="meta">이 갈래에는 지금 열린 것이 없습니다. 다른 갈래를 보세요.</div></div>`;
-
-    return `<h2 id="ben-h">혜택</h2>
-      <p class="sub">지금 <b>신청할 수 있는 것</b>을 마감 가까운 순으로. 공공 출처만 모았습니다.</p>
-      ${segHtml}
-      <div class="meta" style="margin:2px 0 10px">${b.total}건 가운데 ${rows.length}건 · ${esc(b.asOf)} 기준
-        ${b.total > rows.length ? ' — 마감이 가까운 것부터 보여 줍니다' : ''}</div>
-      ${list}
-      <div class="meta" style="margin-top:12px">신청 조건과 마감은 <b>기관 공고가 우선</b>입니다. 누르면 그 기관 쪽으로 갑니다.</div>`;
+    if (!LIVE) return `<h2 id="ben-h">대회 혜택</h2><p class="sub">서버로 열어야 합니다.</p>`;
+    const rows = await api('/perks').catch(() => null);
+    const head = `<div class="mhero" id="ben-h"><h2>참가만 해도 <span class="lime">켜지는 것</span></h2>
+      <p>지금 열린 대회에서 받는 상금·크레딧·상품·피드백을 모았습니다. <b>확정된 것만</b> 적습니다.</p></div>`;
+    if (rows === null) return head + `<div class="card" id="ben-off"><div class="meta">혜택 목록을 못 가져왔습니다 — 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요.</div></div>`;
+    if (!rows.length) return head + `<div class="card" id="ben-none"><h3>지금 열린 대회가 없습니다</h3><div class="meta">대회가 열리면 여기 받는 것이 모입니다. <a href="#" data-go="make">＋ 대회 열기</a></div></div>`;
+    const K = { all: '전체', prize: '상금', credit: '크레딧·상품', people: '멘토·심사' };
+    const has = (r, k) => k === 'all' || r.gets.some(g => k === 'credit' ? (g.k === 'credit' || g.k === 'goods') : g.k === k);
+    const list = rows.filter(r => has(r, benSeg in K ? benSeg : 'all'));
+    const ICON = { prize: '🏆', credit: '🔋', goods: '🎁', people: '🧭', snack: '🍩', sponsor: '🤝', record: '📜', mate: '🤝' };
+    const sumPrize = rows.reduce((n, r) => n + r.gets.filter(g => g.k === 'prize').length, 0);
+    const sumCredit = rows.reduce((n, r) => n + r.gets.filter(g => g.k === 'credit' || g.k === 'goods').length, 0);
+    return head + `<div class="stat" id="ben-stat"><div><b>${rows.length}</b><span>열린 대회</span></div><div><b>${sumPrize}</b><span>상금 있는 곳</span></div><div><b>${sumCredit}</b><span>크레딧·상품</span></div></div>
+      <div class="htabs" id="ben-segs">${Object.entries(K).map(([k, t]) => `<button type="button" data-bseg="${k}"${(benSeg in K ? benSeg : 'all') === k ? ' class="on"' : ''}>${t} ${rows.filter(r => has(r, k)).length}</button>`).join('')}</div>
+      ${list.length ? list.map(r => `<div class="card ev perk" data-open="${esc(r.id)}" role="button" tabindex="0">
+        ${dateTile(r.starts)}
+        <div class="body"><h3>${esc(r.title)}</h3>
+          <div class="meta">${esc(r.host)}${r.place ? ' · ' + esc(r.place) : ''}${r.seatsLeft !== null ? ` · <b>남은 자리 ${r.seatsLeft}팀</b>` : ''}</div>
+          <ul class="perks">${r.gets.map(g => `<li class="hot"><span aria-hidden="true">${ICON[g.k] || '✨'}</span>${esc(g.t)}</li>`).join('')}
+            ${r.always.map(g => `<li><span aria-hidden="true">${ICON[g.k] || '✨'}</span>${esc(g.t)}</li>`).join('')}</ul>
+        </div></div>`).join('') : `<div class="card"><div class="meta">이 갈래로 받는 것이 확정된 대회는 아직 없습니다. «전체» 를 보세요.</div></div>`}
+      <div class="meta" style="margin-top:10px">협찬이 확정되면 여기에 바로 붙습니다. 주최자라면 «자리 → 매칭» 에서 크레딧·상품 줄 곳을 찾으세요.</div>`;
   },
 
   async find() {
@@ -2838,7 +2937,7 @@ const SCREEN = {
         `<button type="button" data-side="${k}"${findSide === k ? ' class="on"' : ''}>${t}</button>`).join('')}</div>`;
     if (findSide === 'give') return `<h2>자리</h2>
       <p class="sub">지금 <b>사람을 기다리는 자리</b>입니다. 하나만 맡아도 됩니다.</p>
-      ${sideTabs}${await SCREEN.giveSide()}`;
+      ${sideTabs}${await SCREEN.myCard()}${await SCREEN.giveSide()}`;
 
     const n = +(localStorage.getItem('hackon.size') || 0) || 24;
     const f = LIVE ? await api(`/find?size=${n}`) : null;
@@ -2895,8 +2994,51 @@ const SCREEN = {
        그 아래 «사람»까지 내려가는 사람이 없었다(이 파일의 지난 주석이 그렇게 적고 있었다).
        기본은 «사람» 이다 — 장소는 하루면 잡지만 심사위원은 3주 전에 움직여야 한다
        (서버 need 표의 when). 먼저 막히는 쪽을 먼저 보여 준다. */
-    const segs = [['people', '사람'], ['venue', '장소']].concat(lead ? [['leads', '연락한 곳']] : []);
-    if (!segs.some(([k]) => k === findSeg)) findSeg = 'people';
+    /* 매칭 — 메일 문구를 써 주는 대신 앱 안에서 잇는다. 카드(줄 사람) → 요청 → 수락 → 둘에게만 연락처.
+       «사람»·«장소» 갈래는 카드가 아직 없는 사람을 찾는 길로 남긴다(모집 페이지·공공 예약). */
+    const segs = [['match', '매칭'], ['people', '사람 모으기'], ['venue', '장소']].concat(lead ? [['leads', '연락한 곳']] : []);
+    if (!segs.some(([k]) => k === findSeg)) findSeg = 'match';
+    const isAdm = !!(ev && ev.admin);
+    const gv = (LIVE && findSeg === 'match') ? await api(`/givers${cur ? '?event=' + encodeURIComponent(cur) : ''}`).catch(() => null) : null;
+    const gAsks = (LIVE && findSeg === 'match' && isAdm) ? await api(`/events/${cur}/asks`).catch(() => null) : null;
+    const gNeeds = (LIVE && findSeg === 'match' && isAdm) ? await api(`/events/${cur}/needs`).catch(() => []) : [];
+    const matchHtml = () => {
+      const hero = `<div class="mhero" id="match-hero"><h2>필요한 사람을 <span class="lime">켜세요</span></h2>
+        <p>심사위원·멘토·장소·크레딧을 «드릴 수 있다» 고 올려 둔 사람들입니다. 요청을 보내고, 상대가 수락하면 <b>그때 서로의 연락처가 열립니다.</b></p>
+        <div class="steps3"><span>① 요청</span><span>② 수락</span><span>③ 연락처 열림 · 자리 확정</span></div></div>`;
+      if (gv === null) return hero + `<div class="card"><div class="meta">카드 목록을 못 받아 왔습니다 — 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 보세요.</div></div>`;
+      const kinds = [...new Set(gv.map(g => g.kind))];
+      const list = gvKind ? gv.filter(g => g.kind === gvKind) : gv;
+      const chips = gv.length ? `<div class="htabs" id="gv-kinds"><button type="button" data-gvkind=""${gvKind ? '' : ' class="on"'}>전체 ${gv.length}</button>${
+        kinds.map(k => `<button type="button" data-gvkind="${k}"${gvKind === k ? ' class="on"' : ''}>${GV_ICON[k] || ''} ${esc(GV_NAME[k] || k)} ${gv.filter(g => g.kind === k).length}</button>`).join('')}</div>` : '';
+      const sent = gAsks && gAsks.length ? `<div class="card" id="ask-sent"><h3>보낸 요청 <span class="pill">${gAsks.length}</span></h3>
+        ${gAsks.map(a => `<div style="display:flex;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--rule)">
+          <span style="font-size:20px">${GV_ICON[a.kind] || '✨'}</span>
+          <div style="flex:1;min-width:0"><b>${esc(a.name)}</b>${a.org ? ` <span class="meta">${esc(a.org)}</span>` : ''}
+            <div class="meta">${esc(a.need_label || GV_NAME[a.kind] || '')}${a.status === 'ok' ? ` · 연락처 <b>${esc(a.contact)}</b>` : ''}</div></div>
+          <span class="gstate${a.status === 'pending' ? ' wait' : a.status === 'no' ? ' no' : ''}">${a.status === 'ok' ? '수락 · 확정' : a.status === 'no' ? '거절' : '답 기다림'}</span>
+          ${a.status === 'pending' ? `<button class="btn sec sm" data-ask-cancel="${a.id}">거두기</button>` : ''}</div>`).join('')}</div>` : '';
+      const myName = (() => { try { return localStorage.getItem('hackon.host.name') || ''; } catch { return ''; } })();
+      const myCt = (() => { try { return localStorage.getItem('hackon.contact') || ''; } catch { return ''; } })();
+      const card = g => `<div class="gcard" data-gv="${g.id}"><div class="gi" aria-hidden="true">${GV_ICON[g.kind] || '✨'}</div><div class="gb">
+        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between"><h3>${esc(g.name)}</h3>
+          ${g.asked ? `<span class="gstate${g.asked === 'pending' ? ' wait' : g.asked === 'no' ? ' no' : ''}">${g.asked === 'ok' ? '수락' : g.asked === 'no' ? '거절' : '답 기다림'}</span>` : `<span class="pill">${esc(GV_NAME[g.kind] || g.kind)}</span>`}</div>
+        <div class="gm">${[g.org, g.area, g.days, g.kind === 'venue' && g.cap ? g.cap + '명까지' : ''].filter(Boolean).map(esc).join(' · ')}</div>
+        ${g.intro ? `<div class="gintro">${esc(g.intro)}</div>` : ''}
+        ${g.fit && g.fit.length ? `<div class="gfit">${g.fit.map(f => `<span>${esc(f)}</span>`).join('')}</div>` : ''}
+        ${isAdm && !g.asked ? (askOpen === g.id ? `<div class="askbox" id="askbox-${g.id}">
+            <label>어느 자리</label><select id="ask-need">${gNeeds.filter(n => n.kind === g.kind || n.kind === 'other').map(n => `<option value="${n.id}">${esc(n.label)}</option>`).join('')}<option value="">새 자리로(${esc(GV_NAME[g.kind] || '')})</option></select>
+            <label>한 줄 부탁</label><input id="ask-msg" maxlength="300" placeholder="예) 11/14 토 13–15시, 2분 발표 8팀 심사 부탁드려요">
+            <div class="row"><div><label>내 이름</label><input id="ask-name" maxlength="40" value="${esc(myName)}" placeholder="동아리·모임 이름"></div>
+              <div><label>내 연락처 <span class="pill">수락하면 상대에게만</span></label><input id="ask-ct" maxlength="100" value="${esc(myCt)}" placeholder="메일 또는 전화"></div></div>
+            <div class="shrow" style="margin-top:10px"><button class="btn sm" data-ask-send="${g.id}">요청 보내기</button><button class="btn sec sm" data-ask-open="0">닫기</button></div></div>`
+          : `<div style="margin-top:10px"><button class="btn sm" data-ask-open="${g.id}">요청하기</button></div>`) : ''}
+      </div></div>`;
+      const who = !cur ? `<div class="card"><div class="meta">요청은 <b>대회 운영 화면</b>에서 보냅니다. <a href="/app">내 대회</a>를 연 뒤 이 탭으로 오세요.</div></div>`
+        : !isAdm ? `<div class="card"><div class="meta">이 대회의 운영자 열쇠가 이 기기에 없어 요청은 못 보냅니다. 목록은 볼 수 있습니다.</div></div>` : '';
+      return hero + sent + who + chips + (list.length ? list.map(card).join('')
+        : `<div class="card"><h3>아직 올라온 카드가 없습니다</h3><div class="meta">«드려요» 쪽에서 첫 카드를 올려 보세요. 아는 심사위원·장소 주인에게 <b>hackon.kr/app</b> 의 «자리 → 드려요» 를 보내도 됩니다.</div></div>`);
+    };
     const seg = findSeg;
 
     /* 심사위원을 맨 위로. 이 줄이 가장 늦게 움직이고 가장 자주 비어 있다. */
@@ -3010,16 +3152,16 @@ const SCREEN = {
     return `<h2>자리</h2>
       <p class="sub">인원만 넣으면 <b>몇이 필요하고 어디서 구하는지</b>가 나옵니다.</p>
       ${sideTabs}
-      <div class="card">
+      ${seg === 'match' ? '' : `<div class="card">
         <label>참가 인원 (몇 명 올 예정인가요)</label>
         <input id="f-n" type="number" value="${f.size}" min="1">
         <div class="meta" style="margin-top:8px">신청자의 절반쯤 오니, 스물넷을 채우려면 마흔여덟까지 받으세요.</div>
-      </div>
+      </div>`}
 
       <div class="htabs" id="find-segs">${segs.map(([k, t]) =>
         `<button type="button" data-seg="${k}"${k === seg ? ' class="on"' : ''}>${t}</button>`).join('')}</div>
 
-      ${seg === 'people' ? peopleHtml() : seg === 'venue' ? venueHtml() : leadsHtml()}`;
+      ${seg === 'match' ? matchHtml() : seg === 'people' ? peopleHtml() : seg === 'venue' ? venueHtml() : leadsHtml()}`;
   },
 
   async board() {
@@ -4579,6 +4721,64 @@ const SCREEN = {
      내 일(연 대회의 할 일·D-day) · 내 일정(지갑의 마감 7일 안) · 새로 켜진 것(새 모델·도구) · 꺼지기 전에(할인·무료 기한)
      · 오늘의 스위치(내 직무 레시피 한 줄). 서버에 새로 적는 것은 없다 — 읽어 와서 이 기기에서 묶는다.
      못 읽은 칸은 «모름» 으로 그린다. 비어 있는 것과 못 읽은 것은 다른 말이다 */
+  /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
+     열쇠는 이 기기에 있으니 화면이 모아 보내고, 서버는 맞는 것만 내 일정으로 돌려준다(/api/cal). */
+  async cal() {
+    const now = new Date(), ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = ymd(now);
+    if (!calMonth) calMonth = today.slice(0, 7);
+    if (!calSel) calSel = today;
+    const body = {
+      hosts: keyIds('hackon.okey.').map(id => ({ event: id, okey: okeyOf(id) })),
+      teams: keyIds('hackon.team.').map(id => { const t = localStorage.getItem('hackon.team.' + id) || ''; return { event: id, team: t, tkey: tkeyOf(t) }; }),
+      judges: keyIds('hackon.jkey.').map(id => ({ event: id, jkey: jkeyOf(id) })),
+    };
+    const any = myKey() || body.hosts.length || body.teams.length || body.judges.length;
+    let d = { events: [], items: [] }, unknown = false;
+    if (LIVE && any) { try { d = await api('/cal', { method: 'POST', body }); } catch { unknown = true; } }
+    const me = PERSONA[meOf()] || null;
+    const day = new Date(today + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+    const KC = { day: 'c-day', due: 'c-due', check: 'c-check', judge: 'c-judge', todo: 'c-todo' };
+    const KN = { day: '대회', due: '마감', check: '답하기', judge: '심사', todo: '할 일' };
+    const at = date => d.items.filter(i => i.date === date);
+    const row = i => `<a class="calrow" href="/e/${esc(i.event)}"><span class="cdot ${KC[i.kind] || ''}"></span>
+      <span class="ct">${i.time ? `<b>${esc(i.time)}</b> ` : ''}${esc(i.title)}</span><span class="ck">${esc(KN[i.kind] || '')}</span></a>`;
+    const todays = at(today);
+    /* 달 칸 — 일요일부터. 점은 그날 일정 종류(최대 셋) */
+    const [Y, M] = calMonth.split('-').map(Number), first = new Date(Y, M - 1, 1), days = new Date(Y, M, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < first.getDay(); i++) cells.push('<span class="cc empty"></span>');
+    for (let n = 1; n <= days; n++) {
+      const ds = `${calMonth}-${String(n).padStart(2, '0')}`, its = at(ds);
+      cells.push(`<button type="button" class="cc${ds === today ? ' today' : ''}${ds === calSel ? ' sel' : ''}${its.length ? ' has' : ''}" data-calday="${ds}" aria-label="${M}월 ${n}일 일정 ${its.length}개">
+        <span class="cn">${n}</span><span class="cds">${[...new Set(its.map(i => i.kind))].slice(0, 3).map(k => `<i class="${KC[k] || ''}"></i>`).join('')}</span></button>`);
+    }
+    const next30 = d.items.filter(i => i.date > today && i.date <= ymd(new Date(now.getTime() + 30 * 86400000)));
+    const selItems = at(calSel);
+    return `<section class="mhero" id="cal-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi.svg" alt="" width="34" height="34">
+        <span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">오늘</span><span style="color:#C9CFDA">${esc(day)}</span></div>
+        <h2 style="margin-top:10px">${unknown ? '일정을 못 읽었습니다' : todays.length ? `오늘 <span class="lime">${todays.length}개</span> 켜져 있어요` : '오늘은 비어 있어요'}</h2>
+        <p>${me ? `${me.icon} ${esc(me.name)} — ${esc(me.line)}` : '나는 누구인가요? 고르면 하루에 맞춰 드립니다.'}</p>
+        <div class="mechips" id="me-chips">${Object.entries(PERSONA).map(([k, p]) => `<button type="button" data-me="${k}"${meOf() === k ? ' class="on"' : ''}>${p.icon} ${esc(p.name)}</button>`).join('')}</div></section>
+      ${me ? `<div class="steps-day" id="me-steps">${me.steps.map(([w, t, href]) => `<a href="${esc(href)}" class="sd"><span>${esc(w)}</span><b>${esc(t)}</b><em>›</em></a>`).join('')}</div>` : ''}
+      ${unknown ? '<div class="card"><div class="meta">일정을 지금 못 읽었습니다 — 일정이 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요.</div></div>'
+        : !any ? `<div class="card" id="cal-empty"><h3>아직 내 대회가 없어요</h3><div class="meta">대회를 열거나 신청하면 날짜·마감·답할 것이 여기 저절로 찍힙니다.</div>
+            <div class="shrow" style="margin-top:10px"><a class="btn sm" href="/#list">대회 찾기</a><a class="btn sec sm" href="/app">＋ 대회 열기</a></div></div>`
+        : todays.length ? `<div class="card" id="cal-today"><h3>오늘</h3>${todays.map(row).join('')}</div>` : ''}
+      <div class="card" id="cal-month">
+        <div class="calhead"><button type="button" class="btn sec sm" data-calmove="-1" aria-label="지난달">‹</button>
+          <b>${Y}년 ${M}월</b><button type="button" class="btn sec sm" data-calmove="1" aria-label="다음 달">›</button></div>
+        <div class="calgrid">${['일', '월', '화', '수', '목', '금', '토'].map(w => `<span class="cw">${w}</span>`).join('')}${cells.join('')}</div>
+        <div class="callegend">${Object.entries(KN).map(([k, n]) => `<span><i class="${KC[k]}"></i>${n}</span>`).join('')}</div>
+        <div id="cal-sel"><h3 style="margin:14px 0 4px">${Number(calSel.slice(5, 7))}월 ${Number(calSel.slice(8))}일</h3>
+          ${selItems.length ? selItems.map(row).join('') : '<div class="meta">이날은 일정이 없습니다.</div>'}</div></div>
+      ${next30.length ? `<div class="card" id="cal-next"><h3>다가오는 30일 <span class="pill">${next30.length}</span></h3>${next30.map(i => `<div class="calday">${esc(i.date.slice(5).replace('-', '/'))}</div>${row(i)}`).join('')}</div>` : ''}
+      ${d.events.length ? `<div class="card" id="cal-sub"><h3>폰 달력에도 <span class="meta">구독 — 바뀌면 저절로</span></h3>
+        <div class="meta">구글·애플 달력에 주소 하나만 넣으면 여기 일정이 따라갑니다. 주소에 열쇠는 안 들어갑니다.</div>
+        <div style="height:8px"></div><button class="btn sm" id="cal-subbtn">구독 주소 만들기</button><div id="cal-subout"></div></div>` : ''}
+      <div class="shrow" style="margin:6px 0 20px"><a class="btn sec sm" href="/brief">아침 브리핑</a><a class="btn sec sm" href="/wallet">AI 지갑</a><a class="btn sec sm" href="/app">내 대회</a></div>`;
+  },
+
   async brief() {
     const now = ymdLocal(), wk = walShift(now, 7);
     const dd = d => { const n = walDays(d, now); return n === null ? '' : n < 0 ? '지남' : n === 0 ? '오늘' : `D-${n}`; };
@@ -7219,6 +7419,75 @@ function wire() {
     const out = $('#resume-out'); out.textContent = t; out.hidden = false;   // 복사가 막혀도 눈으로 보고 고를 수 있게
     try { await navigator.clipboard.writeText(t); flash(b.dataset.resume === 'linkedin' ? '링크드인 «프로젝트» 칸에 붙여 넣으세요' : '대외활동 칸에 붙여 넣으세요'); } catch (_) {}
   });
+  /* ── 오늘 · 내 달력 ── */
+  document.querySelectorAll('[data-me]').forEach(b => b.onclick = () => {
+    try { localStorage.setItem('hackon.me', meOf() === b.dataset.me ? '' : b.dataset.me); } catch {}
+    render();
+  });
+  document.querySelectorAll('[data-calday]').forEach(b => b.onclick = () => { calSel = b.dataset.calday; render(); });
+  document.querySelectorAll('[data-calmove]').forEach(b => b.onclick = () => {
+    const [y, m] = calMonth.split('-').map(Number), t = new Date(y, m - 1 + Number(b.dataset.calmove), 1);
+    calMonth = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`; render();
+  });
+  const calSubBtn = $('#cal-subbtn');
+  if (calSubBtn) calSubBtn.onclick = async () => {
+    const body = {
+      hosts: keyIds('hackon.okey.').map(id => ({ event: id, okey: okeyOf(id) })),
+      teams: keyIds('hackon.team.').map(id => { const t = localStorage.getItem('hackon.team.' + id) || ''; return { event: id, team: t, tkey: tkeyOf(t) }; }),
+      judges: keyIds('hackon.jkey.').map(id => ({ event: id, jkey: jkeyOf(id) })),
+    };
+    try {
+      const r = await api('/cal/sub', { method: 'POST', body });
+      const url = `${location.origin}/api/cal/${r.token}.ics`, web = url.replace(/^https?:/, 'webcal:');
+      $('#cal-subout').innerHTML = `<div class="askbox"><div class="meta">이 주소를 달력 앱의 «구독 추가» 에 넣으세요.</div>
+        <input readonly value="${esc(url)}" id="cal-url" style="margin-top:6px"><div class="shrow" style="margin-top:8px">
+        <a class="btn sm" href="${esc(web)}">애플 달력에 바로</a><a class="btn sec sm" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/r?cid=${encodeURIComponent(web)}">구글 달력에</a></div></div>`;
+    } catch (e) { flash(e.message, true); }
+  };
+  /* ── 자리 매칭 ── */
+  document.querySelectorAll('[data-gvkind]').forEach(b => b.onclick = () => { gvKind = b.dataset.gvkind; render(); });
+  document.querySelectorAll('[data-ask-open]').forEach(b => b.onclick = () => { askOpen = +b.dataset.askOpen; render(); });
+  document.querySelectorAll('[data-ask-send]').forEach(b => b.onclick = async () => {
+    const name = $('#ask-name').value.trim(), ct = $('#ask-ct').value.trim();
+    if (!name || !ct) return flash('수락하면 상대에게 갈 내 이름과 연락처를 적어 주세요', true);
+    try {
+      await api(`/events/${cur}/asks`, { method: 'POST', body: { giver: +b.dataset.askSend, need: $('#ask-need').value || undefined, msg: $('#ask-msg').value.trim(), from_name: name, from_contact: ct } });
+      try { localStorage.setItem('hackon.host.name', name); if (!localStorage.getItem('hackon.contact')) localStorage.setItem('hackon.contact', ct); } catch {}
+      askOpen = 0; flash('요청을 보냈습니다. 수락하면 서로의 연락처가 열립니다'); render();
+    } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-ask-cancel]').forEach(b => b.onclick = async () => {
+    try { await api(`/asks/${b.dataset.askCancel}/cancel`, { method: 'POST' }); flash('요청을 거뒀습니다'); render(); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-gvk]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('[data-gvk]').forEach(x => x.classList.toggle('on', x === b));
+    const w = $('#gv-capw'); if (w) w.hidden = b.dataset.gvk !== 'venue';
+  });
+  const gvSave = $('#gv-save');
+  if (gvSave) gvSave.onclick = async () => {
+    const k = document.querySelector('[data-gvk].on');
+    try {
+      const r = await api('/givers', { method: 'POST', body: { kind: k ? k.dataset.gvk : '', name: $('#gv-name').value, org: $('#gv-org').value, area: $('#gv-area').value,
+        days: $('#gv-days').value, cap: $('#gv-cap').value, intro: $('#gv-intro').value, contact: $('#gv-ct').value } });
+      try { localStorage.setItem('hackon.giver', r.id + '.' + r.gkey); } catch {}
+      flash('카드를 올렸습니다. 요청이 오면 여기와 연락처(메일)로 알려 드립니다'); render();
+    } catch (e) { flash(e.message, true); }
+  };
+  const answer = async (id, yes) => {
+    const me = myGiver(); if (!me) return;
+    try { const r = await api(`/asks/${id}/answer`, { method: 'POST', gkey: me.gkey, body: { yes } });
+      flash(yes ? `수락했습니다 — 주최자 연락처: ${r.from_contact}` : '거절했습니다'); render(); } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-ask-yes]').forEach(b => b.onclick = () => answer(b.dataset.askYes, true));
+  document.querySelectorAll('[data-ask-no]').forEach(b => b.onclick = () => answer(b.dataset.askNo, false));
+  const gveSave = $('#gve-save'), gveHide = $('#gve-hide'), gveLink = $('#gve-link');
+  const gvEdit = async body => { const me = myGiver(); if (!me) return;
+    try { await api(`/givers/${me.id}`, { method: 'POST', gkey: me.gkey, body }); flash('저장했습니다'); render(); } catch (e) { flash(e.message, true); } };
+  if (gveSave) gveSave.onclick = () => gvEdit({ area: $('#gve-area').value, days: $('#gve-days').value, intro: $('#gve-intro').value, contact: $('#gve-ct').value });
+  if (gveHide) gveHide.onclick = () => gvEdit({ hidden: gveHide.dataset.hidden === '1' });
+  if (gveLink) gveLink.onclick = async () => { const me = myGiver(); if (!me) return;
+    try { await navigator.clipboard.writeText(`${location.origin}/card#${me.id}.${me.gkey}`); flash('복사했습니다 — 다른 기기에서 열면 내 카드가 따라옵니다'); } catch { flash(`${location.origin}/card#${me.id}.${me.gkey}`); } };
+
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -8049,6 +8318,14 @@ const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
 const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
+/* /card#<id>.<열쇠> — 카드 열쇠를 이 기기에 넣고 «자리 → 드려요» 로. 열쇠는 # 뒤라 서버에 안 간다 */
+if (location.pathname === '/card') {
+  const m = /^#(\d+)\.([0-9a-f]{16})$/.exec(location.hash || '');
+  if (m) { try { localStorage.setItem('hackon.giver', m[1] + '.' + m[2]); } catch {} }
+  history.replaceState(null, '', '/app');
+  tab = 'find'; findSide = 'give';
+}
+const CAL = location.pathname === '/cal';        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
 const PTN = location.pathname === '/partner';    // 협찬·협업 안내 — 주시는 것별로 받는 것 한 장
@@ -8100,6 +8377,7 @@ else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (PTN) { tab = 'partner'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

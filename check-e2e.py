@@ -142,8 +142,10 @@ with sync_playwright() as p:
     # 목록이 비면 grid 가 높이 0 이라 '보인다' 가 안 된다. 개수 표시가 채워지길 기다린다.
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
     htxt = pg.inner_text("body")
-    for must in ["대회 찾기", "열린 대회", "대회 열기", "협찬"]:
+    for must in ["열린 대회", "대회 열기", "협찬"]:
         A(must in htxt, f"첫 화면에 '{must}' 가 없다")
+    # 위 고리 «대회» 가 열린 대회 목록으로 간다(10/02 고리를 셋으로 줄이며 «대회 찾기» → «대회»)
+    A(pg.locator('nav.sec a[href="#list"]').count() == 1, "첫 화면 위 고리에 대회 목록 입구가 없다")
     for sel in ("#hero-open", "#hero-go"):
         box = pg.locator(sel).bounding_box()
         A(box is not None and box["y"] + box["height"] <= 844,
@@ -2981,16 +2983,17 @@ with sync_playwright() as pw:
     pg.goto("about:blank")
     pg.goto(f"{BASE}/app#{ev}", wait_until="networkidle")
     pg.click('nav button[data-t="find"]')
-    pg.wait_for_selector("#f-n")
-    # 구하기의 기본 갈래는 «사람» 이다. 장소는 하루면 잡지만 심사위원은 3주 전에 움직여야 한다.
+    pg.wait_for_selector("#find-segs")
+    # 구하기의 기본 갈래는 «매칭»(앱 안 요청·수락)이다. 그다음이 «사람 모으기» — 심사위원은 3주 전에 움직여야 한다.
     segs = pg.eval_on_selector_all('#find-segs button', 'bs => bs.map(b => b.dataset.seg)')
-    A(segs[0] == "people", f"구하기 첫 갈래가 «사람» 이 아니다: {segs}")
-    A(pg.query_selector('#find-segs button.on').get_attribute("data-seg") == "people",
-      "구하기가 «사람» 갈래로 안 열린다")
+    A(segs[:2] == ["match", "people"], f"구하기 갈래 차례가 매칭·사람이 아니다: {segs}")
+    A(pg.query_selector('#find-segs button.on').get_attribute("data-seg") == "match",
+      "구하기가 «매칭» 갈래로 안 열린다")
+    pg.click('#find-segs button[data-seg="people"]'); pg.wait_for_selector("#f-n")
     A("심사위원" in pg.eval_on_selector('#view .card h3', 'h => h.textContent'),
       "«사람» 갈래 맨 위 카드가 심사위원이 아니다")
     A(pg.query_selector('#jd-open') is not None, "심사위원 카드에 모집 페이지 입구가 없다")
-    ok("구하기 — 기본은 «사람», 맨 위는 심사위원, 모집 페이지 입구가 붙는다")
+    ok("구하기 — 기본은 «매칭», «사람 모으기» 맨 위는 심사위원, 모집 페이지 입구가 붙는다")
 
     # 장소 갈래로 옮겨 앉는다 (아래 숫자·목록 검사는 전부 장소 쪽이다)
     pg.click('#find-segs button[data-seg="venue"]')
@@ -4348,59 +4351,33 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/en 이 폰 폭에서 옆으로 밀린다")
     b.close()
 ok("해외 — /en(빨리빨리·품앗이·정·켜다·너랑), hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
-# ── 혜택 탭. 자료는 밖에서 받아 오므로 «목록이 있다»를 단언하지 않는다 —
-# 대신 ① 탭이 있고 눌러서 그려지는가 ② 기본 갈래가 장학금인가
-# ③ 모르는 값을 «없음»으로 그리지 않는가(순수 함수로 못박는다) 를 본다.
+# ── 대회 혜택 탭 — 열린 대회에서 받는 것(확정된 것만). 장학금 목록은 이 탭에서 뺐다 ──
+_, _bev = post("/api/events", {"title": "혜택 화면 검사", "starts": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")})
+post(f"/api/events/{_bev['id']}", {"prize": 500000, "topic": "생활 불편", "place": "온라인"}, key=_bev["okey"], method="PATCH")
+post(f"/api/events/{_bev['id']}/list", {"on": True}, key=_bev["okey"])
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     ctx = b.new_context(viewport={"width": 390, "height": 900})
-    pg = ctx.new_page()
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("perks: " + str(e)))
     pg.goto(f"{BASE}/app", wait_until="networkidle")
     pg.wait_for_selector("body[data-ready='1']", timeout=10000)
-
-    A(pg.locator("nav button[data-t='benefit']").count() == 1, "아래 탭에 «혜택» 이 없다")
-    A(pg.inner_text("nav button[data-t='benefit']").strip().endswith("혜택"),
-      "탭 이름이 «혜택» 이 아니다: " + pg.inner_text("nav button[data-t='benefit']"))
-    # 390px 에서 탭 다섯이 다 보여야 한다 — 하나가 잘리면 넷으로 줄인 뜻이 없어진다
     tabs = pg.eval_on_selector_all("nav button", "els => els.map(e => e.getBoundingClientRect())")
     A(len(tabs) == 5, f"아래 탭이 다섯이 아니다: {len(tabs)}")
-    A(all(t["width"] > 40 for t in tabs), f"탭 하나가 너무 좁다: {[round(t['width']) for t in tabs]}")
-    A(max(t["right"] for t in tabs) <= 391, f"탭이 화면 밖으로 넘친다: {max(t['right'] for t in tabs)}")
-    # 줄바꿈과 이름은 «내 대회» 블록이 Range 사각형 수로 이미 잰다 — 두 곳에 안 적는다
-
+    A(all(t["width"] > 40 for t in tabs) and max(t["right"] for t in tabs) <= 391, f"탭이 좁거나 넘친다: {[round(t['width']) for t in tabs]}")
     pg.click("nav button[data-t='benefit']")
-    # data-ready 는 이미 '1' 이라 그걸 기다리면 그냥 지나간다 — 이 화면의 표식을 기다린다.
-    # 자료를 밖에서 받아 오므로 넉넉히 준다.
-    pg.wait_for_selector("#ben-h", timeout=40000)
-    pg.wait_for_selector("#ben-segs, #ben-off", timeout=40000)
-    body = pg.inner_text("body")
-    A("혜택" in body, "혜택 화면이 안 그려졌다")
-    # 자료를 받았으면 갈래가 뜨고, 못 받았으면 «못 가져왔습니다» 가 뜬다. 둘 중 하나여야 한다
-    got = pg.locator("#ben-segs").count() == 1
-    A(got or pg.locator("#ben-off").count() == 1,
-      "자료도 없고 못 가져왔다는 말도 없다 — 빈 화면이다")
-    if got:
-        A(pg.inner_text("#ben-segs button.on").strip() == "장학금",
-          "기본 갈래가 장학금이 아니다: " + pg.inner_text("#ben-segs button.on"))
-        A("기관 공고가 우선" in body, "기관 공고가 우선이라는 말이 없다")
-        # 갈래를 눌러 실제로 바뀌는가
-        pg.click("#ben-segs button[data-bseg='support']")
-        pg.wait_for_function(
-            "() => { const b = document.querySelector('#ben-segs button.on');"
-            " return b && b.textContent.trim() === '지원금'; }", timeout=40000)
-        A(pg.inner_text("#ben-segs button.on").strip() == "지원금",
-          "갈래를 눌렀는데 안 바뀐다")
-
-    # 순수 함수 — 여기가 «모름을 없음으로 그리지 않는다» 를 지키는 자리다
-    A(pg.evaluate("benWhere([])") == "", "지역을 모를 때 뭔가를 적고 있다")
-    A(pg.evaluate("benWhere(['all'])") == "전국", "자료가 전국이라 적은 것을 안 쓰고 있다")
-    A(pg.evaluate("benWhere(['seoul','busan'])") == "서울·부산", "지역 이름을 한글로 안 바꾼다")
-    A("외 1곳" in pg.evaluate("benWhere(['seoul','busan','daegu','jeju'])"), "넷 이상을 줄여 적지 않는다")
-    A(pg.evaluate("benDday('')") == "", "마감을 모를 때 날짜를 지어낸다")
-    A(pg.evaluate("benDday('2000-01-01')") == "지남", "지난 것을 열려 있는 것처럼 그린다")
-    ctx.close()
-    b.close()
-ok("혜택 탭 — 탭 다섯이 390px 에 들어가고, 기본 갈래가 장학금이며, 모르는 값을 «없음» 으로 안 그린다")
+    pg.wait_for_selector("#ben-h", timeout=20000)
+    body = pg.inner_text("#view")
+    A("장학금" not in body, "혜택 탭에 아직 장학금 목록이 있다")
+    A(any(e["id"] == _bev["id"] for e in api("/api/events")), "검사 대회가 목록에 안 올랐다 — 아래 단언이 공회전한다")
+    if True:
+        _card = pg.locator(".perk", has_text="혜택 화면 검사")
+        A("상금 500,000원" in _card.inner_text(), f"상금이 받는 것으로 안 뜬다: {_card.inner_text()}")
+        A("실무 기록" in _card.inner_text(), "누구나 받는 것(실무 기록)이 없다")
+        pg.click("#ben-segs button[data-bseg='prize']"); pg.wait_for_timeout(300)
+        A(pg.locator(".perk", has_text="혜택 화면 검사").count() == 1, "상금 갈래에서 상금 있는 대회가 빠진다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "혜택 화면이 폰 폭에서 옆으로 밀린다")
+    ctx.close(); b.close()
+ok("대회 혜택 — 열린 대회의 상금·협찬·누구나 받는 것, 장학금은 빠짐, 탭 다섯이 390px 에")
 
 # ── 이번 주 확 뜬 것 + «쉽게:» — 별·하트를 날짜별로 적어 둔 DB 를 바깥에서 만들고 띄운다 ──
 # 소식은 남의 사이트에서 오므로 실행마다 다르다 — 그래서 우리가 넣은 줄로만 단언한다.
@@ -4456,9 +4433,9 @@ with sync_playwright() as pw:
     pg.goto(BASE + "/", wait_until="networkidle")
     # «있을 때만 뜨는 것»(id 가 nav- 로 시작 — 강의·마켓·순위·그날의 조건)은 자료가 생기면 켜진다. 늘 보이는 고리만 센다
     _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
-    A(len(_vis) <= 5, f"첫 화면 늘 보이는 고리가 다섯을 넘는다: {_vis}")
+    A(len(_vis) <= 3, f"첫 화면 늘 보이는 고리가 셋을 넘는다: {_vis}")
     _groups = pg.evaluate("[...document.querySelectorAll('nav.sec .more-in .mg')].map(x => x.textContent.trim())")
-    A(_groups == ["참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 셋이 아니다: {_groups}")
+    A(_groups == ["매일", "참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 다르다: {_groups}")
     _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
     for _h in _hrefs:
         try:
@@ -4469,14 +4446,14 @@ with sync_playwright() as pw:
     pg.click("nav.sec details.navmore summary"); pg.wait_for_timeout(200)
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "더 보기를 펴면 폰 폭에서 옆으로 밀린다")
     b.close()
-ok("첫 화면 고리 — 늘 보이는 것 다섯 이하, 더 보기는 셋으로 묶고 고리마다 200")
+ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식), 더 보기는 넷으로 묶고 고리마다 200")
 
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
-post(f"/api/events/{_kev['id']}", {"due": "2099-01-01T00:00"}, key=_kev["owner"], method="PATCH")
+post(f"/api/events/{_kev['id']}", {"due": "2099-01-01T00:00"}, key=_kev["okey"], method="PATCH")
 _, _kt = post(f"/api/events/{_kev['id']}/teams", {"name": "막힘검사팀이름", "email": "k@example.com", "agree": True})
 A(post(f"/api/teams/{_kt['id']}/submit", {"url": "https://k.example/x", "stuck": "배포 설정에서 두 시간 막힘"}, tkey=_kt["tkey"])[0] == 200, "막힌 것 한 줄을 못 낸다")
-post(f"/api/events/{_kev['id']}", {"due": "2026-01-10T00:00"}, key=_kev["owner"], method="PATCH")
+post(f"/api/events/{_kev['id']}", {"due": "2026-01-10T00:00"}, key=_kev["okey"], method="PATCH")
 with sync_playwright() as pw:
     b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
     pg.on("pageerror", lambda e: errs.append("stuck: " + str(e)))
@@ -4485,6 +4462,102 @@ with sync_playwright() as pw:
     A("배포 설정에서 두 시간 막힘" in _st and "막힘검사팀이름" not in _st, f"막힌 곳 모음이 이상하다: {_st}")
     b.close()
 ok("막힌 곳 모음 — 끝난 뒤 공개 페이지에 팀 이름 없이")
+
+# ── 자리 매칭 — 카드 올리기(화면) → 주최자 요청(화면) → 카드 주인 수락(/card) → 둘에게만 연락처 ──
+_, _mev = post("/api/events", {"title": "매칭 화면 검사", "starts": (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d")})
+post(f"/api/events/{_mev['id']}/needs", {"kind": "judge", "label": "심사위원 1명"}, key=_mev["okey"])
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    # ① 줄 사람 — 드려요에서 카드를 올린다
+    gctx = b.new_context(viewport={"width": 390, "height": 844}); gp = gctx.new_page()
+    gp.on("pageerror", lambda e: errs.append("match-giver: " + str(e)))
+    gp.goto(f"{BASE}/app", wait_until="networkidle"); gp.wait_for_selector("body[data-ready='1']")
+    gp.click('nav button[data-t="find"]'); gp.wait_for_selector("#find-side")
+    gp.click('#find-side button[data-side="give"]'); gp.wait_for_selector("#gv-form")
+    gp.click('[data-gvk="judge"]')
+    gp.fill("#gv-name", "김심사e2e"); gp.fill("#gv-area", "마포"); gp.fill("#gv-intro", "AI 기획 8년")
+    gp.fill("#gv-ct", "judge-e2e@example.com")
+    gp.click("#gv-save"); gp.wait_for_selector("#gv-mine")
+    _gk = gp.evaluate("localStorage.getItem('hackon.giver')")
+    A(_gk and "." in _gk, f"카드 열쇠가 이 기기에 안 남았다: {_gk}")
+    # 공개 목록에는 연락처가 없다
+    A("judge-e2e@example.com" not in json.dumps(api("/api/givers")), "공개 카드 목록에 연락처가 샌다")
+    # ② 주최자 — 자리 탭 기본 갈래가 «매칭», 카드에 요청
+    hctx = b.new_context(viewport={"width": 390, "height": 844}); hp = hctx.new_page()
+    hp.on("pageerror", lambda e: errs.append("match-host: " + str(e)))
+    hp.add_init_script(f"localStorage.setItem('hackon.owner','{_mev['owner']}')")
+    hp.goto(f"{BASE}/app#{_mev['id']}", wait_until="networkidle"); hp.wait_for_selector("body[data-ready='1']")
+    hp.click('nav button[data-t="find"]'); hp.wait_for_selector("#match-hero")
+    A(hp.query_selector('#find-segs button.on').get_attribute("data-seg") == "match", "자리 탭이 «매칭» 으로 안 열린다")
+    _card = hp.locator(".gcard", has_text="김심사e2e")
+    A("빈 자리와 같은 종류" in _card.inner_text(), f"맞는 이유가 카드에 없다: {_card.inner_text()}")
+    _card.locator("[data-ask-open]").click(); hp.wait_for_selector("#ask-name")
+    hp.fill("#ask-msg", "e2e 심사 부탁"); hp.fill("#ask-name", "e2e 동아리"); hp.fill("#ask-ct", "host-e2e@example.com")
+    hp.locator("[data-ask-send]").click(); hp.wait_for_selector("#ask-sent")
+    A("답 기다림" in hp.inner_text("#ask-sent") and "judge-e2e@example.com" not in hp.inner_text("#ask-sent"), "수락 전에 연락처가 보이거나 상태가 없다")
+    # ③ 카드 주인 — 다른 기기에서 /card#id.key 로 열어 수락
+    cctx = b.new_context(viewport={"width": 390, "height": 844}); cp = cctx.new_page()
+    cp.on("pageerror", lambda e: errs.append("match-card: " + str(e)))
+    cp.goto(f"{BASE}/card#{_gk}", wait_until="networkidle"); cp.wait_for_selector("#gv-mine")
+    A(cp.url.endswith("/app"), f"/card 가 열쇠를 주소에 남긴다: {cp.url}")
+    _ask = cp.locator(".gcard[data-ask]").first
+    A("매칭 화면 검사" in _ask.inner_text() and "host-e2e@example.com" not in _ask.inner_text(), "받은 요청이 없거나 수락 전 주최자 연락처가 보인다")
+    _ask.locator("[data-ask-yes]").click(); cp.wait_for_timeout(600)
+    A("host-e2e@example.com" in cp.inner_text("#view"), "수락했는데 주최자 연락처가 안 열린다")
+    # ④ 주최자 화면 — 연락처가 열리고 자리가 확정으로
+    hp.reload(wait_until="networkidle"); hp.click('nav button[data-t="find"]'); hp.wait_for_selector("#ask-sent")
+    A("judge-e2e@example.com" in hp.inner_text("#ask-sent") and "수락" in hp.inner_text("#ask-sent"), "수락 뒤 주최자에게 연락처가 안 열린다")
+    _nd = api(f"/api/events/{_mev['id']}/needs")
+    A(any(p["name"] == "김심사e2e" for n in _nd for p in n["pledges"]), "수락했는데 공개 자리에 확정으로 안 오른다")
+    for _p in (gp, hp, cp):
+        A(_p.evaluate("document.documentElement.scrollWidth") <= 391, "매칭 화면이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("자리 매칭 — 카드 올리기 → 요청 → /card 에서 수락 → 둘에게만 연락처, 자리 확정")
+
+# ── 오늘 · 내 달력 /cal — 연 대회·신청한 대회가 달력에, 나는 누구(사람별 한 걸음), 구독 주소 ──
+_d5 = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+_, _cev = post("/api/events", {"title": "달력 화면 검사", "starts": _d5, "ends": _d5})
+_, _cteam = post(f"/api/events/{_cev['id']}/teams", {"name": "달력검사팀", "email": "cal@example.com", "agree": True})
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("cal: " + str(e)))
+    # 비어 있을 때 — «없음» 으로(모름 아님)
+    pg.goto(BASE + "/cal", wait_until="networkidle"); pg.wait_for_selector("#cal-hero")
+    A(pg.query_selector("#cal-empty") is not None, "열쇠가 하나도 없는데 «아직 내 대회가 없어요» 가 안 뜬다")
+    # 신청한 팀 열쇠를 든 기기
+    pg.evaluate(f"localStorage.setItem('hackon.team.{_cev['id']}', '{_cteam['id']}'); localStorage.setItem('hackon.tkey.{_cteam['id']}', '{_cteam['tkey']}')")
+    pg.reload(wait_until="networkidle"); pg.wait_for_selector("#cal-month")
+    A(pg.query_selector(f'[data-calday="{_d5}"].has') is not None, f"신청한 대회 날({_d5})이 달력에 안 찍힌다")
+    pg.click(f'[data-calday="{_d5}"]'); pg.wait_for_timeout(300)
+    A("달력 화면 검사" in pg.inner_text("#cal-sel"), "날짜를 눌러도 그날 일정이 안 뜬다")
+    A("참석 답하기" in pg.inner_text("#cal-next"), "다가오는 30일에 «참석 답하기» 가 없다")
+    # 나는 누구 — 고르면 하루의 세 걸음이 바뀐다
+    pg.click('[data-me="shop"]'); pg.wait_for_selector("#me-steps")
+    A("번거로운 일" in pg.inner_text("#me-steps"), "사장님을 골랐는데 사장님 한 걸음이 아니다")
+    A(pg.evaluate("localStorage.getItem('hackon.me')") == "shop", "고른 사람이 이 기기에 안 남는다")
+    # 구독 주소 — 열쇠가 주소에 안 들어간다, 주소를 열면 달력 파일
+    pg.click("#cal-subbtn"); pg.wait_for_selector("#cal-url")
+    _url = pg.input_value("#cal-url")
+    A(_cteam["tkey"] not in _url and _url.endswith(".ics"), f"구독 주소가 이상하다: {_url}")
+    _ics = urllib.request.urlopen(_url.replace(BASE, BASE), timeout=10).read().decode()
+    A("BEGIN:VCALENDAR" in _ics and "달력 화면 검사" in _ics, "구독 주소가 달력 파일을 안 준다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "달력이 폰 폭에서 옆으로 밀린다")
+    pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-cal.png"), full_page=True)
+    b.close()
+ok("오늘 · 내 달력 — 비면 «없음», 신청한 대회·답하기가 달력에, 사람별 한 걸음, 구독 주소(열쇠 없음)")
+
+# ── ON 클럽 /club — 바이브코더 문화 한 장. 노랑이 새 자세 둘, 다가오는 밤(없음·모름 가르기), 폰 폭 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.on("pageerror", lambda e: errs.append("club: " + str(e)))
+    pg.goto(BASE + "/club", wait_until="networkidle"); pg.wait_for_timeout(400)
+    for _img in pg.eval_on_selector_all("img", "els => els.map(e => e.getAttribute('src'))"):
+        A(urllib.request.urlopen(BASE + _img, timeout=10).status == 200, f"ON 클럽 그림 {_img} 이 안 열린다")
+    A(pg.evaluate("[...document.images].every(i => i.complete && i.naturalWidth > 0)"), "ON 클럽 그림이 깨진다")
+    A("불러오는 중" not in pg.inner_text("#club-ev"), "다가오는 밤이 «불러오는 중» 에서 멈췄다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "ON 클럽이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("ON 클럽 — 노랑이 새 자세 둘, 다가오는 밤, 폰 폭")
 
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

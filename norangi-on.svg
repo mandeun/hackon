@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  노랑이 — 켜짐(ON) 자세
+  두 팔을 번쩍 들고, 눈(콘센트 구멍)에 라임 불이 들어왔다. 둘레에 불꽃 넷.
+  배지·굿즈·«데모 성공» 화면에 쓴다. 색: 먹 #0B1020, 노랑 #FFB020, 라임 #C8F53B
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="노랑이 — 켜짐">
+  <title>노랑이 — 켜짐</title>
+  <desc>두 팔을 들고 눈에 라임 불이 들어온 노랑이. 둘레에 불꽃이 튄다.</desc>
+  <g id="불꽃" stroke="#C8F53B" stroke-width="5" stroke-linecap="round">
+    <path d="M10 14 L18 20"/><path d="M110 14 L102 20"/><path d="M8 62 L20 60"/><path d="M112 62 L100 60"/>
+  </g>
+  <g id="팔다리" fill="none" stroke="#FFB020" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M60 62 V88"/><path d="M60 70 L26 40"/><path d="M60 70 L94 40"/>
+    <path d="M60 88 L48 108"/><path d="M60 88 L72 108"/>
+  </g>
+  <g id="손발" fill="#FFB020">
+    <rect x="15" y="29" width="13" height="11" rx="4"/><rect x="92" y="29" width="13" height="11" rx="4"/>
+    <rect x="38" y="105" width="13" height="11" rx="4"/><rect x="69" y="105" width="13" height="11" rx="4"/>
+  </g>
+  <g id="머리">
+    <rect x="34" y="12" width="52" height="50" rx="19" fill="#FFB020"/>
+    <rect x="45" y="27" width="10" height="19" rx="5" fill="#0B1020"/>
+    <rect x="65" y="27" width="10" height="19" rx="5" fill="#0B1020"/>
+    <rect x="47.5" y="30" width="5" height="9" rx="2.5" fill="#C8F53B"/>
+    <rect x="67.5" y="30" width="5" height="9" rx="2.5" fill="#C8F53B"/>
+  </g>
+</svg>

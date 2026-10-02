@@ -1,0 +1,159 @@
+<!doctype html>
+<!-- ON 클럽 — 바이브코더의 문화. 해커온이 «대회 도구» 에서 «모이는 이유» 가 되는 자리.
+     리추얼(ON 나이트) · 말(켜다·꺼졌다·플러그인·멀티탭·딸깍) · 사지 않고 «켜서 받는» 굿즈 · 동네 모임(멀티탭).
+     외부 스크립트 없음. 다가오는 모임은 공개 대회 목록(/api/events)에서 — 못 읽으면 «모름», 없으면 «없음». -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0B1020">
+<title>ON 클럽 — 바이브코더가 켜는 밤 · HACK:ON</title>
+<meta name="description" content="바이브코더들이 매달 모여 2분씩 «켜 보는» ON 나이트. 굿즈는 사지 않고 켜서 받습니다. 동네마다 멀티탭.">
+<link rel="icon" href="/icon.svg">
+<link rel="canonical" href="https://hackon.kr/club">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://hackon.kr/club">
+<meta property="og:title" content="ON 클럽 — 바이브코더가 켜는 밤">
+<meta property="og:description" content="매달 마지막 금요일, 2분씩 켜 보는 밤. 굿즈는 켜서 받는다.">
+<meta property="og:image" content="https://hackon.kr/og.png">
+<style>
+:root{--ink:#0B1020;--ink2:#141B2E;--lime:#C8F53B;--yel:#FFB020;--pg:#0B1020;--fg:#F3F5F9;--mute:#9AA3B5;--line:#232B42;
+  --sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--fg);font:16px/1.6 var(--sans);word-break:keep-all;overflow-wrap:break-word;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px}
+.top{display:flex;align-items:center;gap:12px;min-height:60px}
+.top .logo{font-weight:800;font-size:19px;text-decoration:none;margin-right:auto;display:inline-flex;align-items:center;gap:6px}
+.top .logo b{color:var(--lime)}
+.top a.s{font-size:14px;font-weight:700;text-decoration:none;padding:8px 12px;border:1px solid var(--line);border-radius:999px}
+.mono{font-family:var(--mono);letter-spacing:.02em}
+.hero{position:relative;border-radius:28px;padding:30px 22px 26px;margin:6px 0 18px;overflow:hidden;
+  background:radial-gradient(120% 90% at 85% 10%,rgba(200,245,59,.22),transparent 55%),linear-gradient(160deg,#141B2E,#0B1020 60%);border:1px solid var(--line)}
+.hero .tag{display:inline-flex;gap:8px;align-items:center;font-size:12px;font-weight:800;color:var(--lime);border:1px solid rgba(200,245,59,.4);border-radius:99px;padding:5px 11px}
+.hero .tag i{width:8px;height:8px;border-radius:50%;background:var(--lime);box-shadow:0 0 12px var(--lime)}
+.hero h1{font-size:44px;line-height:1.02;margin:16px 0 10px;letter-spacing:-.04em}
+.hero h1 s{color:var(--mute);text-decoration-thickness:4px;text-decoration-color:var(--yel)}
+.hero h1 em{font-style:normal;color:var(--lime)}
+.hero p{color:#C9CFDA;margin:0;max-width:30em}
+.hero img{position:absolute;right:8px;top:44px;width:104px;height:104px}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;position:relative;z-index:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 18px;border-radius:14px;font-weight:800;text-decoration:none;background:var(--lime);color:var(--ink)}
+.btn.sec{background:transparent;color:#fff;border:1px solid var(--line)}
+.sec-h{display:flex;align-items:baseline;gap:10px;margin:28px 0 10px}
+.sec-h h2{font-size:22px;margin:0;letter-spacing:-.02em}
+.sec-h .mono{font-size:12px;color:var(--lime)}
+.card{background:var(--ink2);border:1px solid var(--line);border-radius:20px;padding:18px;margin:0 0 12px}
+.card h3{margin:0 0 4px;font-size:17px}
+.meta{color:var(--mute);font-size:14px}
+.rit{display:grid;gap:10px}
+.rit .r{display:flex;gap:12px;align-items:flex-start}
+.rit .r b.n{flex:none;width:34px;height:34px;border-radius:10px;background:var(--lime);color:var(--ink);display:grid;place-items:center;font-family:var(--mono)}
+.words{display:flex;flex-wrap:wrap;gap:8px}
+.word{border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:#0F1526;flex:1 1 150px}
+.word b{display:block;font-size:18px}
+.word b em{font-style:normal;color:var(--lime)}
+.word span{font-size:13px;color:var(--mute)}
+.goods{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.good{border-radius:18px;padding:14px;background:#0F1526;border:1px solid var(--line);position:relative}
+.good .ic{font-size:30px}
+.good b{display:block;margin-top:6px}
+.good .how{font-size:12.5px;color:var(--lime);margin-top:6px;font-weight:700}
+.good.lock::after{content:"켜서 받기";position:absolute;top:10px;right:10px;font-size:10.5px;font-weight:800;color:var(--ink);background:var(--yel);border-radius:99px;padding:2px 7px}
+.taps{display:grid;gap:8px}
+.tap{display:flex;gap:10px;align-items:center;border:1px dashed var(--line);border-radius:14px;padding:12px}
+.tap .plug{flex:none;display:flex;gap:4px}
+.tap .plug i{width:8px;height:16px;border-radius:4px;background:var(--yel)}
+.tap .plug i.off{background:var(--line)}
+.ev{display:block;text-decoration:none;padding:12px 0;border-top:1px solid var(--line)}
+.ev:first-child{border-top:0}
+.ev b{display:block}
+.lead{display:flex;gap:14px;align-items:center}
+.lead img{flex:none;width:72px;height:72px;border-radius:20px;background:#0F1526;border:1px solid var(--line);padding:6px}
+footer{padding:26px 0 44px;color:var(--mute);font-size:14px}
+@media (min-width:640px){.hero h1{font-size:60px}.hero img{width:180px;height:180px;top:30px;right:20px}.hero p{max-width:24em}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="/"><img src="/norangi.svg" alt="" width="24" height="24">HACK<b>:</b>ON</a>
+    <a class="s" href="/cal">오늘</a>
+  </header>
+
+  <section class="hero">
+    <span class="tag"><i></i><span class="mono">ON CLUB · 매달 마지막 금요일</span></span>
+    <h1><s>NO</s><br><em>ON</em> 나이트</h1>
+    <p>바이브코더들이 모여 <b>2분씩 켜 보는</b> 밤. 슬라이드는 없고 화면만 있습니다. 덜 된 것도, 꺼진 것도 켜 봅니다.</p>
+    <div class="btns"><a class="btn" href="#next">다음 ON 나이트</a><a class="btn sec" href="/app?make=1">내 동네에서 열기</a></div>
+    <img src="/norangi-vibe.svg" alt="" width="150" height="150">
+  </section>
+
+  <div class="sec-h"><h2>ON 나이트는 이렇게</h2><span class="mono">RITUAL</span></div>
+  <div class="card rit">
+    <div class="r"><b class="n">01</b><div><h3>플러그인</h3><div class="meta">들어오면 이름표 대신 «지금 켜고 있는 것» 한 줄을 적습니다.</div></div></div>
+    <div class="r"><b class="n">02</b><div><h3>2분 켜 보기</h3><div class="meta">화면 하나, 2분. 박수 대신 «딸깍». 꺼지면 «꺼졌다!» 하고 같이 웃습니다.</div></div></div>
+    <div class="r"><b class="n">03</b><div><h3>막힌 곳 한 줄</h3><div class="meta">끝나면 «여기서 막혔다» 를 남깁니다. 이름 없이 모여 다음 사람의 지도가 됩니다.</div></div></div>
+    <div class="r"><b class="n">04</b><div><h3>멀티탭</h3><div class="meta">같이 켤 사람을 찾으면 그 자리에서 팀(멀티탭)이 됩니다. 다음 대회에 같이 꽂힙니다.</div></div></div>
+  </div>
+
+  <div class="sec-h"><h2>우리 말</h2><span class="mono">GLOSSARY</span></div>
+  <div class="words">
+    <div class="word"><b><em>켜다</em></b><span>배포했다 · 공개했다 · 남이 눌러 볼 수 있게 됐다</span></div>
+    <div class="word"><b>꺼졌다</b><span>에러 났다. 부끄러운 게 아니라 이야깃거리</span></div>
+    <div class="word"><b>플러그인</b><span>팀이나 모임에 합류</span></div>
+    <div class="word"><b>멀티탭</b><span>팀 · 동네 모임. 여럿이 한 줄에 꽂힌다</span></div>
+    <div class="word"><b>딸깍</b><span>박수 대신. 스위치 켜는 소리</span></div>
+    <div class="word"><b>너랑</b><span>빨리 말하면 «노랑». NO 라던 걸 너랑 하면 ON</span></div>
+  </div>
+
+  <div class="sec-h"><h2>굿즈는 사지 않고 켜서 받습니다</h2><span class="mono">DROPS</span></div>
+  <div class="goods">
+    <div class="good lock"><div class="ic">🟨</div><b>노랑이 스티커</b><div class="meta">노트북 뚜껑용</div><div class="how">첫 완주</div></div>
+    <div class="good lock"><div class="ic">⌨️</div><b>콘센트 키캡</b><div class="meta">ESC 자리에 꽂는 노랑이</div><div class="how">ON 나이트 3번 켜 보기</div></div>
+    <div class="good lock"><div class="ic">👕</div><b>NO→ON 티셔츠</b><div class="meta">앞 NO, 뒤 ON</div><div class="how">실무 기록 2단계</div></div>
+    <div class="good lock"><div class="ic">🔌</div><b>멀티탭 패치</b><div class="meta">모임 연 사람만</div><div class="how">동네 멀티탭 열기</div></div>
+    <div class="good lock"><div class="ic">🧥</div><b>크루 후드</b><div class="meta">운영을 같이 한 사람</div><div class="how">크루 한 기수</div></div>
+    <div class="good lock"><div class="ic">💡</div><b>켜 준 사람 배지</b><div class="meta">프로필에 붙는 표시</div><div class="how">남의 대회 심사·멘토 3번</div></div>
+  </div>
+  <p class="meta" style="margin-top:8px">돈으로 사는 굿즈는 아직 없습니다. 받는 기준은 <a href="/cert">실무 기록 단계</a>와 같은 기록(완주·데모·기여)을 씁니다.</p>
+
+  <div class="sec-h"><h2>동네 멀티탭</h2><span class="mono">CHAPTERS</span></div>
+  <div class="taps">
+    <div class="tap"><span class="plug"><i></i><i></i></span><div><b>서울 마포 · 신촌</b><div class="meta">대학가 · 첫 멀티탭 — 10/31 데모데이에서 켭니다</div></div></div>
+    <div class="tap"><span class="plug"><i class="off"></i><i class="off"></i></span><div><b>성수 · 강남</b><div class="meta">비어 있음 — 공유오피스 한 곳과 열 사람을 찾습니다</div></div></div>
+    <div class="tap"><span class="plug"><i class="off"></i><i class="off"></i></span><div><b>온라인 · 해외</b><div class="meta">비어 있음 — <a href="/en">영어로 같이</a> 켤 사람</div></div></div>
+  </div>
+  <div class="btns"><a class="btn" href="/app?make=1">우리 동네 멀티탭 열기</a><a class="btn sec" href="/crew">크루로 같이 이끌기</a></div>
+
+  <div class="sec-h" id="next"><h2>다가오는 밤</h2><span class="mono">NEXT</span></div>
+  <div class="card" id="club-ev"><div class="meta">불러오는 중…</div></div>
+
+  <div class="sec-h"><h2>이끄는 사람</h2><span class="mono">HOST</span></div>
+  <div class="card lead"><img src="/norangi-on.svg" alt="" width="72" height="72">
+    <div><h3>HACK:ON 크루</h3><div class="meta">매달 밤을 열고, 굿즈를 만들고, 동네 멀티탭을 잇습니다. 같이 이끌 사람은 <a href="/crew">크루 모집</a>으로, 협찬·공간은 <a href="/partner">협찬 안내</a>로.</div></div></div>
+
+  <footer>해커온 ON 클럽 · <a href="/">첫 화면</a> · <a href="/cal">오늘</a> · <a href="/news">소식</a></footer>
+</div>
+<script>
+/* 다가오는 밤 — 공개 대회 중 모임·데모 성격(나이트·데모·이그나이트·밋업·모임)을 먼저, 없으면 가까운 대회.
+   못 읽으면 «모름», 없으면 «없음» — 둘을 섞지 않는다 */
+(function () {
+  var box = document.getElementById('club-ev');
+  var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  fetch('/api/events').then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (d) {
+    var rows = Array.isArray(d) ? d : (d.rows || []);
+    var today = new Date().toISOString().slice(0, 10);
+    rows = rows.filter(function (e) { return !e.ends || String(e.ends).slice(0, 10) >= today; });
+    var night = rows.filter(function (e) { return /나이트|데모|이그나이트|밋업|모임|night|demo/i.test(e.title || ''); });
+    var list = (night.length ? night : rows).sort(function (a, b) { return String(a.starts).localeCompare(String(b.starts)); }).slice(0, 5);
+    if (!list.length) { box.innerHTML = '<div class="meta">아직 잡힌 밤이 없습니다. <a href="/app?make=1">첫 ON 나이트를 열어 보세요</a> — 이름 하나면 됩니다.</div>'; return; }
+    box.innerHTML = list.map(function (e) {
+      return '<a class="ev" href="/e/' + esc(e.id) + '"><b>' + esc(e.title) + '</b><span class="meta">' + esc(String(e.starts || '').slice(0, 10)) +
+        (e.place ? ' · ' + esc(e.place) : '') + ' · ' + esc(e.host || '') + (e.teams ? ' · ' + e.teams + '팀 신청' : '') + '</span></a>';
+    }).join('');
+  }).catch(function () { box.innerHTML = '<div class="meta">지금 못 불러왔습니다 — 잡힌 밤이 있는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요.</div>'; });
+})();
+</script>
+</body>
+</html>
