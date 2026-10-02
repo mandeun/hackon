@@ -4439,19 +4439,25 @@ with sync_playwright() as pw:
     # «있을 때만 뜨는 것»(id 가 nav- 로 시작 — 강의·마켓·순위·그날의 조건)은 자료가 생기면 켜진다. 늘 보이는 고리만 센다
     _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
     A(len(_vis) <= 3, f"첫 화면 늘 보이는 고리가 셋을 넘는다: {_vis}")
-    _groups = pg.evaluate("[...document.querySelectorAll('nav.sec .more-in .mg')].map(x => x.textContent.trim())")
-    A(_groups == ["매일", "참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 다르다: {_groups}")
-    _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
+    _groups = pg.evaluate("[...document.querySelectorAll('#menu-sheet .mg')].map(x => x.textContent.trim())")
+    A(_groups == ["매일", "같이", "참가", "열기"], f"전체 메뉴 묶음이 다르다: {_groups}")
+    _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"], #menu-sheet a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
     for _h in _hrefs:
         try:
             _code = urllib.request.urlopen(BASE + _h, timeout=10).status
         except urllib.error.HTTPError as _e:
             _code = _e.code
         A(_code == 200, f"첫 화면 고리 {_h} 가 {_code}")
-    pg.click("nav.sec details.navmore summary"); pg.wait_for_timeout(200)
-    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "더 보기를 펴면 폰 폭에서 옆으로 밀린다")
+    A(pg.locator("#menu-sheet").is_hidden(), "전체 메뉴가 처음부터 열려 있다")
+    pg.click("#nav-menu"); pg.wait_for_selector("#menu-sheet .tiles a")
+    A(pg.evaluate("document.activeElement && document.activeElement.closest('#menu-sheet') !== null"), "메뉴를 열었는데 포커스가 판 안으로 안 간다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "메뉴를 펴면 폰 폭에서 옆으로 밀린다")
+    _tiles = pg.eval_on_selector_all("#menu-sheet .tiles a", "els => els.map(e => e.getBoundingClientRect()).filter(r => r.right > 391 || r.width < 120)")
+    A(not _tiles, f"메뉴 타일이 화면 밖이거나 너무 좁다: {_tiles}")
+    pg.keyboard.press("Escape"); pg.wait_for_timeout(150)
+    A(pg.locator("#menu-sheet").is_hidden() and pg.evaluate("document.activeElement.id") == "nav-menu", "Esc 로 안 닫히거나 포커스가 «메뉴» 로 안 돌아온다")
     b.close()
-ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식), 더 보기는 넷으로 묶고 고리마다 200")
+ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식) + 메뉴 판(묶음 넷·타일·Esc·포커스), 고리마다 200")
 
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
