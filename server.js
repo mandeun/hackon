@@ -3882,6 +3882,30 @@ function mine(db, owner) {
   };
 }
 
+/** 학기 활동 보고서 — 동아리 회장이 학교에 내는 «활동 실적». 한 계정이 연 대회·모임·프로젝트를 기간으로 묶는다.
+    셀 수 없는 것은 null(모름)로 둔다 — 체크인을 안 받은 행사의 «온 사람 0» 은 거짓이다(meetStats 와 같은 규칙) */
+const KIND_LABEL = { '': '해커톤', '모임': '모임·수업', '프로젝트': '프로젝트' };
+function termReport(db, owner, from, to) {
+  const o = db.prepare('SELECT name FROM owners WHERE id=?').get(owner);
+  if (!o) throw new HttpError(404, '없는 열쇠입니다');
+  const a = isDay(from) ? from : '0000-01-01', z = isDay(to) ? to : '9999-12-31';
+  if (a > z) throw new HttpError(400, '시작이 끝보다 늦습니다');
+  const rows = db.prepare("SELECT id, title, kind, starts, ends FROM events WHERE owner=? AND substr(starts,1,10) BETWEEN ? AND ? ORDER BY starts").all(owner, a, z)
+    .map(e => {
+      const m = meetStats(db, e.id), oc = outcomes(db, e.id), sp = support(db, e.id);
+      const sps = db.prepare('SELECT name FROM sponsors WHERE event=?').all(e.id).map(x => x.name);
+      return { id: e.id, title: e.title, kind: KIND_LABEL[e.kind] || '해커톤', starts: String(e.starts).slice(0, 10), ends: String(e.ends).slice(0, 10),
+               applied: m.applied, came: m.came, finished: e.kind === '모임' ? null : oc.finished, certs: m.certs,
+               sponsors: sps, kept: sp.done, promised: sp.promised };
+    });
+  const sum = k => rows.reduce((n, r) => n + (r[k] || 0), 0);
+  const known = k => rows.some(r => r[k] !== null);
+  return { name: o.name, from: a === '0000-01-01' ? '' : a, to: z === '9999-12-31' ? '' : z, rows,
+           total: { events: rows.length, applied: sum('applied'), came: known('came') ? sum('came') : null,
+                    finished: known('finished') ? sum('finished') : null, certs: sum('certs'),
+                    sponsors: [...new Set(rows.flatMap(r => r.sponsors))].length } };
+}
+
 /** 공개 페이지에 붙는 주최자 이력. 지난 대회가 있어야 의미가 생긴다. */
 function record(db, event) {
   const e = db.prepare('SELECT owner FROM events WHERE id=?').get(event);
@@ -6275,6 +6299,10 @@ function routes(db) {
                                             JOIN owners o ON o.id = s.owner ORDER BY s.at`).all());
         }
 
+        if (p === '/api/mine/report' && req.method === 'GET') {
+          if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');
+          return json(res, 200, termReport(db, owner, q.from, q.to));
+        }
         if (p === '/api/mine' && req.method === 'GET') {
           if (!owner) throw new HttpError(403, '주최자 열쇠가 필요합니다');   /* 400 은 «보낸 것이 잘못됐다» — 권한 문제는 403(감사 e) */
           /* 사이트 운영자는 모든 대회를 본다. 열쇠를 잃은 주최자를 되살리려면 먼저 그 대회가 보여야 한다.
@@ -7556,6 +7584,25 @@ async function selftest() {
     ok(code === 404, '계정 지우기: 이미 지운 계정은 없는 계정이다');
     db.prepare('DELETE FROM events WHERE id=?').run(eo.id);
     db.prepare('DELETE FROM owners WHERE id=?').run(other);
+  }
+  /* 학기 활동 보고서 — 기간 안 행사만, 모르는 것은 null */
+  {
+    const ow = 'tr' + crypto.randomBytes(5).toString('hex');
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(ow, '회장');
+    const h1 = createEvent(db, { title: '1학기 해커톤', owner: ow, starts: '2026-04-11', ends: '2026-04-11' });
+    const m1 = createEvent(db, { title: '바이브코딩 수업', owner: ow, kind: '모임', starts: '2026-05-02', ends: '2026-05-02' });
+    createEvent(db, { title: '2학기 데모데이', owner: ow, starts: '2026-10-31', ends: '2026-10-31' });
+    joinTeam(db, h1.id, { name: '가팀', agree: true }); joinTeam(db, h1.id, { name: '나팀', agree: true });
+    const mt = joinTeam(db, m1.id, { name: '수강생', agree: true });
+    db.prepare("UPDATE teams SET came='y' WHERE id=?").run(mt);
+    const tr = termReport(db, ow, '2026-03-01', '2026-08-31');
+    ok(tr.rows.length === 2 && tr.rows.map(r => r.kind).join() === '해커톤,모임·수업', '활동 보고서: 기간 안 행사만, 종류가 붙는다');
+    ok(tr.rows[0].applied === 2 && tr.rows[0].came === null && tr.rows[1].came === 1, '활동 보고서: 체크인 안 받은 행사의 «온 사람» 은 모름(null)');
+    ok(tr.total.applied === 3 && tr.total.came === 1 && tr.rows[1].finished === null, '활동 보고서: 합계는 아는 것만 더한다');
+    let bad = 0; try { termReport(db, ow, '2026-09-01', '2026-03-01'); } catch (e) { bad = e.code; }
+    ok(bad === 400, '활동 보고서: 시작이 끝보다 늦으면 400');
+    for (const r of db.prepare('SELECT id FROM events WHERE owner=?').all(ow)) db.prepare('DELETE FROM events WHERE id=?').run(r.id);
+    db.prepare('DELETE FROM owners WHERE id=?').run(ow);
   }
   /* 모아 보기 — 등록 안 해도 보이고, 주최자가 확인하면 그 자리에서 HACK:ON 대회가 된다 */
   {

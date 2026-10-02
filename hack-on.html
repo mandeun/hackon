@@ -896,6 +896,7 @@ const NEED_KIND = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심�
    상태는 G 하나에 둔다 — flash() 가 성공하면 화면을 통째로 다시 그리는데,
    단계를 DOM 에만 두면 «보냈습니다» 대신 첫 화면이 돌아온다. */
 document.head.insertAdjacentHTML('beforeend', `<style>
+@media print{nav,#toast,.no-print,header{display:none!important}body{background:#fff}#term-sheet{box-shadow:none;border:0}}
 .htabs{position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0 10px;margin:0 0 6px;background:var(--bg,#F4F5F7);-webkit-overflow-scrolling:touch;scrollbar-width:none;
   scroll-snap-type:x proximity;overscroll-behavior-x:contain;
   /* 오른쪽 끝을 흐린다 — 잘린 자리가 보여야 «옆으로 더 있다»를 안다 */
@@ -1581,7 +1582,9 @@ function moreForm(t) {
   </div>`;
 }
 let msg = null;
-let ARD_KIND = '', ARD_Q = '';   // 모아 보기 — 고른 종류·찾는 말
+let ARD_KIND = '', ARD_Q = '';
+const TERM = { from: '', to: '' };   // 학기 활동 보고서 기간
+const ymdLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };   // 모아 보기 — 고른 종류·찾는 말
 let TPL = null;   // 열기 탭에서 누른 유형
 let P_LOGO_DATA = '';   // 협찬사 로고 파일(줄인 data: 주소). 넣고 나면 비운다
 
@@ -2239,6 +2242,7 @@ const SCREEN = {
         <div><b>${my.total.promised ? my.total.keptRate + '%' : '—'}</b><span>약속 이행</span></div>
       </div>` : ''}
       ${my.events.map(ownedCard).join('')}
+      <button class="btn sec sm" id="b-term" style="margin:4px 0 10px">학기 활동 보고서 — 학교 제출용</button>
       ${AUTH && AUTH.links && AUTH.links.length ? `<div class="card" style="padding:11px 13px"><div class="meta">
         <b>${AUTH.links.map(l => esc(l.label)).join('·')}로 로그인돼 있습니다.</b> 다른 기기에서도 그대로 보입니다.
         ${loginRest().length ? `<br>다른 것으로도 들어오시려면 지금 붙여 두세요 — 안 붙이면 계정이 둘로 갈립니다.<br>
@@ -3953,6 +3957,34 @@ const SCREEN = {
         <button class="btn sm" id="tp-go" style="margin-top:10px">올리기</button>`}
       </details>
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/app">대회 열기</a> · <a href="/learn">강의</a> · <a href="/market">마켓</a></p>`;
+  },
+
+  /* 학기 활동 보고서. 동아리 회장이 학교에 내는 «활동 실적» 한 장 — 인쇄하거나 PDF 로 저장한다.
+     모르는 칸(체크인을 안 받은 행사의 «온 사람»)은 0 이 아니라 «—» 로 둔다 */
+  async term() {
+    const y = new Date().getFullYear(), mo = new Date().getMonth() + 1;
+    if (!TERM.from) { TERM.from = mo >= 3 && mo <= 8 ? `${y}-03-01` : mo >= 9 ? `${y}-09-01` : `${y - 1}-09-01`;
+                      TERM.to = mo >= 3 && mo <= 8 ? `${y}-08-31` : mo >= 9 ? `${y + 1}-02-28` : `${y}-02-28`; }
+    let d; try { d = await api(`/mine/report?from=${TERM.from}&to=${TERM.to}`); }
+    catch (e) { return `<div class="card"><h3>보고서를 만들지 못했습니다</h3><div class="meta">${esc(e.message)}</div></div>`; }
+    const n = v => v === null || v === undefined ? '—' : String(v);
+    return `<section class="hero no-print"><div class="top"><span class="pill">활동 보고서</span></div>
+        <h2>학기 활동 보고서</h2>
+        <p class="sub" style="margin-bottom:0">이 계정으로 연 대회·모임·프로젝트를 기간으로 묶습니다. 동아리 재등록·지원금 신청에 그대로 붙이세요.</p>
+        <div class="shrow" style="margin-top:10px"><input id="tm-from" type="date" value="${esc(TERM.from)}" style="flex:1"><input id="tm-to" type="date" value="${esc(TERM.to)}" style="flex:1"><button class="btn sec sm" id="tm-go">다시 보기</button></div>
+      </section>
+      <div class="card" id="term-sheet">
+        <h3>${esc(d.name || '우리 동아리')} 활동 실적 <span class="meta">${esc(d.from)} ~ ${esc(d.to)}</span></h3>
+        <div class="stat"><div><b>${d.total.events}</b><span>행사</span></div><div><b>${d.total.applied}</b><span>신청</span></div>
+          <div><b>${n(d.total.came)}</b><span>참석</span></div><div><b>${n(d.total.finished)}</b><span>완주(제출)</span></div><div><b>${d.total.certs}</b><span>수료증</span></div></div>
+        ${d.rows.length ? `<table style="margin-top:10px"><tr><th>날짜</th><th>행사</th><th class="n">신청</th><th class="n">참석</th><th class="n">완주</th><th>협찬</th></tr>
+          ${d.rows.map(r => `<tr><td>${esc(r.starts.slice(5).replace('-', '/'))}</td><td>${esc(r.title)} <span class="meta">${esc(r.kind)}</span></td>
+            <td class="n">${r.applied}</td><td class="n">${n(r.came)}</td><td class="n">${n(r.finished)}</td>
+            <td>${r.sponsors.length ? esc(r.sponsors.join(', ')) + (r.promised ? ` <span class="meta">약속 ${r.kept}/${r.promised}</span>` : '') : '—'}</td></tr>`).join('')}</table>`
+          : '<div class="meta" style="margin-top:8px">이 기간에 연 행사가 없습니다.</div>'}
+        <div class="meta" style="margin-top:10px">«—» 는 기록이 없어 모르는 칸입니다(체크인을 받지 않은 행사 등). HACK:ON 기록 기준 · 만든 날 ${esc(ymdLocal())}</div>
+      </div>
+      <div class="no-print" style="display:flex;gap:8px;margin:10px 0"><button class="btn" id="tm-print">인쇄 · PDF 저장</button><button class="btn sec" id="tm-back">돌아가기</button></div>`;
   },
 
   async market() {
@@ -6121,6 +6153,12 @@ function wire() {
           flash(r.state === 'claimed' ? '넘겼습니다 — 대회가 만들어졌습니다' : r.state === 'hidden' ? '내렸습니다' : '거절했습니다'); }
     catch (e) { flash(e.message, true); }
   });
+  const bTerm = $('#b-term');
+  if (bTerm) bTerm.onclick = () => { tab = 'term'; render(); };
+  const tmGo = $('#tm-go');
+  if (tmGo) tmGo.onclick = () => { TERM.from = $('#tm-from').value; TERM.to = $('#tm-to').value; render(); };
+  if ($('#tm-print')) $('#tm-print').onclick = () => window.print();
+  if ($('#tm-back')) $('#tm-back').onclick = () => { tab = 'home'; render(); };
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
