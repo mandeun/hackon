@@ -4413,6 +4413,10 @@ with sync_playwright() as pw:
     # 아래 목록 줄에도 «쉽게» — 그리고 확 뜬 것 판은 목록(#list) 밖이라 칩 수와 그린 줄 수가 그대로 맞는다
     # «쉽게» 는 어려운 말이 있는 줄에만(10/02 — 출처 종류로 붙이던 뻔한 문장은 뺐다)
     A(pg.locator("#list .ez").count() >= 1, "어려운 말(MCP·에이전트)이 있는 줄에 «쉽게» 가 안 붙는다")
+    # 시간 아끼기 — 깃허브 줄엔 ⏱ 과 바로 해 보는 명령, 복사 단추(10/03)
+    _try = pg.locator(".it .try code").first.inner_text()
+    A(_try.startswith("git clone https://github.com/e2e/agent-kit"), f"깃허브 줄에 바로 해 보기 명령이 없다: {_try}")
+    A(pg.locator(".it .do").filter(has_text="README").count() == 0, "출처마다 같던 «할 일» 문장이 아직 붙는다")
     A("누구나 보고 고쳐 쓸 수 있게" not in pg.inner_text("#view, body"), "출처 종류로 붙이던 뻔한 «쉽게» 문장이 아직 있다")
     _all = pg.evaluate("document.querySelector('.chip[data-k=\"all\"]').dataset.n")
     A(int(_all) == pg.locator("#list .it").count(), "확 뜬 것 판이 칩 수와 목록 줄 수를 어긋나게 한다")
