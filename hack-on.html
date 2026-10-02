@@ -28,7 +28,11 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;word-break:keep-all;overflow-wrap:break-word;
      display:flex;justify-content:center;min-height:100dvh;
-     -webkit-font-smoothing:antialiased}
+     -webkit-font-smoothing:antialiased;
+     /* 한국어는 낱말 안에서 끊으면 안 읽힌다 — «혼자» 가 «혼/자» 로 갈라져 있었다.
+        home.html 은 처음부터 이 규칙이 있었는데 앱에만 없었다. 주소처럼 긴 것은
+        break-word 가 받아 준다. URL 칸의 break-all 은 더 구체적이라 그대로 이긴다. */
+     word-break:keep-all;overflow-wrap:break-word}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;border:0;background:none}
 button{cursor:pointer}
 input,select,textarea{border:1px solid var(--rule);border-radius:9px;padding:9px 11px;width:100%;background:#fff}
@@ -2416,6 +2420,10 @@ const SCREEN = {
           비밀번호는 없습니다.</div>
         ${loginBtns()}
       </div>` : '';
+    /* 첫 화면이 대회 한 건으로 끝나면 아래가 통째로 빈다. 랜딩(home.html)에는 이미
+       «풀어 달라는 문제» 가 실려 있는데 앱에만 없었다 — 인스타·유튜브로 들어오는 사람은
+       거의 폰이고, 폰에서 처음 보는 화면이 바로 여기다. 문제는 대회가 0건이어도 남아 있다. */
+    const reqs = LIVE ? await api('/requests').catch(() => []) : [];
     const mineBox = my && my.events.length ? `
       <h2>내가 연 대회</h2>
 
@@ -2480,15 +2488,26 @@ const SCREEN = {
           <div style="height:8px"></div><button class="btn sec sm" data-untrash-ev="${+t.id}">되살리기</button></div>`).join('')
           : `<div class="meta">지운 대회가 없습니다.</div>`}
       </details>` : ''}`;
+    /* 대회가 아니라 «문제» 로도 들어올 수 있게. 0건이면 칸 자체를 안 그린다 —
+       빈 칸은 «여기는 비어 있는 곳» 이라고 말한다. 셋까지만 보이고 나머지는 문제 은행으로. */
+    const askBox = reqs.length ? `<h2 style="margin-top:22px">풀어 달라는 문제 <span class="pill">${reqs.length}</span></h2>
+      <p class="sub">동네 가게·모임이 올린 «번거로운 일» 입니다. 아직 어느 대회에도 안 붙었습니다.</p>
+      ${reqs.slice(0, 3).map(r => `<div class="card" role="button" tabindex="0" data-go="problems" style="padding:13px 15px">
+        <div class="top"><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span><span>${esc(r.name)}</span>${r.solutions ? `<span class="pill ok">풀이 ${r.solutions}</span>` : ''}</div>
+        <h3 style="margin-top:4px">${esc(r.topic || r.pain)}</h3>
+        ${r.done ? `<div class="meta"><b>«됐다»의 기준:</b> ${esc(r.done)}</div>` : ''}
+      </div>`).join('')}
+      <button class="btn sec sm" data-go="problems">문제 ${reqs.length}개 다 보기</button>` : '';
+
     /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
        그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
     if (!list.length && my && my.events.length) return loginBox + claimBox + adminBox + mineBox + acctBox + `
       <div class="card">
         <h3>다음에 할 일</h3>
         <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
-      </div>` + findBox;
+      </div>` + askBox + findBox;
     if (!list.length) return loginBox + claimBox + adminBox + mineBox + acctBox + `<h2>아직 열린 대회가 없습니다</h2>
-      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
+      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + askBox + findBox;
     return loginBox + claimBox + adminBox + mineBox + acctBox + `<h2>열린 대회</h2>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
@@ -2496,7 +2515,7 @@ const SCREEN = {
         <div class="meta">${badge(e)} ${esc(e.host)}${+e.prize ? ' · 상금 ' + won(e.prize) : ''}</div>
         ${evLine(e)}</div>
       </div>`).join('') +
-      (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '') + findBox;
+      (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '') + askBox + findBox;
   },
 
   /* ── 내 대회 — 이 브라우저가 든 열쇠를 모아 역할별로 세운다 ──
