@@ -4604,12 +4604,15 @@ const SCREEN = {
     const readable = r => !/[\u4e00-\u9fff]{4,}/.test(r.title || '');
     const fresh = rows.filter(r => r.kind !== 'deal' && readable(r) && (r.kind === 'tool' || r.kind === 'pick' || LAUNCH.test(r.title || '')))
       .sort((a, b) => (LAUNCH.test(b.title || '') ? 1 : 0) - (LAUNCH.test(a.title || '') ? 1 : 0)).slice(0, 3);
+    /* 이번 주 확 뜬 것 — 7일 동안 별·하트가 많이 는 것 셋. 서버가 세서 준다(news_counts) */
+    const hot = news && Array.isArray(news.hot) ? news.hot.filter(readable).slice(0, 3) : [];
     const tip = recipe ? String(recipe).split('\n').find(l => /^첫 작업/.test(l)) || String(recipe).split('\n')[0] : '';
     const day = new Date(now + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
     BRIEF_TEXT = ['☀️ HACK:ON 오늘 켤 것 — ' + day,
       ...(work.length ? ['', '[켜 둔 일]', ...work.map(w => `· ${w.e.title} ${dd(String(w.e.starts).slice(0, 10))}${w.pub ? ` · 신청 ${w.pub.teams}팀` : ''}${w.todo && w.todo.length ? ` · 할 일: ${w.todo[0].title}` : ''}`)] : []),
       ...(wal.length ? ['', '[꺼지기 전에]', ...wal.map(it => `· ${it.name} ${WAL_KIND[it.kind] || ''} ${dd(it.next)}`)] : []),
       ...(fresh.length ? ['', '[새로 켜진 것]', ...fresh.map(r => `· ${r.title}`)] : []),
+      ...(hot.length ? ['', '[이번 주 확 뜬 것]', ...hot.map(r => `· ${r.title} (${r.mark}+${r.gain})`)] : []),
       ...(deals.length ? ['', '[할인·무료]', ...deals.map(r => `· ${r.title}`)] : []),
       ...(tip ? ['', '[오늘의 스위치] ' + tip.replace(/^첫 작업:\s*/, '')] : []),
       '', `${location.origin}/brief`].join('\n');
@@ -4630,7 +4633,10 @@ const SCREEN = {
         ${wal.length ? wal.map(it => item(`${it.name} — ${WAL_KIND[it.kind] || ''}`, `${esc(dd(it.next))} · ${esc(it.next.slice(5).replace('-', '/'))}${it.memo ? ' · ' + esc(it.memo) : ''}`)).join('')
           : '<div class="meta">7일 안에 다가오는 마감이 없습니다. 메일·공지를 <a href="/wallet">AI 지갑</a>에 붙여 넣으면 여기 뜹니다.</div>'}</div>
       <div class="card" id="br-new"><h3>새로 켜진 것 <span class="meta">새 모델·도구</span></h3>
-        ${news === null ? unk : fresh.length ? fresh.map(r => item(r.title, r.note ? esc(r.note) : '', r.url)).join('') : '<div class="meta">오늘은 새 소식이 없습니다.</div>'}</div>
+        ${news === null ? unk : fresh.length ? fresh.map(r => item(r.title, [r.note ? esc(r.note) : '', r.easy ? '쉽게: ' + esc(r.easy) : ''].filter(Boolean).join('<br>'), r.url)).join('') : '<div class="meta">오늘은 새 소식이 없습니다.</div>'}</div>
+      <div class="card" id="br-hot"><h3>이번 주 확 뜬 것 <span class="meta">7일 동안 별·하트가 는 순</span></h3>
+        ${news === null ? unk : hot.length ? hot.map(r => item(r.title, `<b style="color:#C2410C">${esc(r.mark)} +${esc(r.gain.toLocaleString())}</b> · ${esc(r.days)}일 동안${r.easy ? `<br>쉽게: ${esc(r.easy)}` : ''}`, r.url)).join('')
+          : news.hotKnown === false ? '<div class="meta">아직 모릅니다 — 별·하트 수를 이틀 넘게 적어야 셀 수 있습니다.</div>' : '<div class="meta">이번 주에 확 는 것이 없습니다.</div>'}</div>
       <div class="card" id="br-deal"><h3>할인·무료</h3>
         ${news === null ? unk : deals.length ? deals.map(r => item(r.title, r.note ? esc(r.note) : '', r.url)).join('') : '<div class="meta">지금 모인 할인 소식이 없습니다.</div>'}</div>
       <div class="card" id="br-tip"><h3>오늘의 스위치 <span class="meta">${WAL_JOB ? esc(WAL_JOB) : '직무를 고르면 맞춰 드립니다'}</span></h3>

@@ -4399,5 +4399,52 @@ with sync_playwright() as pw:
     b.close()
 ok("혜택 탭 — 탭 다섯이 390px 에 들어가고, 기본 갈래가 장학금이며, 모르는 값을 «없음» 으로 안 그린다")
 
+# ── 이번 주 확 뜬 것 + «쉽게:» — 별·하트를 날짜별로 적어 둔 DB 를 바깥에서 만들고 띄운다 ──
+# 소식은 남의 사이트에서 오므로 실행마다 다르다 — 그래서 우리가 넣은 줄로만 단언한다.
+_hdir = _tf.mkdtemp(prefix="hackon-hot-")
+_hdb = os.path.join(_hdir, "hot.db")
+HOT_BASE = checklib.start(extra_env={"DB": _hdb})   # 한 번 띄워 표를 만든다
+checklib.stop(HOT_BASE)
+_today = datetime.now().strftime("%Y-%m-%d")
+_d3 = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+con = _sq.connect(_hdb)
+for _src, _u, _t, _note, _job in (("gh", "https://github.com/e2e/agent-kit", "e2e/agent-kit — MCP agent 도구", "★ 1500", "개발"),
+                                  ("hf", "https://huggingface.co/e2e/tiny", "e2e/tiny", "♥ 40", ""),
+                                  ("geek", "https://geek.example/1", "e2e 읽을거리 한 줄", "", "")):
+    con.execute("INSERT INTO news(src,key,title,url,note,job,at) VALUES(?,?,?,?,?,?,?)", (_src, _u, _t, _u, _note, _job, _today))
+con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://github.com/e2e/agent-kit", _d3, 1200))
+con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://github.com/e2e/agent-kit", _today, 1500))
+con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://huggingface.co/e2e/tiny", _today, 40))
+con.commit(); con.close()
+HOT_BASE = checklib.start(extra_env={"DB": _hdb})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_context(viewport={"width": 390, "height": 844}).new_page()
+    pg.on("pageerror", lambda e: errs.append("hot: " + str(e)))
+    pg.goto(HOT_BASE + "/news", wait_until="networkidle"); pg.wait_for_selector("#hot")
+    _h = pg.inner_text("#hot")
+    A("e2e/agent-kit" in _h and "+300" in _h, f"확 뜬 것 판에 +300 이 없다: {_h}")
+    A("e2e/tiny" not in _h, "하루치뿐인 것(는 만큼 모름)이 확 뜬 것 판에 올랐다")
+    A("쉽게:" in _h and "MCP" in _h, f"확 뜬 것 줄에 «쉽게» 가 없다: {_h}")
+    # 아래 목록 줄에도 «쉽게» — 그리고 확 뜬 것 판은 목록(#list) 밖이라 칩 수와 그린 줄 수가 그대로 맞는다
+    A(pg.locator("#list .ez").count() >= 3, "목록 줄에 «쉽게» 가 안 붙는다")
+    _all = pg.evaluate("document.querySelector('.chip[data-k=\"all\"]').dataset.n")
+    A(int(_all) == pg.locator("#list .it").count(), "확 뜬 것 판이 칩 수와 목록 줄 수를 어긋나게 한다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "뉴스가 폰 폭에서 옆으로 밀린다")
+    pg.goto(HOT_BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#br-hot")
+    A("+300" in pg.inner_text("#br-hot") and "쉽게:" in pg.inner_text("#br-hot"), f"브리핑에 확 뜬 것이 없다: {pg.inner_text('#br-hot')}")
+    b.close()
+checklib.stop(HOT_BASE)
+# 기록이 하루치뿐인 새 DB — «없음» 이 아니라 «모름» 으로 그려야 한다
+_hdb2 = os.path.join(_hdir, "hot2.db")
+HOT_BASE = checklib.start(extra_env={"DB": _hdb2})
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page()
+    pg.goto(HOT_BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#br-hot")
+    A("아직 모릅니다" in pg.inner_text("#br-hot"), f"기록이 없는데 «모름» 이 아니다: {pg.inner_text('#br-hot')}")
+    b.close()
+checklib.stop(HOT_BASE)
+ok("이번 주 확 뜬 것 — 7일 동안 는 만큼(+300), 하루치는 판 밖, 줄마다 «쉽게», 기록 없으면 «모름», 브리핑에도")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
