@@ -9389,6 +9389,7 @@ async function selftest() {
       const tk = db.prepare('SELECT tkey FROM teams WHERE id=?').get(ct).tkey;
       const cj = createEvent(db, { title: '심사할 대회', starts: '2099-08-01', ends: '2099-08-01' });
       const jk = db.prepare('SELECT jkey FROM events WHERE id=?').get(cj.id).jkey;
+      db.prepare("UPDATE events SET due='2099-08-01T17:00' WHERE id=?").run(cj.id);
       const ch = createEvent(db, { title: '내가 연 대회', starts: '2099-09-01', ends: '2099-09-01' });
       const refs = calRefs(db, { teams: [{ event: ce.id, team: ct, tkey: tk }, { event: ce.id, team: ct, tkey: 'wrong' }],
         judges: [{ event: cj.id, jkey: jk }, { event: ch.id, jkey: 'nope' }], hosts: [{ event: ch.id, okey: ch.okey }] }, '');
