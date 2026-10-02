@@ -1452,6 +1452,15 @@ const cancelLine = e => `<div class="meta" id="cancel-rule" style="margin-top:6p
    목록에 없어서 전부 «기타» 로 뭉쳤다. 뭉친 칸은 2회차에 홍보를 어디다 쓸지 못 알려 준다. */
 const FOUND = ['당근', '오픈 대화방', '인스타', '캠퍼스픽', '위비티', '이벤터스',
                '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
+/* 운영 화면 «모집 늘리기» 에 꺼내 두는 길. 지금 사람이 실제로 오는 곳만 */
+const GROW_CH = ['당근', '오픈 대화방', '인스타', '학교 커뮤니티', '아는 사람'];
+/* 그 방에 그대로 붙이는 모집 문구. 방마다 말투만 조금 다르고 날짜·시간·장소·링크는 같다 */
+function growMsg(e, ch, url) {
+  const when = whenText(e), where = e.place || (e.mode === 'online' ? '온라인' : '장소는 신청하면 안내');
+  const head = ch === '아는 사람' ? `혹시 이거 같이 갈래? 🙌` : ch === '인스타' ? `📣 ${e.title}` : `[${e.title}] 같이 하실 분 모집합니다`;
+  return [head, '', `📅 ${when}`, `📍 ${where}`, e.topic ? `💡 ${e.topic}` : '', e.cap ? `👥 ${e.cap}명까지` : '',
+    '처음이어도, 혼자 와도 됩니다. 이름과 이메일만 있으면 신청 끝.', '', `신청 → ${url}`].filter((x, i, a) => x !== '' || (i > 0 && a[i - 1] !== '')).join('\n');
+}
 /* 초대 링크. /e/<id>?f=당근 으로 뿌리면 신청할 때 «어디서 보셨나요» 를 안 묻고 그대로 센다 —
    한 사람씩 데려오는 판에서는 누가 뿌린 링크가 먹혔는지가 유일한 단서다.
    목록에 있는 값만 받는다. 아무 문자열이나 받으면 지나가던 사람이 집계에 줄을 만들 수 있다.
@@ -1631,6 +1640,20 @@ function pasteDates(text, now = ymdLocal()) {
 }
 const walShift = (day, n) => { const d = new Date(day + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 let WAL_FOUND = null;   // 붙여 넣기에서 건진 것 — 넣기 전에 사람이 본다
+/* 직무별 추천. «무엇을 구독하나» 를 사람이 다 적게 하지 않고, 직무 하나 고르면 먼저 권한다.
+   값은 적지 않는다 — 가격은 달마다 바뀌어서 화면에 박으면 거짓말이 된다. 무료인 것만 «무료» 라고 붙인다 */
+const WAL_REC = {
+  '마케팅': [['ChatGPT Plus', '카피 10안을 한 번에 — 톤·금지어를 프로젝트에 고정'], ['Canva', '카드뉴스·썸네일'], ['n8n', '시트 → 인스타·블로그 예약 게시', 1], ['Higgsfield', '15초 숏폼 영상']],
+  '기획': [['Claude Pro', '회의록 → 결정·담당·기한 표'], ['Figma', 'Make 로 눌러 보는 화면을 하루 안에'], ['Notion AI', '문서·회의 정리']],
+  '디자인': [['Figma', '마감은 손으로'], ['Midjourney', '무드보드·시안'], ['ComfyUI', '로컬 생성, 무제한', 1]],
+  '개발': [['Claude Code', '저장소를 읽고 고치는 에이전트'], ['Cursor', '편집기 안 자동완성·수정'], ['Ollama', '로컬 모델', 1], ['GitHub Copilot', '학생·오픈소스는 무료일 때가 있음']],
+  '영업·CS': [['ChatGPT Plus', '문의 답변 초안 — «약속하지 말 것» 을 지시로'], ['Claude Pro', '긴 계약서·메일 요약']],
+  '데이터': [['Claude Pro', '표 붙여 넣고 분석·차트 코드'], ['Gemini', '구글 시트 안에서 바로'], ['ChatGPT Plus', '파일 올려 분석']],
+  '소상공인': [['ChatGPT Plus', '리뷰 답글·메뉴 설명·전단 문구'], ['Canva', '전단·메뉴판'], ['Gemini', '무료로 먼저 써 보기', 1]],
+};
+/* 같은 일을 하는 구독 — 둘 다 내고 있으면 하나는 끊어 볼 만하다 */
+const WAL_OVERLAP = [['Cursor', 'GitHub Copilot'], ['ChatGPT Plus', 'Claude Pro', 'Gemini']];
+let WAL_JOB = (() => { try { return localStorage.getItem('hackon.waljob') || ''; } catch (_) { return ''; } })();
 const WAL_TOOLS = ['Claude Pro', 'Claude Max', 'Claude Code 클라우드 크레딧', 'ChatGPT Plus', 'Gemini', 'Cursor', 'GitHub Copilot', 'Perplexity', 'Midjourney', 'Higgsfield', 'Canva', 'Notion AI', 'ElevenLabs'];
 /* 반복이 있으면 오늘 이후 첫 날로 굴린다. 날짜가 없으면 «모름» — 맨 뒤 */
 function walNext(it, now = ymdLocal()) {
@@ -1665,6 +1688,21 @@ let P_LOGO_DATA = '';   // 협찬사 로고 파일(줄인 data: 주소). 넣고 
    저장할 때마다 '안 본 팀 먼저' 로 순서가 다시 매겨지기 때문이다. */
 let jTeam = null, jAll = false;
 let curPerson = null;
+/* 이력서에 붙일 글. 끝난 대회에서 «왔거나 냈던» 줄만 쓴다 — 신청만 하고 안 온 대회는 이력이 아니다.
+   링크드인은 «프로젝트» 칸 한 덩이, 링커리어·이력서는 대외활동 칸(활동명·기관·기간·내용) 꼴 */
+function resumeText(d, kind, now = ymdLocal()) {
+  const rows = (d.history || []).filter(h => h.ends && h.ends < now && (h.came || h.made));
+  const link = `${location.origin}/p/${d.id}`;
+  const ym = x => String(x || '').slice(0, 7).replace('-', '.');
+  const did = h => [h.made ? '결과물 제출(완주)' : '참가', h.role ? `역할 ${h.role}` : '', h.mate ? `${h.mate} 와 함께` : ''].filter(Boolean).join(' · ');
+  if (!rows.length) return '';
+  if (kind === 'linkedin') return [
+    `HACK:ON 해커톤·프로젝트 기록 — 완주 ${d.finished}회 · 수상 ${d.wins || 0}회${d.finishRate !== null && d.finishRate !== undefined ? ` · 완주율 ${d.finishRate}%` : ''}`,
+    ...rows.map(h => `• ${ym(h.ends)} ${h.title} — ${did(h)}${h.url ? ` · ${h.url}` : ''}`),
+    `검증된 기록: ${link}`].join('\n');
+  return rows.map(h => [`활동명: ${h.title}`, `기관: HACK:ON (hackon.kr)`, `기간: ${ym(h.ends)}`,
+    `내용: ${did(h)}${h.url ? ` · 결과물 ${h.url}` : ''}`].join('\n')).join('\n\n') + `\n\n기록 확인: ${link}`;
+}
 let OWN_TK = '';   // 프로필 화면에서 «이 사람 본인» 으로 확인된 팀 열쇠. 밖에서 만든 것을 올리고 지울 때 쓴다
 let TVWALL = false;   // 큰 화면 로고 벽 고정(L 키)
 document.addEventListener('keydown', e => { if (TVM && (e.key === 'l' || e.key === 'L')) { TVWALL = !TVWALL; render(); } });
@@ -3401,6 +3439,18 @@ const SCREEN = {
             : ''}</div>
         ${linkBox(`${shareBase()}/e/${e.id}`, '', 'b-copy',
           '<b>참가자용.</b> 찍으면 바로 열립니다.')}
+        ${/* 모집 늘리기 — 길마다 다른 초대 링크(?f=)와 그 길로 몇 명이 왔는지. 한 사람씩 데려오는 판에서
+              «어느 방에 다시 올릴지» 는 이 숫자만 보고 정한다. 문구는 그 방에 그대로 붙일 수 있게 날짜·시간·장소를 넣어 만든다 */''}
+        ${(() => { const by = {}; for (const r of d.rows) if (r.found) by[r.found] = (by[r.found] || 0) + 1;
+           const none = d.rows.filter(r => !r.found).length;
+           return `<div class="card" id="grow" style="margin:10px 0;padding:14px 16px;background:var(--fill)">
+             <b>모집 늘리기</b> <span class="meta">신청 ${d.rows.length}팀${e.cap ? ` / 정원 ${e.cap}` : ''}</span>
+             <div class="meta" style="margin-top:4px">방마다 다른 링크를 뿌리면 어디서 왔는지 저절로 셉니다. 많이 온 방에 한 번 더 올리세요.</div>
+             ${GROW_CH.map(ch => `<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+               <b style="min-width:84px">${esc(ch)}</b><span class="pill${by[ch] ? ' ok' : ''}">${by[ch] || 0}명</span>
+               <button class="btn sec sm" data-flink="${esc(ch)}">링크</button>
+               <button class="btn sec sm" data-fmsg="${esc(ch)}">문구 복사</button></div>`).join('')}
+             ${none ? `<div class="meta" style="margin-top:6px">어디서 왔는지 아직 모름 ${none}명</div>` : ''}</div>`; })()}
         ${/* 협찬 안내는 «보내는» 주소다 — 인스타 프로필·메일에 이 한 줄만 붙인다. 참가자용 바로 밑에 둔다 */''}
         ${linkBox(`${shareBase()}/give/${e.id}`, 'givelink', 'b-copyg',
           '<b>협찬사용.</b> 자리별 희망가와 이름이 어디 붙는지가 한 장에 있습니다.')}
@@ -4206,6 +4256,15 @@ const SCREEN = {
           <div class="shrow" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn" id="wal-ics">달력에 한 번에 넣기</button><button class="btn sec" id="wal-share">친구에게 알려 주기</button></div>
           <div class="meta" style="margin-top:6px">달력 파일을 열면 날짜마다 <b>하루 전 알림</b>이 붙습니다.</div></div>`
         : '<div class="card"><h3>아직 비어 있습니다</h3><div class="meta">아래에서 쓰는 것을 하나 넣어 보세요. 30초면 됩니다.</div></div>'}
+      <div class="card" id="wal-rec"><h3>내 직무에 맞는 도구</h3>
+        <div class="gchips">${Object.keys(WAL_REC).map(j => `<button type="button" class="pick${WAL_JOB === j ? ' on' : ''}" data-wjob="${esc(j)}">${esc(j)}</button>`).join('')}</div>
+        ${WAL_JOB ? WAL_REC[WAL_JOB].map(([t, why, free]) => { const has = list.some(it => it.name.toLowerCase().includes(t.toLowerCase()));
+            return `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--rule);margin-top:6px">
+              <div style="flex:1;min-width:0"><b>${esc(t)}</b>${free ? ' <span class="pill ok">무료</span>' : ''}<div class="meta">${esc(why)}</div></div>
+              ${has ? '<span class="pill">쓰는 중</span>' : `<button class="btn sec sm" data-wrecadd="${esc(t)}">넣기</button>`}</div>`; }).join('')
+          : '<div class="meta" style="margin-top:8px">직무를 고르면 먼저 써 볼 것을 권합니다. 값은 자주 바뀌어서 적지 않습니다.</div>'}
+        ${(() => { const dup = WAL_OVERLAP.map(g => g.filter(t => list.some(it => it.kind === 'renew' && it.name.toLowerCase().includes(t.toLowerCase())))).filter(g => g.length > 1);
+            return dup.length ? `<div class="notice" style="margin-top:10px">${dup.map(g => `<b>${g.map(esc).join(' · ')}</b> — 같은 일을 하는 구독입니다. 하나로 줄여 볼 만합니다.`).join('<br>')}</div>` : ''; })()}</div>
       ${list.length ? `<div class="card" id="wal-perks"><h3>내 도구에 붙는 혜택</h3>
         ${wNews === null && wRef === null ? '<div class="meta">혜택 소식을 불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
           : !perks.length ? '<div class="meta">지금 넣은 도구에 맞는 할인 소식·추천 코드가 없습니다.</div>'
@@ -4931,6 +4990,11 @@ const SCREEN = {
         ${T.next ? `<div class="meta" style="margin-top:6px">${esc(T.next)}</div>` : ''}
         <div class="meta" style="margin-top:10px;font-family:var(--mono,monospace)">${esc(location.host)}/p/${esc(d.id)}</div>
         <div class="meta">이 주소를 이력서·프로필에 붙이세요. 숫자는 대회 기록에서만 나옵니다.</div>
+        ${/* 링크드인·링커리어에 그대로 붙이는 글. 대회가 찍어 준 기록(끝난 대회에서 왔거나 낸 것)만 — 본인이 늘려 적을 칸이 없다 */''}
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px">
+          <button class="btn sec sm" data-resume="linkedin">링크드인용 복사</button>
+          <button class="btn sec sm" data-resume="linkareer">링커리어·이력서용 복사</button></div>
+        <pre id="resume-out" hidden style="white-space:pre-wrap;user-select:all;text-align:left;font-size:13px;margin-top:10px"></pre>
       </div>
       ${made.length ? `<div class="card" id="made">
         <h3>만든 것 <span class="pill">${made.length}</span></h3>
@@ -6631,6 +6695,12 @@ function wire() {
     if (!walSave(l)) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
     flash('넣었습니다');
   };
+  document.querySelectorAll('[data-wjob]').forEach(b => b.onclick = () => { WAL_JOB = WAL_JOB === b.dataset.wjob ? '' : b.dataset.wjob; try { localStorage.setItem('hackon.waljob', WAL_JOB); } catch (_) {} render(); });
+  document.querySelectorAll('[data-wrecadd]').forEach(b => b.onclick = () => {
+    const l = walLoad(); l.push({ name: b.dataset.wrecadd, kind: 'renew', date: '', every: 'month', won: 0, memo: '' });
+    if (!walSave(l)) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
+    flash(`${b.dataset.wrecadd} 를 넣었습니다. 갱신일을 알면 아래에서 고치세요`);
+  });
   if ($('#wl-parse')) $('#wl-parse').onclick = () => { WAL_FOUND = pasteDates($('#wl-paste').value); render(); };
   if ($('#wl-addall')) $('#wl-addall').onclick = () => {
     const pick = [...document.querySelectorAll('[data-wfound]:checked')].map(c => WAL_FOUND.found[+c.dataset.wfound]);
@@ -6737,6 +6807,12 @@ function wire() {
   document.querySelectorAll('[data-rsok]').forEach(b => b.onclick = async () => {
     try { await api(`/admin/ref/${b.dataset.rsok}`, { method: 'POST', body: {} }); flash('열었습니다'); } catch (e) { flash(e.message, true); }
   });
+  document.querySelectorAll('[data-resume]').forEach(b => b.onclick = async () => {
+    const t = PROF ? resumeText(PROF, b.dataset.resume) : '';
+    if (!t) return flash('아직 끝난 대회 기록이 없습니다 — 대회에 나오면 여기 쌓입니다', true);
+    const out = $('#resume-out'); out.textContent = t; out.hidden = false;   // 복사가 막혀도 눈으로 보고 고를 수 있게
+    try { await navigator.clipboard.writeText(t); flash(b.dataset.resume === 'linkedin' ? '링크드인 «프로젝트» 칸에 붙여 넣으세요' : '대외활동 칸에 붙여 넣으세요'); } catch (_) {}
+  });
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -6765,6 +6841,15 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
   if (lst) lst.onclick = () => setList(true);
+  const growUrl = ch => `${shareBase()}/e/${cur}?f=${encodeURIComponent(ch)}`;
+  /* 복사가 막히면(앱 안·http) prompt 대신 화면에 그대로 띄운다 — 앱(WKWebView)에선 prompt 가 안 뜬다 */
+  const growCopy = async (text, ok) => { try { await navigator.clipboard.writeText(text); flash(ok); }
+    catch (_) { const g = $('#grow'); if (g) { let pre = $('#grow-out'); if (!pre) { pre = document.createElement('pre'); pre.id = 'grow-out'; pre.style.cssText = 'white-space:pre-wrap;user-select:all;margin-top:8px;font-size:13px'; g.appendChild(pre); } pre.textContent = text; } } };
+  document.querySelectorAll('[data-flink]').forEach(b => b.onclick = () => growCopy(growUrl(b.dataset.flink), `${b.dataset.flink} 링크를 복사했습니다`));
+  document.querySelectorAll('[data-fmsg]').forEach(b => b.onclick = async () => {
+    let ev = null; try { ev = await api(`/events/${cur}`); } catch (_) { return flash('대회 정보를 못 읽었습니다', true); }
+    growCopy(growMsg(ev, b.dataset.fmsg, growUrl(b.dataset.fmsg)), `${b.dataset.fmsg} 문구를 복사했습니다. 그 방에 붙여 넣으세요`);
+  });
   const unsmp = $('#b-unsample');
   if (unsmp) unsmp.onclick = async () => {
     try { await api(`/events/${cur}/sample`, { method: 'POST', body: { sample: false } }); flash('연습용을 풀었습니다. 이제 목록에 올릴 수 있습니다'); } catch (e) { flash(e.message, true); }

@@ -4130,6 +4130,15 @@ with sync_playwright() as pw:
     _wl = pg.inner_text("#wal-list")
     A("서류 제출" in _wl and "데모데이" in _wl, f"붙여 넣기로 건진 것이 지갑에 안 들어간다: {_wl[:300]}")
     A(not _reqs, f"붙여 넣은 글이 서버로 간다: {_reqs}")
+    # 직무 추천 — 고르면 먼저 써 볼 것, 이미 쓰는 것은 «쓰는 중», 같은 일 하는 구독 둘은 «줄여 볼 만»
+    pg.fill("#wl-name", "Cursor"); pg.click('[data-wkind="renew"]'); pg.fill("#wl-date", "2099-02-01"); pg.click("#wl-go"); pg.wait_for_timeout(400)
+    pg.fill("#wl-name", "GitHub Copilot"); pg.click('[data-wkind="renew"]'); pg.fill("#wl-date", "2099-03-01"); pg.click("#wl-go"); pg.wait_for_timeout(400)
+    pg.click('[data-wjob="개발"]'); pg.wait_for_timeout(400)
+    _rc = pg.inner_text("#wal-rec")
+    A("Claude Code" in _rc and "쓰는 중" in _rc and "하나로 줄여 볼 만" in _rc, f"직무 추천·쓰는 중·겹침 안내가 안 뜬다: {_rc}")
+    pg.click('[data-wrecadd="Claude Code"]'); pg.wait_for_timeout(400)
+    A("Claude Code" in pg.inner_text("#wal-list"), "추천에서 «넣기» 를 눌렀는데 지갑에 안 들어간다")
+    A(not _reqs, f"직무 추천이 서버로 간다: {_reqs}")
     b.close()
 ok("AI 지갑 — 날짜순·날짜 모름은 맨 뒤·달력 파일(하루 전 알림)·서버로 안 보냄·안 쓰는 구독은 해지 후보·붙여 넣은 글에서 마감·일정 건지기")
 # ── 검색·AI 답변 — 대회 공개 화면 머리 딱지, Event 한 장, /llms.txt ──
@@ -4165,5 +4174,38 @@ with sync_playwright() as pw:
     A(pg.query_selector("#m-contact") is None, "참가자 폰에서 신청 때 적은 이메일을 «조금만 더» 가 또 묻는다")
     b.close()
 ok("참가자 폰 — 신청 때 받은 이메일을 다시 안 묻고, 첫 화면이 옆으로 안 밀린다")
+
+# ── 모집 늘리기 — 방마다 다른 초대 링크, 그 길로 온 수, 그 방에 붙일 문구 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 390, "height": 844}); ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+    _gr = post("/api/events", {"title": "모집 늘리기 검사"})[1]
+    post(f"/api/events/{_gr['id']}", {"starts": "2099-10-31", "ends": "2099-10-31", "place": "선릉", "cap": 40}, _gr["okey"], method="PATCH")
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("grow: " + str(e)))
+    pg.goto(BASE + f"/e/{_gr['id']}?f=당근", wait_until="networkidle"); pg.wait_for_selector("#t-name")
+    pg.fill("#t-name", "당근에서온팀"); pg.fill("#t-email", "dg@example.com"); pg.check("#t-agree"); pg.click("#t-join"); pg.wait_for_selector("#m-save")
+    op = ctx.new_page(); op.on("pageerror", lambda e: errs.append("grow-op: " + str(e)))
+    op.add_init_script(f"localStorage.setItem('hackon.okey.{_gr['id']}','{_gr['okey']}')")
+    op.goto(BASE + f"/app#{_gr['id']}", wait_until="networkidle"); op.wait_for_selector("#grow", state="attached", timeout=10000)
+    _gt = op.eval_on_selector("#grow", "el => el.textContent")
+    A("당근" in _gt and "1명" in _gt and "정원 40" in _gt, f"모집 늘리기에 당근 1명·정원이 안 보인다: {_gt[:200]}")
+    op.click('#host-tabs [data-sec="sec-links"]'); op.wait_for_timeout(300)
+    op.click('[data-fmsg="오픈 대화방"]'); op.wait_for_timeout(600)
+    _clip = op.evaluate("navigator.clipboard.readText()")
+    A("모집 늘리기 검사" in _clip and "선릉" in _clip and f"/e/{_gr['id']}?f=" in _clip and urllib.parse.quote("오픈 대화방") in _clip,
+      f"대화방에 붙일 문구에 제목·장소·그 방 링크가 없다: {_clip}")
+    b.close()
+ok("모집 늘리기 — 방마다 초대 링크·온 수·붙일 문구(날짜·장소·그 방 링크)")
+
+# ── 이력서에 붙일 글 — 끝난 대회에서 왔거나 낸 것만, 신청만 한 것·안 끝난 것은 뺀다 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(); pg.goto(BASE + "/app", wait_until="networkidle")
+    _d = "{id:'abc123abc123',finished:1,wins:0,finishRate:50,history:[{title:'낸 대회',ends:'2026-10-31',came:true,made:true,url:'https://x.example'},{title:'신청만 한 대회',ends:'2026-08-01',came:false,made:false},{title:'안 끝난 대회',ends:'2099-01-01',came:true,made:true}]}"
+    _li = pg.evaluate(f"resumeText({_d}, 'linkedin', '2026-11-05')"); _lk = pg.evaluate(f"resumeText({_d}, 'linkareer', '2026-11-05')")
+    A("낸 대회" in _li and "결과물 제출(완주)" in _li and "/p/abc123abc123" in _li, f"링크드인용 글이 기록을 안 싣는다: {_li}")
+    A("신청만 한 대회" not in _li + _lk and "안 끝난 대회" not in _li + _lk, f"신청만 한 대회·안 끝난 대회가 이력에 들어간다: {_li}")
+    A("활동명: 낸 대회" in _lk and "기관: HACK:ON" in _lk, f"링커리어용 칸 꼴이 아니다: {_lk}")
+    b.close()
+ok("이력서에 붙일 글 — 링크드인·링커리어 꼴, 끝난 대회에서 왔거나 낸 것만")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
