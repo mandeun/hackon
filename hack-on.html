@@ -851,6 +851,27 @@ const isBlocked = (ev, team) => blockList().includes(ev + '|' + team);
 const repBtns = (ev, kind, ref, team) => LIVE
   ? ` <button class="lnk" data-rep="${esc(kind)}" data-ev="${esc(ev)}" data-ref="${esc(String(ref))}" data-team="${esc(team)}">신고</button>`
     + ` <button class="lnk" data-blk="${esc(team)}" data-ev="${esc(ev)}" data-kind="${esc(kind)}" data-ref="${esc(String(ref))}">차단</button>` : '';
+/* 운영 «오늘 할 일» 카드. 노션 «지금 할 일» 페이지를 대신한다.
+   늦음·오늘·이번 주만 펼치고 나머지는 접는다. 체크하면 서버가 «했음» 을 남긴다 */
+const TODO_SRC = { dday: '대회 날짜', lead: '연락', sponsor: '협찬 약속', manual: '직접' };
+const todoRow = (i, cls) => `<label class="ck" style="margin-top:6px"><input type="checkbox" data-todo="${esc(i.key)}">
+  <span>${esc(i.title)} <span class="meta"${cls ? ` style="color:var(--bad,#C2410C)"` : ''}>· ${i.due ? esc(i.due.slice(5).replace('-', '/')) : '날짜 모름'} · ${esc(TODO_SRC[i.src] || '')}</span></span></label>`;
+function todoCard(t) {
+  if (t === undefined) return '';
+  if (t === null) return `<div class="card" id="todo"><h3>오늘 할 일</h3><div class="meta">할 일을 못 읽었습니다. 새로고침해 보세요.</div></div>`;
+  const top = t.late.length + t.now.length + t.week.length + t.nodate.length;
+  return `<div class="card" id="todo"><h3>오늘 할 일${t.late.length ? ` <span class="pill warn">늦음 ${t.late.length}</span>` : ''}</h3>
+    ${top ? '' : '<div class="meta">이번 주에 할 일이 없습니다.</div>'}
+    ${t.late.length ? `<div class="meta" style="margin-top:6px"><b>늦음</b></div>${t.late.map(i => todoRow(i, 1)).join('')}` : ''}
+    ${t.now.length ? `<div class="meta" style="margin-top:8px"><b>오늘</b></div>${t.now.map(i => todoRow(i)).join('')}` : ''}
+    ${t.week.length ? `<div class="meta" style="margin-top:8px"><b>이번 주</b></div>${t.week.map(i => todoRow(i)).join('')}` : ''}
+    ${t.nodate.length ? `<div class="meta" style="margin-top:8px"><b>날짜 없음</b></div>${t.nodate.map(i => todoRow(i)).join('')}` : ''}
+    ${t.later.length ? `<details style="margin-top:8px"><summary class="meta" style="cursor:pointer">나중 ${t.later.length}</summary>
+      ${t.later.map(i => todoRow(i)).join('')}</details>` : ''}
+    <input id="td-title" maxlength="80" placeholder="할 일 한 줄 (예: 심사위원께 확인 전화)" style="margin-top:10px">
+    <div class="shrow" style="margin-top:6px"><input id="td-due" type="date" aria-label="기한 (비워도 됩니다)" style="flex:1"><button class="btn sm" id="td-add">더하기</button></div>
+    <div class="meta" style="margin-top:6px">대회 날짜·연락 대장·협찬 약속에서 앱이 채웁니다${t.done ? ` · 한 것 ${t.done}` : ''}.</div></div>`;
+}
 /* 데모데이 제출 둘. 영상은 서버가 유튜브 id 로만 남긴다 — 주소는 여기서 만든다 */
 const demoLinks = r => (r.video || r.deck) ? `<div class="shrow" style="margin-top:8px;gap:6px;flex-wrap:wrap">
   ${r.video ? `<a class="btn sec sm" target="_blank" rel="noopener noreferrer" href="https://youtu.be/${esc(r.video)}">▶ 1분 시연 영상</a>` : ''}
@@ -2672,15 +2693,16 @@ const SCREEN = {
 
     const leadsHtml = () => lead ? `<h3 id="sec-leads" style="margin-top:18px">연락한 곳</h3>
         <p class="sub">혼자 열면 어디에 보냈는지를 잊습니다.</p>
-        ${lead.rows.length ? `<table><tr><th>무엇</th><th>어디</th><th>상태</th><th></th></tr>
+        ${lead.rows.length ? `<table><tr><th>무엇</th><th>어디</th><th>상태</th><th>다음 연락</th><th></th></tr>
           ${lead.rows.map(r => `<tr>
             <td>${esc(r.kind)}</td>
             <td>${esc(r.name)}${r.how ? `<br><span class="meta">${esc(r.how)}</span>` : ''}</td>
             <td><button class="btn sec sm" data-state="${r.id}" data-now="${esc(r.state)}"
                   style="padding:4px 9px">${esc(r.state)}</button></td>
+            <td>${r.state === '보냄' || r.state === '답장' ? `<input type="date" data-next="${r.id}" value="${esc(r.next_at || '')}" aria-label="다음 연락일" style="max-width:140px;padding:4px 6px">` : ''}</td>
             <td><button class="btn sec sm" data-drop="${r.id}" style="padding:4px 9px">지움</button></td>
           </tr>`).join('')}</table>
-          <p class="sub">상태를 누르면 보냄 → 답장 → 확정 → 거절 순으로 바뀝니다.</p>`
+          <p class="sub">상태를 누르면 보냄 → 답장 → 확정 → 거절 순으로 바뀝니다. 다음 연락일을 비우면 보낸 날 +3일에 «오늘 할 일»로 올라옵니다.</p>`
         : ''}
         <div class="card">
           <div class="row">
@@ -2720,6 +2742,8 @@ const SCREEN = {
     const e = d.event;
     /* 들어온 신고. 못 읽었으면 null — «신고 0건» 과 «모름» 을 같은 화면으로 그리지 않는다 */
     const reps = (LIVE && e.admin) ? await api(`/events/${cur}/reports`).catch(() => null) : [];
+    /* 오늘 할 일. 못 읽었으면 null — «할 일 없음» 과 «모름» 을 같은 화면으로 그리지 않는다 */
+    const opTodo = (LIVE && e.admin) ? await api(`/events/${cur}/todo`).catch(() => null) : undefined;
     /* 선발형 프로젝트 — 지원자 카드. 연락처 없이 기록만(수락하면 명단에 연락처가 붙는다) */
     const apps = (LIVE && e.pick) ? await api(`/events/${cur}/applicants`).then(r => r.rows).catch(() => null) : [];
     /* 운영자 board 에는 심사·투표 열쇠가 딸려 온다. 적어 두면 링크·창 열기가 늘 된다. */
@@ -2860,6 +2884,8 @@ const SCREEN = {
           QURL_SHOWN ? esc(shareBase() + '/e/' + e.id) : ''}</div>
         <div class="meta" style="margin-top:6px">참가자에게 QR 을 보여 줄 곳은 <b>큰 화면</b>입니다. 심사·투표 QR 은 아래 «보낼 주소»에 있습니다.</div>` : '<button class="btn sec sm" id="b-pub" style="margin-top:14px">공개 페이지 미리보기</button>'}
       </section>
+
+      ${todoCard(opTodo)}
 
       ${(() => {
         /* 심사 넛지. 앱은 심사위원이 있는지 모른다 — 점수가 들어와야 센다. 그래서 상태는 셋이다:
@@ -5999,6 +6025,19 @@ function wire() {
   });
   document.querySelectorAll('[data-repdone]').forEach(b => b.onclick = async () => {
     try { await api(`/reports/${b.dataset.repdone}/done`, { method: 'POST', body: {} }); render(); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-todo]').forEach(c => c.onchange = async () => {
+    try { await api(`/events/${cur}/todo/done`, { method: 'POST', body: { key: c.dataset.todo, on: c.checked } }); flash(c.checked ? '했음으로 표시했습니다' : '되돌렸습니다'); }
+    catch (e) { c.checked = !c.checked; flash(e.message, true); }
+  });
+  const tdAdd = $('#td-add');
+  if (tdAdd) tdAdd.onclick = async () => {
+    try { await api(`/events/${cur}/todo`, { method: 'POST', body: { title: $('#td-title').value.trim(), due: $('#td-due').value } }); flash('할 일을 더했습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-next]').forEach(inp => inp.onchange = async () => {
+    try { await api(`/leads/${inp.dataset.next}`, { method: 'POST', body: { next: inp.value } }); flash('다음 연락일을 적었습니다'); }
+    catch (e) { flash(e.message, true); }
   });
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {

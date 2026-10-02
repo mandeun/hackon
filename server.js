@@ -2867,6 +2867,19 @@ function open(file) {
   for (const c of ['video', 'deck'])
     try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN photo INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* 운영 «오늘 할 일». 앱이 대회 날짜·연락 대장·협찬 약속에서 뽑는 할 일은 표에 안 넣고 그때그때 만든다.
+     여기엔 사람이 직접 적은 것(src='manual')과, 뽑은 것 가운데 «했음» 을 누른 표시(src=그 열쇠)만 남는다.
+     노션 «지금 할 일» 페이지를 대신한다 — 두 곳에 적으면 한쪽이 늘 낡는다 */
+  db.exec(`CREATE TABLE IF NOT EXISTS tasks(
+      id      INTEGER PRIMARY KEY,
+      event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      src     TEXT NOT NULL DEFAULT 'manual',   -- manual | d:<날수> | l:<연락 id>
+      title   TEXT NOT NULL DEFAULT '',
+      due     TEXT NOT NULL DEFAULT '',         -- YYYY-MM-DD. 비면 «날짜 모름» — 늦음으로 안 센다
+      done_at TEXT NOT NULL DEFAULT '',
+      at      TEXT NOT NULL DEFAULT (datetime('now')))`);
+  /* 연락 대장 «다음 연락일». 비면 보낸 날 +3일로 본다 */
+  try { db.exec("ALTER TABLE leads ADD COLUMN next_at TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
   for (const c of ['role', 'found', 'note', 'agreed', 'came', 'want'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
@@ -5450,6 +5463,93 @@ function showcase(db) {
     });
 }
 
+/* ── 운영 «오늘 할 일» ──
+   네 곳에서 모은다: 대회 날짜(D-day 역산) · 연락 대장(답 없는 곳) · 협찬 약속(못 지킨 것) · 직접 적은 것.
+   늦음 / 오늘 / 이번 주 / 나중 / 날짜 모름 으로 나눠 준다. 날짜가 없는 것은 늦음으로 그리지 않는다. */
+const DDAY = [
+  [-28, '포스터·공개 페이지 올리기'], [-21, '협찬 연락 마감 — 답 없는 곳 정리'], [-14, '심사위원·멘토 확정'],
+  [-7, '참가자 안내 보내기 (장소·준비물·대화방)'], [-3, '참석 재확인 보내기'], [-1, '큰 화면·진행표·와이파이 점검'],
+  [1, '결과 보고서 공개'], [7, '협찬사에 결과 보고 보내기'], [14, '2주 뒤 안부 확인'],
+];
+/* 데모데이(미리 만들어 오는 대회)에만 더한다 — 진행표에 «이그나이트» 가 있으면 데모데이로 본다 */
+const DDAY_DEMO = [[-7, '발표 형식 안내 (제목 5초 + 8장 × 15초 자동 넘김)'], [-1, '시연 영상·발표 자료 제출 확인']];
+const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+function todoOf(db, event, now = today()) {
+  const e = db.prepare('SELECT id, kind, starts, ends, plan FROM events WHERE id=?').get(event);
+  if (!e) throw new HttpError(404, '없는 대회입니다');
+  const marks = new Map(db.prepare("SELECT src, done_at FROM tasks WHERE event=? AND src<>'manual'").all(event).map(r => [r.src, r.done_at]));
+  const items = [];
+  /* 1) 대회 날짜. 해커톤(빈 kind)만 — 모임·프로젝트는 매주 도는 것이라 이 목록이 안 맞는다 */
+  if (!e.kind && isDay(String(e.starts).slice(0, 10))) {
+    const st = String(e.starts).slice(0, 10), end = isDay(String(e.ends).slice(0, 10)) ? String(e.ends).slice(0, 10) : st;
+    const demo = /이그나이트|데모데이/.test(String(e.plan || ''));
+    /* 열쇠는 날수. 데모데이 몫은 같은 날수에 겹치므로 끝에 x 를 붙인다 */
+    for (const [n, title, x] of DDAY.concat(demo ? DDAY_DEMO.map(d => [...d, 'x']) : [])) {
+      const key = 'd:' + n + (x || '');
+      items.push({ key, src: 'dday', title, due: addDays(n < 0 ? st : end, n), done: !!marks.get(key) });
+    }
+  }
+  /* 2) 연락 대장. 보냈는데 답이 없거나, 답이 와서 정해야 하는 곳 */
+  for (const l of db.prepare("SELECT id, kind, name, state, at, next_at FROM leads WHERE event=? AND state IN ('보냄','답장')").all(event)) {
+    const key = 'l:' + l.id;
+    items.push({ key, src: 'lead', lead: l.id,
+      title: l.state === '보냄' ? `${l.name} — 답이 없으면 다시 연락 (${l.kind})` : `${l.name} — 답장 왔음, 정하기 (${l.kind})`,
+      due: isDay(l.next_at) ? l.next_at : addDays(String(l.at).slice(0, 10), l.state === '보냄' ? 3 : 1),
+      done: !!marks.get(key) });
+  }
+  /* 3) 협찬 약속. 못 지킨 것만. 끝난 뒤 일주일 안에 지키는 것으로 본다(결과 보고서·로고 사진) */
+  const endDay = isDay(String(e.ends).slice(0, 10)) ? String(e.ends).slice(0, 10) : '';
+  for (const x of db.prepare('SELECT id, name, kind, done FROM sponsors WHERE event=?').all(event)) {
+    const hit = new Set(String(x.done || '').split(',').filter(v => v !== ''));
+    (TIERS[x.kind] || TIERS['크레딧']).forEach((t, i) => {
+      if (hit.has(String(i))) return;
+      items.push({ key: `s:${x.id}:${i}`, src: 'sponsor', sponsor: x.id, title: `${x.name} — ${t}`,
+                   due: endDay ? addDays(endDay, 7) : '', done: false });
+    });
+  }
+  /* 4) 직접 적은 것 */
+  for (const t of db.prepare("SELECT id, title, due, done_at FROM tasks WHERE event=? AND src='manual' ORDER BY id").all(event))
+    items.push({ key: 'm:' + t.id, src: 'manual', title: t.title, due: t.due, done: !!t.done_at });
+  const week = addDays(now, 7);
+  const open = items.filter(i => !i.done).sort((a, b) => (a.due || '9') < (b.due || '9') ? -1 : 1);
+  return {
+    today: now,
+    late: open.filter(i => i.due && i.due < now),
+    now: open.filter(i => i.due === now),
+    week: open.filter(i => i.due > now && i.due <= week),
+    later: open.filter(i => i.due > week),
+    nodate: open.filter(i => !i.due),
+    done: items.filter(i => i.done).length,
+  };
+}
+function addTodo(db, event, b) {
+  const title = plain(b.title, 80);
+  if (!title) throw new HttpError(400, '할 일을 한 줄 적어 주세요');
+  const due = String(b.due || '');
+  if (due && !isDay(due)) throw new HttpError(400, '날짜는 YYYY-MM-DD 로 넣어 주세요');
+  return { id: Number(db.prepare("INSERT INTO tasks(event,src,title,due) VALUES(?,'manual',?,?)").run(event, title, due).lastInsertRowid) };
+}
+/* «했음» 켜고 끄기. 협찬 약속은 sponsors.done 을 그대로 고친다 — 결과 보고서의 «지킨 약속 n/m» 과 같은 칸이다 */
+function markTodo(db, event, key, on = true) {
+  const k = String(key || '');
+  let m;
+  if ((m = k.match(/^m:(\d+)$/))) {
+    if (!db.prepare("UPDATE tasks SET done_at=? WHERE id=? AND event=? AND src='manual'").run(on ? new Date().toISOString() : '', +m[1], event).changes)
+      throw new HttpError(404, '없는 할 일입니다');
+  } else if ((m = k.match(/^s:(\d+):(\d+)$/))) {
+    const sp = db.prepare('SELECT done FROM sponsors WHERE id=? AND event=?').get(+m[1], event);
+    if (!sp) throw new HttpError(404, '없는 협찬사입니다');
+    const set = new Set(String(sp.done || '').split(',').filter(v => v !== ''));
+    if (on) set.add(m[2]); else set.delete(m[2]);
+    db.prepare('UPDATE sponsors SET done=? WHERE id=?').run([...set].sort((a, b) => a - b).join(','), +m[1]);
+  } else if (/^(d:-?\d+x?|l:\d+)$/.test(k)) {
+    db.prepare("DELETE FROM tasks WHERE event=? AND src=?").run(event, k);
+    if (on) db.prepare("INSERT INTO tasks(event,src,done_at) VALUES(?,?,?)").run(event, k, new Date().toISOString());
+  } else throw new HttpError(400, '모르는 할 일입니다');
+  return { ok: true };
+}
+
 function ledgerOf(db, event) {
   /* direct — 운영자가 «밖에서 구했어요»로 직접 올린 줄. 신청을 거쳐 확인된 줄과 구분해 보여 준다(레드팀: 운영자 사칭) */
   return db.prepare(`SELECT n.kind, n.label, p.name, p.org, p.status, p.created AS at,
@@ -6232,8 +6332,24 @@ function routes(db) {
           needAdmin(db, r.event, key, owner, siteAdmin);
           const b = await body(req);
           if (b.remove) db.prepare('DELETE FROM leads WHERE id=?').run(m[1]);
+          else if (b.next !== undefined) {   // 다음 연락일만 고친다. 비우면 «보낸 날 +3일» 로 돌아간다
+            const nx = String(b.next || '');
+            if (nx && !isDay(nx)) throw new HttpError(400, '날짜는 YYYY-MM-DD 로 넣어 주세요');
+            db.prepare('UPDATE leads SET next_at=? WHERE id=?').run(nx, m[1]);
+          }
           else db.prepare('UPDATE leads SET state=? WHERE id=?').run(b.state || '보냄', m[1]);
           return json(res, 200, { ok: true });
+        }
+        /* 운영 «오늘 할 일» — 그 대회의 운영자만 */
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/todo$/))) {
+          needAdmin(db, m[1], key, owner, siteAdmin);
+          if (req.method === 'POST') return json(res, 201, addTodo(db, m[1], await body(req)));
+          return json(res, 200, todoOf(db, m[1]));
+        }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/todo\/done$/)) && req.method === 'POST') {
+          needAdmin(db, m[1], key, owner, siteAdmin);
+          const b = await body(req);
+          return json(res, 200, markTodo(db, m[1], b.key, b.on !== false));
         }
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/crew$/)) && req.method === 'GET')
           return json(res, 200, crew(db, m[1]));
@@ -7339,6 +7455,43 @@ async function selftest() {
     ok(code === 404, '계정 지우기: 이미 지운 계정은 없는 계정이다');
     db.prepare('DELETE FROM events WHERE id=?').run(eo.id);
     db.prepare('DELETE FROM owners WHERE id=?').run(other);
+  }
+  /* 운영 «오늘 할 일» — 대회 날짜·연락 대장·협찬 약속·직접 적은 것을 한 칸에 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const te = createEvent(db, { title: '할일시험', starts: '2026-10-31', ends: '2026-10-31' });
+    const now = '2026-10-24';   // D-7
+    let td = todoOf(db, te.id, now);
+    ok(td.now.some(i => i.key === 'd:-7') && td.late.some(i => i.key === 'd:-14'), '할 일: D-7 은 오늘, D-14 는 늦음으로 나온다');
+    ok(!td.now.some(i => /발표 형식/.test(i.title)), '할 일: 데모데이가 아니면 발표 형식 안내가 없다');
+    db.prepare("UPDATE events SET plan=? WHERE id=?").run(JSON.stringify([{ at: '13:25', what: '이그나이트 발표 (20팀 · 팀당 3분)' }]), te.id);
+    ok(todoOf(db, te.id, now).now.some(i => i.key === 'd:-7x'), '할 일: 진행표에 이그나이트가 있으면 데모데이 몫(발표 형식 안내)이 더해진다');
+    markTodo(db, te.id, 'd:-7');
+    ok(!todoOf(db, te.id, now).now.some(i => i.key === 'd:-7') && todoOf(db, te.id, now).done >= 1, '할 일: «했음» 을 누르면 목록에서 빠진다');
+    markTodo(db, te.id, 'd:-7', false);
+    ok(todoOf(db, te.id, now).now.some(i => i.key === 'd:-7'), '할 일: 다시 누르면 돌아온다');
+    /* 연락 대장 — 보낸 날 +3일, 다음 연락일을 적으면 그 날 */
+    const lid = Number(db.prepare("INSERT INTO leads(event,kind,name,at) VALUES(?,?,?,?)").run(te.id, '협찬', '과일가게', '2026-10-20').lastInsertRowid);
+    ok(todoOf(db, te.id, now).late.some(i => i.key === 'l:' + lid && i.due === '2026-10-23'), '할 일: 답 없는 연락은 보낸 날 +3일이 기한이다');
+    db.prepare('UPDATE leads SET next_at=? WHERE id=?').run('2026-10-26', lid);
+    ok(todoOf(db, te.id, now).week.some(i => i.key === 'l:' + lid), '할 일: 다음 연락일을 적으면 그 날로 옮겨 간다');
+    db.prepare("UPDATE leads SET state='확정' WHERE id=?").run(lid);
+    ok(!JSON.stringify(todoOf(db, te.id, now)).includes('과일가게'), '할 일: 확정된 연락은 할 일에서 빠진다');
+    /* 협찬 약속 — 끝난 날 +7일. 했음을 누르면 결과 보고서의 «지킨 약속» 이 같이 오른다 */
+    const sid = Number(db.prepare("INSERT INTO sponsors(event,name,kind) VALUES(?,?,?)").run(te.id, '일레븐랩스', '크레딧').lastInsertRowid);
+    const sp1 = todoOf(db, te.id, now).week.concat(todoOf(db, te.id, now).later).filter(i => i.sponsor === sid);
+    ok(sp1.length === (TIERS['크레딧'] || []).length && sp1.every(i => i.due === '2026-11-07'), '할 일: 협찬 약속이 끝난 날 +7일로 나온다');
+    markTodo(db, te.id, `s:${sid}:0`);
+    ok(db.prepare('SELECT done FROM sponsors WHERE id=?').get(sid).done === '0', '할 일: 협찬 약속을 했음으로 누르면 sponsors.done 이 같이 바뀐다');
+    /* 직접 적은 것 — 날짜 없으면 «날짜 모름» 이지 늦음이 아니다 */
+    const mid = addTodo(db, te.id, { title: '정회광에게 안내문 회신' }).id;
+    td = todoOf(db, te.id, now);
+    ok(td.nodate.some(i => i.key === 'm:' + mid) && !td.late.some(i => i.key === 'm:' + mid), '할 일: 날짜 없는 것은 «날짜 모름» 칸 — 늦음으로 안 센다');
+    ok(raises(() => addTodo(db, te.id, { title: '' }), 400) && raises(() => addTodo(db, te.id, { title: 'x', due: '10/31' }), 400), '할 일: 빈 제목·틀린 날짜는 400');
+    ok(raises(() => markTodo(db, te.id, 'zz'), 400) && raises(() => markTodo(db, te.id, 'm:999999'), 404), '할 일: 모르는 열쇠·없는 할 일은 막는다');
+    const other = createEvent(db, { title: '남의대회' });
+    ok(raises(() => markTodo(db, other.id, 'm:' + mid), 404), '할 일: 남의 대회 할 일은 못 고친다');
+    db.prepare('DELETE FROM events WHERE id IN (?,?)').run(te.id, other.id);
   }
   /* 옛 DB 옮겨심기 — owners.kakao 에만 있던 계정이 logins 로 온다. 몇 번 돌려도 같다(E19) */
   {
