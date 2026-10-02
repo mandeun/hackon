@@ -1874,6 +1874,12 @@ function lineDiff(a, b) {
 }
 const bdPostId = () => { const m = /^\/board\/(\d+)$/.exec(location.pathname); return m ? +m[1] : 0; };
 const voterTok = () => { try { let v = localStorage.getItem('hackon.voter'); if (!v || !/^[0-9a-z]{12,40}$/i.test(v)) { v = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('hackon.voter', v); } return v; } catch { return ''; } };
+/* App Store 1.2 — 첫 글 전에 이용 규칙 한 번, 차단한 글쓴이(이 기기에만) */
+const RULES_TEXT = '이용 규칙\n· 욕설·비방·차별·성적인 글 금지(올리기 전에 막힙니다)\n· 연락처·광고 금지\n· 신고 셋이면 저절로 내려가고, 운영자가 24시간 안에 확인합니다\n· 어기면 글이 지워지고 쓰기가 막힐 수 있습니다\n\n동의하고 올릴까요?';
+const needRules = () => { try { if (localStorage.getItem('hackon.rules') === '1') return true; } catch {} if (!confirm(RULES_TEXT)) return false; try { localStorage.setItem('hackon.rules', '1'); } catch {} return true; };
+const blockedSet = () => { try { return new Set(JSON.parse(localStorage.getItem('hackon.blocked') || '[]')); } catch { return new Set(); } };
+const setBlocked = set => { try { localStorage.setItem('hackon.blocked', JSON.stringify([...set].slice(-500))); } catch {} };
+const SAFETY_LINE = '<p class="meta" style="margin:16px 4px">신고는 24시간 안에 확인합니다 · 문의 <a href="mailto:hi@mandeun.com">hi@mandeun.com</a> · <a href="/privacy">개인정보</a></p>';
 const ago = t => { const m = Math.max(0, (Date.now() - Date.parse(String(t).replace(' ', 'T') + 'Z')) / 60000); return m < 1 ? '방금' : m < 60 ? Math.floor(m) + '분 전' : m < 1440 ? Math.floor(m / 60) + '시간 전' : Math.floor(m / 1440) + '일 전'; };
 const meOf = () => { try { return localStorage.getItem('hackon.me') || ''; } catch { return ''; } };
 /* 일상 입구 — 네 사람의 하루에 해커온이 끼는 자리. «앱을 여는 이유» 가 사람마다 다르다(docs/daily.md) */
@@ -4843,8 +4849,9 @@ const SCREEN = {
           <div class="bdmeta"><b>${esc(e.author)}</b><span>${esc(ago(e.created))}</span>${e.stale ? `<span class="gstate wait">옛 판(${e.base}판) 위 — 합칠 수 없음</span>` : ''}</div>
           ${e.note ? `<div style="margin:6px 0;font-weight:700">${esc(e.note)}</div>` : ''}
           <div class="diff">${diff(e)}</div>
-          ${d.isEditor ? `<div class="shrow" style="margin-top:10px">${e.stale ? '' : `<button class="btn sm" data-merge="${e.id}">합치기</button>`}<button class="btn sec sm" data-eclose="${e.id}">돌려보내기</button></div>` : ''}
+          ${d.isEditor ? `<div class="shrow" style="margin-top:10px">${e.stale ? '' : `<button class="btn sm" data-merge="${e.id}">합치기</button>`}<button class="btn sec sm" data-eclose="${e.id}">돌려보내기</button></div>` : `<div style="margin-top:8px"><button type="button" class="bdmini" style="margin:0" data-bdreport="e:${e.id}">신고</button></div>`}
         </div>`).join('')}` : ''}
+      ${SAFETY_LINE}
       ${d.history.length ? `<details class="more"><summary>판 기록 ${d.history.length}</summary><div class="in">${d.history.map(h => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${h.ver}판</b><span>${esc(h.author)}</span><span>${esc(h.note)}</span><span>${esc(ago(h.at))}</span></div>`).join('')}</div></details>` : ''}`;
   },
 
@@ -4856,6 +4863,7 @@ const SCREEN = {
       let d = null, gone = false;
       try { d = await api(`/board/${id}`, { voter: voterTok() }); } catch (e) { gone = e.status === 404; }
       if (!d) return `<a class="bdback" href="/board">‹ 게시판</a><div class="card"><div class="meta">${gone ? '없거나 내려간 글입니다.' : '지금 못 불러왔습니다 — 잠시 뒤 다시 열어 주세요.'}</div></div>`;
+      if (d.post.atag && blockedSet().has(d.post.atag)) return `<a class="bdback" href="/board">‹ 게시판</a><div class="card"><div class="meta">차단한 사람의 글입니다.</div><button type="button" class="btn sec sm" data-bdunblock="${esc(d.post.atag)}" style="margin-top:8px">차단 풀고 보기</button></div>`;
       const p = d.post, tn = Object.fromEntries(d.topics), mine = (() => { try { return localStorage.getItem('hackon.bkey.' + p.id) || ''; } catch { return ''; } })();
       return `<a class="bdback" href="/board${p.topic ? '?t=' + esc(p.topic) : ''}">‹ ${esc(tn[p.topic] || '게시판')}</a>
         <article class="bdpost" id="bd-post">
@@ -4866,16 +4874,17 @@ const SCREEN = {
             <button type="button" class="bdup${p.voted ? ' on' : ''}" data-bdup="${p.id}" aria-pressed="${p.voted}">▲ <b id="bd-upn">${p.up}</b></button>
             <button type="button" data-bdshare="${p.id}">↗ 공유</button>
             <button type="button" data-bdreport="p:${p.id}">신고</button>
+            ${p.atag ? `<button type="button" data-bdblock="${esc(p.atag)}">차단</button>` : ''}
             ${mine ? `<button type="button" data-bddel="p:${p.id}">지우기</button>` : ''}
           </div>
         </article>
         <h3 class="calsec">댓글 ${d.comments.length}</h3>
-        <div id="bd-comments">${d.comments.map(c => { const ck = (() => { try { return localStorage.getItem('hackon.ckey.' + c.id) || ''; } catch { return ''; } })();
+        <div id="bd-comments">${d.comments.filter(c => !(c.atag && blockedSet().has(c.atag))).map(c => { const ck = (() => { try { return localStorage.getItem('hackon.ckey.' + c.id) || ''; } catch { return ''; } })();
           return `<div class="bdc"><div class="bdmeta"><b>${esc(c.nick)}</b><span>${esc(ago(c.created))}</span>
-            <button type="button" class="bdmini" data-bdreport="c:${c.id}">신고</button>${ck ? `<button type="button" class="bdmini" data-bddel="c:${c.id}">지우기</button>` : ''}</div>
+            <button type="button" class="bdmini" data-bdreport="c:${c.id}">신고</button>${c.atag ? `<button type="button" class="bdmini" data-bdblock="${esc(c.atag)}">차단</button>` : ''}${ck ? `<button type="button" class="bdmini" data-bddel="c:${c.id}">지우기</button>` : ''}</div>
             <div class="bdbody">${esc(c.body)}</div></div>`; }).join('') || '<div class="meta" style="padding:6px 4px">첫 댓글을 남겨 주세요.</div>'}</div>
         <div class="card bdform" id="bd-cform"><textarea id="bdc-body" maxlength="1000" rows="3" placeholder="댓글 — 연락처는 적지 않습니다"></textarea>
-          <div class="shrow" style="margin-top:8px"><input id="bdc-nick" maxlength="16" placeholder="닉네임(비우면 익명)" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"><button class="btn sm" id="bdc-send">달기</button></div></div>`;
+          <div class="shrow" style="margin-top:8px"><input id="bdc-nick" maxlength="16" placeholder="닉네임(비우면 익명)" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"><button class="btn sm" id="bdc-send">달기</button></div></div>${SAFETY_LINE}`;
     }
     const qt = new URLSearchParams(location.search).get('t');
     if (qt && !bdTopic) bdTopic = qt;
@@ -4894,13 +4903,14 @@ const SCREEN = {
     const tn = Object.fromEntries(topics);
     return head + write + `<div class="htabs" id="bd-topics"><button type="button" data-bdt=""${bdTopic ? '' : ' class="on"'}>전체</button>${topics.map(([k, t]) => `<button type="button" data-bdt="${k}"${bdTopic === k ? ' class="on"' : ''}>${esc(t)}</button>`).join('')}</div>
       <div class="bdsort" id="bd-sort">${[['hot', '🔥 인기'], ['new', '🆕 최신'], ['top', '🏆 주간 TOP']].map(([k, t]) => `<button type="button" data-bds="${k}"${bdSort === k ? ' class="on"' : ''}>${t}</button>`).join('')}</div>
+      ${(() => { const bl = blockedSet(), hid = d.rows.filter(r => r.atag && bl.has(r.atag)).length; d.rows = d.rows.filter(r => !(r.atag && bl.has(r.atag))); return hid ? `<div class="meta" style="margin:0 4px 8px">차단한 사람의 글 ${hid}개를 숨겼습니다 · <button type="button" class="bdmini" id="bd-unblock" style="margin:0">차단 모두 풀기</button></div>` : ''; })()}
       <div id="bd-list">${d.rows.length ? d.rows.map(r => `<a class="bdrow" href="/board/${r.id}">
           <span class="bdv" aria-label="추천 ${r.up}"><i>▲</i><b>${r.up}</b></span>
           <span class="bdr"><span class="bdmeta"><span class="bdtopic">${esc(tn[r.topic] || '')}</span>${r.best ? '<span class="bdbest">개념</span>' : ''}</span>
             <b class="bdt">${esc(r.title)}</b>
             ${r.peek ? `<span class="bdpeek">${esc(r.peek)}</span>` : ''}
             <span class="bdmeta"><span>${esc(r.nick)} · ${esc(ago(r.created))}</span><span>💬 ${r.comments}</span></span></span></a>`).join('')
-        : `<div class="card"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>`;
+        : `<div class="card"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>${SAFETY_LINE}`;
   },
 
   /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
@@ -7635,7 +7645,7 @@ function wire() {
       if (author) try { localStorage.setItem('hackon.nick', author); } catch {}
       const body = { body: $('#wr-body').value, base: +wrSend.dataset.base, note: $('#wr-note').value, author };
       const r = ek ? await api(`/chapters/${at.ch}`, { method: 'POST', ekey: ek, body }).catch(e => { if (e.status === 403) return null; throw e; }) : null;
-      if (!r) await api(`/chapters/${at.ch}/edits`, { method: 'POST', body });
+      if (!r) { if (!needRules()) return; await api(`/chapters/${at.ch}/edits`, { method: 'POST', body: { ...body, agree: true } }); }
       wrEditing = false; flash(r ? '저장했습니다 — 새 판이 됐습니다' : '제안을 보냈습니다 — 편집자가 합치면 글에 들어갑니다'); render();
     } catch (e) { flash(e.message, true); }
   };
@@ -7652,7 +7662,8 @@ function wire() {
   if (bdfSend) bdfSend.onclick = async () => {
     const tp = document.querySelector('[data-bdft].on'), nick = $('#bdf-nick').value.trim();
     try {
-      const r = await api('/board', { method: 'POST', body: { topic: tp ? tp.dataset.bdft : 'free', title: $('#bdf-title').value, body: $('#bdf-body').value, nick } });
+      if (!needRules()) return;
+      const r = await api('/board', { method: 'POST', voter: voterTok(), body: { topic: tp ? tp.dataset.bdft : 'free', title: $('#bdf-title').value, body: $('#bdf-body').value, nick, agree: true } });
       try { localStorage.setItem('hackon.bkey.' + r.id, r.bkey); if (nick) localStorage.setItem('hackon.nick', nick); } catch {}
       location.href = '/board/' + r.id;
     } catch (e) { flash(e.message, true); }
@@ -7676,10 +7687,17 @@ function wire() {
     const url = location.origin + '/board/' + b.dataset.bdshare, title = ($('#bd-post h1') || {}).textContent || 'HACK:ON 게시판';
     try { if (navigator.share) await navigator.share({ title, url }); else { await navigator.clipboard.writeText(url); flash('주소를 복사했습니다'); } } catch {}
   });
+  document.querySelectorAll('[data-bdblock]').forEach(b => b.onclick = () => {
+    if (!confirm('이 사람을 차단할까요? 이 기기에서 그 사람의 글·댓글이 안 보입니다.')) return;
+    const set = blockedSet(); set.add(b.dataset.bdblock); setBlocked(set); flash('차단했습니다'); render();
+  });
+  document.querySelectorAll('[data-bdunblock]').forEach(b => b.onclick = () => { const set = blockedSet(); set.delete(b.dataset.bdunblock); setBlocked(set); render(); });
+  const bdUnblock = $('#bd-unblock'); if (bdUnblock) bdUnblock.onclick = () => { setBlocked(new Set()); render(); };
   const bdcSend = $('#bdc-send');
   if (bdcSend) bdcSend.onclick = async () => {
     const nick = $('#bdc-nick').value.trim();
-    try { const r = await api(`/board/${bdPostId()}/comments`, { method: 'POST', body: { body: $('#bdc-body').value, nick } });
+    if (!needRules()) return;
+    try { const r = await api(`/board/${bdPostId()}/comments`, { method: 'POST', voter: voterTok(), body: { body: $('#bdc-body').value, nick, agree: true } });
       try { localStorage.setItem('hackon.ckey.' + r.id, r.ckey); if (nick) localStorage.setItem('hackon.nick', nick); } catch {}
       render(); } catch (e) { flash(e.message, true); }
   };

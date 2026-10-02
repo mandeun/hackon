@@ -4609,6 +4609,17 @@ with sync_playwright() as pw:
     A("커서로 하루 만에" not in pg.inner_text("#bd-list"), "다른 주제 글이 섞여 나온다")
     pg.click('[data-bdt="vibe"]'); pg.wait_for_timeout(300)
     A("커서로 하루 만에" in pg.inner_text("#bd-list"), "고른 주제의 글이 안 나온다")
+    # App Store 1.2 — 다른 사람 글을 차단하면 이 기기에서 안 보이고, 화면마다 연락처·신고 처리 시한
+    A("24시간 안에" in pg.inner_text("#view") and "hi@mandeun.com" in pg.inner_text("#view"), "게시판에 신고 처리 시한·연락처가 없다")
+    _o = b.new_context(viewport={"width": 390, "height": 844}).new_page(); _o.on("dialog", lambda d: d.accept())
+    _o.goto(BASE + "/board", wait_until="networkidle"); _o.click("#bd-new"); _o.wait_for_selector("#bd-form")
+    _o.click('[data-bdft="vibe"]'); _o.fill("#bdf-title", "차단될 사람의 글"); _o.fill("#bdf-body", "광고 같은 글"); _o.click("#bdf-send"); _o.wait_for_selector("#bd-post")
+    pg.reload(wait_until="networkidle"); pg.wait_for_selector("#bd-list")
+    pg.locator(".bdrow", has_text="차단될 사람의 글").click(); pg.wait_for_selector("#bd-post")
+    pg.click("[data-bdblock]"); pg.wait_for_timeout(300)
+    pg.goto(BASE + "/board?t=vibe", wait_until="networkidle"); pg.wait_for_selector("#bd-list")
+    A("차단될 사람의 글" not in pg.inner_text("#bd-list") and "커서로 하루 만에" in pg.inner_text("#bd-list"), "차단한 사람 글이 아직 보이거나 내 글까지 숨겨졌다")
+    A("숨겼습니다" in pg.inner_text("#view"), "차단으로 숨긴 글 수가 안 보인다")
     pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-board.png"), full_page=True)
     # 지우기 — 쓴 브라우저만
     pg.click(".bdrow"); pg.wait_for_selector("#bd-post")
@@ -4637,6 +4648,7 @@ with sync_playwright() as pw:
     # 다른 사람 둘이 같은 1판 위에서 제안
     for who, body in (("김e2e", "첫 문단.\n둘째 문단을 고쳤다."), ("박e2e", "첫 문단 고침.\n둘째 문단.")):
         wp = b.new_context(viewport={"width": 390, "height": 844}).new_page(); wp.on("pageerror", lambda e: errs.append("write-w: " + str(e)))
+        wp.on("dialog", lambda d: d.accept())   # 첫 제안 전 «이용 규칙» 동의(App Store 1.2)
         wp.goto(_churl, wait_until="networkidle"); wp.wait_for_selector("#wr-edit")
         A("합치기" not in wp.inner_text("#view"), "편집자 아닌 사람에게 «합치기» 가 보인다")
         wp.click("#wr-edit"); wp.fill("#wr-body", body); wp.fill("#wr-author", who); wp.fill("#wr-note", who + " 고침"); wp.click("#wr-send"); wp.wait_for_timeout(500)
