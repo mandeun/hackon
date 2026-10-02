@@ -835,6 +835,75 @@ function recruitList(db, q = {}) {
     });
 }
 
+/* ── 만든 것 (/made) ── 깃허브와 다른 점: 화면을 바로 눌러 보고, 1분 영상으로 보고, 그 자리에서 함께할 사람을 모은다 */
+const jobsCsv = v => [...new Set(String(Array.isArray(v) ? v.join(',') : v || '').split(',').map(x => x.trim()).filter(x => JOBS.includes(x)))].join(',');
+const workOut = (db, w) => ({ id: w.id, title: w.title, line: w.line, demo: w.demo, video: w.video, repo: w.repo, job: w.job,
+  needs: w.needs ? w.needs.split(',') : [], live: !!w.ok, at: w.at,
+  stars: db.prepare('SELECT COUNT(*) c FROM work_stars WHERE work=?').get(w.id).c,
+  joins: db.prepare('SELECT COUNT(*) c FROM work_joins WHERE work=?').get(w.id).c,
+  by: (db.prepare('SELECT name FROM owners WHERE id=?').get(w.owner) || {}).name || '' });
+function worksList(db, q = {}) {
+  const job = JOBS.includes(q.job) ? q.job : '', term = plain(q.q, 40), want = q.need === '1';
+  return db.prepare('SELECT * FROM works WHERE hidden=0 ORDER BY id DESC LIMIT 300').all()
+    .filter(w => (!job || w.job === job || w.needs.split(',').includes(job)) && (!want || w.needs) && (!term || (w.title + w.line).includes(term)))
+    .map(w => workOut(db, w))
+    /* 별은 이번 주에 받은 것이 무겁다 — 오래된 인기작이 위를 막지 않게 별/(경과 일수+2) */
+    .sort((a, b) => b.stars / ((Date.now() - Date.parse(b.at + 'Z')) / 864e5 + 2) - a.stars / ((Date.now() - Date.parse(a.at + 'Z')) / 864e5 + 2) || b.id - a.id);
+}
+function addWork(db, owner, b) {
+  needAcct(db, owner);
+  const title = plain(b.title, 60);
+  if (!title) throw new HttpError(400, '이름을 적어 주세요');
+  const demo = b.demo ? webUrl(b.demo) : '', repo = b.repo ? webUrl(b.repo) : '';
+  if (b.demo && !demo) throw new HttpError(400, '눌러 볼 주소는 https:// 로 시작해야 합니다');
+  if (!demo && !b.video) throw new HttpError(400, '눌러 볼 주소나 1분 영상 중 하나는 있어야 합니다 — 보여 줄 것이 있어야 합니다');
+  const vid = b.video ? ytId(b.video) : '';
+  if (b.video && !vid) throw new HttpError(400, '영상은 유튜브 주소로 넣어 주세요');
+  if (db.prepare("SELECT COUNT(*) c FROM works WHERE owner=? AND at >= datetime('now','-1 day')").get(owner).c >= 5) throw new HttpError(429, '하루 5개까지 올릴 수 있습니다');
+  const id = Number(db.prepare('INSERT INTO works(owner,title,line,demo,video,repo,job,needs) VALUES(?,?,?,?,?,?,?,?)')
+    .run(owner, title, plain(b.line, 120), demo, vid, repo, JOBS.includes(b.job) ? b.job : '', jobsCsv(b.needs)).lastInsertRowid);
+  return { id };
+}
+function workView(db, id, owner) {
+  const w = db.prepare('SELECT * FROM works WHERE id=? AND hidden=0').get(+id);
+  if (!w) throw new HttpError(404, '없거나 내려간 작업물입니다');
+  const mine = !!owner && w.owner === owner;
+  return { ...workOut(db, w), mine,
+    starred: !!owner && !!db.prepare('SELECT 1 FROM work_stars WHERE work=? AND owner=?').get(w.id, owner),
+    asked: !!owner && !!db.prepare('SELECT 1 FROM work_joins WHERE work=? AND owner=?').get(w.id, owner),
+    /* 함께하겠다는 사람과 그 메모는 작업물 주인만 본다 */
+    requests: mine ? db.prepare('SELECT j.id, j.role, j.note, j.at, o.name FROM work_joins j LEFT JOIN owners o ON o.id=j.owner WHERE j.work=? ORDER BY j.id DESC').all(w.id) : undefined };
+}
+function starWork(db, id, owner) {
+  needAcct(db, owner);
+  if (!db.prepare('SELECT 1 FROM works WHERE id=? AND hidden=0').get(+id)) throw new HttpError(404, '없거나 내려간 작업물입니다');
+  if (db.prepare('DELETE FROM work_stars WHERE work=? AND owner=?').run(+id, owner).changes) return { starred: false };
+  db.prepare('INSERT INTO work_stars(work,owner) VALUES(?,?)').run(+id, owner);
+  return { starred: true };
+}
+function joinWork(db, id, owner, b) {
+  needAcct(db, owner);
+  const w = db.prepare('SELECT owner FROM works WHERE id=? AND hidden=0').get(+id);
+  if (!w) throw new HttpError(404, '없거나 내려간 작업물입니다');
+  if (w.owner === owner) throw new HttpError(400, '내 작업물에는 신청하지 않습니다');
+  const note = plain(b.note, 300);
+  if (note.length < 5) throw new HttpError(400, '무엇을 할 수 있는지, 어떻게 연락하면 되는지 적어 주세요');
+  db.prepare('INSERT INTO work_joins(work,owner,role,note) VALUES(?,?,?,?) ON CONFLICT(work,owner) DO UPDATE SET role=excluded.role, note=excluded.note, at=datetime(\'now\')')
+    .run(+id, owner, JOBS.includes(b.role) ? b.role : '', note);
+  return { ok: true };
+}
+function worksAdmin(db, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 봅니다');
+  return db.prepare('SELECT * FROM works WHERE hidden=0 AND ok=0 AND demo<>\'\' ORDER BY id DESC LIMIT 200').all().map(w => workOut(db, w));
+}
+function decideWork(db, id, act, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 정합니다');
+  const col = act === 'ok' ? 'ok' : act === 'hide' ? 'hidden' : '';
+  if (!col) throw new HttpError(400, '모르는 처리입니다');
+  if (!db.prepare(`UPDATE works SET ${col}=1 WHERE id=?`).run(+id).changes) throw new HttpError(404, '없는 작업물입니다');
+  return { ok: true };
+}
+
 /* ── 세팅 모음 (/setups) ──
    낸 사람만 최신판을 받는다 — 받으려면 90일 안에 하나를 내야 한다(SETUP_WINDOW). 관리자는 늘 받는다.
    세팅 본문은 관리자와 낸 사람만 본다. 공개되는 것은 «무엇을 묶었나»(판·메모·제목)뿐이다 */
@@ -922,7 +991,8 @@ function latestPack(db, id, owner) {
 /* ── 모아 보기 (/around) ──
    등록 안 해도 보인다 → 주최자가 확인을 청한다 → 운영자가 넘긴다 → 그 자리에서 HACK:ON 으로 운영.
    제보는 로그인한 사람만(누가 올렸는지 운영자가 알아야 지운다), 하루 10건. 공개 목록엔 제보자·청한 사람이 안 나간다 */
-const SPOT_KINDS = ['해커톤', '동아리', '스터디', '공공 과제'];
+/* 공모전·봉사·대외활동·ESG — 사회공헌과 AI 를 잇는 활동도 같이 모은다(청년 혜택 수집은 공공 출처만, 여기는 제보) */
+const SPOT_KINDS = ['해커톤', '동아리', '스터디', '공공 과제', '공모전', '봉사·대외활동', 'ESG·사회공헌'];
 const spotOut = (r) => ({ id: r.id, kind: r.kind, name: r.name, org: r.org, url: r.url, place: r.place, school: r.school,
   starts: r.starts, ends: r.ends, note: r.note, claimed: r.state === 'claimed', event: r.state === 'claimed' ? r.event : '' });
 function spotsList(db, q = {}) {
@@ -3147,6 +3217,31 @@ function open(file) {
      보상이 «유급» 이어도 HACK:ON 은 돈과 계약에 끼지 않는다 — 조건은 모집자와 지원자가 직접 정한다(직업소개를 하지 않는다) */
   for (const [c, t] of [['roles', "TEXT NOT NULL DEFAULT ''"], ['reward', "TEXT NOT NULL DEFAULT ''"], ['salary', 'INTEGER NOT NULL DEFAULT 0'], ['hours', 'INTEGER NOT NULL DEFAULT 0']])
     try { db.exec(`ALTER TABLE events ADD COLUMN ${c} ${t}`); } catch {}
+  /* 만든 것 — 깃허브처럼 작업물을 올리되, 앱 화면을 그 자리에서 눌러 보고 1분 영상으로 본다.
+     혼자 다 만들기 힘든 사람이 «이 직무 사람이 필요해요» 를 걸고 함께할 사람을 모은다.
+     시연 화면(iframe)은 사이트 운영자가 열어 본 뒤(ok=1)에만 페이지 안에 띄운다 — 그 전엔 새 창 링크만 */
+  db.exec(`CREATE TABLE IF NOT EXISTS works(
+      id      INTEGER PRIMARY KEY,
+      owner   TEXT NOT NULL,
+      title   TEXT NOT NULL,
+      line    TEXT NOT NULL DEFAULT '',        -- 한 줄 소개
+      demo    TEXT NOT NULL DEFAULT '',        -- 눌러 볼 주소(https)
+      video   TEXT NOT NULL DEFAULT '',        -- 유튜브 id 11자
+      repo    TEXT NOT NULL DEFAULT '',        -- 저장소(선택)
+      job     TEXT NOT NULL DEFAULT '',        -- 어느 직무의 일을 푸나(직무 탭과 같은 말)
+      needs   TEXT NOT NULL DEFAULT '',        -- 함께할 사람 — 필요한 직무(쉼표)
+      ok      INTEGER NOT NULL DEFAULT 0,      -- 운영자가 시연을 열어 봄 → 페이지 안에 띄운다
+      hidden  INTEGER NOT NULL DEFAULT 0,
+      at      TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS work_stars(work INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE, owner TEXT NOT NULL, PRIMARY KEY(work, owner))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS work_joins(
+      id    INTEGER PRIMARY KEY,
+      work  INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+      owner TEXT NOT NULL,
+      role  TEXT NOT NULL DEFAULT '',
+      note  TEXT NOT NULL,                     -- 무엇을 할 수 있나·어떻게 연락하나. 작업물 주인만 본다
+      at    TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(work, owner))`);
   /* 연락 대장 «다음 연락일». 비면 보낸 날 +3일로 본다 */
   try { db.exec("ALTER TABLE leads ADD COLUMN next_at TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
@@ -3609,6 +3704,11 @@ function mergeOwners(db, from, into) {
     db.prepare('UPDATE setups SET owner=? WHERE owner=?').run(into, from);
     db.prepare('UPDATE OR IGNORE pack_curators SET owner=? WHERE owner=?').run(into, from);
     db.prepare('DELETE FROM pack_curators WHERE owner=?').run(from);
+    db.prepare('UPDATE works SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE OR IGNORE work_stars SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('DELETE FROM work_stars WHERE owner=?').run(from);
+    db.prepare('UPDATE OR IGNORE work_joins SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('DELETE FROM work_joins WHERE owner=?').run(from);
     db.prepare('UPDATE logins SET owner=? WHERE owner=?').run(into, from);
     /* 사이트 운영자 자격도 따라간다. 둘 다 운영자면 한 줄만 남아야 해서 OR REPLACE 를 쓴다
        — 그냥 UPDATE 면 PRIMARY KEY 가 부딪혀 합치기 전체가 굴러떨어진다. */
@@ -3648,6 +3748,10 @@ async function deleteAccount(db, owner, b, notify) {
     /* 세팅 모음 — 낸 세팅은 그 사람 글이라 같이 지운다. 이미 묶인 최신판은 이름 없이 묶였으니 그대로 */
     db.prepare('DELETE FROM setups WHERE owner=?').run(owner);
     db.prepare('DELETE FROM pack_curators WHERE owner=?').run(owner);
+    /* 만든 것 — 올린 것·별·함께하기 신청을 다 지운다(작업물이 지워지면 거기 달린 별·신청도 같이 간다) */
+    db.prepare('DELETE FROM works WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM work_stars WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM work_joins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM logins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM site_admins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM owners WHERE id=?').run(owner);
@@ -6477,6 +6581,14 @@ function routes(db) {
           return json(res, 200, reviewOutside(db, m[1], !!(await body(req)).ok, { siteAdmin }));
         /* 마켓 — 읽기는 누구나, 판매 등록은 본인(팀·짝 열쇠), 확인·내리기·검사는 사이트 운영자 */
         if (p === '/api/market' && req.method === 'GET') return json(res, 200, { rows: marketList(db) });
+        /* 만든 것 — 보는 것은 누구나, 올리기·별·함께하기는 계정으로 */
+        if (p === '/api/works' && req.method === 'GET') return json(res, 200, { jobs: JOBS, rows: worksList(db, q), loggedIn: !!owner });
+        if (p === '/api/works' && req.method === 'POST') return json(res, 201, addWork(db, owner, await body(req)));
+        if ((m = p.match(/^\/api\/works\/(\d+)$/)) && req.method === 'GET') return json(res, 200, workView(db, m[1], owner));
+        if ((m = p.match(/^\/api\/works\/(\d+)\/star$/)) && req.method === 'POST') return json(res, 200, starWork(db, m[1], owner));
+        if ((m = p.match(/^\/api\/works\/(\d+)\/join$/)) && req.method === 'POST') return json(res, 200, joinWork(db, m[1], owner, await body(req)));
+        if (p === '/api/admin/works' && req.method === 'GET') return json(res, 200, { rows: worksAdmin(db, { siteAdmin }) });
+        if ((m = p.match(/^\/api\/admin\/works\/(\d+)$/)) && req.method === 'POST') return json(res, 200, decideWork(db, m[1], (await body(req)).act, { siteAdmin }));
         if (p === '/api/recruits' && req.method === 'GET') return json(res, 200, { jobs: JOBS, rewards: REWARDS, rows: recruitList(db, q) });
         /* 세팅 모음. 보는 것(목록·판 이력)은 누구나, 내기·열기·최신판 받기는 계정으로 */
         if (p === '/api/packs' && req.method === 'GET') return json(res, 200, { rows: packList(db), window: SETUP_WINDOW, loggedIn: !!owner });
@@ -7456,7 +7568,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -7760,8 +7872,8 @@ async function selftest() {
     const owned = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
       .map((t) => t.name)
       .filter((n) => db.prepare('SELECT COUNT(*) c FROM pragma_table_info(?) WHERE name=\'owner\'').get(n).c);
-    ok(owned.join(',') === 'event_trash,events,logins,news,pack_curators,setups,site_admins',
-       'owner 를 가진 표는 일곱 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
+    ok(owned.join(',') === 'event_trash,events,logins,news,pack_curators,setups,site_admins,work_joins,work_stars,works',
+       'owner 를 가진 표는 열 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
     /* 소식(제보)도 따라간다 */
     const o1 = crypto.randomBytes(6).toString('hex'), o2 = crypto.randomBytes(6).toString('hex');
     db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o1, '갑');
@@ -7788,6 +7900,7 @@ async function selftest() {
     const dpk = Number(db.prepare("INSERT INTO packs(title,code) VALUES('지울 모음','c0de')").run().lastInsertRowid);
     db.prepare('INSERT INTO pack_curators(pack,owner) VALUES(?,?)').run(dpk, a);
     db.prepare("INSERT INTO setups(pack,owner,title,body) VALUES(?,?,'내 세팅','지울 사람의 세팅 본문입니다')").run(dpk, a);
+    db.prepare("INSERT INTO works(owner,title,demo) VALUES(?,'지울 작업물','https://w.example')").run(a);
     let code = 0; try { await deleteAccount(db, a, {}); } catch (e) { code = e.code; }
     ok(code === 409 && db.prepare('SELECT 1 FROM owners WHERE id=?').get(a), '계정 지우기: «탈퇴» 라고 안 적으면 안 지운다');
     const r = await deleteAccount(db, a, { confirm: '탈퇴' }, async () => 0);
@@ -7804,6 +7917,7 @@ async function selftest() {
     db.prepare('DELETE FROM spots WHERE url=?').run('https://del-' + a + '.example');
     ok(!db.prepare('SELECT 1 FROM setups WHERE owner=?').get(a) && !db.prepare('SELECT 1 FROM pack_curators WHERE owner=?').get(a),
        '계정 지우기: 낸 세팅과 모음 관리자 자리도 지운다');
+    ok(!db.prepare('SELECT 1 FROM works WHERE owner=?').get(a), '계정 지우기: 올린 작업물도 지운다');
     db.prepare('DELETE FROM packs WHERE id=?').run(dpk);
     ok(db.prepare('SELECT 1 FROM owners WHERE id=?').get(other) && db.prepare('SELECT 1 FROM events WHERE id=?').get(eo.id),
        '계정 지우기: 남의 계정과 대회는 그대로다');
@@ -7850,6 +7964,32 @@ async function selftest() {
     ok(bad === 400, '활동 보고서: 시작이 끝보다 늦으면 400');
     for (const r of db.prepare('SELECT id FROM events WHERE owner=?').all(ow)) db.prepare('DELETE FROM events WHERE id=?').run(r.id);
     db.prepare('DELETE FROM owners WHERE id=?').run(ow);
+  }
+  /* 만든 것 — 보여 줄 것(주소·영상)이 있어야 올리고, 시연은 운영자가 열어 본 뒤에만 페이지 안에, 함께하기 메모는 주인만 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const [mk, fan] = ['wm', 'wf'].map(x => x + crypto.randomBytes(5).toString('hex'));
+    for (const o of [mk, fan]) db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o, o === mk ? '만든이' : '팬');
+    ok(raises(() => addWork(db, mk, { title: '보여 줄 것 없음' }), 400), '만든 것: 눌러 볼 주소나 영상이 없으면 막는다');
+    ok(raises(() => addWork(db, mk, { title: 'x', demo: 'javascript:alert(1)' }), 400), '만든 것: https 가 아닌 주소는 막는다');
+    const wid = addWork(db, mk, { title: '회의록 정리기', line: '녹음 올리면 결정표', demo: 'https://demo.example/app', video: 'https://youtu.be/dQw4w9WgXcQ',
+                                  job: '기획', needs: '디자인,개발,없는직무' }).id;
+    const w0 = workView(db, wid, fan);
+    ok(!w0.live && w0.video === 'dQw4w9WgXcQ' && w0.needs.join() === '디자인,개발' && w0.requests === undefined,
+       '만든 것: 처음엔 시연을 안 띄우고, 직무는 정한 말만, 남에게 신청 목록이 안 보인다');
+    ok(worksList(db, { job: '디자인' }).some(w => w.id === wid) && worksList(db, { need: '1' }).some(w => w.id === wid), '만든 것: 필요한 직무·«사람 구함» 으로 거른다');
+    ok(starWork(db, wid, fan).starred && workView(db, wid, fan).stars === 1 && !starWork(db, wid, fan).starred, '만든 것: 별은 한 사람 하나, 다시 누르면 뺀다');
+    ok(raises(() => joinWork(db, wid, mk, { note: '내가 나에게' }), 400), '만든 것: 내 작업물엔 함께하기 신청을 못 한다');
+    joinWork(db, wid, fan, { role: '디자인', note: '피그마로 화면 잡아 드릴게요. 인스타 DM 주세요' });
+    const mv = workView(db, wid, mk);
+    ok(mv.requests.length === 1 && mv.requests[0].note.includes('피그마') && mv.requests[0].name === '팬', '만든 것: 함께하기 신청과 메모는 주인이 본다');
+    ok(raises(() => decideWork(db, wid, 'ok', {}), 403), '만든 것: 시연 열기는 사이트 운영자만');
+    decideWork(db, wid, 'ok', { siteAdmin: true });
+    ok(workView(db, wid, fan).live, '만든 것: 운영자가 열어 보면 페이지 안에 시연을 띄운다');
+    decideWork(db, wid, 'hide', { siteAdmin: true });
+    ok(raises(() => workView(db, wid, fan), 404) && !worksList(db).some(w => w.id === wid), '만든 것: 내린 것은 안 보인다');
+    db.prepare('DELETE FROM works WHERE id=?').run(wid);
+    for (const o of [mk, fan]) db.prepare('DELETE FROM owners WHERE id=?').run(o);
   }
   /* 모집공고 — 목록에 올린 선발형 프로젝트만, 직무·보상으로 거르고, 유급이 아니면 월 금액을 지운다 */
   {
@@ -7911,6 +8051,10 @@ async function selftest() {
     const pub = spotsList(db, { q: '연세' });
     ok(pub.length === 1 && !pub[0].claimed && !JSON.stringify(pub).includes(tipper), '모아 보기: 공개 목록에 뜨고 제보자 계정은 안 나간다');
     ok(spotsList(db, { kind: '동아리', q: '연세' }).length === 0, '모아 보기: 종류로 거른다');
+    const esg = addSpot(db, tipper, { kind: 'ESG·사회공헌', name: 'AI 로 동네 어르신 돕기 공모전', url: 'https://esg-ai.example' });
+    ok(spotsList(db, { kind: 'ESG·사회공헌' }).some(r => r.id === esg.id) && SPOT_KINDS.includes('공모전') && SPOT_KINDS.includes('봉사·대외활동'),
+       '모아 보기: 공모전·봉사·대외활동·ESG 도 모은다');
+    db.prepare('DELETE FROM spots WHERE id=?').run(esg.id);
     ok(raises(() => claimSpot(db, host, sp.id, {}), 400), '모아 보기: 주최자임을 보일 방법을 안 적으면 막는다');
     claimSpot(db, host, sp.id, { how: '공식 메일 hack@yonsei.example 로 회신' });
     ok(raises(() => claimSpot(db, tipper, sp.id, { how: '나도' }), 409), '모아 보기: 먼저 청한 사람이 있으면 다른 사람은 못 청한다');

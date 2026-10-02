@@ -1588,7 +1588,8 @@ function moreForm(t) {
 let msg = null;
 let ARD_KIND = '', ARD_Q = '';
 let SETP = 0, SETLATEST = null;
-let RCT_JOB = '', RCT_RW = '';   // 모집공고 — 고른 직무·보상
+let RCT_JOB = '', RCT_RW = '';
+let MDP = 0, MD_JOB = '', MD_NEED = false;   // 만든 것 — 열어 본 작업물, 거르기   // 모집공고 — 고른 직무·보상
 /* AI 지갑. 서버에 안 보낸다 — 무엇을 구독하는지는 그 사람 일이다. 사생활 모드에서 localStorage 가 던지면 빈 지갑 */
 const WAL_KEY = 'hackon.wallet';
 const walLoad = () => { try { return JSON.parse(localStorage.getItem(WAL_KEY) || '[]'); } catch (_) { return []; } };
@@ -2195,6 +2196,7 @@ const SCREEN = {
     const opend = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/outside').then(r => r.rows).catch(() => null) : [];
     const mkadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/market').then(r => r.rows).catch(() => null) : [];
     const spadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/spots').then(r => r.rows).catch(() => null) : [];
+    const wkadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/works').then(r => r.rows).catch(() => null) : [];
     const claimBox = (AUTH && AUTH.claimable) ? `
       <div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
         <h3 style="color:var(--warn)">첫 사이트 운영자 앉히기</h3>
@@ -2220,6 +2222,14 @@ const SCREEN = {
             ${e.listed ? '' : ' <span class="pill warn">초안</span>'}
             · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
         </div>`).join('')}` : ''}
+      <div class="card" id="works-admin"><h3>만든 것 — 시연 열어 보기 ${wkadm && wkadm.length ? `<span class="pill warn">${wkadm.length}</span>` : ''}</h3>
+        <div class="meta">새 창으로 열어 보고 멀쩡하면 «열기» — 그때부터 페이지 안에서 눌러 볼 수 있습니다. 피싱·성인물이면 «내리기».</div>
+        ${wkadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !wkadm.length ? '<div class="meta" style="margin-top:8px">기다리는 것이 없습니다.</div>'
+          : wkadm.map(w => `<div style="margin-top:10px"><b>${esc(w.title)}</b> <span class="meta">${esc(w.by || '')}</span>
+              <div><a href="${esc(w.demo)}" target="_blank" rel="noopener noreferrer">${esc(w.demo)}</a></div>
+              <button class="btn sm" data-wka="${w.id}" data-act="ok">열기</button> <button class="btn sec sm" data-wka="${w.id}" data-act="hide">내리기</button></div>`).join('')}
+      </div>
       <div class="card" id="spots-admin"><h3>모아 보기 — 주최자 확인 요청 ${spadm && spadm.filter(r => r.state === 'pending').length ? `<span class="pill warn">${spadm.filter(r => r.state === 'pending').length}</span>` : ''}</h3>
         <div class="meta">청한 사람이 적은 방법(공식 메일·계정)으로 진짜 주최자인지 본 뒤 넘깁니다. 넘기면 그 계정으로 대회가 생깁니다.</div>
         ${spadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
@@ -4141,6 +4151,65 @@ const SCREEN = {
         <a class="btn sm" href="/app" style="margin-top:8px;text-decoration:none">모집 열기</a>
         <div class="meta" style="margin-top:8px">유급이어도 HACK:ON 은 돈과 계약에 끼지 않습니다. 근로 조건은 모집자와 직접 정하세요.</div></div>
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/around">모아 보기</a> · <a href="/setups">세팅 모음</a></p>`;
+  },
+
+  /* 만든 것 — 깃허브와 다른 점 셋: 화면을 바로 눌러 본다, 1분 영상으로 본다, 그 자리에서 함께할 사람을 모은다.
+     시연 화면은 운영진이 한 번 열어 본 뒤에만 이 안에 띄운다(그 전엔 새 창). 바깥 주소라 sandbox 를 씌운다 */
+  async made() {
+    const acct = (AUTH && AUTH.loggedIn) || !!myKey();
+    const jobs = ['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'];
+    const loginBox = `<div class="meta" style="margin-top:8px">누가 올렸는지 알아야 함께할 사람을 이어 드릴 수 있어서 로그인한 뒤에 받습니다.</div>${loginBtns('', 'margin-top:8px')}`;
+    if (MDP) {
+      let w; try { w = await api(`/works/${MDP}`); }
+      catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없거나 내려간 작업물입니다' : '불러오지 못했습니다'}</h3><button class="btn sec sm" id="md-back">목록으로</button></div>`; }
+      const ext = (() => { try { return new URL(w.demo).host !== location.host; } catch (_) { return false; } })();
+      return `<section class="hero"><div class="top">${w.job ? `<span class="pill">${esc(w.job)}</span>` : ''}${w.needs.length ? '<span class="pill warn">함께할 사람 구함</span>' : ''}</div>
+          <h2>${esc(w.title)}</h2>${w.line ? `<p class="sub" style="margin-bottom:0">${esc(w.line)}</p>` : ''}
+          <div class="meta" style="margin-top:6px">${w.by ? esc(w.by) + ' · ' : ''}★ ${w.stars} · 함께하기 ${w.joins}</div></section>
+        ${w.video ? `<div class="card" style="padding:0;overflow:hidden"><iframe src="https://www.youtube-nocookie.com/embed/${esc(w.video)}" title="1분 소개 영상" loading="lazy" referrerpolicy="no-referrer"
+            allow="encrypted-media; picture-in-picture" allowfullscreen style="width:100%;aspect-ratio:16/9;border:0;display:block"></iframe></div>` : ''}
+        ${w.demo ? (w.live && ext ? `<div class="card"><h3>바로 눌러 보기</h3>
+            <iframe src="${esc(w.demo)}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups" style="width:100%;height:min(62vh,520px);border:1px solid var(--rule);border-radius:12px;background:#fff"></iframe>
+            <a class="meta" href="${esc(w.demo)}" target="_blank" rel="noopener noreferrer">새 창에서 열기</a></div>`
+          : `<div class="card"><h3>눌러 보기</h3><a class="btn sm" href="${esc(w.demo)}" target="_blank" rel="noopener noreferrer">새 창에서 열기</a>
+            <div class="meta" style="margin-top:6px">${w.live ? '' : '운영진이 한 번 열어 본 뒤부터 이 화면 안에서 바로 눌러 볼 수 있습니다.'}</div></div>`) : ''}
+        <div class="shrow" style="gap:8px;margin:4px 0 10px;flex-wrap:wrap">
+          <button class="btn${w.starred ? '' : ' sec'} sm" id="md-star">${w.starred ? '★ 별 줌' : '☆ 별 주기'}</button>
+          ${w.repo ? `<a class="btn sec sm" href="${esc(w.repo)}" target="_blank" rel="noopener noreferrer">저장소</a>` : ''}
+          <button class="btn sec sm" id="md-share">보내기</button>
+          <button class="lnk" data-rep="other" data-ev="" data-ref="work:${w.id}" data-team="${esc(w.title)}">신고</button></div>
+        ${w.needs.length ? `<div class="card" id="md-join"><h3>함께할 사람 — ${w.needs.map(esc).join(' · ')}</h3>
+          ${w.mine ? (w.requests.length ? w.requests.map(r => `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)"><b>${esc(r.name || '이름 없음')}</b> <span class="pill">${esc(r.role || '직무 안 적음')}</span>
+              <div class="meta">${esc(r.note)}</div></div>`).join('') : '<div class="meta">아직 신청이 없습니다. «보내기» 로 필요한 사람에게 알려 보세요.</div>')
+            : !acct ? loginBox
+            : `${w.asked ? '<div class="meta">신청했습니다. 고쳐서 다시 낼 수 있습니다.</div>' : ''}
+              <label>내 직무</label><select id="mj-role">${w.needs.map(j => `<option>${esc(j)}</option>`).join('')}</select>
+              <label>무엇을 할 수 있나 · 어떻게 연락하나</label><textarea id="mj-note" rows="3" maxlength="300" placeholder="예) 피그마로 화면을 잡을 수 있어요. 인스타 @… 로 연락 주세요"></textarea>
+              <button class="btn sm" id="mj-go" style="margin-top:8px">함께하기 신청</button>
+              <div class="meta" style="margin-top:4px">이 메모는 만든 사람만 봅니다.</div>`}</div>` : ''}
+        <button class="btn sec sm" id="md-back" style="margin:10px 0">목록으로</button>`;
+    }
+    let d = null; try { d = await api(`/works?job=${encodeURIComponent(MD_JOB)}&need=${MD_NEED ? 1 : ''}`); } catch { d = null; }
+    return `<section class="hero"><div class="top"><span class="pill">만든 것</span></div>
+        <h2>눌러 보고, 같이 만들기</h2>
+        <p class="sub" style="margin-bottom:0">바이브코딩으로 만든 것을 올리면 <b>화면을 바로 눌러 보고 1분 영상으로</b> 봅니다. 혼자 다 하기 힘들면 «이 직무 사람이 필요해요» 를 걸어 함께할 사람을 모으세요.</p></section>
+      <div class="htabs">${['', ...jobs].map(j => `<button type="button" data-mdj="${esc(j)}"${MD_JOB === j ? ' class="on"' : ''}>${j ? esc(j) : '전체'}</button>`).join('')}</div>
+      <label class="ck" style="margin:0 0 10px"><input type="checkbox" id="md-need"${MD_NEED ? ' checked' : ''}><span>함께할 사람을 구하는 것만</span></label>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? '<div class="card"><h3>아직 올라온 것이 없습니다</h3><div class="meta">첫 작업물을 올려 보세요.</div></div>'
+        : d.rows.map(w => `<a class="card" href="#" data-work="${w.id}" style="display:block;text-decoration:none;color:inherit">
+            <div class="top">${w.job ? `<span class="pill">${esc(w.job)}</span>` : ''}${w.video ? '<span class="pill">▶ 영상</span>' : ''}${w.demo ? '<span class="pill ok">눌러 보기</span>' : ''}${w.needs.length ? `<span class="pill warn">${w.needs.map(esc).join('·')} 구함</span>` : ''}</div>
+            <h3 style="margin:6px 0 2px">${esc(w.title)}</h3><div class="meta">${w.line ? esc(w.line) + ' · ' : ''}★ ${w.stars}</div></a>`).join('')}
+      <details class="card" id="md-new"><summary style="cursor:pointer;font-weight:700">내 작업물 올리기</summary>
+        ${!acct ? loginBox : `<label>이름</label><input id="mw-title" maxlength="60" placeholder="예) 회의록 정리기">
+        <label>한 줄 소개</label><input id="mw-line" maxlength="120" placeholder="예) 녹음 올리면 결정·담당·기한 표로">
+        <label>눌러 볼 주소</label><input id="mw-demo" placeholder="https://… (배포한 주소)">
+        <label>1분 영상(유튜브)</label><input id="mw-video" placeholder="https://youtu.be/…">
+        <label>저장소(선택)</label><input id="mw-repo" placeholder="https://github.com/…">
+        <label>어느 직무의 일을 푸나</label><select id="mw-job"><option value="">안 정함</option>${jobs.map(j => `<option>${j}</option>`).join('')}</select>
+        <label>함께할 사람 — 필요한 직무</label><div class="gchips">${jobs.map(j => `<button type="button" class="pick" data-mwn="${j}">${j}</button>`).join('')}</div>
+        <button class="btn sm" id="mw-go" style="margin-top:10px">올리기</button>`}</details>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/recruit">모집공고</a> · <a href="/market">마켓</a></p>`;
   },
 
   async market() {
@@ -6376,6 +6445,31 @@ function wire() {
   document.querySelectorAll('[data-rcj]').forEach(b => b.onclick = () => { RCT_JOB = b.dataset.rcj; render(); });
   document.querySelectorAll('[data-rcr]').forEach(b => b.onclick = () => { RCT_RW = b.dataset.rcr; render(); });
   document.querySelectorAll('[data-erole]').forEach(b => b.onclick = () => b.classList.toggle('on'));
+  document.querySelectorAll('[data-work]').forEach(a => a.onclick = (ev) => { ev.preventDefault(); MDP = +a.dataset.work; render(); });
+  document.querySelectorAll('[data-mdj]').forEach(b => b.onclick = () => { MD_JOB = b.dataset.mdj; render(); });
+  if ($('#md-need')) $('#md-need').onchange = () => { MD_NEED = $('#md-need').checked; render(); };
+  if ($('#md-back')) $('#md-back').onclick = () => { MDP = 0; render(); };
+  document.querySelectorAll('[data-mwn]').forEach(b => b.onclick = () => b.classList.toggle('on'));
+  if ($('#mw-go')) $('#mw-go').onclick = async () => {
+    const v = id => ($('#' + id) || {}).value || '';
+    try { const r = await api('/works', { method: 'POST', body: { title: v('mw-title').trim(), line: v('mw-line').trim(), demo: v('mw-demo').trim(), video: v('mw-video').trim(),
+            repo: v('mw-repo').trim(), job: v('mw-job'), needs: [...document.querySelectorAll('[data-mwn].on')].map(b => b.dataset.mwn).join(',') } });
+          MDP = r.id; flash('올렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#md-star')) $('#md-star').onclick = async () => { try { await api(`/works/${MDP}/star`, { method: 'POST', body: {} }); render(); } catch (e) { flash(e.message, true); } };
+  if ($('#mj-go')) $('#mj-go').onclick = async () => {
+    try { await api(`/works/${MDP}/join`, { method: 'POST', body: { role: $('#mj-role').value, note: $('#mj-note').value.trim() } }); flash('신청했습니다. 만든 분이 연락드립니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#md-share')) $('#md-share').onclick = async () => {
+    const url = `${location.origin}/made?w=${MDP}`, title = ($('h2') || {}).textContent || 'HACK:ON 만든 것';
+    try { if (navigator.share) await navigator.share({ title, text: `${title} — 바로 눌러 볼 수 있어요`, url }); else { await navigator.clipboard.writeText(url); flash('주소를 복사했습니다'); } } catch (_) {}
+  };
+  document.querySelectorAll('[data-wka]').forEach(b => b.onclick = async () => {
+    try { await api(`/admin/works/${b.dataset.wka}`, { method: 'POST', body: { act: b.dataset.act } }); flash(b.dataset.act === 'ok' ? '열었습니다 — 이제 안에서 눌러 볼 수 있습니다' : '내렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -7192,6 +7286,7 @@ const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 —
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
+const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
 const WAL = location.pathname === '/wallet';     // AI 지갑 — 구독 갱신·크레딧 만료·한도 리셋을 한 장에. 이 기기에만 저장
 const SET = location.pathname === '/setups';     // 세팅 모음 — 잘 쓰는 사람의 세팅을 모아 최신판으로 돌려준다
@@ -7233,6 +7328,7 @@ if (TVM) {
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (WAL) { tab = 'wallet'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (SET) { tab = 'setups'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
