@@ -999,6 +999,9 @@ function profile(db, pid) {
                            ORDER BY e.ends DESC`).all(pid, pid);
   /* 프로젝트는 주마다 센다 — 4주 중 2주 빠지면 안 온 것이 2다. 한 주라도 왔으면 «온 대회» 다 */
   for (const r of rows) if (r.kind === '프로젝트' && r.weeks) {
+    /* 운영자가 그 프로젝트에서 체크인을 한 번도 안 눌렀으면 «모름» 이다 — 주 수만큼 결석으로 세면
+       체크인을 잊은 운영진 때문에 참가자 전원이 «안 오는 사람» 이 된다 */
+    if (!db.prepare('SELECT 1 FROM attend a JOIN teams t ON t.id = a.team WHERE t.event=? LIMIT 1').get(r.event)) { r.unknown = true; continue; }
     const n = db.prepare('SELECT COUNT(*) c FROM attend WHERE team=? AND week<=?').get(r.id, r.weeks).c;
     r.absent = r.weeks - n;
     if (n) r.came = r.came || 'weekly';
@@ -1025,7 +1028,8 @@ function profile(db, pid) {
     /* 온 대회가 없으면 완주율은 «모름» 이다. 0 을 주면 모집 화면에서 «안 하는 사람» 으로 읽힌다(E22) */
     finishRate: came ? Math.round(made / came * 1000) / 10 : null,
     /* 매너는 실력과 따로 센다. 신청하고 안 온 것은 못해서가 아니다. */
-    noshow: past.length - came + past.reduce((a, r) => a + (r.absent && r.came ? r.absent : r.absent && !r.came ? r.absent - 1 : 0), 0),
+    noshow: past.filter(r => !r.unknown && !r.came).length
+            + past.reduce((a, r) => a + (r.absent && r.came ? r.absent : r.absent && !r.came ? r.absent - 1 : 0), 0),
     skill: shrink(rt.map(r => r.skill)),
     manner: shrink(rt.map(r => r.manner)),
     /* 받은 칭찬 태그. 비매너 알림은 여기 절대 안 싣는다 — 사이트 운영자 화면에만 있다 */
@@ -8560,6 +8564,18 @@ async function selftest() {
     toggleAttend(db, pa, 1); toggleAttend(db, pa, 2); toggleAttend(db, pa, 3); toggleAttend(db, pa, 3);
     ok(db.prepare('SELECT COUNT(*) c FROM attend WHERE team=?').get(pa).c === 2, '체크인: 다시 누르면 취소');
     ok(profile(db, iPa).noshow === 2, '프로젝트: 4주 중 2주 빠지면 안 온 횟수가 2 (' + profile(db, iPa).noshow + ')');
+    /* 체크인을 한 주도 안 누른 프로젝트는 모름 — 결석으로 안 센다 */
+    {
+      const pz = createEvent(db, { title: '체크인안한프로젝트', kind: '프로젝트', weeks: 4, starts: '2026-01-01', ends: '2026-01-28' });
+      const iz = 'pz' + crypto.randomBytes(4).toString('hex');
+      db.prepare('INSERT INTO people(id,handle) VALUES(?,?)').run(iz, '체크인모름');
+      const tz = joinTeam(db, pz.id, { name: '모름팀', agree: true });
+      db.prepare('UPDATE teams SET person=? WHERE id=?').run(iz, tz);
+      ok(profile(db, iz).noshow === 0, '프로젝트: 운영자가 체크인을 한 번도 안 눌렀으면 안 온 횟수에 안 넣는다 (' + profile(db, iz).noshow + ')');
+      toggleAttend(db, joinTeam(db, pz.id, { name: '온팀', agree: true }), 1);
+      ok(profile(db, iz).noshow === 4, '프로젝트: 다른 팀이 체크인됐으면 4주 다 빠진 것으로 센다 (' + profile(db, iz).noshow + ')');
+      db.prepare('DELETE FROM events WHERE id=?').run(pz.id);
+    }
     /* 주차 제출 — 마지막 주가 완주 */
     ok(raises(() => weekSubmit(db, pa, 'zzzz', { week: 1, url: 'https://x.example' }), 403), '주차 제출: 팀 열쇠만');
     ok(raises(() => weekSubmit(db, pa, tkPa, { week: 2, url: 'javascript:alert(1)' }), 400), '주차 제출: https 주소만');
