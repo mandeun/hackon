@@ -391,9 +391,9 @@ with sync_playwright() as p:
     # 첫 화면이 그 파일을 실제로 부르는가 — 목록에만 있고 안 쓰면 아무 데도 안 보인다
     pg.goto(BASE + "/")
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
-    A(pg.is_visible(".brandline img"), "첫 화면에 노랑이가 안 보인다")
-    A("너랑" in pg.inner_text(".brandline"), "브랜드 줄에 이름의 뜻이 없다")
-    ok("노랑이 — 셋 다 200, 앰버·먹, 첫 화면 브랜드 줄에 실제로 그려진다")
+    A(pg.is_visible(".foot-mark img"), "첫 화면 맨 아래 상표 옆에 노랑이가 안 보인다")
+    A(pg.query_selector(".brandline") is None, "첫 화면에 따로 선 브랜드 소개 줄이 아직 있다")
+    ok("노랑이 — 셋 다 200, 앰버·먹, 첫 화면 상표 옆에 설명 없이 그려진다")
 
     # ── 소개 페이지 /brand ──
     A(code_of("/brand") == 200, "/brand 가 안 열린다")
@@ -409,7 +409,7 @@ with sync_playwright() as p:
     # 첫 화면에서 갈 길이 있는가 — 아무도 안 들어오는 페이지는 없는 것과 같다
     pg.goto(BASE + "/")
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
-    A(pg.get_attribute(".brandline .more", "href") == "/brand", "첫 화면에서 소개 페이지로 가는 길이 없다")
+    A(pg.query_selector('footer a[href="/brand"]') is not None, "첫 화면 맨 아래에서 소개 페이지로 가는 길이 없다")
     ok("노랑이 소개 /brand — 이름·생김새·색 셋·규칙 넷, 그림 안 깨짐, 첫 화면에서 연결")
 
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다

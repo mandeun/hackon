@@ -220,12 +220,9 @@ details.more li a{display:inline-flex;align-items:center;min-height:44px}
 .sheet .x:hover{background:var(--soft)}
 .btn[disabled]{opacity:.55;cursor:default}
 
-/* 브랜드 한 줄. 앰버는 «누를 것» 이 아니라 그림 색이라, 단추처럼 보이는 바탕을 깔지 않는다 */
-.brandline{border-top:1px solid var(--hair)}
-.brandline .wrap{display:flex;align-items:center;gap:14px;padding:20px}
-.brandline img{flex:none}
-.brandline p{margin:0;font-size:14.5px;line-height:1.6}
-.brandline .more{display:inline-block;margin-top:2px;color:var(--ink);font-weight:700;font-size:13.5px}
+/* 노랑이는 설명 없이 맨 아래 상표 옆에만 선다. 따로 소개 줄을 두니 «이게 왜 여기» 로 읽혔다 */
+.foot-mark{display:inline-flex;align-items:center;gap:6px;font-weight:700;color:var(--ink)}
+.foot-mark img{flex:none}
 footer{padding:26px 0 40px;font-size:13px;color:var(--grey)}
 footer .wrap{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
 footer a{color:inherit;display:inline-flex;align-items:center;min-height:44px}
@@ -381,22 +378,13 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   </div>
 </div>
 
-<!-- 브랜드 한 줄. 노랑이를 눈에 보이는 자리에 한 번 세운다 — 이름의 뜻이 여기서 시작한다 -->
-<div class="brandline">
-  <div class="wrap">
-    <img src="/norangi.svg" alt="노랑이" width="56" height="56">
-    <p><b>노랑이</b> — 「NO」라고 생각했던 걸 「너<b>랑</b>」 해서 이룹니다.<br>
-      <span class="grey">콘센트가 머리, 사람과 사람을 잇던 선이 팔다리입니다.</span>
-      <a href="/brand" class="more">이름과 색의 뜻 →</a></p>
-  </div>
-</div>
-
 <footer>
   <div class="wrap">
-    <span translate="no" style="font-weight:700;color:var(--ink)">HACK<span class="stamp">:</span>ON</span>
+    <span class="foot-mark" translate="no"><img src="/norangi.svg" alt="" width="22" height="22">HACK<span class="stamp">:</span>ON</span>
     <span>코드와 운영 방법이 전부 공개입니다.</span>
     <a id="foot-manual" href="#">운영 매뉴얼</a>
     <a href="https://github.com/mandeun/hackon" rel="noopener">소스 보기</a>
+    <a href="/brand">브랜드</a>
     <span id="foot-mail"></span>
     <span class="mono" id="foot-note" style="margin-left:auto"></span>
   </div>
