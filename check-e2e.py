@@ -2981,16 +2981,17 @@ with sync_playwright() as pw:
     pg.goto("about:blank")
     pg.goto(f"{BASE}/app#{ev}", wait_until="networkidle")
     pg.click('nav button[data-t="find"]')
-    pg.wait_for_selector("#f-n")
-    # 구하기의 기본 갈래는 «사람» 이다. 장소는 하루면 잡지만 심사위원은 3주 전에 움직여야 한다.
+    pg.wait_for_selector("#find-segs")
+    # 구하기의 기본 갈래는 «매칭»(앱 안 요청·수락)이다. 그다음이 «사람 모으기» — 심사위원은 3주 전에 움직여야 한다.
     segs = pg.eval_on_selector_all('#find-segs button', 'bs => bs.map(b => b.dataset.seg)')
-    A(segs[0] == "people", f"구하기 첫 갈래가 «사람» 이 아니다: {segs}")
-    A(pg.query_selector('#find-segs button.on').get_attribute("data-seg") == "people",
-      "구하기가 «사람» 갈래로 안 열린다")
+    A(segs[:2] == ["match", "people"], f"구하기 갈래 차례가 매칭·사람이 아니다: {segs}")
+    A(pg.query_selector('#find-segs button.on').get_attribute("data-seg") == "match",
+      "구하기가 «매칭» 갈래로 안 열린다")
+    pg.click('#find-segs button[data-seg="people"]'); pg.wait_for_selector("#f-n")
     A("심사위원" in pg.eval_on_selector('#view .card h3', 'h => h.textContent'),
       "«사람» 갈래 맨 위 카드가 심사위원이 아니다")
     A(pg.query_selector('#jd-open') is not None, "심사위원 카드에 모집 페이지 입구가 없다")
-    ok("구하기 — 기본은 «사람», 맨 위는 심사위원, 모집 페이지 입구가 붙는다")
+    ok("구하기 — 기본은 «매칭», «사람 모으기» 맨 위는 심사위원, 모집 페이지 입구가 붙는다")
 
     # 장소 갈래로 옮겨 앉는다 (아래 숫자·목록 검사는 전부 장소 쪽이다)
     pg.click('#find-segs button[data-seg="venue"]')
@@ -4473,10 +4474,10 @@ ok("첫 화면 고리 — 늘 보이는 것 다섯 이하, 더 보기는 셋으�
 
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
-post(f"/api/events/{_kev['id']}", {"due": "2099-01-01T00:00"}, key=_kev["owner"], method="PATCH")
+post(f"/api/events/{_kev['id']}", {"due": "2099-01-01T00:00"}, key=_kev["okey"], method="PATCH")
 _, _kt = post(f"/api/events/{_kev['id']}/teams", {"name": "막힘검사팀이름", "email": "k@example.com", "agree": True})
 A(post(f"/api/teams/{_kt['id']}/submit", {"url": "https://k.example/x", "stuck": "배포 설정에서 두 시간 막힘"}, tkey=_kt["tkey"])[0] == 200, "막힌 것 한 줄을 못 낸다")
-post(f"/api/events/{_kev['id']}", {"due": "2026-01-10T00:00"}, key=_kev["owner"], method="PATCH")
+post(f"/api/events/{_kev['id']}", {"due": "2026-01-10T00:00"}, key=_kev["okey"], method="PATCH")
 with sync_playwright() as pw:
     b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
     pg.on("pageerror", lambda e: errs.append("stuck: " + str(e)))
@@ -4485,6 +4486,57 @@ with sync_playwright() as pw:
     A("배포 설정에서 두 시간 막힘" in _st and "막힘검사팀이름" not in _st, f"막힌 곳 모음이 이상하다: {_st}")
     b.close()
 ok("막힌 곳 모음 — 끝난 뒤 공개 페이지에 팀 이름 없이")
+
+# ── 자리 매칭 — 카드 올리기(화면) → 주최자 요청(화면) → 카드 주인 수락(/card) → 둘에게만 연락처 ──
+_, _mev = post("/api/events", {"title": "매칭 화면 검사", "starts": (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d")})
+post(f"/api/events/{_mev['id']}/needs", {"kind": "judge", "label": "심사위원 1명"}, key=_mev["okey"])
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    # ① 줄 사람 — 드려요에서 카드를 올린다
+    gctx = b.new_context(viewport={"width": 390, "height": 844}); gp = gctx.new_page()
+    gp.on("pageerror", lambda e: errs.append("match-giver: " + str(e)))
+    gp.goto(f"{BASE}/app", wait_until="networkidle"); gp.wait_for_selector("body[data-ready='1']")
+    gp.click('nav button[data-t="find"]'); gp.wait_for_selector("#find-side")
+    gp.click('#find-side button[data-side="give"]'); gp.wait_for_selector("#gv-form")
+    gp.click('[data-gvk="judge"]')
+    gp.fill("#gv-name", "김심사e2e"); gp.fill("#gv-area", "마포"); gp.fill("#gv-intro", "AI 기획 8년")
+    gp.fill("#gv-ct", "judge-e2e@example.com")
+    gp.click("#gv-save"); gp.wait_for_selector("#gv-mine")
+    _gk = gp.evaluate("localStorage.getItem('hackon.giver')")
+    A(_gk and "." in _gk, f"카드 열쇠가 이 기기에 안 남았다: {_gk}")
+    # 공개 목록에는 연락처가 없다
+    A("judge-e2e@example.com" not in json.dumps(api("/api/givers")), "공개 카드 목록에 연락처가 샌다")
+    # ② 주최자 — 자리 탭 기본 갈래가 «매칭», 카드에 요청
+    hctx = b.new_context(viewport={"width": 390, "height": 844}); hp = hctx.new_page()
+    hp.on("pageerror", lambda e: errs.append("match-host: " + str(e)))
+    hp.add_init_script(f"localStorage.setItem('hackon.owner','{_mev['owner']}')")
+    hp.goto(f"{BASE}/app#{_mev['id']}", wait_until="networkidle"); hp.wait_for_selector("body[data-ready='1']")
+    hp.click('nav button[data-t="find"]'); hp.wait_for_selector("#match-hero")
+    A(hp.query_selector('#find-segs button.on').get_attribute("data-seg") == "match", "자리 탭이 «매칭» 으로 안 열린다")
+    _card = hp.locator(".gcard", has_text="김심사e2e")
+    A("빈 자리와 같은 종류" in _card.inner_text(), f"맞는 이유가 카드에 없다: {_card.inner_text()}")
+    _card.locator("[data-ask-open]").click(); hp.wait_for_selector("#ask-name")
+    hp.fill("#ask-msg", "e2e 심사 부탁"); hp.fill("#ask-name", "e2e 동아리"); hp.fill("#ask-ct", "host-e2e@example.com")
+    hp.locator("[data-ask-send]").click(); hp.wait_for_selector("#ask-sent")
+    A("답 기다림" in hp.inner_text("#ask-sent") and "judge-e2e@example.com" not in hp.inner_text("#ask-sent"), "수락 전에 연락처가 보이거나 상태가 없다")
+    # ③ 카드 주인 — 다른 기기에서 /card#id.key 로 열어 수락
+    cctx = b.new_context(viewport={"width": 390, "height": 844}); cp = cctx.new_page()
+    cp.on("pageerror", lambda e: errs.append("match-card: " + str(e)))
+    cp.goto(f"{BASE}/card#{_gk}", wait_until="networkidle"); cp.wait_for_selector("#gv-mine")
+    A(cp.url.endswith("/app"), f"/card 가 열쇠를 주소에 남긴다: {cp.url}")
+    _ask = cp.locator(".gcard[data-ask]").first
+    A("매칭 화면 검사" in _ask.inner_text() and "host-e2e@example.com" not in _ask.inner_text(), "받은 요청이 없거나 수락 전 주최자 연락처가 보인다")
+    _ask.locator("[data-ask-yes]").click(); cp.wait_for_timeout(600)
+    A("host-e2e@example.com" in cp.inner_text("#view"), "수락했는데 주최자 연락처가 안 열린다")
+    # ④ 주최자 화면 — 연락처가 열리고 자리가 확정으로
+    hp.reload(wait_until="networkidle"); hp.click('nav button[data-t="find"]'); hp.wait_for_selector("#ask-sent")
+    A("judge-e2e@example.com" in hp.inner_text("#ask-sent") and "수락" in hp.inner_text("#ask-sent"), "수락 뒤 주최자에게 연락처가 안 열린다")
+    _nd = api(f"/api/events/{_mev['id']}/needs")
+    A(any(p["name"] == "김심사e2e" for n in _nd for p in n["pledges"]), "수락했는데 공개 자리에 확정으로 안 오른다")
+    for _p in (gp, hp, cp):
+        A(_p.evaluate("document.documentElement.scrollWidth") <= 391, "매칭 화면이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("자리 매칭 — 카드 올리기 → 요청 → /card 에서 수락 → 둘에게만 연락처, 자리 확정")
 
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
