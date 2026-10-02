@@ -6426,8 +6426,13 @@ function routes(db) {
           const t = db.prepare('SELECT event, tkey FROM teams WHERE id=?').get(+m[1]);
           if (!t) throw new HttpError(404, '없는 팀입니다');
           const tk = req.headers['x-tkey'] || '';
-          if (!isAdmin(db, t.event, key, owner, siteAdmin) && !(t.tkey && tk && tk === t.tkey))
+          const tAdm = isAdmin(db, t.event, key, owner, siteAdmin);
+          if (!tAdm && !(t.tkey && tk && tk === t.tkey))
             throw new HttpError(403, '이 팀의 참가 열쇠나 운영자 열쇠가 필요합니다');
+          /* 프로젝트는 주차 제출(/week)로만 낸다. 여기를 열어 두면 마지막 주를 안 내고도
+             submissions 가 차서 수료 확인·완주가 나왔다. 운영자는 바로잡을 수 있게 둔다 */
+          if (!tAdm && (db.prepare('SELECT kind FROM events WHERE id=?').get(t.event) || {}).kind === '프로젝트')
+            throw new HttpError(409, '프로젝트는 주차 제출로 냅니다 — 마지막 주를 내면 완주입니다');
           submit(db, +m[1], await body(req));
           return json(res, 200, { ok: true });
         }

@@ -3980,6 +3980,15 @@ _pb = lpostj(f"/api/events/{PJ}/teams", {"name": "떨어질팀", "email": "pjb@e
 A(json.loads(urllib.request.urlopen(LEARN_BASE + f"/api/events/{PJ}/board").read())["rows"] == [], "선발 전 지원자가 공개 명단에 보인다")
 A(lpost(f"/api/teams/{_pa['id']}/attend", {"week": 1}) == 403 and lpost(f"/api/teams/{_pa['id']}/pick", {"state": "accepted"}) == 403,
   "운영자 열쇠 없이 주차 체크인·선발을 한다")
+# 프로젝트는 주차 제출로만 낸다 — 일반 제출 길로 submissions 를 채우면 마지막 주 없이 수료 확인이 나왔다
+_rq = urllib.request.Request(LEARN_BASE + f"/api/teams/{_pa['id']}/submit", method="POST",
+                             data=json.dumps({"url": "https://skip.example"}).encode(),
+                             headers={"content-type": "application/json", "x-tkey": _pa["tkey"]})
+try:
+    urllib.request.urlopen(_rq); _sc = 200
+except urllib.error.HTTPError as _e:
+    _sc = _e.code
+A(_sc == 409, f"프로젝트 팀이 일반 제출 길로 낸다({_sc}) — 마지막 주 없이 완주가 된다")
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     ctx = b.new_context(viewport={"width": 1200, "height": 900})
