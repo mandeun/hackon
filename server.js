@@ -1834,6 +1834,29 @@ const LOGINS = {
       trust: !!(me.email && me.email_verified),
     }),
   },
+  /* Apple — 앱스토어 지침 4.8: 다른 회사 로그인을 주면 Apple 로그인도 같이 줘야 한다.
+     다른 셋과 두 군데가 다르다. 비밀키 대신 우리 키로 서명한 JWT 를 보내고(appleSecret),
+     프로필 주소가 없어 토큰 응답의 id_token 을 읽는다(readIdToken). scope 를 비워 두면
+     돌아올 때도 다른 셋처럼 GET 이라 같은 갈래를 탄다(이름·메일을 달라면 form_post 가 된다).
+     키 넷(APPLE_ID=Services ID · APPLE_TEAM · APPLE_KEY_ID · APPLE_KEY=p8 본문)이 다 있어야 켜진다 */
+  apple: {
+    label: 'Apple', brand: '#000', ink: '#fff',
+    id: (process.env.APPLE_ID && process.env.APPLE_TEAM && process.env.APPLE_KEY_ID && process.env.APPLE_KEY) ? process.env.APPLE_ID : '',
+    secret: '',
+    secretFn: () => appleSecret({ team: process.env.APPLE_TEAM, keyId: process.env.APPLE_KEY_ID,
+                                  key: String(process.env.APPLE_KEY || '').replace(/\\n/g, '\n'), clientId: process.env.APPLE_ID }),
+    authorize: 'https://appleid.apple.com/auth/authorize',
+    token: 'https://appleid.apple.com/auth/token',
+    idToken: 'https://appleid.apple.com',   // id_token 의 iss
+    scope: '',
+    read: (c) => ({
+      uid: String(c.sub || ''),
+      nick: '',
+      email: c.email || '',
+      /* Apple 은 email_verified 를 문자열 'true' 로 주기도 한다 */
+      trust: !!(c.email && (c.email_verified === true || c.email_verified === 'true')),
+    }),
+  },
   naver: {
     label: '네이버', brand: '#03C75A', ink: '#fff',
     id: process.env.NAVER_KEY || '', secret: process.env.NAVER_SECRET || '',
@@ -1853,6 +1876,27 @@ const LOGINS = {
     },
   },
 };
+/* Apple client_secret — ES256 JWT. 반년까지 되지만 매번 새로 만든다(5분) — 키가 바뀌어도 따로 할 일이 없다 */
+const b64u = (b) => Buffer.from(b).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+function appleSecret({ team, keyId, key, clientId }, now = Math.floor(Date.now() / 1000)) {
+  const head = b64u(JSON.stringify({ alg: 'ES256', kid: keyId }));
+  const body = b64u(JSON.stringify({ iss: team, iat: now, exp: now + 300, aud: 'https://appleid.apple.com', sub: clientId }));
+  const sig = crypto.sign('sha256', Buffer.from(head + '.' + body), { key, dsaEncoding: 'ieee-p1363' });
+  return head + '.' + body + '.' + b64u(sig);
+}
+/* id_token 의 몸통만 읽는다. 서명은 따로 안 본다 — 우리 서버가 TLS 로 Apple 토큰 주소에서 직접 받은 값이라서다
+   (OIDC Core 3.1.3.7: 토큰 엔드포인트에서 직접 받은 id_token 은 TLS 로 서명 검증을 갈음할 수 있다).
+   대신 누구에게 준 토큰인지(aud)·누가 냈는지(iss)·만료(exp)는 꼭 본다 */
+function readIdToken(tok, { clientId, iss }, now = Math.floor(Date.now() / 1000)) {
+  const part = String(tok || '').split('.')[1];
+  if (!part) throw new HttpError(400, 'id_token 이 없습니다');
+  let c; try { c = JSON.parse(Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')); }
+  catch { throw new HttpError(400, 'id_token 을 읽지 못했습니다'); }
+  const aud = Array.isArray(c.aud) ? c.aud : [c.aud];
+  if (c.iss !== iss || !aud.includes(clientId)) throw new HttpError(400, '우리에게 온 로그인 토큰이 아닙니다');
+  if (!(+c.exp > now)) throw new HttpError(400, '로그인 토큰이 만료됐습니다');
+  return c;
+}
 /* 켜진 공급자만. 화면도 이 목록만 보고 단추를 그린다 — 목록이 두 곳에 적히면 어긋난다.
    위에 적힌 순서가 곧 화면 순서다(첫 단추는 카카오 — 한국에서 가장 많이 누른다). */
 const loginsOn = () => Object.keys(LOGINS).filter((k) => !!LOGINS[k].id);
@@ -5892,7 +5936,9 @@ const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'qr.js', 's
   'hero.jpg', 'og.png',
   /* 노랑이. 평면 SVG 라 셋 합쳐 5KB 가 안 된다 — 그림 파일로 두면 색을 고칠 때마다 다시 만들어야 한다 */
   'norangi.svg', 'norangi-run.svg', 'norangi-hi.svg', 'story-norangi.svg',
-  'brand.html']);
+  'brand.html',
+  /* 계정 삭제 안내 — 구글 플레이가 앱 밖 주소를 요구한다(/delete-account) */
+  'delete-account.html']);
 /* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
 /* ── 토스 미니앱에서 오는 요청만 교차 출처를 허용한다.
    앱인토스 문서: «실제 서비스 환경 https://<appName>.apps.tossmini.com ·
@@ -7256,6 +7302,7 @@ function routes(db) {
           redirect_uri: back + '/auth/' + prov + '/done', code, state: stGot,
         });
         if (P.secret) form.set('client_secret', P.secret);
+        if (P.secretFn) form.set('client_secret', P.secretFn());
         /* 네이버는 문서가 GET + 쿼리다. 카카오·구글은 POST 폼이다 */
         const tk = await (await (P.tokenGet
           ? fetch(P.token + '?' + form.toString())
@@ -7271,9 +7318,11 @@ function routes(db) {
           console.error(prov + ' token', back, tk.error_code || tk.error, tk.error_description || '');
           throw new HttpError(400, P.label + ' 로그인에 실패했습니다 (' + (tk.error_code || tk.error || '?') + ')');
         }
-        const me = await (await fetch(P.profile, {
-          headers: { authorization: 'Bearer ' + tk.access_token },
-        })).json();
+        /* Apple 은 프로필 주소가 없다 — 토큰 응답의 id_token 이 곧 프로필이다 */
+        const me = P.idToken ? readIdToken(tk.id_token, { clientId: P.id, iss: P.idToken })
+          : await (await fetch(P.profile, {
+              headers: { authorization: 'Bearer ' + tk.access_token },
+            })).json();
         const prof = P.read(me || {});
         if (!prof.uid) throw new HttpError(400, P.label + ' 사용자 정보를 못 받았습니다');
 
@@ -7376,7 +7425,7 @@ function routes(db) {
 
       /* #region reuse:static — 화이트리스트 + 경로 탈출 방지 + MIME + 스트림.
          뿌리가 프로젝트 폴더라 server.js·package.json·data/ 까지 열렸다(감사 5·6, 오답노트 E7). 이제 화면 파일만 나간다 */
-      const name = p === '/' ? 'home.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
+      const name = p === '/' ? 'home.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
       if (!STATIC_OK.has(name)) throw new HttpError(404, '없습니다');
       const f = path.join(ROOT, name);
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
@@ -7442,9 +7491,9 @@ async function selftest() {
      여기가 틀리면 둘 중 하나다. 계정이 갈려 지난 대회가 사라지거나,
      남의 계정이 넘어간다. 뒤쪽이 훨씬 나쁘다. */
   {
-    ok(Object.keys(LOGINS).join(',') === 'kakao,google,naver', '로그인은 셋 — 적힌 순서가 화면 순서다');
+    ok(Object.keys(LOGINS).join(',') === 'kakao,google,apple,naver', '로그인은 넷 — 적힌 순서가 화면 순서다(Apple 은 앱스토어 4.8)');
     ok(Object.values(LOGINS).every((P) =>
-         /^https:\/\//.test(P.authorize) && /^https:\/\//.test(P.token) && /^https:\/\//.test(P.profile)
+         /^https:\/\//.test(P.authorize) && /^https:\/\//.test(P.token) && /^https:\/\//.test(P.profile || P.idToken)
          && typeof P.read === 'function' && P.label),
        '공급자마다 주소 셋·읽는 법·한국어 이름이 있다');
     /* 응답 모양이 셋 다 다르다. 읽는 법을 여기서 고정한다 */
@@ -7656,6 +7705,9 @@ async function selftest() {
     const copy = (dock.match(/^COPY (?!--from).*\.\/$/m) || [''])[0];
     ok(copy, 'Dockerfile 에서 소스를 넣는 COPY 줄을 못 찾았다');
     const missing = [...STATIC_OK].filter((f) => !copy.includes(' ' + f + ' '));
+    /* 플레이 스토어에 적어 낸 주소. 목록에서 빠지면 심사 중에 404 가 난다 */
+    ok(STATIC_OK.has('delete-account.html') && copy.includes(' delete-account.html '),
+       '/delete-account 안내 페이지가 서빙 목록이나 배포 이미지에 없다 — 플레이 스토어의 삭제 안내 주소가 404 가 된다');
     ok(!missing.length,
        '서빙 목록에 있는데 배포 이미지에 안 들어가는 파일: ' + missing.join(', ') + ' — Dockerfile 의 COPY 에 적는다');
   }
@@ -7716,6 +7768,26 @@ async function selftest() {
     ok(code === 404, '계정 지우기: 이미 지운 계정은 없는 계정이다');
     db.prepare('DELETE FROM events WHERE id=?').run(eo.id);
     db.prepare('DELETE FROM owners WHERE id=?').run(other);
+  }
+  /* Apple 로그인 — 4.8. client_secret 은 우리 키로 검증되는 ES256 JWT, id_token 은 aud·iss·exp 를 본다 */
+  {
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+    const jwt = appleSecret({ team: 'TEAM123456', keyId: 'KEY1234567', key: pem, clientId: 'kr.hackon.web' }, 1000);
+    const [h, b, sg] = jwt.split('.');
+    const dec = (x) => JSON.parse(Buffer.from(x.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString());
+    ok(dec(h).alg === 'ES256' && dec(h).kid === 'KEY1234567' && dec(b).iss === 'TEAM123456' && dec(b).sub === 'kr.hackon.web'
+       && dec(b).aud === 'https://appleid.apple.com' && dec(b).exp === 1300, 'Apple: client_secret 머리·몸통이 Apple 문서 꼴이다');
+    ok(crypto.verify('sha256', Buffer.from(h + '.' + b), { key: publicKey, dsaEncoding: 'ieee-p1363' },
+       Buffer.from(sg.replace(/-/g, '+').replace(/_/g, '/'), 'base64')), 'Apple: client_secret 서명이 우리 키로 검증된다');
+    const idt = (c) => 'x.' + b64u(JSON.stringify(c)) + '.y';
+    const opt = { clientId: 'kr.hackon.web', iss: 'https://appleid.apple.com' };
+    const c1 = readIdToken(idt({ iss: opt.iss, aud: opt.clientId, sub: '001.abc', exp: 2000, email: 'a@privaterelay.appleid.com', email_verified: 'true' }), opt, 1500);
+    ok(LOGINS.apple.read(c1).uid === '001.abc' && LOGINS.apple.read(c1).trust === true, 'Apple: id_token 의 sub 가 회원번호, 문자열 true 도 확인된 메일로 본다');
+    const bad = (c) => { try { readIdToken(idt(c), opt, 1500); return false; } catch (e) { return e.code === 400; } };
+    ok(bad({ iss: opt.iss, aud: 'other.app', sub: 'x', exp: 2000 }) && bad({ iss: 'https://evil.example', aud: opt.clientId, sub: 'x', exp: 2000 })
+       && bad({ iss: opt.iss, aud: opt.clientId, sub: 'x', exp: 1000 }), 'Apple: 남에게 준 토큰·다른 발급자·만료 토큰은 막는다');
+    ok(!process.env.APPLE_ID || !!LOGINS.apple.id, 'Apple: 키가 없으면 단추도 없다');
   }
   /* 학기 활동 보고서 — 기간 안 행사만, 모르는 것은 null */
   {
