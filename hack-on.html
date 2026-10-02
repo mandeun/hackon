@@ -382,7 +382,7 @@ nav .i{font-size:17px}
 }
 body{background:#E9ECEF;font-size:16px;letter-spacing:-.01em}
 #app{background:var(--pg);box-shadow:0 0 0 1px rgba(0,0,0,.03)}
-header{position:sticky;top:0;z-index:20;background:rgba(242,244,246,.88);
+header{position:sticky;top:0;z-index:20;background:#F2F4F6;   /* 반투명이면 밑 글자가 비쳐 겹쳐 보였다(10/02 참가 화면) */
   backdrop-filter:saturate(1.6) blur(14px);-webkit-backdrop-filter:saturate(1.6) blur(14px);
   border-bottom:0;padding:12px 20px 0}
 .hrow{padding-bottom:10px}
@@ -977,6 +977,16 @@ nav button.on::before{content:"";position:absolute;top:0;left:50%;width:22px;hei
 .card.ev{transition:transform .12s, box-shadow .12s}
 .card.ev:active{transform:scale(.99)}
 @media (hover:hover){.card.ev:hover{box-shadow:0 6px 18px rgba(11,16,32,.08)}}
+.evacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px;margin-top:16px;position:relative}
+.evacts > button,.evacts > a{display:flex;align-items:center;justify-content:center;gap:6px;min-height:46px;border-radius:14px;
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;font-weight:800;font-size:14px;text-decoration:none;cursor:pointer;list-style:none}
+.evacts span[aria-hidden]{color:#C8F53B}
+.evacts > button[aria-expanded="true"]{background:#C8F53B;color:#0B1020;border-color:#C8F53B}
+.evacts > button[aria-expanded="true"] span{color:#0B1020}
+.evcal-m{margin-top:8px;background:#fff;border-radius:16px;padding:6px;display:grid}
+.evcal-m[hidden]{display:none}
+.mhero .evcal-m a,.evcal-m a{padding:13px 14px;border-radius:10px;color:#0B1020!important;font-weight:700;text-decoration:none}
+.evcal-m a:hover,.evcal-m a:focus{background:#F1FBD5}
 .inbox-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:#C8F53B;color:#0B1020;font-size:12px;font-weight:800;margin-left:4px}
 /* 고르는 칩 줄은 접어서 다 보인다. 옆으로 밀어야 보이는 칩은 폰에서 «잘린 것» 으로 읽힌다 */
 .htabs.wrap{flex-wrap:wrap;overflow:visible;position:static;row-gap:6px}
@@ -3921,11 +3931,19 @@ const SCREEN = {
           ${proj ? `<li id="proj-line"><span class="ic" aria-hidden="true">🗓️</span><span><span class="k">기간</span><span class="v">${+e.weeks}주${e.meet ? ' · ' + esc(e.meet) : ''}${e.pick ? ' · 선발형 — 리더가 지원서를 보고 수락합니다' : ''}</span></span></li>` : ''}
           ${+e.deposit ? `<li id="dep-line"><span class="ic" aria-hidden="true">🎟️</span><span><span class="k">예약금</span><span class="v">${won(e.deposit)} — 오시면 돌려드립니다. 받는 방법은 주최자가 따로 안내합니다</span></span></li>` : ''}
           ${+e.prize ? `<li><span class="ic" aria-hidden="true">🏆</span><span><span class="k">상금</span><span class="v">상금 ${won(e.prize)}</span></span></li>` : ''}
-          <li><span class="ic" aria-hidden="true">📣</span><span><span class="k">같이 올 사람에게</span><span class="v"><a href="#" id="share-ev" data-title="${esc(e.title)}">친구에게 보내기</a> <span class="hint">· 카톡 방에 한 번</span></span></span></li>
-          <li><span class="ic" aria-hidden="true">🗓️</span><span><span class="k">내 달력에</span><span class="v"><a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 캘린더에 넣기</a></span></span></li>
-          ${e.chat ? `<li><span class="ic" aria-hidden="true">💬</span><span><span class="k">대화방</span><span class="v"><a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener">오픈 대화방 열기</a></span></span></li>` : ''}
           ${e.safety ? `<li><span class="ic" aria-hidden="true">🆘</span><span><span class="k">문제가 생기면</span><span class="v" id="safety-line">${esc(e.safety)}</span></span></li>` : ''}
         </ul>
+        <!-- 공유·달력·대화방 — 정보 줄 사이에 끼어 있던 셋을 한 줄 단추로(10/02). 달력은 고르는 메뉴 하나 -->
+        <div class="evacts" id="ev-acts">
+          <button type="button" id="share-ev" data-title="${esc(e.title)}"><span aria-hidden="true">↗</span>공유</button>
+          <button type="button" id="ev-cal" aria-expanded="false" aria-controls="ev-calm"><span aria-hidden="true">📅</span>달력에</button>
+          ${e.chat ? `<a id="chat-link" href="${esc(e.chat)}" target="_blank" rel="noopener"><span aria-hidden="true">💬</span>대화방</a>` : ''}
+        </div>
+        <div class="evcal-m" id="ev-calm" hidden>
+              <a id="gcal" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.title)}&dates=${esc(String(e.starts).replace(/-/g, ''))}/${esc(gcalEnd(e.ends || e.starts))}&details=${encodeURIComponent(location.origin + '/e/' + e.id)}">구글 달력</a>
+              <a id="nx-ics" href="/api/events/${esc(e.id)}/ics" download>폰 달력 (.ics)</a>
+              <a href="/cal">해커온 «오늘» 에서</a>
+        </div>
         ${meet ? '' : dueBox(e)}
          ${ended ? `<p class="meta" id="ended-line" style="margin:12px 0 0"><b>끝난 대회입니다.</b> <a href="/e/${esc(e.id)}/report">결과 보고서 보기</a></p>`
                  : `<div class="gsteps" id="how3" style="margin:12px 0 0"><span class="on">① 신청</span><span class="sep">→</span><span>② 그날 와서 만들기</span><span class="sep">→</span><span>③ 제출</span></div>`}
@@ -3935,9 +3953,9 @@ const SCREEN = {
         <div class="meta">이 대회 팀들이 «여기서 막혔다» 고 남긴 것입니다. 팀 이름은 안 붙입니다 — 다음 대회의 지도로 씁니다.</div>
         <ul style="margin:8px 0 0 18px">${e.stuck.map(x => `<li style="margin:4px 0">${esc(x)}</li>`).join('')}</ul></div>` : ''}
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
-      ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
-        <div class="meta">운영자 공지가 시각과 함께 남습니다. 메일·문자는 안 보내니 이 페이지를 열어 두세요.</div>
-        <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn sec sm" id="nt-bell">새 소식 알림 받기</button><span class="meta" id="nt-bell-s"></span></div>
+      ${(notes.length || !ended) ? `<div class="card${notes.length ? '' : ' slim'}" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
+        ${notes.length ? '<div class="meta">운영자 공지가 시각과 함께 남습니다. 메일·문자는 안 보내니 이 페이지를 열어 두세요.</div>' : '<div class="meta">아직 공지가 없습니다. 올라오면 여기 뜹니다.</div>'}
+        <div style="margin-top:8px;display:${notes.length ? 'flex' : 'none'};gap:8px;align-items:center;flex-wrap:wrap" id="nt-bell-row"><button class="btn sec sm" id="nt-bell">새 소식 알림 받기</button><span class="meta" id="nt-bell-s"></span></div>
         <ul class="news" id="news-list">${notes.map(newsRow).join('')}</ul></div>` : ''}
       ${(() => {
         /* 묻고 답하기 — 커뮤니티가 아니다. 팀 열쇠로 묻고 운영자만 답한다. 급한 것은 대화방으로 */
@@ -3954,7 +3972,8 @@ const SCREEN = {
             <div><b>${esc(q.team)}</b> · ${esc(q.text)}${q.team === myName ? '' : repBtns(e.id, 'question', q.id, q.team)}</div>
             ${q.answer ? `<div class="meta" style="margin-top:4px">↳ ${esc(q.answer)}</div>` : `<div class="meta" style="margin-top:4px">${q.waiting ? '답을 기다리는 중 (하루 넘음)' : '답을 기다리는 중'}${canAsk && q.team === mine.name ? ` <button class="lnk" data-qclose="${q.id}">내 질문 닫기</button>` : ''}</div>`}
           </div>`).join('')}${blockedNote(e.id, qsAll.length - qs.length)}</div>`; })()}
-      ${(reqs.length || !ended) ? `<div class="card" id="reqs"><h3>이 대회의 주제 · 요청 <span class="pill">${reqs.length}</span></h3>
+      ${!reqs.length && !ended ? `<a class="slimlink" href="/ask?e=${esc(e.id)}">풀어 줬으면 하는 문제가 있나요? <b>주제 올리기 ›</b></a>` : ''}
+      ${reqs.length ? `<div class="card" id="reqs"><h3>이 대회의 주제 · 요청 <span class="pill">${reqs.length}</span></h3>
         <div class="meta">후원자가 낸 관심 주제와 의뢰자가 낸 번거로운 일입니다.</div>
         ${reqs.map(r => `<div class="card" style="margin-top:9px">
           <h3><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span> ${esc(r.topic || r.pain)}</h3>
@@ -4022,7 +4041,7 @@ const SCREEN = {
             ${mine.deposit ? `<span class="pill ${mine.deposit === '안 돌려줌' ? 'warn' : 'ok'}">${esc(mine.deposit)}</span>` : '<span class="pill">주최자 확인 전</span>'}</div>` : ''}
           ${cancelLine(e)}
           <div class="shrow" style="margin-top:8px"><div class="share" id="next-link">${esc(link)}</div><button class="btn sm" id="nx-copy">복사</button>${navigator.share ? '<button class="btn sec sm" id="nx-share">나에게 보내기</button>' : ''}</div>
-          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${meet || proj ? '' : `<button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button>`}<a class="btn sec sm" id="nx-ics" href="/api/events/${esc(e.id)}/ics" download style="text-decoration:none">📅 캘린더에 넣기</a></div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${meet || proj ? '' : `<button class="btn sm" id="nx-submit" data-team="${esc(mine.id)}">결과물 제출하기</button>`}</div>
           <div class="card" id="pairbox" style="margin-top:12px">
             <b>같이 올 사람 있으세요</b>
             <div class="meta">둘이 오면 자리를 하나만 더 씁니다. 한 분이 못 오게 되어도
@@ -7419,6 +7438,8 @@ function wire() {
     const out = $('#resume-out'); out.textContent = t; out.hidden = false;   // 복사가 막혀도 눈으로 보고 고를 수 있게
     try { await navigator.clipboard.writeText(t); flash(b.dataset.resume === 'linkedin' ? '링크드인 «프로젝트» 칸에 붙여 넣으세요' : '대외활동 칸에 붙여 넣으세요'); } catch (_) {}
   });
+  const evCal = $('#ev-cal');
+  if (evCal) evCal.onclick = () => { const m = $('#ev-calm'), on = m.hidden; m.hidden = !on; evCal.setAttribute('aria-expanded', String(on)); };
   /* ── 오늘 · 내 달력 ── */
   document.querySelectorAll('[data-me]').forEach(b => b.onclick = () => {
     try { localStorage.setItem('hackon.me', meOf() === b.dataset.me ? '' : b.dataset.me); } catch {}
@@ -8318,6 +8339,8 @@ const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
 const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
+/* 대회 공개 페이지에서는 위 오른쪽 단추가 «대회 열기» 가 아니라 «오늘» — 참가자에게 대회 열기는 엉뚱하다(10/02) */
+if (/^\/e\//.test(location.pathname)) document.addEventListener('DOMContentLoaded', () => { const g = document.getElementById('g-open'); if (g) { g.textContent = '오늘'; g.href = '/cal'; } });
 /* /card#<id>.<열쇠> — 카드 열쇠를 이 기기에 넣고 «자리 → 드려요» 로. 열쇠는 # 뒤라 서버에 안 간다 */
 if (location.pathname === '/card') {
   const m = /^#(\d+)\.([0-9a-f]{16})$/.exec(location.hash || '');
