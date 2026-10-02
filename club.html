@@ -155,5 +155,20 @@ footer{padding:26px 0 44px;color:var(--mute);font-size:14px}
   }).catch(function () { box.innerHTML = '<div class="meta">지금 못 불러왔습니다 — 잡힌 밤이 있는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요.</div>'; });
 })();
 </script>
+<script>
+/* 최근 간 곳 — 첫 화면 메뉴 판 «최근» 줄에 쓴다. 이 기기에만, 공개 주소만(열쇠 든 주소는 안 적는다) */
+(function () {
+  var OK = /^\/(cal|news|tools|wallet|board|write|club|card|recruit|made|cert|setups|problems|gigs|around|me|learn|market|rank|e\/[a-z0-9]+|board\/\d+|w\/[0-9a-f]{8})$/;
+  function rec() {
+    try {
+      var p = location.pathname; if (!OK.test(p)) return;
+      var h = document.querySelector('main h1, main h2, h1, h2'), t = ((h && h.textContent) || document.title.split(/ [—·|] /)[0] || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+      var l = JSON.parse(localStorage.getItem('hackon.recent') || '[]').filter(function (x) { return x && x.p !== p; });
+      l.unshift({ p: p, t: t }); localStorage.setItem('hackon.recent', JSON.stringify(l.slice(0, 6)));
+    } catch (e) {}
+  }
+  setTimeout(rec, 1200); addEventListener('pagehide', rec);
+})();
+</script>
 </body>
 </html>

@@ -4474,8 +4474,18 @@ with sync_playwright() as pw:
     A(_out == 0, f"메뉴를 연 채 Tab 을 누르면 판 밖으로 {_out}번 샌다(키보드·화면 읽기 사용자가 길을 잃는다)")
     pg.keyboard.press("Escape"); pg.wait_for_timeout(150)
     A(pg.locator("#menu-sheet").is_hidden() and pg.evaluate("document.activeElement.id") == "nav-menu", "Esc 로 안 닫히거나 포커스가 «메뉴» 로 안 돌아온다")
+    # «나» 카드·최근 간 곳 — 처음엔 숫자를 지어내지 않고, /me 를 연 뒤의 요약과 이 기기에 적힌 곳만. 열쇠 든 주소는 안 보인다
+    A("Lv." not in pg.inner_text("#menu-me") and pg.locator("#menu-recent").is_hidden(), "/me 를 안 열었는데 레벨이 뜨거나, 간 곳이 없는데 «최근» 이 뜬다")
+    pg.evaluate("""localStorage.setItem('hackon.melv', JSON.stringify({level: 3, title: '삽질꾼', xp: 160, to: 300, next: {icon: '🔥', name: '개념글', have: 4, goal: 10}}));
+      localStorage.setItem('hackon.recent', JSON.stringify([{p: '/j/secretjudgekey', t: '심사'}, {p: '/board', t: 'x'}, {p: '/me', t: 'y'}, {p: '/e/abc123', t: '동네 해커톤'}]))""")
+    pg.reload(wait_until="networkidle"); pg.click("#nav-menu"); pg.wait_for_selector("#menu-recent:not([hidden])")
+    _mc, _rc = pg.inner_text("#menu-me"), pg.eval_on_selector_all("#menu-recent a", "l => l.map(a => a.getAttribute('href') + '=' + a.textContent)")
+    A("Lv.3" in _mc and "삽질꾼" in _mc and "개념글 4/10" in _mc, f"메뉴 «나» 카드에 레벨·다음 목표가 없다: {_mc}")
+    A(_rc == ["/board=게시판", "/me=나", "/e/abc123=동네 해커톤"], f"최근 간 곳이 이상하다(열쇠 든 주소가 보이거나 이름이 틀림): {_rc}")
+    A(pg.inner_text("#nav-me-lv") == "Lv.3", "위 막대 «나» 에 레벨이 안 뜬다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "«나»·최근 줄을 더하니 폰 폭에서 옆으로 밀린다")
     b.close()
-ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식) + 메뉴 판(묶음 넷·타일·Esc·포커스), 고리마다 200")
+ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식) + 메뉴 판(묶음 넷·타일·Esc·포커스·«나» 카드·최근 간 곳), 고리마다 200")
 
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
@@ -4726,6 +4736,8 @@ with sync_playwright() as pw:
     A(pg.locator(".dgrid i.on").count() >= 1 and "1일" in pg.inner_text("#me-days"), "오늘 한 일이 켜진 날에 안 찍힌다")
     _lv = pg.evaluate("JSON.parse(localStorage.getItem('hackon.melv') || 'null')")
     A(_lv and _lv["level"] >= 1 and _lv["next"], f"메뉴 «나» 카드용 요약이 안 남는다: {_lv}")
+    pg.wait_for_timeout(1400)
+    A('"/me"' in (pg.evaluate("localStorage.getItem('hackon.recent')") or ""), "연 화면이 «최근 간 곳» 에 안 적힌다")
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "나 화면이 폰 폭에서 옆으로 밀린다")
     from axe_playwright_python.sync_playwright import Axe as _AxeMe
     _bad = [v for v in _AxeMe().run(pg).response["violations"] if v["impact"] in ("critical", "serious")]
