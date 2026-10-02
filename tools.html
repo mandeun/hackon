@@ -1,0 +1,214 @@
+<!doctype html>
+<!-- 삽 공구함 — 바이브코더가 매일 쓰는 공구 셋. 전부 브라우저 안에서 돈다(서버로 아무것도 안 보낸다).
+     1) 키 새는 곳 찾기 2) 규칙 파일(CLAUDE.md·.cursorrules·AGENTS.md) 만들기 3) .env → .env.example -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0B1020">
+<title>삽 공구함 — 바이브코딩 공구 · HACK:ON</title>
+<meta name="description" content="API 키 새는 곳 찾기, CLAUDE.md 만들기, .env.example 만들기. 전부 브라우저 안에서, 서버로 안 보냅니다.">
+<link rel="icon" href="/icon.svg">
+<link rel="canonical" href="https://hackon.kr/tools">
+<meta property="og:title" content="삽 공구함 — 바이브코딩 공구">
+<meta property="og:description" content="키 새는 곳 찾기 · CLAUDE.md 만들기 · .env.example. 서버로 안 보냅니다.">
+<meta property="og:image" content="https://hackon.kr/og.png">
+<style>
+:root{--ink:#0B1020;--lime:#C8F53B;--pg:#EEF1F4;--card:#fff;--grey:#5B6470;--hair:#E3E7EC;--bad:#C4353A;--bad-l:#FDECEC;--ok:#0A6E49;--ok-l:#E3F5EC;
+  --sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--ink);font:15.5px/1.6 var(--sans);word-break:keep-all;overflow-wrap:break-word;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:820px;margin:0 auto;padding:0 16px 48px}
+.top{display:flex;align-items:center;gap:12px;min-height:60px}
+.top .logo{font-weight:800;font-size:19px;text-decoration:none;margin-right:auto;display:inline-flex;align-items:center;gap:6px}
+.top a.s{font-size:14px;font-weight:700;text-decoration:none;padding:8px 12px;border:1px solid var(--hair);border-radius:999px;background:#fff}
+.hero{background:var(--ink);color:#fff;border-radius:24px;padding:22px 20px;margin:4px 0 14px}
+.hero h1{margin:0;font-size:26px;letter-spacing:-.03em}
+.hero h1 em{font-style:normal;color:var(--lime)}
+.hero p{margin:6px 0 0;color:#C9CFDA;font-size:14px}
+.tabs{display:flex;gap:6px;margin:0 0 12px;overflow-x:auto;scrollbar-width:none}
+.tabs button{flex:none;min-height:42px;padding:0 14px;border-radius:12px;border:1px solid var(--hair);background:#fff;font:inherit;font-weight:800;cursor:pointer;color:var(--ink)}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--lime);border-color:var(--ink)}
+.panel{background:var(--card);border-radius:20px;padding:16px;border:1px solid var(--hair)}
+.panel[hidden]{display:none}
+label{display:block;font-weight:800;font-size:13.5px;margin:12px 0 6px}
+textarea,input[type=text]{width:100%;border:1px solid var(--hair);border-radius:12px;padding:11px 12px;font:14px/1.5 var(--mono);background:#FAFBFC;color:var(--ink)}
+input[type=text]{font-family:var(--sans)}
+textarea{min-height:170px;resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;border-radius:12px;border:0;background:var(--lime);color:var(--ink);font:inherit;font-weight:800;cursor:pointer;text-decoration:none}
+.btn.sec{background:#F1F3F6}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{min-height:36px;padding:0 12px;border-radius:99px;border:1px solid var(--hair);background:#fff;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;color:var(--ink)}
+.chips button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.out{white-space:pre-wrap;font:13px/1.6 var(--mono);background:#0B1020;color:#E7ECF5;border-radius:14px;padding:12px 14px;margin-top:12px;max-height:420px;overflow:auto}
+.hit{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--hair)}
+.hit:first-child{border-top:0}
+.hit b.ln{flex:none;font-family:var(--mono);font-size:12.5px;background:var(--bad-l);color:var(--bad);border-radius:8px;padding:2px 7px}
+.hit .k{font-weight:800}
+.hit code{font-family:var(--mono);font-size:12.5px;color:var(--grey)}
+.sum{margin-top:12px;padding:12px 14px;border-radius:14px;font-weight:800}
+.sum.bad{background:var(--bad-l);color:var(--bad)}
+.sum.ok{background:var(--ok-l);color:var(--ok)}
+.priv{font-size:12.5px;color:var(--grey);margin-top:10px}
+footer{color:var(--grey);font-size:13.5px;margin-top:22px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top"><a class="logo" href="/"><img src="/norangi-vibe.svg" alt="" width="26" height="26">HACK:ON</a><a class="s" href="/news">소식</a></header>
+  <section class="hero"><h1>삽 <em>공구함</em></h1><p>붙여 넣으면 끝. 서버로 안 보냅니다.</p></section>
+
+  <div class="tabs" role="tablist" aria-label="공구">
+    <button role="tab" id="t-leak" aria-selected="true" aria-controls="p-leak">🔑 키 새는 곳</button>
+    <button role="tab" id="t-rules" aria-selected="false" aria-controls="p-rules">📄 규칙 파일</button>
+    <button role="tab" id="t-env" aria-selected="false" aria-controls="p-env">🧾 .env.example</button>
+  </div>
+
+  <section class="panel" id="p-leak" role="tabpanel" aria-labelledby="t-leak">
+    <label for="leak-in">코드 · .env · 로그를 붙여 넣으세요</label>
+    <textarea id="leak-in" spellcheck="false" placeholder="const openai = new OpenAI({ apiKey: 'sk-...' })"></textarea>
+    <div class="row"><button class="btn" id="leak-go">찾기</button><button class="btn sec" id="leak-clear">지우기</button></div>
+    <div id="leak-out" aria-live="polite"></div>
+    <p class="priv">브라우저 안에서만 봅니다. 찾았으면 그 키는 <b>이미 샌 것</b>으로 보고 새로 발급하세요.</p>
+  </section>
+
+  <section class="panel" id="p-rules" role="tabpanel" aria-labelledby="t-rules" hidden>
+    <label for="r-what">무엇을 만드나요 (한 줄)</label>
+    <input type="text" id="r-what" maxlength="120" placeholder="동네 가게 예약 앱">
+    <label>쓰는 것</label>
+    <div class="chips" id="r-stack"></div>
+    <label>규칙</label>
+    <div class="chips" id="r-rules"></div>
+    <label for="r-test">검사 명령</label>
+    <input type="text" id="r-test" maxlength="80" placeholder="npm test">
+    <div class="row"><div class="chips" id="r-kind"></div></div>
+    <div class="out" id="r-out"></div>
+    <div class="row"><button class="btn" id="r-copy">복사</button><button class="btn sec" id="r-dl">내려받기</button></div>
+  </section>
+
+  <section class="panel" id="p-env" role="tabpanel" aria-labelledby="t-env" hidden>
+    <label for="env-in">.env 를 붙여 넣으세요</label>
+    <textarea id="env-in" spellcheck="false" placeholder="OPENAI_API_KEY=sk-...&#10;DATABASE_URL=postgres://..."></textarea>
+    <div class="row"><button class="btn" id="env-go">만들기</button></div>
+    <div id="env-warn"></div>
+    <label>.env.example</label><div class="out" id="env-out"></div>
+    <label>.gitignore 에 더할 줄</label><div class="out" id="env-gi"></div>
+    <div class="row"><button class="btn" id="env-copy">.env.example 복사</button></div>
+  </section>
+
+  <footer><a href="/">처음으로</a> · <a href="/setups">세팅 모음</a> · <a href="/news">소식</a></footer>
+</div>
+<script>
+/* ── 공구 셋 — 전부 이 화면 안에서. fetch 없음 ── */
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var flash = function (b, t) { var o = b.textContent; b.textContent = t; setTimeout(function () { b.textContent = o; }, 1200); };
+
+  /* 탭 */
+  var tabs = ['leak', 'rules', 'env'];
+  tabs.forEach(function (k) {
+    $('#t-' + k).addEventListener('click', function () {
+      tabs.forEach(function (x) { $('#t-' + x).setAttribute('aria-selected', String(x === k)); $('#p-' + x).hidden = x !== k; });
+      try { history.replaceState(null, '', '#' + k); } catch (e) {}
+    });
+  });
+  var h = (location.hash || '').slice(1); if (tabs.indexOf(h) > 0) $('#t-' + h).click();
+
+  /* 1) 키 새는 곳 — 이름 있는 키 먼저, 그다음 «키=값» 꼴. 값은 앞 4·뒤 4 만 보여 준다 */
+  var KEYS = [
+    ['Anthropic', /sk-ant-[A-Za-z0-9_\-]{20,}/g, 'console.anthropic.com → API Keys'],
+    ['OpenAI', /sk-(?:proj-|svcacct-)?[A-Za-z0-9_\-]{20,}/g, 'platform.openai.com → API keys'],
+    ['Google·Gemini', /AIza[0-9A-Za-z_\-]{35}/g, 'console.cloud.google.com → 사용자 인증 정보'],
+    ['GitHub', /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}/g, 'github.com/settings/tokens'],
+    ['Hugging Face', /hf_[A-Za-z0-9]{30,}/g, 'huggingface.co/settings/tokens'],
+    ['Groq', /gsk_[A-Za-z0-9]{40,}/g, 'console.groq.com/keys'],
+    ['Replicate', /r8_[A-Za-z0-9]{30,}/g, 'replicate.com/account/api-tokens'],
+    ['AWS', /AKIA[0-9A-Z]{16}/g, 'AWS IAM → 액세스 키 비활성화'],
+    ['Stripe', /(?:sk|rk)_live_[0-9a-zA-Z]{20,}/g, 'dashboard.stripe.com/apikeys'],
+    ['Slack', /xox[baprs]-[A-Za-z0-9\-]{10,}/g, 'api.slack.com/apps'],
+    ['개인 키', /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g, '키 쌍을 새로 만드세요'],
+    ['JWT(서비스 키일 수 있음)', /eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}/g, 'Supabase service_role 이면 즉시 교체'],
+  ];
+  var GENERIC = /\b([A-Za-z0-9_]*(?:api[_-]?key|secret|token|passw(?:or)?d|private[_-]?key)[A-Za-z0-9_]*)\s*[:=]\s*['"]?([^\s'"`,;]{12,})/gi;
+  var PUBLIC_NAME = /\b(NEXT_PUBLIC_|VITE_|REACT_APP_|EXPO_PUBLIC_)[A-Z0-9_]*(SECRET|SERVICE_ROLE|PRIVATE|PASSWORD)[A-Z0-9_]*/g;
+  var mask = function (v) { v = String(v); return v.length <= 10 ? v.slice(0, 2) + '…' : v.slice(0, 4) + '…' + v.slice(-4); };
+  window.leakScan = function (text) {
+    var lines = String(text || '').split('\n'), hits = [], seen = {};
+    lines.forEach(function (ln, i) {
+      KEYS.forEach(function (k) { (ln.match(k[1]) || []).forEach(function (m) { var id = i + m; if (seen[id]) return; seen[id] = 1; hits.push({ line: i + 1, kind: k[0], val: mask(m), fix: k[2] }); }); });
+      var g; GENERIC.lastIndex = 0;
+      while ((g = GENERIC.exec(ln))) {
+        var v = g[2];
+        if (/^(process\.env|import\.meta\.env|os\.environ|env\(|\$\{|<|your|xxx|example|changeme|placeholder)/i.test(v)) continue;
+        if (Object.keys(seen).some(function (s) { return s.indexOf(v) >= 0; })) continue;
+        seen[i + v] = 1; hits.push({ line: i + 1, kind: '«' + g[1] + '» 에 값이 그대로', val: mask(v), fix: '환경변수로 빼세요' });
+      }
+      (ln.match(PUBLIC_NAME) || []).forEach(function (m) { hits.push({ line: i + 1, kind: '브라우저로 나가는 이름', val: m, fix: m.split('_')[0] + '_ 로 시작하면 화면 코드에 그대로 실립니다 — 서버에서만 쓰는 이름으로' }); });
+    });
+    return hits;
+  };
+  $('#leak-go').addEventListener('click', function () {
+    var hits = leakScan($('#leak-in').value), box = $('#leak-out');
+    if (!$('#leak-in').value.trim()) { box.innerHTML = ''; return; }
+    box.innerHTML = (hits.length ? '<div class="sum bad">' + hits.length + '곳 찾았습니다</div>' : '<div class="sum ok">찾은 키가 없습니다</div>') +
+      hits.map(function (x) { return '<div class="hit"><b class="ln">' + x.line + '줄</b><div><div class="k">' + esc(x.kind) + '</div><code>' + esc(x.val) + '</code><div style="font-size:13px">' + esc(x.fix) + '</div></div></div>'; }).join('');
+  });
+  $('#leak-clear').addEventListener('click', function () { $('#leak-in').value = ''; $('#leak-out').innerHTML = ''; });
+
+  /* 2) 규칙 파일 — 고른 것만 줄로. 설명 문장 없이 AI 가 바로 따를 지시만 */
+  var STACK = ['Next.js', 'React', 'Vite', 'Node', 'Python', 'FastAPI', 'Supabase', 'Firebase', 'Tailwind', 'Flutter'];
+  var RULES = [
+    ['ko', '한국어로 답하기', '- 답과 커밋 메시지는 한국어로.'],
+    ['small', '작게 고치고 바로 커밋', '- 한 번에 하나만 고치고, 고칠 때마다 커밋한다.'],
+    ['test', '고친 뒤 검사 돌리기', '- 고친 뒤 검사 명령을 돌리고 결과를 보여 준다. 실패하면 끝났다고 하지 않는다.'],
+    ['secret', '키를 코드에 금지', '- API 키·비밀번호는 코드에 적지 않는다. 환경변수로 빼고 .env 는 커밋하지 않는다.'],
+    ['ask', '새 라이브러리는 묻고', '- 새 패키지를 더하기 전에 이유와 함께 먼저 묻는다.'],
+    ['del', '지우기 전에 묻기', '- 파일·데이터를 지우거나 덮어쓰기 전에 먼저 묻는다.'],
+    ['plan', '먼저 계획 세 줄', '- 고치기 전에 무엇을 어느 파일에서 바꿀지 세 줄로 먼저 말한다.'],
+  ];
+  var KINDS = [['CLAUDE.md', 'CLAUDE.md'], ['.cursorrules', '.cursorrules'], ['AGENTS.md', 'AGENTS.md']];
+  var state = { stack: {}, rules: { ko: 1, small: 1, test: 1, secret: 1 }, kind: 'CLAUDE.md' };
+  function chip(box, list, key, multi) {
+    $(box).innerHTML = list.map(function (x) { var id = x[0], t = x[1] || x[0]; var on = multi ? !!state[key][id] : state[key] === id;
+      return '<button type="button" data-k="' + esc(id) + '" aria-pressed="' + on + '">' + esc(t) + '</button>'; }).join('');
+    $(box).querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () {
+      if (multi) { state[key][b.dataset.k] = !state[key][b.dataset.k]; } else state[key] = b.dataset.k;
+      chip(box, list, key, multi); rulesOut(); }); });
+  }
+  window.rulesText = function (s) {
+    var st = Object.keys(s.stack).filter(function (k) { return s.stack[k]; });
+    var rs = RULES.filter(function (r) { return s.rules[r[0]]; }).map(function (r) { return r[2]; });
+    return '# ' + (s.what || '프로젝트') + '\n\n' + (st.length ? '쓰는 것: ' + st.join(', ') + '\n' : '') + (s.test ? '검사: `' + s.test + '`\n' : '') + '\n## 규칙\n' + (rs.join('\n') || '- (규칙을 고르세요)') + '\n';
+  };
+  function rulesOut() { $('#r-out').textContent = rulesText({ what: $('#r-what').value.trim(), test: $('#r-test').value.trim(), stack: state.stack, rules: state.rules }); }
+  chip('#r-stack', STACK.map(function (x) { return [x, x]; }), 'stack', true);
+  chip('#r-rules', RULES, 'rules', true);
+  chip('#r-kind', KINDS, 'kind', false);
+  ['#r-what', '#r-test'].forEach(function (s) { $(s).addEventListener('input', rulesOut); });
+  rulesOut();
+  $('#r-copy').addEventListener('click', function () { var b = this; navigator.clipboard.writeText($('#r-out').textContent).then(function () { flash(b, '복사됨'); }, function () {}); });
+  $('#r-dl').addEventListener('click', function () {
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([$('#r-out').textContent], { type: 'text/markdown' })); a.download = state.kind; a.click();
+  });
+
+  /* 3) .env → .env.example — 값은 지우고 이름·주석만. 값에 키가 보이면 경고 */
+  window.envExample = function (text) {
+    return String(text || '').split('\n').map(function (ln) {
+      var m = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(ln);
+      return m ? m[1] + m[2] + '=' : ln;
+    }).join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  };
+  $('#env-go').addEventListener('click', function () {
+    var t = $('#env-in').value, hits = leakScan(t);
+    $('#env-out').textContent = envExample(t);
+    $('#env-gi').textContent = '.env\n.env.local\n.env.*.local\n';
+    $('#env-warn').innerHTML = hits.length ? '<div class="sum bad">진짜 키가 ' + hits.length + '개 보입니다 — 이미 커밋했다면 새로 발급하세요</div>' : '';
+  });
+  $('#env-copy').addEventListener('click', function () { var b = this; navigator.clipboard.writeText($('#env-out').textContent).then(function () { flash(b, '복사됨'); }, function () {}); });
+})();
+</script>
+</body>
+</html>

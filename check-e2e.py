@@ -3457,10 +3457,10 @@ with sync_playwright() as pw:
         # 시간 통 — 날짜 스무 줄 대신 통 이름
         bks = pg.evaluate("[...document.querySelectorAll('#list h3.bk')].map(h => h.textContent.split(' ')[0])")
         A(bks and set(bks) <= {"오늘", "어제", "이번", "그전"}, f"시간 통이 아니라 날짜가 찍혀 있다: {bks[:5]}")
-        # 두껍게 그린 줄은 전부 «그래서 뭘 하나» 한 줄을 갖는다. 이게 이 화면의 값이다.
+        # 10/03 — «그래서 뭘 하나» 는 제목 신호가 있을 때만. 대신 두꺼운 줄은 «할 일» 이나 «바로 해 보기 명령» 중 하나는 있어야 쓸모가 있다
         fat = pg.evaluate("document.querySelectorAll('#list .it:not(.q)').length")
-        dos = pg.evaluate("document.querySelectorAll('#list .it:not(.q) .do').length")
-        A(0 < dos <= fat, f"«그래서 뭘 하나» 가 하나도 없다: 두꺼운 줄 {fat}, 한 줄 있는 것 {dos}")
+        useful = pg.evaluate("[...document.querySelectorAll('#list .it:not(.q)')].filter(it => it.querySelector('.do, .try, .zh, .ez')).length")
+        A(fat == 0 or useful > 0, f"두꺼운 줄 {fat} 개 중 할 일·명령·풀이가 붙은 줄이 하나도 없다")
         # 같은 문장이 잇달아 두 번 나오면 값이 아니라 채움말이다 — 둘째부터는 지운다.
         run = pg.evaluate("""() => {
           let worst = '';
@@ -3489,7 +3489,7 @@ with sync_playwright() as pw:
         md = urllib.request.urlopen(BASE + "/news.md").read().decode("utf-8")
         mdpick = re.findall(r"^\d+\. \[(.+?)\]\(", md.split("## 오늘 꼭 볼 것")[1].split("\n## ")[0], re.M) if "## 오늘 꼭 볼 것" in md else []
         A(screen and screen == mdpick, f"화면과 /news.md 의 «꼭 볼 것» 이 다르다\n  화면: {screen}\n  md  : {mdpick}")
-        ok(f"뜻으로 묶임 {heads} · 통 {sorted(set(bks))} · «그래서 뭘 하나» {dos}줄 · 화면=md 꼭 볼 것 {len(screen)}줄")
+        ok(f"뜻으로 묶임 {heads} · 통 {sorted(set(bks))} · 할 일·명령·풀이 붙은 줄 {useful} · 화면=md 꼭 볼 것 {len(screen)}줄")
     else:
         ok(f"소식이 {total}건뿐이라 묶음 검사는 건너뜀 (남의 RSS 가 안 올 때)")
 
@@ -4413,6 +4413,10 @@ with sync_playwright() as pw:
     # 아래 목록 줄에도 «쉽게» — 그리고 확 뜬 것 판은 목록(#list) 밖이라 칩 수와 그린 줄 수가 그대로 맞는다
     # «쉽게» 는 어려운 말이 있는 줄에만(10/02 — 출처 종류로 붙이던 뻔한 문장은 뺐다)
     A(pg.locator("#list .ez").count() >= 1, "어려운 말(MCP·에이전트)이 있는 줄에 «쉽게» 가 안 붙는다")
+    # 시간 아끼기 — 깃허브 줄엔 ⏱ 과 바로 해 보는 명령, 복사 단추(10/03)
+    _try = pg.locator(".it .try code").first.inner_text()
+    A(_try.startswith("git clone https://github.com/e2e/agent-kit"), f"깃허브 줄에 바로 해 보기 명령이 없다: {_try}")
+    A(pg.locator(".it .do").filter(has_text="README").count() == 0, "출처마다 같던 «할 일» 문장이 아직 붙는다")
     A("누구나 보고 고쳐 쓸 수 있게" not in pg.inner_text("#view, body"), "출처 종류로 붙이던 뻔한 «쉽게» 문장이 아직 있다")
     _all = pg.evaluate("document.querySelector('.chip[data-k=\"all\"]').dataset.n")
     A(int(_all) == pg.locator("#list .it").count(), "확 뜬 것 판이 칩 수와 목록 줄 수를 어긋나게 한다")
@@ -4441,7 +4445,8 @@ with sync_playwright() as pw:
     _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
     A(len(_vis) <= 3, f"첫 화면 늘 보이는 고리가 셋을 넘는다: {_vis}")
     _groups = pg.evaluate("[...document.querySelectorAll('#menu-sheet .mg')].map(x => x.textContent.trim())")
-    A(_groups == ["매일", "같이", "참가", "열기"], f"전체 메뉴 묶음이 다르다: {_groups}")
+    A(_groups == ["매일", "같이", "만들기", "그 밖에"], f"전체 메뉴 묶음이 다르다: {_groups}")
+    A(pg.locator("#menu-sheet .tiles a").count() <= 12, "메뉴 타일이 열둘을 넘는다 — 덜 쓰는 것은 «그 밖에» 로")
     _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"], #menu-sheet a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
     for _h in _hrefs:
         try:
@@ -4455,6 +4460,10 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "메뉴를 펴면 폰 폭에서 옆으로 밀린다")
     _tiles = pg.eval_on_selector_all("#menu-sheet .tiles a", "els => els.map(e => e.getBoundingClientRect()).filter(r => r.right > 391 || r.width < 120)")
     A(not _tiles, f"메뉴 타일이 화면 밖이거나 너무 좁다: {_tiles}")
+    _out = 0
+    for _ in range(40):
+        pg.keyboard.press("Tab"); _out += 0 if pg.evaluate("!!document.activeElement.closest('#menu-sheet')") else 1
+    A(_out == 0, f"메뉴를 연 채 Tab 을 누르면 판 밖으로 {_out}번 샌다(키보드·화면 읽기 사용자가 길을 잃는다)")
     pg.keyboard.press("Escape"); pg.wait_for_timeout(150)
     A(pg.locator("#menu-sheet").is_hidden() and pg.evaluate("document.activeElement.id") == "nav-menu", "Esc 로 안 닫히거나 포커스가 «메뉴» 로 안 돌아온다")
     b.close()
@@ -4645,6 +4654,30 @@ with sync_playwright() as pw:
     A(_md.startswith("# e2e 같이 쓰는 책") and "둘째 문단을 고쳤다." in _md and "김e2e" in _md, "마크다운 내보내기가 이상하다")
     b.close()
 ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md")
+
+# ── 삽 공구함 /tools — 키 새는 곳 찾기(진짜 키 잡고 process.env 는 안 잡음)·규칙 파일·.env.example, 서버로 안 보냄 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("tools: " + str(e)))
+    _net = []; pg.on("request", lambda r: _net.append(r.url) if "/api/" in r.url else None)
+    pg.goto(BASE + "/tools", wait_until="networkidle"); pg.wait_for_selector("#leak-in")
+    _code = "const a = 'sk-ant-api03-" + "A" * 40 + "';\nconst b = { apiKey: process.env.OPENAI_API_KEY_SECRET_VALUE };\nconst c = { apiKey: 'sk-proj-" + "b" * 30 + "' }\nNEXT_PUBLIC_SUPABASE_SERVICE_ROLE=x\npassword = 'hunter2hunter2!'\nconst ok = 'not a key'"
+    pg.fill("#leak-in", _code); pg.click("#leak-go"); pg.wait_for_timeout(200)
+    _out = pg.inner_text("#leak-out")
+    A("Anthropic" in _out and "OpenAI" in _out and "브라우저로 나가는 이름" in _out and "password" in _out, f"키를 못 잡는다: {_out}")
+    A("2줄" not in _out and "6줄" not in _out, f"process.env·평범한 줄을 키로 잡는다: {_out}")
+    A("A" * 20 not in _out, "찾은 키를 가리지 않고 다 보여 준다")
+    pg.click("#t-rules"); pg.fill("#r-what", "동네 예약 앱"); pg.click('#r-stack [data-k="Next.js"]'); pg.fill("#r-test", "npm test"); pg.wait_for_timeout(100)
+    _r = pg.inner_text("#r-out")
+    A(_r.startswith("# 동네 예약 앱") and "Next.js" in _r and "`npm test`" in _r and "환경변수" in _r, f"규칙 파일이 이상하다: {_r}")
+    pg.click("#t-env"); pg.fill("#env-in", "# 결제\nOPENAI_API_KEY=sk-proj-" + "c" * 30 + "\nexport DB_URL=postgres://u:p@h/db"); pg.click("#env-go"); pg.wait_for_timeout(100)
+    _e = pg.inner_text("#env-out")
+    A("OPENAI_API_KEY=" in _e and "sk-proj" not in _e and "export DB_URL=" in _e and "postgres" not in _e and "# 결제" in _e, f".env.example 에 값이 남는다: {_e}")
+    A("진짜 키" in pg.inner_text("#env-warn"), ".env 에 진짜 키가 있는데 경고가 없다")
+    A(not _net, f"공구함이 서버로 무언가를 보낸다: {_net}")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "공구함이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("삽 공구함 — 키 잡고 process.env 는 안 잡음·가림, 규칙 파일, .env.example 값 지움, 서버로 안 보냄")
 
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

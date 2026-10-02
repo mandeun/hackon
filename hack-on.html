@@ -4730,7 +4730,7 @@ const SCREEN = {
     const row = ([k, v, when]) => `<div style="padding:10px 0;border-top:1px solid var(--rule)"><b>${esc(k)}</b> <span class="meta">— ${esc(when)}</span><div>${esc(v)}</div></div>`;
     return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">시작하기</span></div>
         <h2>해커온에서 켜면 받는 것</h2>
-        <p class="sub" style="margin-bottom:0">바이브코딩으로 금을 캐러 오셨다면, 삽·지도·동료는 여기 있습니다. 만드는 건 여러분, 사람과 노출과 기록은 우리가.</p></section>
+        <p class="sub" style="margin-bottom:0">공구는 <a href="/tools"><b>삽 공구함</b></a> — 키 새는 곳 찾기 · CLAUDE.md · .env.example.</p></section>
       <div class="card" id="launch-now"><h3>지금 바로</h3>${now.map(row).join('')}</div>
       <div class="card" id="launch-later"><h3>기록이 쌓이면 <span class="meta">약속이 아니라 조건입니다</span></h3>${later.map(row).join('')}</div>
       <div class="card"><h3>순서</h3><ol class="steps">
@@ -4993,7 +4993,8 @@ const SCREEN = {
     /* 새 모델·도구 — 소식 종류가 «새 도구» 이거나, 제목이 출시·공개를 말하는 것(새 모델 소식은 읽을거리 출처에서도 온다) */
     const LAUNCH = /출시|공개|새 모델|업데이트|launch|release|introduc|now available|\bGA\b/i;
     /* 한자가 넷 넘게 이어지는 제목(중국어 저장소 소개 등)은 빼고, 출시·공개를 말하는 줄을 먼저 */
-    const readable = r => !/[\u4e00-\u9fff]{4,}/.test(r.title || '');
+    /* 중국어 줄도 싣는다 — 대신 «중국어 — …» 풀이를 같이(10/03). 예전엔 아예 뺐다 */
+    const readable = () => true;
     const fresh = rows.filter(r => r.kind !== 'deal' && readable(r) && (r.kind === 'tool' || r.kind === 'pick' || LAUNCH.test(r.title || '')))
       .sort((a, b) => (LAUNCH.test(b.title || '') ? 1 : 0) - (LAUNCH.test(a.title || '') ? 1 : 0)).slice(0, 3);
     /* 이번 주 확 뜬 것 — 7일 동안 별·하트가 많이 는 것 셋. 서버가 세서 준다(news_counts) */
@@ -5025,7 +5026,7 @@ const SCREEN = {
         ${wal.length ? wal.map(it => item(`${it.name} — ${WAL_KIND[it.kind] || ''}`, `${esc(dd(it.next))} · ${esc(it.next.slice(5).replace('-', '/'))}${it.memo ? ' · ' + esc(it.memo) : ''}`)).join('')
           : '<div class="meta">7일 안에 다가오는 마감이 없습니다. 메일·공지를 <a href="/wallet">AI 지갑</a>에 붙여 넣으면 여기 뜹니다.</div>'}</div>
       <div class="card" id="br-new"><h3>새로 켜진 것 <span class="meta">새 모델·도구</span></h3>
-        ${news === null ? unk : fresh.length ? fresh.map(r => item(r.title, [r.note ? esc(r.note) : '', r.easy ? '쉽게: ' + esc(r.easy) : ''].filter(Boolean).join('<br>'), r.url)).join('') : '<div class="meta">오늘은 새 소식이 없습니다.</div>'}</div>
+        ${news === null ? unk : fresh.length ? fresh.map(r => item(r.title, [r.note ? esc(r.note) : '', r.zh ? esc(r.zh) : '', r.easy ? '쉽게: ' + esc(r.easy) : ''].filter(Boolean).join('<br>'), r.url)).join('') : '<div class="meta">오늘은 새 소식이 없습니다.</div>'}</div>
       <div class="card" id="br-hot"><h3>이번 주 확 뜬 것 <span class="meta">7일 동안 별·하트가 는 순</span></h3>
         ${news === null ? unk : hot.length ? hot.map(r => item(r.title, `<b style="color:#C2410C">${esc(r.mark)} +${esc(r.gain.toLocaleString())}</b> · ${esc(r.days)}일 동안${r.easy ? `<br>쉽게: ${esc(r.easy)}` : ''}`, r.url)).join('')
           : news.hotKnown === false ? '<div class="meta">아직 모릅니다 — 별·하트 수를 이틀 넘게 적어야 셀 수 있습니다.</div>' : '<div class="meta">이번 주에 확 는 것이 없습니다.</div>'}</div>
