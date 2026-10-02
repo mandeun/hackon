@@ -4730,7 +4730,7 @@ const SCREEN = {
     const row = ([k, v, when]) => `<div style="padding:10px 0;border-top:1px solid var(--rule)"><b>${esc(k)}</b> <span class="meta">— ${esc(when)}</span><div>${esc(v)}</div></div>`;
     return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">시작하기</span></div>
         <h2>해커온에서 켜면 받는 것</h2>
-        <p class="sub" style="margin-bottom:0">바이브코딩으로 금을 캐러 오셨다면, 삽·지도·동료는 여기 있습니다. 만드는 건 여러분, 사람과 노출과 기록은 우리가.</p></section>
+        <p class="sub" style="margin-bottom:0">공구는 <a href="/tools"><b>삽 공구함</b></a> — 키 새는 곳 찾기 · CLAUDE.md · .env.example.</p></section>
       <div class="card" id="launch-now"><h3>지금 바로</h3>${now.map(row).join('')}</div>
       <div class="card" id="launch-later"><h3>기록이 쌓이면 <span class="meta">약속이 아니라 조건입니다</span></h3>${later.map(row).join('')}</div>
       <div class="card"><h3>순서</h3><ol class="steps">

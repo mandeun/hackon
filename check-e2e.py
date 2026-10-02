@@ -4646,5 +4646,29 @@ with sync_playwright() as pw:
     b.close()
 ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md")
 
+# ── 삽 공구함 /tools — 키 새는 곳 찾기(진짜 키 잡고 process.env 는 안 잡음)·규칙 파일·.env.example, 서버로 안 보냄 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("tools: " + str(e)))
+    _net = []; pg.on("request", lambda r: _net.append(r.url) if "/api/" in r.url else None)
+    pg.goto(BASE + "/tools", wait_until="networkidle"); pg.wait_for_selector("#leak-in")
+    _code = "const a = 'sk-ant-api03-" + "A" * 40 + "';\nconst b = { apiKey: process.env.OPENAI_API_KEY_SECRET_VALUE };\nconst c = { apiKey: 'sk-proj-" + "b" * 30 + "' }\nNEXT_PUBLIC_SUPABASE_SERVICE_ROLE=x\npassword = 'hunter2hunter2!'\nconst ok = 'not a key'"
+    pg.fill("#leak-in", _code); pg.click("#leak-go"); pg.wait_for_timeout(200)
+    _out = pg.inner_text("#leak-out")
+    A("Anthropic" in _out and "OpenAI" in _out and "브라우저로 나가는 이름" in _out and "password" in _out, f"키를 못 잡는다: {_out}")
+    A("2줄" not in _out and "6줄" not in _out, f"process.env·평범한 줄을 키로 잡는다: {_out}")
+    A("A" * 20 not in _out, "찾은 키를 가리지 않고 다 보여 준다")
+    pg.click("#t-rules"); pg.fill("#r-what", "동네 예약 앱"); pg.click('#r-stack [data-k="Next.js"]'); pg.fill("#r-test", "npm test"); pg.wait_for_timeout(100)
+    _r = pg.inner_text("#r-out")
+    A(_r.startswith("# 동네 예약 앱") and "Next.js" in _r and "`npm test`" in _r and "환경변수" in _r, f"규칙 파일이 이상하다: {_r}")
+    pg.click("#t-env"); pg.fill("#env-in", "# 결제\nOPENAI_API_KEY=sk-proj-" + "c" * 30 + "\nexport DB_URL=postgres://u:p@h/db"); pg.click("#env-go"); pg.wait_for_timeout(100)
+    _e = pg.inner_text("#env-out")
+    A("OPENAI_API_KEY=" in _e and "sk-proj" not in _e and "export DB_URL=" in _e and "postgres" not in _e and "# 결제" in _e, f".env.example 에 값이 남는다: {_e}")
+    A("진짜 키" in pg.inner_text("#env-warn"), ".env 에 진짜 키가 있는데 경고가 없다")
+    A(not _net, f"공구함이 서버로 무언가를 보낸다: {_net}")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "공구함이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("삽 공구함 — 키 잡고 process.env 는 안 잡음·가림, 규칙 파일, .env.example 값 지움, 서버로 안 보냄")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
