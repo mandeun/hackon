@@ -946,6 +946,29 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .mechips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
 .mechips button{font-size:13px;font-weight:800;padding:7px 11px;border-radius:99px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
 .mechips button.on{background:#C8F53B;color:#0B1020;border-color:#C8F53B}
+.lvbar{height:10px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden;margin:12px 0 6px}
+.lvbar span{display:block;height:100%;background:#C8F53B;border-radius:99px}
+.mgoal{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--rule);text-decoration:none;color:var(--ink)}
+.mgoal:first-of-type{border-top:0}
+.mgoal .mi{font-size:24px;width:32px;text-align:center}
+.mgoal .mt{flex:1;min-width:0;display:grid;gap:2px}
+.mgoal .mt em{font-style:normal;font-size:13px;color:var(--ink3)}
+.mbar{height:6px;border-radius:99px;background:var(--rule);overflow:hidden;margin-top:4px}
+.mbar span{display:block;height:100%;background:#7FB800}
+.mgoal .mn{font-weight:800;font-size:13px}
+.dgrid{display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:3px;margin-top:10px;overflow-x:auto;padding-bottom:4px}
+.dgrid i{border-radius:3px;background:var(--rule)}
+.dgrid i.on{background:#C8F53B;box-shadow:inset 0 0 0 1px #7FB800}
+.bgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:8px}
+.bdg{display:grid;justify-items:center;text-align:center;gap:2px;padding:10px 6px;border-radius:14px;border:1px dashed var(--rule);text-decoration:none;color:var(--ink3)}
+.bdg .bi{font-size:24px;filter:grayscale(1);opacity:.6}
+.bdg b{font-size:13px;color:var(--ink)}
+.bdg em{font-style:normal;font-size:11px;line-height:1.3}
+.bdg.got{border:1px solid #C8F53B;background:rgba(200,245,59,.12);color:var(--ink)}
+.bdg.got .bi{filter:none;opacity:1}
+.mstats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+.mstats div{display:grid;justify-items:center;padding:8px 0;border-radius:12px;background:var(--bg2,#f4f5f7)}
+.mstats b{font-size:18px}.mstats em{font-style:normal;font-size:11px;color:var(--ink2)}
 .steps-day{display:grid;gap:8px;margin:0 0 12px}
 .steps-day .sd{display:flex;align-items:center;gap:10px;background:#fff;border-radius:16px;padding:13px 14px;text-decoration:none;color:var(--ink);border:1px solid var(--rule)}
 .steps-day .sd span{flex:none;font-size:12px;font-weight:800;color:#3F5A00;background:#F1FBD5;border-radius:99px;padding:3px 9px}
@@ -2441,6 +2464,20 @@ const ownedCard = e => `<div class="card ev" role="button" tabindex="0" data-ope
 </div>`;
 /* 이 브라우저가 든 열쇠를 접두사별로 모은다. localStorage 를 못 읽는 브라우저(사생활 모드)면 빈 목록 */
 const keyIds = pre => { try { return Object.keys(localStorage).filter(k => k.startsWith(pre)).map(k => k.slice(pre.length)).filter(Boolean); } catch (_) { return []; } };
+/* 나(/me) — 이 기기에 든 열쇠를 모아 보낸다. 서버가 하나씩 맞춰 보고 맞는 것만 센다 */
+const meBody = () => {
+  const kv = pre => { try { return keyIds(pre).map(id => ({ id, key: localStorage.getItem(pre + id) || '' })).slice(-200); } catch { return []; } };
+  const g = myGiver();
+  return {
+    hosts: keyIds('hackon.okey.').map(id => ({ event: id, okey: okeyOf(id) })),
+    teams: keyIds('hackon.team.').map(id => { const t = localStorage.getItem('hackon.team.' + id) || ''; return { event: id, team: t, tkey: tkeyOf(t) }; }),
+    judges: keyIds('hackon.jkey.').map(id => ({ event: id, jkey: jkeyOf(id) })),
+    posts: kv('hackon.bkey.'), comments: kv('hackon.ckey.'), books: kv('hackon.ekey.'),
+    giver: g ? { id: g.id, key: g.gkey } : null,
+  };
+};
+/* 메뉴 판 «나» 카드가 쓰는 요약 — 마지막으로 /me 를 연 때의 것. 없으면 «아직 모름» */
+const meSave = m => { try { localStorage.setItem('hackon.melv', JSON.stringify({ level: m.level, title: m.title, xp: m.xp, to: m.lvTo, next: m.next[0] ? { icon: m.next[0].icon, name: m.next[0].name, have: m.next[0].have, goal: m.next[0].goal } : null })); } catch {} };
 
 const SCREEN = {
   async home() {
@@ -4915,6 +4952,37 @@ const SCREEN = {
 
   /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
      열쇠는 이 기기에 있으니 화면이 모아 보내고, 서버는 맞는 것만 내 일정으로 돌려준다(/api/cal). */
+  async mypage() {
+    let m = null, unknown = false;
+    if (LIVE) { try { m = await api('/me', { method: 'POST', body: meBody(), voter: voterTok() }); meSave(m); } catch { unknown = true; } }
+    else unknown = true;
+    if (!m) return `<section class="mhero" id="me-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi.svg" alt="" width="34" height="34"><span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">나</span></div>
+        <h2 style="margin-top:10px">지금은 못 읽었습니다</h2><p>모은 배지가 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요 — 모은 것은 사라지지 않습니다.</p></section>`;
+    const c = m.counts, pct = Math.max(0, Math.min(100, Math.round((m.xp - m.lvFrom) / Math.max(1, m.lvTo - m.lvFrom) * 100)));
+    const got = m.badges.filter(b => b.got).length;
+    /* 켜진 날 — 16주. 연속이 끊겨도 줄지 않는다(벌 없음) */
+    const on = new Set(m.days), t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const cells = []; for (let d = new Date(t0.getTime() - 111 * 86400000); d <= t0; d.setDate(d.getDate() + 1)) { const k = ymd(d); cells.push(`<i class="${on.has(k) ? 'on' : ''}" title="${k}"></i>`); }
+    const stat = [['🏁', '연 대회', c.hosted], ['🎟️', '신청', c.joined], ['🚀', '제출', c.submitted], ['💬', '글', c.posts], ['🗨️', '댓글', c.comments], ['🔥', '받은 추천', c.upsGot], ['✍️', '합쳐진 고침', c.editsMerged], ['🤝', '연결', c.asksOk]];
+    return `<section class="mhero" id="me-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi-on.svg" alt="" width="40" height="40">
+        <span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">Lv.${m.level}</span><b style="color:#fff">${esc(m.title)}</b></div>
+        <h2 style="margin-top:10px" id="me-lv">${got ? `배지 <span class="lime">${got}</span> / ${m.badges.length}` : '첫 배지까지 한 걸음'}</h2>
+        <div class="lvbar" role="progressbar" aria-label="다음 레벨까지" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
+        <p>${m.xp} XP · 다음 레벨까지 <b>${Math.max(0, m.lvTo - m.xp)} XP</b></p></section>
+      <div class="card" id="me-next"><h3>다음 목표</h3>
+        ${m.next.map(b => `<a class="mgoal" href="${esc(b.href)}"><span class="mi">${b.icon}</span><span class="mt"><b>${esc(b.name)}</b><em>${esc(b.how)}</em>
+          <span class="mbar"><span style="width:${Math.round(b.have / b.goal * 100)}%"></span></span></span><span class="mn">${b.have}/${b.goal}</span><span aria-hidden="true">›</span></a>`).join('') || '<div class="meta">배지를 다 모았습니다. 전설입니다.</div>'}</div>
+      <div class="card" id="me-days"><h3>켜진 날 <span class="pill">${m.days.length}일</span></h3>
+        <div class="meta">무엇이든 한 날에 불이 켜집니다. 쉬었다 와도 줄지 않아요.</div>
+        <div class="dgrid" aria-label="최근 16주 켜진 날">${cells.join('')}</div></div>
+      <div class="card" id="me-badges"><h3>배지</h3><div class="bgrid">
+        ${m.badges.map(b => `<a class="bdg${b.got ? ' got' : ''}" href="${esc(b.href)}" data-badge="${esc(b.id)}"><span class="bi">${b.got ? b.icon : '🔒'}</span><b>${esc(b.name)}</b><em>${b.got ? '얻음' : esc(b.how)}</em></a>`).join('')}</div></div>
+      <div class="card" id="me-stats"><h3>모은 것</h3><div class="mstats">${stat.map(([i, n, v]) => `<div><span>${i}</span><b>${v}</b><em>${n}</em></div>`).join('')}</div>
+        <div class="meta" style="margin-top:8px">이 기기에 든 열쇠로 셉니다. 다른 폰에서 한 것은 그 폰에서 보입니다. 순위표는 없습니다 — 남과 견주지 않고 어제의 나와만.</div></div>
+      <div class="shrow" style="margin:6px 0 20px"><a class="btn sm" href="/cal">오늘</a><a class="btn sec sm" href="/board">게시판</a><a class="btn sec sm" href="/#list">대회 찾기</a></div>`;
+  },
+
   async cal() {
     const now = new Date(), ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const today = ymd(now);
@@ -7645,7 +7713,7 @@ function wire() {
       if (author) try { localStorage.setItem('hackon.nick', author); } catch {}
       const body = { body: $('#wr-body').value, base: +wrSend.dataset.base, note: $('#wr-note').value, author };
       const r = ek ? await api(`/chapters/${at.ch}`, { method: 'POST', ekey: ek, body }).catch(e => { if (e.status === 403) return null; throw e; }) : null;
-      if (!r) { if (!needRules()) return; await api(`/chapters/${at.ch}/edits`, { method: 'POST', body: { ...body, agree: true } }); }
+      if (!r) { if (!needRules()) return; await api(`/chapters/${at.ch}/edits`, { method: 'POST', body: { ...body, agree: true }, voter: voterTok() }); }
       wrEditing = false; flash(r ? '저장했습니다 — 새 판이 됐습니다' : '제안을 보냈습니다 — 편집자가 합치면 글에 들어갑니다'); render();
     } catch (e) { flash(e.message, true); }
   };
@@ -8614,6 +8682,7 @@ if (location.pathname === '/card') {
 }
 const WRT = location.pathname === '/write' || /^\/w\/[0-9a-f]{8}(\/\d+)?$/.test(location.pathname);   // 공동 집필
 const BRD = location.pathname === '/board' || /^\/board\/\d+$/.test(location.pathname);   // 게시판 — 주제별 글·댓글·추천
+const MYP = location.pathname === '/me';   // 나 — 배지·레벨·다음 목표·켜진 날(열쇠로 서버가 센다)
 const CAL = location.pathname === '/cal' || location.pathname === '/brief';   /* 브리핑은 «오늘» 에 합쳤다(10/02) — /brief 주소는 살려 같은 화면으로 */        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
@@ -8668,6 +8737,7 @@ else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'n
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (WRT) { tab = 'write'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRD) { tab = 'forum'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (MYP) { tab = 'mypage'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

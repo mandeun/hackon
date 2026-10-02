@@ -4703,5 +4703,39 @@ with sync_playwright() as pw:
     b.close()
 ok("삽 공구함 — 키 잡고 process.env 는 안 잡음·가림, 규칙 파일, .env.example 값 지움, 서버로 안 보냄")
 
+# ── 나 /me — 열쇠·표로 서버가 센다(우겨도 안 늚), 배지·다음 목표·켜진 날, 못 읽으면 «모름», 폰 폭 ──
+_d6 = (datetime.now() + timedelta(days=6)).strftime("%Y-%m-%d")
+_, _mev = post("/api/events", {"title": "나 화면 검사", "starts": _d6, "ends": _d6})
+_, _mteam = post(f"/api/events/{_mev['id']}/teams", {"name": "나검사팀", "email": "me@example.com", "agree": True})
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("me: " + str(e)))
+    pg.goto(BASE + "/me", wait_until="networkidle"); pg.wait_for_selector("#me-next")
+    A("Lv.1" in pg.inner_text("#me-hero") and pg.locator(".bdg.got").count() == 0, "아무것도 안 했는데 배지가 있다")
+    A(pg.locator("#me-next .mgoal").count() == 3, "다음 목표가 셋이 아니다")
+    # 신청한 팀 열쇠 + 남의 대회 가짜 열쇠 + 게시판 글 하나(이 기기 표로)
+    pg.evaluate(f"""localStorage.setItem('hackon.team.{_mev['id']}', '{_mteam['id']}'); localStorage.setItem('hackon.tkey.{_mteam['id']}', '{_mteam['tkey']}');
+      localStorage.setItem('hackon.okey.{_mev['id']}', 'forged-okey'); localStorage.setItem('hackon.ekey.deadbeef', 'forged')""")
+    _st = pg.evaluate("""async () => (await fetch('/api/board', {method: 'POST', headers: {'content-type': 'application/json', 'x-voter': voterTok()},
+      body: JSON.stringify({topic: 'free', title: '나 화면 검사 글', body: '배지 확인', agree: true})})).status""")
+    A(_st == 201, f"게시판 글이 안 써진다: {_st}")
+    pg.reload(wait_until="networkidle"); pg.wait_for_selector("#me-badges")
+    _got = pg.eval_on_selector_all(".bdg.got", "l => l.map(x => x.dataset.badge)")
+    A("join" in _got and "talk" in _got and "first" in _got, f"신청·첫 글 배지가 안 켜진다: {_got}")
+    A("host" not in _got and "author" not in _got, f"가짜 열쇠로 «판 깔기»·«책 열기» 가 켜진다: {_got}")
+    A(pg.locator(".dgrid i.on").count() >= 1 and "1일" in pg.inner_text("#me-days"), "오늘 한 일이 켜진 날에 안 찍힌다")
+    _lv = pg.evaluate("JSON.parse(localStorage.getItem('hackon.melv') || 'null')")
+    A(_lv and _lv["level"] >= 1 and _lv["next"], f"메뉴 «나» 카드용 요약이 안 남는다: {_lv}")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "나 화면이 폰 폭에서 옆으로 밀린다")
+    from axe_playwright_python.sync_playwright import Axe as _AxeMe
+    _bad = [v for v in _AxeMe().run(pg).response["violations"] if v["impact"] in ("critical", "serious")]
+    A(not _bad, "접근성 /me: " + "; ".join(f"{v['id']}x{len(v['nodes'])}({v['nodes'][0]['target'][0][:40]})" for v in _bad))
+    pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-me.png"), full_page=True)
+    # 서버가 안 되면 «0개» 가 아니라 «모름»
+    pg.route("**/api/me", lambda r: r.abort()); pg.reload(wait_until="networkidle"); pg.wait_for_selector("#me-hero")
+    A("모릅니다" in pg.inner_text("#me-hero") and pg.query_selector("#me-badges") is None, "못 읽었는데 빈 배지판을 그린다(없음과 모름이 섞임)")
+    b.close()
+ok("나 — 열쇠·표로 센 배지(가짜 열쇠는 안 셈)·다음 목표 셋·켜진 날·메뉴용 요약, 못 읽으면 «모름», 접근성")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

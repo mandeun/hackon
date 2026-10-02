@@ -3655,7 +3655,7 @@ function open(file) {
   try { db.exec("ALTER TABLE submissions ADD COLUMN show INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE submissions ADD COLUMN show_at TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 글쓴이 표(atag) — 이 기기 표(voter)의 해시. 차단은 이 표로 «이 사람 글 숨기기» 를 한다(App Store 1.2). 표 자체는 안 나간다 */
-  for (const t of ['board_posts', 'board_comments']) try { db.exec(`ALTER TABLE ${t} ADD COLUMN atag TEXT NOT NULL DEFAULT ''`); } catch {}
+  for (const t of ['board_posts', 'board_comments', 'edits']) try { db.exec(`ALTER TABLE ${t} ADD COLUMN atag TEXT NOT NULL DEFAULT ''`); } catch {}
   /* 공동 집필 제안의 낸 사람 표(소금 친 IP 해시) — 한 사람이 한 장을 제안 50개로 메워 남이 못 내게 하던 것(레드팀 10/03) */
   try { db.exec("ALTER TABLE edits ADD COLUMN ip TEXT NOT NULL DEFAULT ''"); } catch {}
   for (const c of ['aiuse', 'aidrop', 'stuck'])
@@ -6494,7 +6494,7 @@ function chapterAdd(db, bookId, ekey, x) {
 }
 /* 제안 — 어느 판 위에서 썼는지(base)를 같이 받는다. 지금 판과 똑같은 글은 제안이 아니다 */
 const EDIT_PER_PERSON = 3;   // 한 사람(IP 해시)이 한 장에 걸어 둘 수 있는 기다리는 제안
-function editPropose(db, cid, x, ip = '') {
+function editPropose(db, cid, x, ip = '', voter = '') {
   const c = chapterOf(db, cid);
   const body = bookText(x.body, BOOK_BODY_MAX);
   if (!body.trim()) throw new HttpError(400, '고쳐 쓴 글이 비었습니다');
@@ -6506,7 +6506,7 @@ function editPropose(db, cid, x, ip = '') {
     throw new HttpError(429, '이 장에 기다리는 제안이 너무 많습니다. 편집자가 정리한 뒤에 다시 내 주세요');
   if (ip && db.prepare("SELECT COUNT(*) c FROM edits WHERE chapter=? AND status='pending' AND ip=?").get(c.id, String(ip)).c >= EDIT_PER_PERSON)
     throw new HttpError(429, `이 장에 내 제안이 ${EDIT_PER_PERSON}개 기다리고 있습니다. 편집자가 본 뒤에 더 내 주세요`);
-  const r = db.prepare('INSERT INTO edits(chapter,base,body,note,author,ip) VALUES(?,?,?,?,?,?)').run(c.id, base, body, plain(x.note, 140), plain(x.author, 30) || '익명', String(ip || ''));
+  const r = db.prepare('INSERT INTO edits(chapter,base,body,note,author,ip,atag) VALUES(?,?,?,?,?,?,?)').run(c.id, base, body, plain(x.note, 140), plain(x.author, 30) || '익명', String(ip || ''), authorTag(voter));
   return { id: Number(r.lastInsertRowid), base };
 }
 /* 합치기 — 제안이 지금 판 위에서 쓰였을 때만. 그 사이 다른 제안이 합쳐졌으면 409(덮어쓰면 남의 고침이 사라진다) */
@@ -6720,6 +6720,79 @@ function calSub(db, refs) {
   const token = crypto.randomBytes(12).toString('hex');
   db.prepare('INSERT INTO cal_subs(token, refs) VALUES(?,?)').run(token, JSON.stringify(refs));
   return { token };
+}
+
+/* ── 나(/me) — 배지·레벨·다음 목표·켜진 날 ─────────────────────────────────────
+   계정이 없어도 된다. 화면이 이 기기에 든 열쇠(okey·tkey·jkey·ekey·gkey·bkey·ckey)와 표(voter)를 보내면
+   서버가 하나씩 맞춰 보고 맞는 것만 센다 — 화면이 «나 대회 열 번 열었어» 라고 우겨도 안 늘어난다.
+   켜진 날은 줄지 않는다(연속 끊김 없음). 쉬었다 와도 모은 것은 그대로 — 벌주는 장치는 두지 않는다. */
+const ME_BADGES = [
+  // [id, 아이콘, 이름, 무엇을 하면, 지표, 몇 번, 하러 가는 곳]
+  ['first', '🔌', '첫 켜짐', '무엇이든 하나 하기', 'acts', 1, '/board'],
+  ['join', '🎟️', '첫 신청', '대회 하나 신청하기', 'joined', 1, '/#list'],
+  ['ship', '🚀', '첫 제출', '만든 것 제출하기', 'submitted', 1, '/app'],
+  ['host', '🏁', '판 깔기', '대회 하나 열기', 'hosted', 1, '/app'],
+  ['judge', '⚖️', '심사위원', '심사 한 번 맡기', 'judged', 1, '/cal'],
+  ['talk', '💬', '첫 글', '게시판에 글 쓰기', 'posts', 1, '/board'],
+  ['reply', '🗨️', '수다쟁이', '댓글 10개', 'comments', 10, '/board'],
+  ['cheer', '👏', '박수 부대', '남의 글 추천 20번', 'votes', 20, '/board'],
+  ['crowd', '🔥', '개념글', '내 글이 추천 10개 받기', 'upsGot', 10, '/board'],
+  ['author', '📚', '책 열기', '공동 집필 책 하나 열기', 'books', 1, '/write'],
+  ['editor', '✍️', '고친 사람', '고쳐 쓰기 제안이 합쳐지기', 'editsMerged', 1, '/write'],
+  ['giver', '🤝', '드려요', '줄 사람 카드 올리기', 'giver', 1, '/give'],
+  ['matched', '🔗', '연결됨', '받은 요청 수락하기', 'asksOk', 1, '/give'],
+  ['star', '⭐', '추천작', '운영자 추천작에 오르기', 'featured', 1, '/made'],
+  ['regular', '📅', '단골', '켜진 날 7일', 'days', 7, '/cal'],
+  ['veteran', '🧭', '세 판째', '대회 3번(열기·신청 합쳐)', 'runs', 3, '/#list'],
+];
+const ME_XP = { hosted: 50, joined: 30, submitted: 40, judged: 30, posts: 10, comments: 3, upsGot: 2, votes: 1, books: 30, editsProposed: 5, editsMerged: 20, giver: 20, asksOk: 30, featured: 50 };
+const ME_TITLES = ['켜는 중', '플러그', '삽질꾼', '빌더', '메이커', '불씨', '판 깔이', '전설'];
+const meNeed = n => 25 * n * (n - 1);   // n 레벨에 닿는 XP — 1:0, 2:50, 3:150, 4:300, 5:500 …
+function meStats(db, b, owner, voter) {
+  b = b && typeof b === 'object' ? b : {};
+  const list = (k, n = 200) => Array.isArray(b[k]) ? b[k].slice(0, n).filter(x => x && typeof x === 'object') : [];
+  const refs = calRefs(db, b, owner);
+  const teamIds = [...new Set(list('teams', 50).filter(t => db.prepare("SELECT 1 FROM teams WHERE id=? AND event=? AND tkey=? AND tkey<>''").get(+t.team || 0, String(t.event || ''), String(t.tkey || ''))).map(t => +t.team))];
+  const tag = authorTag(voter), days = new Set();
+  const day = s => { const d = String(s || '').slice(0, 10); if (isDay(d)) days.add(d); };
+  // 글·댓글 — 표(atag)로 쓴 것 + 예전 글은 지우기 열쇠로
+  const posts = new Map();
+  if (tag) for (const r of db.prepare('SELECT id, up, created FROM board_posts WHERE atag=? AND hidden=0').all(tag)) posts.set(r.id, r);
+  for (const k of list('posts')) { const r = db.prepare("SELECT id, up, created FROM board_posts WHERE id=? AND bkey=? AND bkey<>'' AND hidden=0").get(+k.id || 0, String(k.key || '')); if (r) posts.set(r.id, r); }
+  const comments = new Map();
+  if (tag) for (const r of db.prepare('SELECT id, created FROM board_comments WHERE atag=? AND hidden=0').all(tag)) comments.set(r.id, r);
+  for (const k of list('comments')) { const r = db.prepare("SELECT id, created FROM board_comments WHERE id=? AND ckey=? AND ckey<>'' AND hidden=0").get(+k.id || 0, String(k.key || '')); if (r) comments.set(r.id, r); }
+  const votes = /^[0-9a-z]{12,40}$/i.test(String(voter || '')) ? db.prepare('SELECT COUNT(*) c FROM board_votes WHERE voter=?').get(String(voter)).c : 0;
+  const edits = tag ? db.prepare('SELECT status, created FROM edits WHERE atag=?').all(tag) : [];
+  const books = list('books', 50).map(k => db.prepare("SELECT id, created FROM books WHERE id=? AND ekey=? AND ekey<>''").get(String(k.id || ''), String(k.key || ''))).filter(Boolean);
+  let giver = 0, asksOk = 0;
+  const g = b.giver && typeof b.giver === 'object' ? db.prepare("SELECT id, created FROM givers WHERE id=? AND gkey=? AND gkey<>'' AND hidden=0").get(+b.giver.id || 0, String(b.giver.key || '')) : null;
+  if (g) { giver = 1; day(g.created); asksOk = db.prepare("SELECT COUNT(*) c FROM asks WHERE giver=? AND status='ok'").get(g.id).c; }
+  let submitted = 0, featured = 0;
+  for (const id of teamIds) {
+    const t = db.prepare('SELECT joined, featured FROM teams WHERE id=?').get(id); day(t.joined); featured += t.featured ? 1 : 0;
+    const s = db.prepare('SELECT at FROM submissions WHERE team=?').get(id); if (s) { submitted++; day(s.at); }
+  }
+  for (const r of refs.filter(r => r.role === 'host')) day((db.prepare('SELECT created FROM events WHERE id=?').get(r.event) || {}).created);
+  [...posts.values(), ...comments.values(), ...edits, ...books].forEach(r => day(r.created));
+  const c = {
+    hosted: refs.filter(r => r.role === 'host').length, joined: refs.filter(r => r.role === 'team').length, judged: refs.filter(r => r.role === 'judge').length,
+    submitted, featured, posts: posts.size, comments: comments.size, votes,
+    upsGot: [...posts.values()].reduce((a, r) => a + (r.up || 0), 0),
+    books: books.length, editsProposed: edits.length, editsMerged: edits.filter(e => e.status === 'merged').length, giver, asksOk,
+  };
+  c.runs = c.hosted + c.joined;
+  c.days = days.size;
+  c.acts = c.hosted + c.joined + c.judged + c.posts + c.comments + c.votes + c.books + c.editsProposed + c.giver;
+  const xp = Object.entries(ME_XP).reduce((a, [k, w]) => a + (c[k] || 0) * w, 0) + c.days * 5;
+  let level = 1; while (meNeed(level + 1) <= xp) level++;
+  const badges = ME_BADGES.map(([id, icon, name, how, key, goal, href]) => ({ id, icon, name, how, href, goal, have: Math.min(c[key] || 0, goal), got: (c[key] || 0) >= goal }));
+  const next = badges.filter(x => !x.got).sort((a, z) => z.have / z.goal - a.have / a.goal || a.goal - z.goal).slice(0, 3);
+  return {
+    counts: c, xp, level, title: ME_TITLES[Math.min(level, ME_TITLES.length) - 1],
+    lvFrom: meNeed(level), lvTo: meNeed(level + 1), badges, next,
+    days: [...days].sort().slice(-400),
+  };
 }
 
 /* ── 대회 혜택 — 지금 열린 대회에 참가하면 받는 것 ─────────────────────────────
@@ -8720,6 +8793,10 @@ function routes(db) {
           res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8', 'cache-control': 'no-cache' });
           return res.end(calIcs(db, JSON.parse(sub.refs), siteOf(req)));
         }
+        if (p === '/api/me' && req.method === 'POST') {
+          if (tooMany('me:' + clientIp(req), BOARD_LIMIT * 6)) throw new HttpError(429, '너무 자주 불렀습니다. 잠시 뒤에 다시 열어 주세요');
+          return json(res, 200, meStats(db, await body(req), owner, req.headers['x-voter'] || ''));
+        }
         if (p === '/api/cal/sub' && req.method === 'POST') return json(res, 201, calSub(db, calRefs(db, await body(req), owner)));
         /* 공동 집필 */
         if (p === '/api/books' && req.method === 'POST') {
@@ -8738,7 +8815,7 @@ function routes(db) {
           if (tooMany('ed:' + clientIp(req), BOARD_LIMIT * 3)) throw new HttpError(429, '제안을 너무 빨리 내고 있습니다. 잠시 뒤에 다시 해 주세요');
           const bb = await body(req);
           if (bb.agree !== true) throw new HttpError(400, '이용 규칙에 동의해야 제안할 수 있습니다');
-          return json(res, 201, editPropose(db, m[1], bb, ipTag(clientIp(req))));
+          return json(res, 201, editPropose(db, m[1], bb, ipTag(clientIp(req)), req.headers['x-voter'] || ''));
         }
         if ((m = p.match(/^\/api\/chapters\/(\d+)\/revert$/)) && req.method === 'POST') return json(res, 200, chapterRevert(db, m[1], req.headers['x-ekey'] || '', (await body(req)).ver));
         if ((m = p.match(/^\/api\/edits\/(\d+)\/merge$/)) && req.method === 'POST') return json(res, 200, editMerge(db, m[1], req.headers['x-ekey'] || ''));
@@ -9009,7 +9086,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/board' || p.match(/^\/board\/\d+$/) || p === '/write' || p.match(/^\/w\/[0-9a-f]{8}(\/\d+)?$/) || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/me' || p === '/board' || p.match(/^\/board\/\d+$/) || p === '/write' || p.match(/^\/w\/[0-9a-f]{8}(\/\d+)?$/) || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -9863,6 +9940,42 @@ async function selftest() {
       const p3 = boardPost(bdb, { topic: 'show', title: '방금 켰습니다', body: '데모' });
       for (let i = 0; i < 3; i++) boardVote(bdb, p3.id, 'w' + String(i).padStart(12, '0'));
       ok(boardList(bdb, { sort: 'hot' }).rows[0].id === p3.id, '게시판 — 인기는 시간이 지나면 내려간다(열흘 된 개념글보다 방금 글)');
+    }
+    /* 나(/me) — 든 열쇠·표가 맞는 것만 센다. 화면이 우겨도 안 는다. 켜진 날은 줄지 않는다 */
+    {
+      const mdb = open(':memory:'), V = 'me' + 'a'.repeat(12), W = 'me' + 'b'.repeat(12);
+      const z = meStats(mdb, {}, '', '');
+      ok(z.level === 1 && z.xp === 0 && z.badges.every(b => !b.got) && z.next.length === 3 && z.days.length === 0, '나 — 아무것도 없으면 1레벨·배지 0·다음 목표 셋');
+      const e1 = createEvent(mdb, { title: '나 검사 대회', starts: '2099-07-10', ends: '2099-07-10' });
+      const t1 = joinTeam(mdb, e1.id, { name: '나팀', agree: true, email: 'me@x.test' }), tk = mdb.prepare('SELECT tkey FROM teams WHERE id=?').get(t1).tkey;
+      mdb.prepare("INSERT INTO submissions(team,url) VALUES(?, 'https://x.test')").run(t1);
+      const p1 = boardPost(mdb, { topic: 'free', title: '표로 쓴 글', body: 'a' }, V);
+      const p0 = boardPost(mdb, { topic: 'free', title: '표 없이 쓴 옛 글', body: 'b' });
+      const pw = boardPost(mdb, { topic: 'free', title: '남의 글', body: 'c' }, W);
+      boardComment(mdb, pw.id, { body: '댓글' }, V);
+      for (let i = 0; i < 4; i++) boardVote(mdb, p1.id, 'u' + String(i).padStart(12, '0'));
+      boardVote(mdb, pw.id, V);
+      const bk = bookCreate(mdb, { title: '나의 책' }), ch = mdb.prepare('SELECT id FROM chapters WHERE book=?').get(bk.id).id;
+      const ed = editPropose(mdb, ch, { body: '고친 글', base: 0 }, '', V); editMerge(mdb, ed.id, bk.ekey);
+      const g = addGiver(mdb, { kind: 'mentor', name: '멘토', contact: 'm@x.test' });
+      const body = { teams: [{ event: e1.id, team: t1, tkey: tk }], hosts: [{ event: e1.id, okey: e1.okey }], posts: [{ id: p0.id, key: p0.bkey }],
+        books: [{ id: bk.id, key: bk.ekey }], giver: { id: g.id, key: g.gkey } };
+      const m = meStats(mdb, body, '', V), c = m.counts;
+      ok(c.hosted === 1 && c.joined === 0 && c.submitted === 1, '나 — 연 대회·제출을 센다(연 대회에 신청도 했으면 연 것으로): ' + JSON.stringify(c));
+      ok(c.posts === 2 && c.comments === 1 && c.upsGot === 4 && c.votes === 1, '나 — 표로 쓴 글 + 열쇠로 찾은 옛 글, 댓글, 받은·누른 추천');
+      ok(c.books === 1 && c.editsProposed === 1 && c.editsMerged === 1 && c.giver === 1, '나 — 책·합쳐진 제안·줄 사람 카드');
+      ok(m.badges.find(b => b.id === 'talk').got && m.badges.find(b => b.id === 'editor').got && !m.badges.find(b => b.id === 'crowd').got, '나 — 배지는 기준을 넘은 것만');
+      ok(m.badges.find(b => b.id === 'crowd').have === 4 && m.next[0].id === 'crowd' && m.next[0].have / m.next[0].goal >= m.next[1].have / m.next[1].goal, '나 — 다음 목표는 가장 가까운 것부터, 몇까지 왔는지와 함께');
+      ok(m.xp === 50 + 40 + 20 + 3 + 8 + 1 + 30 + 5 + 20 + 20 + m.counts.days * 5 && m.level === Math.max(...[1, 2, 3, 4, 5].filter(n => 25 * n * (n - 1) <= m.xp)), '나 — XP 는 한 일마다 정한 만큼, 레벨은 그 문턱으로: ' + m.xp + '/' + m.level);
+      const fake = meStats(mdb, { teams: [{ event: e1.id, team: t1, tkey: 'x' }], hosts: [{ event: e1.id, okey: 'x' }], posts: [{ id: pw.id, key: 'x' }],
+        books: [{ id: bk.id, key: 'x' }], giver: { id: g.id, key: 'x' } }, '', W);
+      ok(fake.counts.hosted === 0 && fake.counts.submitted === 0 && fake.counts.books === 0 && fake.counts.giver === 0 && fake.counts.posts === 1 && fake.counts.editsMerged === 0, '나 — 틀린 열쇠는 안 센다, 남의 표로는 남의 글만');
+      ok(meStats(mdb, { posts: Array.from({ length: 5 }, () => ({ id: p0.id, key: p0.bkey })) }, '', '').counts.posts === 1, '나 — 같은 글 열쇠를 여러 번 보내도 하나');
+      mdb.prepare("UPDATE board_posts SET created='2020-01-02 10:00:00' WHERE id=?").run(p0.id);
+      const d1 = meStats(mdb, body, '', V).days;
+      mdb.prepare('UPDATE board_posts SET hidden=1 WHERE id=?').run(p1.id);
+      const m2 = meStats(mdb, body, '', V);
+      ok(d1.includes('2020-01-02') && m2.days.includes('2020-01-02') && m2.counts.posts === 1, '나 — 켜진 날은 오래된 것도 남고, 내려간 글은 안 센다');
     }
     /* 내 달력 — 든 열쇠가 맞는 대회만, 역할별 날짜·마감·재확인·할 일 */
     {
