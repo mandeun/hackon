@@ -3416,6 +3416,13 @@ function open(file) {
       hidden  INTEGER NOT NULL DEFAULT 0,
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    /* 공동 집필 — 책 하나를 장으로 나누고, 누구나 «고쳐 쓰기 제안» 을 내면 편집자가 차이를 보고 «합치기».
+       깃의 머지를 글에 옮긴 것: 제안은 어느 판(base) 위에서 썼는지 기억하고, 그 사이 장이 바뀌었으면 합치지 않는다(충돌).
+       편집자 열쇠(ekey)는 만든 브라우저에만 — 헤더 x-ekey 로만 받는다. */
+    CREATE TABLE IF NOT EXISTS books(id TEXT PRIMARY KEY, title TEXT NOT NULL, about TEXT NOT NULL DEFAULT '', editor TEXT NOT NULL DEFAULT '', ekey TEXT NOT NULL, created TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS chapters(id INTEGER PRIMARY KEY, book TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, ord INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', ver INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS chapter_vers(chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, ver INTEGER NOT NULL, body TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(chapter, ver));
+    CREATE TABLE IF NOT EXISTS edits(id INTEGER PRIMARY KEY, chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, base INTEGER NOT NULL, body TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '익명', status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL DEFAULT (datetime('now')), decided TEXT NOT NULL DEFAULT '');
     /* 게시판 — 주제(갤러리)별 글·댓글·추천. 디시·레딧식이지만 연락처는 안 싣는다(공개 칸 원칙 그대로).
        지우기 열쇠(bkey·ckey)는 쓴 사람 브라우저에만 — 헤더로만 받는다. 신고 셋이면 저절로 숨김. */
     CREATE TABLE IF NOT EXISTS board_posts(
@@ -6344,6 +6351,99 @@ function setOffer(db, id, b) {
   return { id, status: b.status };
 }
 
+/* ── 공동 집필 — 장별 «고쳐 쓰기 제안» → 편집자 «합치기»(머지). 충돌이면 안 합친다 ─────────────────── */
+const BOOK_BODY_MAX = 60000, BOOK_CH_MAX = 60, EDIT_PENDING_MAX = 50;
+const bookText = (v, n) => String(v == null || typeof v === 'object' ? '' : v).replace(/\r\n?/g, '\n').replace(/<\/?script[^>]*>/gi, '').slice(0, n);
+function bookCreate(db, x) {
+  const title = plain(x.title, 80);
+  if (!title) throw new HttpError(400, '책 이름을 적어 주세요');
+  const id = crypto.randomBytes(4).toString('hex'), ekey = crypto.randomBytes(10).toString('hex');
+  db.prepare('INSERT INTO books(id,title,about,editor,ekey) VALUES(?,?,?,?,?)').run(id, title, plain(x.about, 200), plain(x.editor, 30) || '편집자', ekey);
+  db.prepare('INSERT INTO chapters(book,ord,title) VALUES(?,1,?)').run(id, '1장');
+  return { id, ekey };
+}
+function bookOf(db, id, ekey = '') {
+  const b = db.prepare('SELECT * FROM books WHERE id=?').get(String(id));
+  if (!b) throw new HttpError(404, '없는 책입니다');
+  return { b, editor: !!ekey && String(ekey) === b.ekey };
+}
+function needEditor(db, id, ekey) { const r = bookOf(db, id, ekey); if (!r.editor) throw new HttpError(403, '편집자만 할 수 있습니다'); return r.b; }
+function bookView(db, id, ekey = '') {
+  const { b, editor } = bookOf(db, id, ekey);
+  const chapters = db.prepare(`SELECT c.id, c.ord, c.title, c.ver, c.updated, length(c.body) AS chars,
+      (SELECT COUNT(*) FROM edits e WHERE e.chapter = c.id AND e.status = 'pending') AS pending FROM chapters c WHERE c.book=? ORDER BY c.ord, c.id`).all(b.id);
+  const people = db.prepare(`SELECT author, COUNT(*) n FROM chapter_vers v JOIN chapters c ON c.id = v.chapter WHERE c.book=? AND author<>'' GROUP BY author ORDER BY n DESC`).all(b.id);
+  return { book: { id: b.id, title: b.title, about: b.about, editor: b.editor, created: b.created }, chapters, people, isEditor: editor };
+}
+function chapterOf(db, cid) {
+  const c = db.prepare('SELECT * FROM chapters WHERE id=?').get(+cid);
+  if (!c) throw new HttpError(404, '없는 장입니다');
+  return c;
+}
+function chapterView(db, cid, ekey = '') {
+  const c = chapterOf(db, cid), { b, editor } = bookOf(db, c.book, ekey);
+  const edits = db.prepare(`SELECT id, base, body, note, author, status, created FROM edits WHERE chapter=? AND status='pending' ORDER BY id`).all(c.id)
+    .map(e => ({ ...e, stale: e.base !== c.ver }));
+  const history = db.prepare('SELECT ver, author, note, at FROM chapter_vers WHERE chapter=? ORDER BY ver DESC LIMIT 30').all(c.id);
+  return { book: { id: b.id, title: b.title }, chapter: { id: c.id, ord: c.ord, title: c.title, body: c.body, ver: c.ver, updated: c.updated }, edits, history, isEditor: editor };
+}
+function chapterAdd(db, bookId, ekey, x) {
+  const b = needEditor(db, bookId, ekey);
+  const n = db.prepare('SELECT COUNT(*) c, COALESCE(MAX(ord),0) m FROM chapters WHERE book=?').get(b.id);
+  if (n.c >= BOOK_CH_MAX) throw new HttpError(409, `장은 ${BOOK_CH_MAX}개까지입니다`);
+  const r = db.prepare('INSERT INTO chapters(book,ord,title) VALUES(?,?,?)').run(b.id, n.m + 1, plain(x.title, 60) || `${n.m + 1}장`);
+  return { id: Number(r.lastInsertRowid) };
+}
+/* 제안 — 어느 판 위에서 썼는지(base)를 같이 받는다. 지금 판과 똑같은 글은 제안이 아니다 */
+function editPropose(db, cid, x) {
+  const c = chapterOf(db, cid);
+  const body = bookText(x.body, BOOK_BODY_MAX);
+  if (!body.trim()) throw new HttpError(400, '고쳐 쓴 글이 비었습니다');
+  if (body === c.body) throw new HttpError(400, '바뀐 곳이 없습니다');
+  const base = Number.isInteger(+x.base) ? +x.base : c.ver;
+  if (base > c.ver || base < 0) throw new HttpError(400, '없는 판 위에서 쓴 제안입니다');
+  if (db.prepare("SELECT COUNT(*) c FROM edits WHERE chapter=? AND status='pending'").get(c.id).c >= EDIT_PENDING_MAX)
+    throw new HttpError(429, '이 장에 기다리는 제안이 너무 많습니다. 편집자가 정리한 뒤에 다시 내 주세요');
+  const r = db.prepare('INSERT INTO edits(chapter,base,body,note,author) VALUES(?,?,?,?,?)').run(c.id, base, body, plain(x.note, 140), plain(x.author, 30) || '익명');
+  return { id: Number(r.lastInsertRowid), base };
+}
+/* 합치기 — 제안이 지금 판 위에서 쓰였을 때만. 그 사이 다른 제안이 합쳐졌으면 409(덮어쓰면 남의 고침이 사라진다) */
+function editMerge(db, eid, ekey) {
+  const e = db.prepare('SELECT * FROM edits WHERE id=?').get(+eid);
+  if (!e) throw new HttpError(404, '없는 제안입니다');
+  const c = chapterOf(db, e.chapter); needEditor(db, c.book, ekey);
+  if (e.status !== 'pending') throw new HttpError(409, '이미 정리된 제안입니다');
+  if (e.base !== c.ver) throw new HttpError(409, `그 사이 이 장이 바뀌었습니다(${e.base}판 → ${c.ver}판). 제안한 사람이 새 판 위에 다시 쓰거나, 편집자가 직접 옮겨 적어야 합니다`);
+  const ver = c.ver + 1;
+  db.prepare('INSERT INTO chapter_vers(chapter,ver,body,author,note) VALUES(?,?,?,?,?)').run(c.id, ver, e.body, e.author, e.note);
+  db.prepare("UPDATE chapters SET body=?, ver=?, updated=datetime('now') WHERE id=?").run(e.body, ver, c.id);
+  db.prepare("UPDATE edits SET status='merged', decided=datetime('now') WHERE id=?").run(e.id);
+  return { ver };
+}
+function editClose(db, eid, ekey) {
+  const e = db.prepare('SELECT * FROM edits WHERE id=?').get(+eid);
+  if (!e) throw new HttpError(404, '없는 제안입니다');
+  const c = chapterOf(db, e.chapter); needEditor(db, c.book, ekey);
+  if (e.status !== 'pending') throw new HttpError(409, '이미 정리된 제안입니다');
+  db.prepare("UPDATE edits SET status='closed', decided=datetime('now') WHERE id=?").run(e.id);
+  return { ok: true };
+}
+/* 편집자가 직접 고치기 — 제안을 내고 바로 합치는 것과 같다(기록이 남는다) */
+function chapterSave(db, cid, ekey, x) {
+  const c = chapterOf(db, cid); needEditor(db, c.book, ekey);
+  if (x.title !== undefined) db.prepare('UPDATE chapters SET title=? WHERE id=?').run(plain(x.title, 60) || c.title, c.id);
+  if (x.body === undefined) return { ver: c.ver };
+  const e = editPropose(db, cid, { body: x.body, base: x.base, note: x.note || '편집자 직접 고침', author: bookOf(db, c.book).b.editor });
+  return editMerge(db, e.id, ekey);
+}
+function bookMd(db, id) {
+  const { b } = bookOf(db, id);
+  const ch = db.prepare('SELECT title, body FROM chapters WHERE book=? ORDER BY ord, id').all(b.id);
+  const people = db.prepare(`SELECT DISTINCT author FROM chapter_vers v JOIN chapters c ON c.id=v.chapter WHERE c.book=? AND author<>''`).all(b.id).map(r => r.author);
+  return `# ${b.title}\n\n${b.about ? b.about + '\n\n' : ''}` + ch.map(c => `## ${c.title}\n\n${c.body.trim()}\n`).join('\n') +
+    `\n---\n함께 쓴 사람: ${people.join(', ') || b.editor} · HACK:ON 공동 집필 (${mailSite()}/w/${b.id})\n`;
+}
+
 /* ── 게시판 — 주제별 글·댓글·추천(▲). 개념글은 추천 BOARD_BEST 이상 ───────────────────────────── */
 const BOARD_TOPICS = [['free', '자유'], ['vibe', '바이브코딩'], ['ai', 'AI 도구'], ['team', '팀원 구함'], ['show', '자랑·데모'], ['career', '취업·커리어'], ['shop', '사장님'], ['qna', '질문']];
 const BOARD_TOPIC_KEYS = BOARD_TOPICS.map(t => t[0]);
@@ -8488,6 +8588,25 @@ function routes(db) {
           return res.end(calIcs(db, JSON.parse(sub.refs), siteOf(req)));
         }
         if (p === '/api/cal/sub' && req.method === 'POST') return json(res, 201, calSub(db, calRefs(db, await body(req), owner)));
+        /* 공동 집필 */
+        if (p === '/api/books' && req.method === 'POST') {
+          if (tooMany('bk:' + clientIp(req), BOARD_LIMIT)) throw new HttpError(429, '책을 너무 빨리 만들고 있습니다. 잠시 뒤에 다시 해 주세요');
+          return json(res, 201, bookCreate(db, await body(req)));
+        }
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})$/)) && req.method === 'GET') return json(res, 200, bookView(db, m[1], req.headers['x-ekey'] || ''));
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\.md$/)) && req.method === 'GET') {
+          res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="hackon-book-${m[1]}.md"` });
+          return res.end(bookMd(db, m[1]));
+        }
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\/chapters$/)) && req.method === 'POST') return json(res, 201, chapterAdd(db, m[1], req.headers['x-ekey'] || '', await body(req)));
+        if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'GET') return json(res, 200, chapterView(db, m[1], req.headers['x-ekey'] || ''));
+        if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'POST') return json(res, 200, chapterSave(db, m[1], req.headers['x-ekey'] || '', await body(req)));
+        if ((m = p.match(/^\/api\/chapters\/(\d+)\/edits$/)) && req.method === 'POST') {
+          if (tooMany('ed:' + clientIp(req), BOARD_LIMIT * 3)) throw new HttpError(429, '제안을 너무 빨리 내고 있습니다. 잠시 뒤에 다시 해 주세요');
+          return json(res, 201, editPropose(db, m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/edits\/(\d+)\/merge$/)) && req.method === 'POST') return json(res, 200, editMerge(db, m[1], req.headers['x-ekey'] || ''));
+        if ((m = p.match(/^\/api\/edits\/(\d+)\/close$/)) && req.method === 'POST') return json(res, 200, editClose(db, m[1], req.headers['x-ekey'] || ''));
         /* 게시판 */
         if (p === '/api/board' && req.method === 'GET')
           return json(res, 200, boardList(db, { topic: String(q.topic || ''), sort: ['hot', 'new', 'top'].includes(q.sort) ? q.sort : 'hot', page: q.page }));
@@ -8745,7 +8864,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/board' || p.match(/^\/board\/\d+$/) || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/board' || p.match(/^\/board\/\d+$/) || p === '/write' || p.match(/^\/w\/[0-9a-f]{8}(\/\d+)?$/) || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -9506,6 +9625,36 @@ async function selftest() {
       ok(bpub.every(r => r.stuck === undefined), '막힌 곳 — 공개 순위표 줄에는 안 붙는다(이름과 묶이지 않게)');
       ok(bmine.find(r => r.id === k1).stuck.includes('3시간') && bmine.filter(r => r.stuck !== undefined).length === 1, '막힌 곳 — 본인 줄에만 보인다');
       ok(badm.find(r => r.id === k1).stuck.includes('3시간'), '막힌 곳 — 운영자는 본다');
+    }
+    /* 공동 집필 — 제안 → 합치기, 충돌이면 409, 편집자 열쇠, 판 기록, 마크다운 */
+    {
+      const wdb = open(':memory:');
+      let bad = false; try { bookCreate(wdb, { title: '  ' }); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 이름 없는 책은 안 만든다');
+      const bk = bookCreate(wdb, { title: '바이브코딩 첫걸음', about: '같이 쓰는 입문서', editor: '편집장' });
+      const v0 = bookView(wdb, bk.id);
+      ok(v0.chapters.length === 1 && !v0.isEditor && bookView(wdb, bk.id, bk.ekey).isEditor && !JSON.stringify(v0).includes(bk.ekey), '공동 집필 — 첫 장이 있고, 편집자는 열쇠로만, 열쇠는 응답에 없다');
+      const ch = v0.chapters[0].id;
+      bad = false; try { chapterAdd(wdb, bk.id, 'wrong', { title: '2장' }); } catch (e) { bad = e.code === 403; } ok(bad, '공동 집필 — 남이 장을 못 늘린다');
+      chapterSave(wdb, ch, bk.ekey, { body: '첫 문단.\n둘째 문단.', base: 0 });
+      ok(chapterView(wdb, ch).chapter.ver === 1 && chapterView(wdb, ch).history[0].author === '편집장', '공동 집필 — 편집자 직접 고침도 판으로 남는다');
+      bad = false; try { editPropose(wdb, ch, { body: '첫 문단.\n둘째 문단.', base: 1 }); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 바뀐 곳 없는 제안은 안 받는다');
+      bad = false; try { editPropose(wdb, ch, { body: 'x', base: 9 }); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 없는 판 위의 제안은 안 받는다');
+      const a = editPropose(wdb, ch, { body: '첫 문단.\n둘째 문단을 고쳤다.', base: 1, author: '김작가', note: '둘째 문단 다듬기' });
+      const b2 = editPropose(wdb, ch, { body: '첫 문단 고침.\n둘째 문단.', base: 1, author: '박작가' });
+      ok(chapterView(wdb, ch).edits.length === 2 && chapterView(wdb, ch).edits.every(e => !e.stale), '공동 집필 — 기다리는 제안 둘');
+      bad = false; try { editMerge(wdb, a.id, 'wrong'); } catch (e) { bad = e.code === 403; } ok(bad, '공동 집필 — 편집자만 합친다');
+      ok(editMerge(wdb, a.id, bk.ekey).ver === 2 && chapterView(wdb, ch).chapter.body.includes('둘째 문단을 고쳤다'), '공동 집필 — 합치면 새 판이 되고 글이 바뀐다');
+      ok(chapterView(wdb, ch).edits.find(e => e.id === b2.id).stale, '공동 집필 — 옛 판 위의 제안에는 «바뀜» 표시');
+      bad = false; try { editMerge(wdb, b2.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 그 사이 장이 바뀌었으면 합치지 않는다(남의 고침을 덮지 않게)');
+      ok(chapterView(wdb, ch).chapter.body.includes('둘째 문단을 고쳤다'), '공동 집필 — 충돌난 제안은 글을 안 바꾼다');
+      bad = false; try { editMerge(wdb, a.id, bk.ekey); } catch (e) { bad = e.code === 409; } ok(bad, '공동 집필 — 한 제안을 두 번 합치지 않는다');
+      editClose(wdb, b2.id, bk.ekey);
+      ok(chapterView(wdb, ch).edits.length === 0, '공동 집필 — 돌려보낸 제안은 목록에서 빠진다');
+      chapterAdd(wdb, bk.id, bk.ekey, { title: '도구 고르기' });
+      const md = bookMd(wdb, bk.id);
+      ok(md.startsWith('# 바이브코딩 첫걸음') && md.includes('## 1장') && md.includes('## 도구 고르기') && md.includes('김작가'), '공동 집필 — 마크다운으로 장 차례대로, 함께 쓴 사람까지');
+      ok(bookView(wdb, bk.id).people.some(p => p.author === '김작가'), '공동 집필 — 합쳐진 사람이 «함께 쓴 사람» 에 오른다');
+      ok(!bookText('<script>alert(1)</script>본문', 100).includes('<script'), '공동 집필 — 스크립트 꼬리표는 벗긴다(화면은 글자로만 그린다)');
     }
     /* 게시판 — 주제·연락처·추천 한 번·개념글·신고 셋 숨김·지우기 열쇠·정렬 */
     {
