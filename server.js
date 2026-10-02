@@ -3691,6 +3691,16 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN twist TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 연습용 대회. 해 보려고 연 것 — 목록에 안 오르고 SAMPLE_DAYS 뒤 휴지통으로 간다 */
   try { db.exec('ALTER TABLE events ADD COLUMN sample INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* 강점과 원하는 것 — 팀원 추천이 «서로 채워 주는 강점 + 같은 방향» 을 찾는 데 쓴다 */
+  try { db.exec("ALTER TABLE teams ADD COLUMN strengths TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE teams ADD COLUMN aim TEXT NOT NULL DEFAULT ''"); } catch {}
+  /* 팀원 추천 «좋아요». 둘 다 누르면 서로 연락처가 열린다 — 한쪽만 누른 것은 누른 쪽만 안다 */
+  db.exec(`CREATE TABLE IF NOT EXISTS match_likes(
+    event   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    from_t  INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    to_t    INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(from_t, to_t))`);
   try { db.exec("ALTER TABLE news ADD COLUMN job TEXT NOT NULL DEFAULT ''"); } catch {}      // 직무 태그(자동 분류 또는 제보자가 고른 것)
   try { db.exec("ALTER TABLE news ADD COLUMN by TEXT NOT NULL DEFAULT ''"); } catch {}       // 제보자 이름(로그인 별명)
   try { db.exec("ALTER TABLE news ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}    // 제보자 계정 — 하루 5건 상한      // 별점 옆 한 줄
@@ -4287,6 +4297,21 @@ function moreTeam(db, id, b, can) {
     if (next !== String(t.bring || '')) {
       if (!owns) throw new HttpError(403, '가져올 것은 신청한 분만 고칠 수 있습니다');
       set.push('bring=?'); val.push(next);
+    }
+  }
+  /* 강점·원하는 것 — 바뀌는 값이고 본인만 고친다(가져올 것과 같은 규칙) */
+  if (b.strengths !== undefined) {
+    const next = strengthList(b.strengths).slice(0, 3).join(',');
+    if (next !== String(t.strengths || '')) {
+      if (!owns) throw new HttpError(403, '강점은 신청한 분만 고칠 수 있습니다');
+      set.push('strengths=?'); val.push(next);
+    }
+  }
+  if (b.aim !== undefined) {
+    const next = AIMS.includes(String(b.aim)) ? String(b.aim) : '';
+    if (next !== String(t.aim || '')) {
+      if (!owns) throw new HttpError(403, '원하는 것은 신청한 분만 고칠 수 있습니다');
+      set.push('aim=?'); val.push(next);
     }
   }
   /* 인원은 바뀌는 값이라 덮어쓰기를 허용한다. 한 명 들어오면 고쳐야 한다.
@@ -5218,6 +5243,68 @@ function crew(db, event) {
                    mem: r.s.mem, want: r.want, note: r.note })),
     teams: rows.length,
   };
+}
+
+/** 팀원 추천 — 같은 대회 안에서 «이 사람과 맞을 것» 셋.
+    맞는다는 것: 역할이 겹치지 않는다(만들기·기획·디자인), 본인이 고른 실력이 한 칸 안이다, 자리가 남았다.
+    매너 평가가 셋 넘게 쌓였는데 낮은(3 미만) 사람은 아예 안 권한다 — 낮은 걸 «보여 주는» 대신 «권하지 않는» 쪽.
+    자동으로 팀을 묶지 않는다. 마지막은 현장에서 얼굴 보고 — 온라인 자동 매칭은 «비공개·초대 필요» 로 죽었다.
+    연락처는 둘 다 «좋아요» 를 눌렀을 때만 그 둘에게 열린다. */
+const MATCH_ROLES = ['만들기', '기획', '디자인'];
+/* 강점은 «무엇을 잘하나», 원하는 것은 «왜 하나». 강점은 달라야 서로 채우고, 원하는 것은 같아야 끝까지 간다 —
+   돈 벌려는 사람과 배우려는 사람이 한 팀이면 둘째 주에 갈라진다 */
+const STRENGTHS = ['아이디어', '끝까지 만들기', '발표·설득', '디자인 감각', '사용자 만나기', '데이터·분석', '글쓰기'];
+const AIMS = ['수익', '사회 문제', '배우기', '포트폴리오', '재미'];
+const strengthList = v => String(v || '').split(',').map(x => x.trim()).filter(x => STRENGTHS.includes(x));
+function matchOf(db, event, tkey) {
+  const me = raterOf(db, event, tkey);
+  if (!me) throw new HttpError(403, '이 대회에 신청한 브라우저에서만 봅니다');
+  const rows = db.prepare(`SELECT id, name, role, solo, size, want, members, person, contact, pick, strengths, aim FROM teams WHERE event=? ORDER BY id`).all(event)
+    .filter(r => r.pick !== 'applied' && r.pick !== 'rejected');
+  const mine = rows.find(r => r.id === me.team);
+  if (!mine) throw new HttpError(404, '내 팀을 못 찾았습니다');
+  const lv = pid => { const p = pid && db.prepare('SELECT level FROM people WHERE id=?').get(pid); return p ? LEVELS.indexOf(p.level) : -1; };
+  const myLv = lv(mine.person);
+  const liked = new Set(db.prepare('SELECT to_t FROM match_likes WHERE from_t=?').all(mine.id).map(r => r.to_t));
+  const likedMe = new Set(db.prepare('SELECT from_t FROM match_likes WHERE to_t=?').all(mine.id).map(r => r.from_t));
+  const picks = [];
+  for (const r of rows) {
+    if (r.id === mine.id) continue;
+    const s = seats(r);
+    if (!r.solo && s.free <= 0) continue;                       // 자리 없는 팀은 권하지 않는다
+    if (r.person) {
+      const mn = shrink(db.prepare('SELECT manner FROM ratings WHERE target=?').all(r.person).map(x => x.manner));
+      if (mn.show && mn.score < 3) continue;
+    }
+    const why = []; let score = 0;
+    if (r.role && mine.role && r.role !== mine.role) { score += 3; why.push(`역할이 달라요 — ${r.role}`); }
+    else if (r.role && !mine.role) { score += 1; why.push(r.role); }
+    const l = lv(r.person);
+    if (l >= 0 && myLv >= 0 && Math.abs(l - myLv) <= 1) { score += 2; why.push(`실력이 비슷해요 — ${LEVELS[l]}`); }
+    if (mine.role && r.want && String(r.want).includes(mine.role)) { score += 2; why.push(`${mine.role} 하는 사람을 찾아요`); }
+    const mySt = strengthList(mine.strengths), st = strengthList(r.strengths);
+    const fills = st.filter(x => !mySt.includes(x));
+    if (mySt.length && fills.length) { score += 2; why.push(`내게 없는 강점 — ${fills.slice(0, 2).join('·')}`); }
+    if (mine.aim && r.aim === mine.aim) { score += 2; why.push(`원하는 게 같아요 — ${r.aim}`); }
+    if (r.solo) { score += 1; why.push('혼자 왔어요'); } else { score += 1; why.push(`자리 ${s.free}개 남음`); }
+    if (likedMe.has(r.id)) { score += 3; why.push('나를 좋아요 했어요'); }
+    picks.push({ id: r.id, name: r.name, role: r.role, solo: !!r.solo, free: r.solo ? null : s.free, level: l >= 0 ? LEVELS[l] : '', strengths: strengthList(r.strengths), aim: r.aim, why, score, liked: liked.has(r.id) });
+  }
+  picks.sort((a, b) => b.score - a.score || a.id - b.id);
+  /* 서로 좋아요 — 이 둘에게만 연락처 */
+  const mutual = rows.filter(r => liked.has(r.id) && likedMe.has(r.id)).map(r => ({ id: r.id, name: r.name, role: r.role, contact: r.contact }));
+  return { picks: picks.slice(0, 3).map(({ score, ...x }) => x), mutual, me: { id: mine.id, role: mine.role, strengths: strengthList(mine.strengths), aim: mine.aim },
+           options: { strengths: STRENGTHS, aims: AIMS } };
+}
+function likeMatch(db, event, tkey, to, on = true) {
+  const me = raterOf(db, event, tkey);
+  if (!me) throw new HttpError(403, '이 대회에 신청한 브라우저에서만 누릅니다');
+  const t = db.prepare('SELECT id FROM teams WHERE id=? AND event=?').get(+to, event);
+  if (!t) throw new HttpError(404, '이 대회에 없는 팀입니다');
+  if (t.id === me.team) throw new HttpError(400, '내 팀은 고를 수 없습니다');
+  if (on) db.prepare('INSERT OR IGNORE INTO match_likes(event,from_t,to_t) VALUES(?,?,?)').run(event, me.team, t.id);
+  else db.prepare('DELETE FROM match_likes WHERE from_t=? AND to_t=?').run(me.team, t.id);
+  return matchOf(db, event, tkey);
 }
 
 /** 행사장 큰 화면이 쓰는 것. 열쇠가 없다 — 벽에 걸어 두는 화면이라
@@ -7142,6 +7229,10 @@ function routes(db) {
           const b = await body(req);
           return json(res, 200, markTodo(db, m[1], b.key, b.on !== false));
         }
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/match$/)) && req.method === 'GET')
+          return json(res, 200, matchOf(db, m[1], req.headers['x-tkey'] || ''));
+        if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/match\/(\d+)$/)) && req.method === 'POST')
+          return json(res, 200, likeMatch(db, m[1], req.headers['x-tkey'] || '', m[2], (await body(req)).on !== false));
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/crew$/)) && req.method === 'GET')
           return json(res, 200, crew(db, m[1]));
 
@@ -9583,6 +9674,67 @@ async function selftest() {
       ok(cdb.prepare('SELECT id FROM events').all().map(r => r.id).join() === real.id, '남기기로 고른 대회만 남는다');
       ok(cdb.prepare('SELECT hidden FROM works').get().hidden === 1 && cdb.prepare('SELECT hidden FROM gigs').get().hidden === 1,
          '만든 것·외주는 지우지 않고 내린다');
+      {
+        /* 팀원 추천 — 역할 보완·실력 한 칸·자리 있음, 매너 낮은 사람은 안 권함, 연락처는 서로 좋아요일 때만 */
+        const me = createEvent(cdb, { title: '추천 검사' });
+        const J = (name, role, lvl, email, extra = {}) => {
+          const r = joinTeam(cdb, me.id, { name, agree: true, email, ...extra }); const id = r.id || r;
+          cdb.prepare('UPDATE teams SET role=?, solo=? WHERE id=?').run(role, extra.solo === false ? 0 : 1, id);
+          const t = cdb.prepare('SELECT tkey, person FROM teams WHERE id=?').get(id);
+          if (lvl) cdb.prepare('UPDATE people SET level=? WHERE id=?').run(lvl, t.person);
+          return { id, tkey: t.tkey, person: t.person };
+        };
+        const a = J('개발자A', '만들기', '만들 줄 앎', 'a@m.test');
+        const b = J('기획자B', '기획', '해 봤음', 'b@m.test');
+        const c = J('개발자C', '만들기', '만들 줄 앎', 'c@m.test');
+        const d = J('디자이너D', '디자인', '처음', 'd@m.test');
+        const bad = J('매너낮음', '디자인', '만들 줄 앎', 'x@m.test');
+        for (const [i, g] of ['g1', 'g2', 'g3', 'g4'].entries()) cdb.prepare('INSERT INTO ratings(event,giver,target,skill,manner) VALUES(?,?,?,?,?)').run(me.id, g, bad.person, 3, 1);
+        const m1 = matchOf(cdb, me.id, a.tkey);
+        ok(m1.picks.length <= 3 && m1.picks[0].id === b.id && m1.picks[0].why.some(w => w.includes('역할이 달라요')),
+           '역할이 다르고 실력이 한 칸 안인 사람이 맨 위');
+        ok(!m1.picks.some(x => x.id === bad.id), '매너 평가가 쌓였는데 낮은 사람은 권하지 않는다');
+        const ord = m1.picks.map(x => x.id);
+        ok(ord.indexOf(d.id) >= 0 && (ord.indexOf(c.id) < 0 || ord.indexOf(d.id) < ord.indexOf(c.id)),
+           '실력이 한 칸 넘게 달라도 역할이 다른 사람이 역할이 같은 사람보다 위');
+        ok(!m1.picks.some(x => x.id === a.id), '나는 추천에 없다');
+        ok(!JSON.stringify(m1.picks).includes('@m.test') && !m1.mutual.length, '좋아요 전에는 연락처가 한 줄도 없다');
+        let mBad = 0; try { matchOf(cdb, me.id, 'nope'); } catch (e) { mBad = e.code; }
+        ok(mBad === 403, '신청 안 한 브라우저는 추천을 못 본다 (403)');
+        likeMatch(cdb, me.id, a.tkey, b.id);
+        ok(!matchOf(cdb, me.id, a.tkey).mutual.length && !JSON.stringify(matchOf(cdb, me.id, b.tkey)).includes('a@m.test'),
+           '한쪽만 좋아요면 아무에게도 연락처가 안 열린다');
+        ok(matchOf(cdb, me.id, b.tkey).picks[0].id === a.id && matchOf(cdb, me.id, b.tkey).picks[0].why.includes('나를 좋아요 했어요'),
+           '나를 좋아요 한 사람이 내 추천 위로 온다');
+        const mm = likeMatch(cdb, me.id, b.tkey, a.id);
+        ok(mm.mutual.length === 1 && mm.mutual[0].contact === 'a@m.test' && matchOf(cdb, me.id, a.tkey).mutual[0].contact === 'b@m.test',
+           '서로 좋아요면 그 둘에게만 연락처가 열린다');
+        ok(!JSON.stringify(matchOf(cdb, me.id, c.tkey)).includes('@m.test'), '셋째 사람에게는 둘의 연락처가 안 보인다');
+        likeMatch(cdb, me.id, a.tkey, b.id, false);
+        ok(!matchOf(cdb, me.id, b.tkey).mutual.length, '좋아요를 거두면 연락처가 다시 닫힌다');
+        /* 강점·원하는 것 — 내게 없는 강점이 있고 원하는 게 같은 사람이 위. 남이 대신 못 고친다 */
+        const me2 = createEvent(cdb, { title: '강점 검사' });
+        const K = (name, st, aim, email) => { const r = joinTeam(cdb, me2.id, { name, agree: true, email }); const id = r.id || r;
+          cdb.prepare("UPDATE teams SET role='만들기', solo=1 WHERE id=?").run(id);
+          const tk = cdb.prepare('SELECT tkey FROM teams WHERE id=?').get(id).tkey;
+          moreTeam(cdb, id, { strengths: st, aim }, { tkey: tk }); return { id, tkey: tk }; };
+        const s1 = K('나', '아이디어,끝까지 만들기', '수익', 's1@m.test');
+        const s2 = K('같은강점', '아이디어', '수익', 's2@m.test');
+        const s4 = K('방향다름', '발표·설득', '재미', 's4@m.test');   // 먼저 만든다 — 점수가 같으면 먼저 온 쪽이 위라, 방향 점수만이 순서를 가른다
+        const s3 = K('채워줌', '발표·설득,사용자 만나기', '수익', 's3@m.test');
+        const ms = matchOf(cdb, me2.id, s1.tkey);
+        ok(ms.picks[0].id === s3.id && ms.picks[0].why.some(w => w.includes('내게 없는 강점')) && ms.picks[0].why.some(w => w.includes('원하는 게 같아요')),
+           '내게 없는 강점 + 같은 방향인 사람이 맨 위');
+        ok(ms.picks.findIndex(x => x.id === s4.id) > ms.picks.findIndex(x => x.id === s3.id), '방향이 다르면 강점을 채워 줘도 아래');
+        ok(cdb.prepare('SELECT strengths FROM teams WHERE id=?').get(s1.id).strengths === '아이디어,끝까지 만들기', '강점이 저장된다');
+        moreTeam(cdb, s1.id, { strengths: '아이디어,없는강점', aim: '없는값' }, { tkey: s1.tkey });
+        ok(cdb.prepare('SELECT strengths, aim FROM teams WHERE id=?').get(s1.id).strengths === '아이디어' && cdb.prepare('SELECT aim FROM teams WHERE id=?').get(s1.id).aim === '',
+           '목록에 없는 강점·원하는 것은 버린다');
+        let sx = 0; try { moreTeam(cdb, s2.id, { strengths: '글쓰기' }, { tkey: s1.tkey }); } catch (e) { sx = e.code; }
+        ok(sx === 403, '남의 강점은 못 고친다 (403)');
+        let self = 0; try { likeMatch(cdb, me.id, a.tkey, a.id); } catch (e) { self = e.code; }
+        ok(self === 400, '내 팀은 고를 수 없다 (400)');
+      }
       cdb.close();
       for (const f of [cf, cf + '-wal', cf + '-shm']) fs.rmSync(f, { force: true });
     }

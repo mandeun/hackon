@@ -1641,6 +1641,26 @@ function pasteDates(text, now = ymdLocal()) {
 const walShift = (day, n) => { const d = new Date(day + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 let WAL_FOUND = null;   // 붙여 넣기에서 건진 것 — 넣기 전에 사람이 본다
 let BRIEF_TEXT = '';   // 아침 브리핑 한 장(카톡에 붙일 글)
+let MATCH = null;      // 팀원 추천 — 공개 페이지가 그릴 때 받아 둔다
+/* 팀원 추천 한 장. 왜 맞는지(역할·실력·강점·방향)를 한 줄로 보이고, 연락처는 서로 좋아요일 때만.
+   강점·원하는 것을 안 골랐으면 고르라고 먼저 권한다 — 안 고르면 역할·실력만으로 맞춘다 */
+function matchCard(m) {
+  if (!m) return '';
+  const chips = (list, on, attr, multi) => `<div class="gchips">${list.map(x => `<button type="button" class="pick${(multi ? on.includes(x) : on === x) ? ' on' : ''}" data-${attr}="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+  return `<div class="card" id="match">
+    <h3>같이 할 사람 추천</h3>
+    <div class="meta">역할이 겹치지 않고, 실력이 비슷하고, 내게 없는 강점이 있고, 원하는 게 같은 사람. 마지막은 현장에서 얼굴 보고 정하세요.</div>
+    <label>내 강점 <span class="pill ok">셋까지</span></label>${chips(m.options.strengths, m.me.strengths, 'mst', true)}
+    <label>왜 하나요</label>${chips(m.options.aims, m.me.aim, 'maim', false)}
+    <button class="btn sec sm" id="m-strsave" style="margin-top:8px">저장하고 다시 찾기</button>
+    ${m.mutual.length ? `<div class="notice" style="margin-top:12px"><b>서로 좋아요</b> — 연락해 보세요<br>${m.mutual.map(x => `${esc(x.name)}${x.role ? ` (${esc(x.role)})` : ''} · <b>${esc(x.contact || '연락처 없음')}</b>`).join('<br>')}</div>` : ''}
+    ${!m.picks.length ? '<div class="meta" style="margin-top:12px">아직 권할 사람이 없습니다. 신청이 더 들어오면 여기 뜹니다.</div>'
+      : m.picks.map(x => `<div style="padding:10px 0;border-top:1px solid var(--rule);margin-top:8px;display:flex;gap:10px;align-items:flex-start">
+          <div style="flex:1;min-width:0"><b>${esc(x.name)}</b> ${x.role ? `<span class="pill">${esc(x.role)}</span>` : ''}${x.level ? ` <span class="pill">${esc(x.level)}</span>` : ''}
+            <div class="meta">${x.why.map(esc).join(' · ')}</div></div>
+          <button class="btn ${x.liked ? '' : 'sec '}sm" data-mlike="${x.id}" data-on="${x.liked ? 0 : 1}">${x.liked ? '좋아요 ✓' : '좋아요'}</button></div>`).join('')}
+    <div class="meta" style="margin-top:8px">좋아요는 상대에게 «누가» 눌렀는지만 보입니다. 둘 다 누르면 그 둘에게만 연락처가 열립니다.</div></div>`;
+}
 /* 직무별 추천. «무엇을 구독하나» 를 사람이 다 적게 하지 않고, 직무 하나 고르면 먼저 권한다.
    값은 적지 않는다 — 가격은 달마다 바뀌어서 화면에 박으면 거짓말이 된다. 무료인 것만 «무료» 라고 붙인다 */
 const WAL_REC = {
@@ -3611,6 +3631,8 @@ const SCREEN = {
     const hrep = LIVE ? await api(`/events/${cur}/rep`).catch(() => null) : null;
     /* 같이 있었던 사람 — 매너 평가 칸. 신청한 브라우저(팀 열쇠)에서만 온다. 못 받으면 칸을 안 그린다 */
     const peers = (LIVE && myId && tkeyOf(myId)) ? await api(`/events/${cur}/peers`, { tkey: tkeyOf(myId) }).catch(() => null) : null;
+    /* 팀원 추천 — 신청한 브라우저(팀 열쇠)에만. 끝난 대회·선발형 지원 대기 중엔 안 띄운다 */
+    MATCH = (LIVE && mine && myId && tkeyOf(myId) && statusOf(e).k !== '끝남') ? await api(`/events/${cur}/match`, { tkey: tkeyOf(myId) }).catch(() => null) : null;
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : (DEMO.needs || []);
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : (DEMO.ledger || []);
     const notes = LIVE ? await api(`/events/${cur}/notices`).catch(() => []) : [];
@@ -3692,7 +3714,7 @@ const SCREEN = {
            스크롤 끝에 있으면 4050 은 못 찾는다. 나머지는 «읽을거리»라 아래로 간다. */
         !ended
           ? (mine
-              ? moreForm(mine)
+              ? moreForm(mine) + matchCard(MATCH)
               : `<div class="card" id="apply"><h3>${e.pick ? '지원하기' : '참가 신청'}</h3>
                    ${cancelLine(e)}
                    ${applyForm()}</div>`)
@@ -6767,6 +6789,23 @@ function wire() {
     const l = walLoad(); l.push({ name: b.dataset.wrecadd, kind: 'renew', date: '', every: 'month', won: 0, memo: '' });
     if (!walSave(l)) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
     flash(`${b.dataset.wrecadd} 를 넣었습니다. 갱신일을 알면 아래에서 고치세요`);
+  });
+  document.querySelectorAll('[data-mst]').forEach(b => b.onclick = () => {
+    if (!b.classList.contains('on') && document.querySelectorAll('[data-mst].on').length >= 3) return flash('강점은 셋까지 고릅니다', true);
+    b.classList.toggle('on'); });
+  document.querySelectorAll('[data-maim]').forEach(b => b.onclick = () => document.querySelectorAll('[data-maim]').forEach(x => x.classList.toggle('on', x === b && !b.classList.contains('on'))));
+  if ($('#m-strsave')) $('#m-strsave').onclick = async () => {
+    const myId = localStorage.getItem('hackon.team.' + cur);
+    try { await api(`/teams/${myId}/more`, { method: 'POST', tkey: tkeyOf(myId), body: {
+            strengths: [...document.querySelectorAll('[data-mst].on')].map(x => x.dataset.mst).join(','),
+            aim: (document.querySelector('[data-maim].on') || {}).dataset?.maim || '' } });
+          flash('저장했습니다. 추천을 다시 찾았습니다'); } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-mlike]').forEach(b => b.onclick = async () => {
+    const myId = localStorage.getItem('hackon.team.' + cur);
+    try { const r = await api(`/events/${cur}/match/${b.dataset.mlike}`, { method: 'POST', tkey: tkeyOf(myId), body: { on: b.dataset.on === '1' } });
+          flash(r.mutual.some(x => String(x.id) === b.dataset.mlike) ? '서로 좋아요! 연락처가 열렸습니다' : (b.dataset.on === '1' ? '좋아요를 보냈습니다' : '좋아요를 거뒀습니다')); }
+    catch (e) { flash(e.message, true); }
   });
   if ($('#br-copy')) $('#br-copy').onclick = async () => {
     const out = $('#br-out'); out.textContent = BRIEF_TEXT; out.hidden = false;

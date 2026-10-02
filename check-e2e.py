@@ -4229,5 +4229,29 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "브리핑이 폰 폭에서 옆으로 밀린다")
     b.close()
 ok("아침 브리핑 — 내 대회 D-day·7일 안 마감·직무 레시피 한 줄·카톡용 한 장, 서버에 안 씀")
+
+# ── 팀원 추천 — 역할이 다른 사람 추천, 좋아요 받은 쪽에 표시, 서로 좋아요면 그 둘에게만 연락처 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    _mv = post("/api/events", {"title": "추천 검사 대회", "starts": "2099-10-31"})[1]
+    def _sign(name, email, role):
+        ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("match: " + str(e)))
+        pg.goto(BASE + f"/e/{_mv['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-name")
+        pg.fill("#t-name", name); pg.fill("#t-email", email); pg.check("#t-agree"); pg.click("#t-join"); pg.wait_for_selector("#m-save")
+        pg.select_option("#m-role", role); pg.select_option("#m-solo", "1"); pg.click("#m-save"); pg.wait_for_timeout(900)
+        return pg
+    _pa = _sign("추천A", "ma@example.com", "만들기"); _pb = _sign("추천B", "mb@example.com", "기획"); _pc = _sign("추천C", "mc@example.com", "디자인")
+    _pa.reload(wait_until="networkidle"); _pa.wait_for_selector("#match")
+    _mt = _pa.inner_text("#match")
+    A("추천B" in _mt and "역할이 달라요" in _mt and "mb@example.com" not in _mt, f"추천에 역할이 다른 사람·이유가 없거나 연락처가 샌다: {_mt[:200]}")
+    _pa.click(f'[data-mlike]:near(:text("추천B"))'); _pa.wait_for_timeout(900)
+    _pb.reload(wait_until="networkidle"); _pb.wait_for_selector("#match")
+    A("나를 좋아요 했어요" in _pb.inner_text("#match") and "ma@example.com" not in _pb.inner_text("#match"), "좋아요 받은 쪽에 표시가 없거나, 한쪽 좋아요로 연락처가 열린다")
+    _pb.click(f'[data-mlike]:near(:text("추천A"))'); _pb.wait_for_timeout(900)
+    A("ma@example.com" in _pb.inner_text("#match"), "서로 좋아요인데 연락처가 안 열린다")
+    _pc.reload(wait_until="networkidle"); _pc.wait_for_selector("#match")
+    A("ma@example.com" not in _pc.inner_text("#match") and "mb@example.com" not in _pc.inner_text("#match"), "셋째 사람에게 둘의 연락처가 보인다")
+    b.close()
+ok("팀원 추천 — 역할 보완 추천·좋아요 표시·서로 좋아요일 때만 그 둘에게 연락처")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")
