@@ -4253,5 +4253,17 @@ with sync_playwright() as pw:
     A("ma@example.com" not in _pc.inner_text("#match") and "mb@example.com" not in _pc.inner_text("#match"), "셋째 사람에게 둘의 연락처가 보인다")
     b.close()
 ok("팀원 추천 — 역할 보완 추천·좋아요 표시·서로 좋아요일 때만 그 둘에게 연락처")
+
+# ── 기여자 장부 /thanks — 공개 화면, 운영자 아니면 못 적음, 수익 나눔 계산은 운영자만 ──
+A(code_of("/thanks") == 200, "/thanks 가 안 열린다")
+A(post("/api/admin/thanks", {"name": "남이 적음"})[0] == 403, "운영자가 아닌데 기여자를 적을 수 있다")
+A(code_of("/api/admin/share?pool=100&from=2026-01-01&to=2026-12-31") == 403, "운영자가 아닌데 수익 나눔 계산을 본다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("thanks: " + str(e)))
+    pg.goto(BASE + "/thanks", wait_until="networkidle"); pg.wait_for_timeout(500)
+    _tt = pg.inner_text("#view")
+    A("해커온을 같이 켠 사람들" in _tt and "기여하는 길" in _tt, f"기여자 화면이 아니다: {_tt[:120]}")
+    b.close()
+ok("기여자 장부 — 공개 화면, 운영자만 적고, 수익 나눔 계산도 운영자만")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

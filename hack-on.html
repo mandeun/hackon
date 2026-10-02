@@ -2294,6 +2294,7 @@ const SCREEN = {
     const wkadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/works').then(r => r.rows).catch(() => null) : [];
     const rfadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/ref').then(r => r.rows).catch(() => null) : [];
     const cladm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/cleanup').catch(() => null) : null;
+    const thadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/thanks').catch(() => null) : null;
     const claimBox = (AUTH && AUTH.claimable) ? `
       <div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
         <h3 style="color:var(--warn)">첫 사이트 운영자 앉히기</h3>
@@ -2319,6 +2320,19 @@ const SCREEN = {
             ${e.listed ? '' : ' <span class="pill warn">초안</span>'}
             · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
         </div>`).join('')}` : ''}
+      ${AUTH && AUTH.siteAdmin ? `<div class="card" id="thanks-admin"><h3>기여자 장부</h3>
+        <div class="meta">점수는 «무엇을 했나» 한 줄과 같이 공개됩니다. 수익 약정은 서명을 받은 뒤에만 켭니다. <a href="/thanks">공개 화면</a></div>
+        ${thadm === null ? '<div class="meta">불러오지 못했습니다.</div>' : thadm.rows.map(c => `<div style="margin-top:8px"><b>${esc(c.name)}</b> <span class="meta">${esc(c.role || '기여자')} · ${c.points}점${c.share ? ' · 수익 약정' : ''}${c.hidden ? ' · 내림' : ''}</span>
+            <div class="shrow" style="flex-wrap:wrap;gap:6px"><select data-tkind="${c.id}">${thadm.kinds.map(k => `<option>${esc(k)}</option>`).join('')}</select>
+              <input data-tpts="${c.id}" type="number" min="1" max="100" placeholder="점수" style="width:80px">
+              <input data-twhy="${c.id}" maxlength="120" placeholder="무엇을 했나 한 줄">
+              <button class="btn sec sm" data-tgive="${c.id}">점수 주기</button></div></div>`).join('')}
+        <div class="row" style="margin-top:12px"><div><label>이름</label><input id="th-name" maxlength="40"></div>
+          <div><label>역할</label><select id="th-role"><option value="">기여자</option><option>매니저</option><option>리뷰어</option><option>크루</option></select></div></div>
+        <div class="row"><div><label>맡은 곳(매니저)</label><input id="th-area" maxlength="40" placeholder="예) 해커온뉴스"></div>
+          <div><label>주소(선택)</label><input id="th-link" placeholder="https://github.com/…"></div></div>
+        <label class="ck"><input type="checkbox" id="th-share"><span>수익 나눔 약정 서명 받음</span></label>
+        <button class="btn sm" id="th-add" style="margin-top:8px">기여자 올리기</button></div>` : ''}
       ${AUTH && AUTH.siteAdmin ? `<div class="card" id="clean-admin"><h3>한꺼번에 치우기 — 남길 것만 고르기</h3>
         <div class="meta"><b>체크한 것만 남고 나머지는 치웁니다.</b> 대회는 휴지통으로(30일 안에 연 사람이 되살림), 만든 것·외주는 내립니다(지우지 않음). 신청한 사람에게 메일은 안 갑니다.</div>
         ${cladm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>' : `
@@ -4318,6 +4332,27 @@ const SCREEN = {
       <div class="card"><h3>지금 받을 수 있는 혜택</h3><div class="meta">무료 크레딧·할인·한도 리셋 소식은 해커온뉴스 «무료·할인·리셋» 에 모입니다.</div>
         <a class="btn sec sm" href="/news" style="margin-top:8px;text-decoration:none">혜택 소식 보기</a></div>
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/setups">세팅 모음</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
+  /* 기여자 — 코드·새 서비스·운영·콘텐츠로 해커온을 같이 켠 사람. 점수마다 «무엇을 했나» 한 줄이 같이 보인다 */
+  async thanks() {
+    let d = null; try { d = await api('/thanks'); } catch { d = null; }
+    const mark = { '꽂음': '🔌', '켬': '💡', '발전소': '⚡' };
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">기여자</span></div>
+        <h2>해커온을 같이 켠 사람들</h2>
+        <p class="sub" style="margin-bottom:0">코드·새 서비스·운영·콘텐츠로 기여한 분. 점수마다 무엇을 했는지 한 줄이 붙습니다 — 이유 없는 점수는 없습니다.</p></section>
+      <div class="card"><div class="meta">🔌 꽂음 — 첫 기여 · 💡 켬 — 10점 · ⚡ 발전소 — 50점. 매니저는 한 곳을 맡아 굴리는 사람입니다.
+        수익 나눔에 약정한 분은 분기마다 점수 비율로 나눕니다(<a href="https://github.com/mandeun/hackon/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">규칙</a>).</div></div>
+      ${d === null ? '<div class="card"><h3>불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? '<div class="card"><h3>첫 기여자를 기다립니다</h3><div class="meta">고칠 곳을 찾았거나 붙이고 싶은 서비스가 있으면 hi@mandeun.com 으로 알려 주세요.</div></div>'
+        : `<div class="card" id="thanks-list">${d.rows.map(c => `<div style="padding:10px 0;border-top:1px solid var(--rule)">
+            <div><b>${c.link ? `<a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.name)}</a>` : esc(c.name)}</b>
+              ${c.role ? `<span class="pill ok">${esc(c.role)}${c.area ? ' · ' + esc(c.area) : ''}</span>` : ''}
+              ${c.tier ? `<span class="pill">${mark[c.tier] || ''} ${esc(c.tier)} · ${c.points}점</span>` : ''}</div>
+            ${c.recent.map(r => `<div class="meta">${esc(r.at)} · ${esc(r.kind)} — ${esc(r.why)}</div>`).join('')}</div>`).join('')}</div>`}
+      <div class="card"><h3>기여하는 길</h3><div class="meta">코드: 깃허브에 풀 리퀘스트 · 새 서비스: 해커온에 붙일 것을 만들어 연결 · 운영: 대회 하나를 맡는 매니저 · 콘텐츠: 직무 레시피·뉴스 고르기.
+        <br>먼저 <a href="mailto:hi@mandeun.com?subject=${encodeURIComponent('[기여] ')}">hi@mandeun.com</a> 으로 한 줄 보내 주세요.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="https://github.com/mandeun/hackon" target="_blank" rel="noopener">소스 보기</a></p>`;
   },
 
   /* 아침 브리핑 — «오늘 켤 것». 노랑이(콘센트)가 하루를 켜는 한 장.
@@ -6910,6 +6945,15 @@ function wire() {
   if ($('#rs-go')) $('#rs-go').onclick = async () => {
     try { await api('/ref', { method: 'POST', body: { name: $('#rs-name').value.trim(), url: $('#rs-url').value.trim(), note: $('#rs-note').value.trim() } }); flash('제안했습니다. 운영진이 약관을 본 뒤 엽니다'); } catch (e) { flash(e.message, true); }
   };
+  if ($('#th-add')) $('#th-add').onclick = async () => {
+    try { await api('/admin/thanks', { method: 'POST', body: { name: $('#th-name').value.trim(), role: $('#th-role').value, area: $('#th-area').value.trim(), link: $('#th-link').value.trim(), share: $('#th-share').checked } }); flash('올렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-tgive]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.tgive, v = sel => (document.querySelector(`[${sel}="${id}"]`) || {}).value;
+    try { await api(`/admin/thanks/${id}/points`, { method: 'POST', body: { kind: v('data-tkind'), points: +v('data-tpts'), why: (v('data-twhy') || '').trim() } }); flash('점수를 줬습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
   /* 한꺼번에 치우기 — 사라질 개수를 늘 보여 주고, 그 숫자를 그대로 적어야 서버가 받는다 */
   const cleanCount = () => {
     const all = document.querySelectorAll('[data-ckeep]').length, kept = document.querySelectorAll('[data-ckeep]:checked').length;
@@ -7760,6 +7804,7 @@ const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부�
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
 const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
+const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
 const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
 const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
@@ -7805,6 +7850,7 @@ else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'no
 else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

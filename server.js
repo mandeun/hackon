@@ -3691,6 +3691,24 @@ function open(file) {
   try { db.exec("ALTER TABLE events ADD COLUMN twist TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 연습용 대회. 해 보려고 연 것 — 목록에 안 오르고 SAMPLE_DAYS 뒤 휴지통으로 간다 */
   try { db.exec('ALTER TABLE events ADD COLUMN sample INTEGER NOT NULL DEFAULT 0'); } catch {}
+  /* 기여자 — 코드·새 서비스·운영·콘텐츠로 해커온을 키운 사람. 사이트 운영자만 적는다(본인 신청은 메일로).
+     계정(owner)에 매지 않는다 — 이름만 거는 명예 장부라, 계정을 지워도 «한 일» 은 남는다(본인이 원하면 운영자가 내린다) */
+  db.exec(`CREATE TABLE IF NOT EXISTS contributors(
+    id      INTEGER PRIMARY KEY,
+    name    TEXT NOT NULL,
+    link    TEXT NOT NULL DEFAULT '',
+    role    TEXT NOT NULL DEFAULT '',      -- '' | 매니저 | 리뷰어 | 크루
+    area    TEXT NOT NULL DEFAULT '',      -- 매니저가 맡은 곳(예: 뉴스·추천 코드·10/31)
+    share   INTEGER NOT NULL DEFAULT 0,    -- 수익 나눔 약정에 서명했나. 1 이어야 분기 정산에 든다
+    hidden  INTEGER NOT NULL DEFAULT 0,
+    at      TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS contrib_points(
+    id      INTEGER PRIMARY KEY,
+    who     INTEGER NOT NULL REFERENCES contributors(id) ON DELETE CASCADE,
+    kind    TEXT NOT NULL,                 -- 코드 | 서비스 | 운영 | 콘텐츠 | 디자인 | 번역
+    points  INTEGER NOT NULL,
+    why     TEXT NOT NULL,
+    at      TEXT NOT NULL DEFAULT (datetime('now')))`);
   /* 강점과 원하는 것 — 팀원 추천이 «서로 채워 주는 강점 + 같은 방향» 을 찾는 데 쓴다 */
   try { db.exec("ALTER TABLE teams ADD COLUMN strengths TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN aim TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -5243,6 +5261,68 @@ function crew(db, event) {
                    mem: r.s.mem, want: r.want, note: r.note })),
     teams: rows.length,
   };
+}
+
+/* ── 기여자 명예 장부 ─────────────────────────────────
+   돈보다 이름이 먼저다. 점수는 운영자가 «무엇을 했나» 한 줄과 같이 적고, 그 줄이 공개된다 — 이유 없는 점수는 없다.
+   등급은 «켜다» 로 부른다: 꽂음(첫 기여) → 켬(10점) → 발전소(50점).
+   수익 나눔은 약정(share=1)에 서명한 사람만, 분기 순수익의 일정 몫을 그 분기 점수 비율로 — 계산은 이 함수가 하고
+   돈은 사람이 보낸다(CONTRIBUTING.md 9절). 토큰·코인으로 주지 않는다. */
+const CONTRIB_KINDS = ['코드', '서비스', '운영', '콘텐츠', '디자인', '번역'];
+const CONTRIB_ROLES = ['', '매니저', '리뷰어', '크루'];
+const contribTier = n => n >= 50 ? '발전소' : n >= 10 ? '켬' : n > 0 ? '꽂음' : '';
+function thanksList(db, { admin = false } = {}) {
+  return db.prepare('SELECT * FROM contributors' + (admin ? '' : ' WHERE hidden=0') + ' ORDER BY id').all().map(c => {
+    const pts = db.prepare('SELECT kind, points, why, at FROM contrib_points WHERE who=? ORDER BY id DESC').all(c.id);
+    const total = pts.reduce((a, p) => a + p.points, 0);
+    return { id: c.id, name: c.name, link: c.link, role: c.role, area: c.area, points: total, tier: contribTier(total),
+             kinds: [...new Set(pts.map(p => p.kind))], recent: pts.slice(0, 3).map(p => ({ kind: p.kind, why: p.why, at: String(p.at).slice(0, 10) })),
+             ...(admin ? { share: !!c.share, hidden: !!c.hidden } : {}) };
+  }).sort((a, b) => (b.role === '매니저') - (a.role === '매니저') || b.points - a.points || a.id - b.id);
+}
+function addContributor(db, b, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 적습니다');
+  const name = plain(b.name, 40);
+  if (!name) throw new HttpError(400, '이름을 적어 주세요');
+  const link = b.link ? webUrl(b.link) : '';
+  if (b.link && !link) throw new HttpError(400, '주소는 https:// 로 넣어 주세요');
+  const role = CONTRIB_ROLES.includes(b.role) ? b.role : '';
+  return { id: Number(db.prepare('INSERT INTO contributors(name,link,role,area,share) VALUES(?,?,?,?,?)')
+    .run(name, link || '', role, plain(b.area, 40), b.share ? 1 : 0).lastInsertRowid) };
+}
+function giveCredit(db, who, b, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 적습니다');
+  if (!db.prepare('SELECT 1 FROM contributors WHERE id=?').get(+who)) throw new HttpError(404, '없는 기여자입니다');
+  const kind = CONTRIB_KINDS.includes(b.kind) ? b.kind : null;
+  if (!kind) throw new HttpError(400, `종류는 ${CONTRIB_KINDS.join('·')} 중 하나입니다`);
+  const pts = Math.floor(+b.points);
+  if (!(pts >= 1 && pts <= 100)) throw new HttpError(400, '점수는 1~100 입니다');
+  const why = plain(b.why, 120);
+  if (!why) throw new HttpError(400, '무엇을 했는지 한 줄이 있어야 점수를 줍니다 — 이유 없는 점수는 공개 장부에 못 올라갑니다');
+  db.prepare('INSERT INTO contrib_points(who,kind,points,why) VALUES(?,?,?,?)').run(+who, kind, pts, why);
+  return { ok: true };
+}
+function setContributor(db, id, b, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 고칩니다');
+  const c = db.prepare('SELECT * FROM contributors WHERE id=?').get(+id);
+  if (!c) throw new HttpError(404, '없는 기여자입니다');
+  const role = b.role !== undefined ? (CONTRIB_ROLES.includes(b.role) ? b.role : c.role) : c.role;
+  db.prepare('UPDATE contributors SET role=?, area=?, share=?, hidden=? WHERE id=?')
+    .run(role, b.area !== undefined ? plain(b.area, 40) : c.area, b.share !== undefined ? (b.share ? 1 : 0) : c.share,
+         b.hidden !== undefined ? (b.hidden ? 1 : 0) : c.hidden, c.id);
+  return { ok: true };
+}
+/** 분기 수익 나눔 계산. 약정(share) 있는 사람만, 그 분기(from~to) 점수 비율로 pool(원)을 나눈다.
+    원 단위 내림 — 남는 몇 원은 다음 분기로 넘긴다(rest). 보내는 것은 사람이 한다 */
+function shareSplit(db, pool, from, to, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 봅니다');
+  const P = Math.max(0, Math.floor(+pool || 0));
+  if (!isDay(from) || !isDay(to) || from > to) throw new HttpError(400, '기간을 YYYY-MM-DD 로 주세요');
+  const rows = db.prepare(`SELECT c.id, c.name, SUM(p.points) pts FROM contrib_points p JOIN contributors c ON c.id = p.who
+                           WHERE c.share=1 AND c.hidden=0 AND date(p.at) BETWEEN ? AND ? GROUP BY c.id ORDER BY pts DESC`).all(from, to);
+  const total = rows.reduce((a, r) => a + r.pts, 0);
+  const out = rows.map(r => ({ id: r.id, name: r.name, points: r.pts, won: total ? Math.floor(P * r.pts / total) : 0 }));
+  return { pool: P, total, rows: out, rest: P - out.reduce((a, r) => a + r.won, 0) };
 }
 
 /** 팀원 추천 — 같은 대회 안에서 «이 사람과 맞을 것» 셋.
@@ -6997,6 +7077,12 @@ function routes(db) {
         if ((m = p.match(/^\/api\/ref\/(\d+)\/next$/)) && req.method === 'POST') { needAcct(db, owner); return json(res, 200, nextRefCode(db, m[1], owner)); }
         if ((m = p.match(/^\/api\/ref\/code\/(\d+)\/used$/)) && req.method === 'POST') return json(res, 200, usedRefCode(db, m[1], owner));
         if ((m = p.match(/^\/api\/ref\/code\/(\d+)\/dead$/)) && req.method === 'POST') return json(res, 200, deadRefCode(db, m[1], owner));
+        if (p === '/api/thanks' && req.method === 'GET') return json(res, 200, { rows: thanksList(db), kinds: CONTRIB_KINDS });
+        if (p === '/api/admin/thanks' && req.method === 'GET') { if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 봅니다'); return json(res, 200, { rows: thanksList(db, { admin: true }), kinds: CONTRIB_KINDS, roles: CONTRIB_ROLES }); }
+        if (p === '/api/admin/thanks' && req.method === 'POST') return json(res, 201, addContributor(db, await body(req), { siteAdmin }));
+        if ((m = p.match(/^\/api\/admin\/thanks\/(\d+)$/)) && req.method === 'POST') return json(res, 200, setContributor(db, m[1], await body(req), { siteAdmin }));
+        if ((m = p.match(/^\/api\/admin\/thanks\/(\d+)\/points$/)) && req.method === 'POST') return json(res, 201, giveCredit(db, m[1], await body(req), { siteAdmin }));
+        if (p === '/api/admin/share' && req.method === 'GET') return json(res, 200, shareSplit(db, q.pool, q.from, q.to, { siteAdmin }));
         if (p === '/api/admin/cleanup' && req.method === 'GET') return json(res, 200, cleanupList(db, { siteAdmin }));
         if (p === '/api/admin/cleanup' && req.method === 'POST') return json(res, 200, await cleanupRun(db, await body(req), { siteAdmin }));
         if (p === '/api/admin/ref' && req.method === 'GET') { if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 봅니다'); return json(res, 200, { rows: db.prepare('SELECT * FROM ref_services WHERE ok=0 ORDER BY id DESC').all() }); }
@@ -8023,7 +8109,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/thanks' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -9734,6 +9820,38 @@ async function selftest() {
         ok(sx === 403, '남의 강점은 못 고친다 (403)');
         let self = 0; try { likeMatch(cdb, me.id, a.tkey, a.id); } catch (e) { self = e.code; }
         ok(self === 400, '내 팀은 고를 수 없다 (400)');
+      }
+      {
+        /* 기여자 명예 장부 — 운영자만 적고, 이유 없는 점수는 없고, 등급은 꽂음→켬→발전소, 수익 나눔은 약정한 사람만 점수 비율로 */
+        const A = { siteAdmin: true };
+        let ce = 0; try { addContributor(cdb, { name: '남' }, {}); } catch (e) { ce = e.code; }
+        ok(ce === 403, '기여자는 사이트 운영자만 적는다 (403)');
+        const k1 = addContributor(cdb, { name: '코드기여', link: 'https://github.com/k1', share: 1 }, A).id;
+        const k2 = addContributor(cdb, { name: '운영매니저', role: '매니저', area: '10/31', share: 1 }, A).id;
+        const k3 = addContributor(cdb, { name: '약정없음' }, A).id;
+        let nw = 0; try { giveCredit(cdb, k1, { kind: '코드', points: 5, why: '' }, A); } catch (e) { nw = e.code; }
+        ok(nw === 400, '무엇을 했는지 한 줄이 없으면 점수를 못 준다 (400)');
+        let nk = 0; try { giveCredit(cdb, k1, { kind: '코인', points: 5, why: 'x' }, A); } catch (e) { nk = e.code; }
+        let np = 0; try { giveCredit(cdb, k1, { kind: '코드', points: 500, why: 'x' }, A); } catch (e) { np = e.code; }
+        ok(nk === 400 && np === 400, '정해진 종류·1~100 점만 받는다');
+        giveCredit(cdb, k1, { kind: '코드', points: 30, why: '팀원 추천 만듦' }, A);
+        giveCredit(cdb, k1, { kind: '서비스', points: 30, why: '새 서비스 연결' }, A);
+        giveCredit(cdb, k2, { kind: '운영', points: 12, why: '10/31 현장 운영' }, A);
+        giveCredit(cdb, k3, { kind: '콘텐츠', points: 40, why: '레시피 정리' }, A);
+        const th = thanksList(cdb);
+        ok(th[0].name === '운영매니저' && th[0].role === '매니저', '매니저가 맨 위에 선다');
+        const c1 = th.find(x => x.id === k1);
+        ok(c1.points === 60 && c1.tier === '발전소' && th.find(x => x.id === k2).tier === '켬' && c1.recent[0].why === '새 서비스 연결',
+           '점수 합·등급(꽂음→켬→발전소)·무엇을 했는지 한 줄이 공개된다');
+        ok(!('share' in c1), '공개 장부에는 수익 약정 여부가 안 나간다');
+        const sp = shareSplit(cdb, 1000000, today(), today(), A);
+        ok(sp.rows.length === 2 && !sp.rows.some(r => r.id === k3), '약정 안 한 사람은 수익 나눔에 안 든다(명예만)');
+        ok(sp.rows[0].won === Math.floor(1000000 * 60 / 72) && sp.rows[0].won + sp.rows[1].won + sp.rest === 1000000,
+           '점수 비율로 나누고, 내림하고 남은 돈은 rest 로 넘긴다');
+        let ss = 0; try { shareSplit(cdb, 1, today(), today(), {}); } catch (e) { ss = e.code; }
+        ok(ss === 403, '수익 나눔 계산은 사이트 운영자만 본다 (403)');
+        setContributor(cdb, k3, { hidden: 1 }, A);
+        ok(!thanksList(cdb).some(x => x.id === k3), '본인이 원하면 장부에서 내린다');
       }
       cdb.close();
       for (const f of [cf, cf + '-wal', cf + '-shm']) fs.rmSync(f, { force: true });
