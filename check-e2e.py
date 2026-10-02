@@ -4616,9 +4616,13 @@ A(_mask, "maskable 512 PNG 가 매니페스트에 없다 — 안드로이드 런
 for _sz in ("192x192", "512x512"):
     A(any(i.get("purpose", "any") == "any" and i.get("sizes") == _sz for i in _png), f"일반(any) {_sz} PNG 아이콘이 없다")
 for _ic in _png + [ic for s in _sc for ic in s["icons"]]:
-    with urllib.request.urlopen(BASE + _ic["src"], timeout=10) as _r:
-        _st_code, _ct, _b = _r.status, _r.headers.get("content-type", ""), _r.read()
-    A(_st_code == 200 and _ct.startswith("image/png"), f"{_ic['src']} 가 PNG 로 안 나온다: {_st_code} {_ct}")
+    try:
+        with urllib.request.urlopen(BASE + _ic["src"], timeout=10) as _r:
+            _st_code, _ct, _b = _r.status, _r.headers.get("content-type", ""), _r.read()
+    except urllib.error.HTTPError as _e:
+        _st_code, _ct, _b = _e.code, "", b""
+    A(_st_code == 200 and _ct.startswith("image/png"),
+      f"{_ic['src']} 가 PNG 로 안 나온다: {_st_code} {_ct} — 404 면 server.js STATIC_OK·Dockerfile COPY 에 적는다")
     _w, _h, _ctype, _px = _png_info(_b)
     A(f"{_w}x{_h}" == _ic["sizes"], f"{_ic['src']} 실제 크기 {_w}x{_h} 가 매니페스트({_ic['sizes']})와 다르다")
     if _ic in _mask:   # 런처가 원·물방울로 깎으므로 모서리까지 먹이 차 있어야 한다. 투명하면 깎인 자리에 구멍이 보인다
@@ -4679,8 +4683,11 @@ with sync_playwright() as pw:
     # 다시 이어지면(online) 누르지 않아도 다시 시도한다 — 화면이 새로 열리면 표시가 사라진다
     pg.evaluate("window.__still = 1")
     ctx.set_offline(True)
-    with pg.expect_navigation(timeout=5000):
-        ctx.set_offline(False)
+    try:
+        with pg.expect_navigation(timeout=5000):
+            ctx.set_offline(False)
+    except Exception:
+        A(False, "인터넷이 다시 이어져도 오프라인 화면이 다시 시도하지 않는다(online 을 안 듣는다)")
     A(pg.evaluate("window.__still") is None, "인터넷이 다시 이어져도 오프라인 화면이 다시 시도하지 않는다")
     b.close()
 ok("PWA·안드로이드 — PNG 아이콘·maskable(꽉 찬 바탕) 실제 크기, id·scope·바로가기, 데이터·달력 캐시 안 함, SW 알림, 끊기면 오프라인 화면 → 이어지면 저절로 다시 시도")
