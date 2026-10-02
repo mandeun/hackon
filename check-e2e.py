@@ -4131,7 +4131,12 @@ if "application/ld+json" in _h:
 _lt = urllib.request.urlopen(BASE + "/llms.txt").read().decode()
 A(_lt.startswith("# HACK:ON") and "/news.md" in _lt, f"/llms.txt 가 안내문이 아니다: {_lt[:80]}")
 A(urllib.request.urlopen(BASE + "/e/zzzzzz9").status == 200, "없는 대회 주소가 화면을 못 낸다")
-ok("검색·AI — 대회 화면 og 딱지(website), 목록 대회는 Event, /llms.txt")
+try:
+    urllib.request.urlopen(urllib.request.Request(BASE + "/", headers={"user-agent": "Mozilla/5.0 (compatible; GPTBot/1.2)"})); A(False, "학습용 수집기(GPTBot)가 첫 화면을 받아 간다")
+except urllib.error.HTTPError as _e:
+    A(_e.code == 403, f"학습용 수집기 응답이 403 이 아니다: {_e.code}")
+A(urllib.request.urlopen(urllib.request.Request(BASE + "/", headers={"user-agent": "Mozilla/5.0 (compatible; Yeti/1.1; +https://naver.me/spd)"})).status == 200, "네이버 검색 봇이 막힌다")
+ok("검색·AI — 대회 화면 og 딱지(website), 목록 대회는 Event, /llms.txt, 학습용 수집기 403·네이버 봇 200")
 
 # ── 운영자 열쇠 없는 참가자 폰 — 신청 때 적은 이메일을 또 묻지 않는다, 첫 화면이 옆으로 안 밀린다 ──
 with sync_playwright() as pw:

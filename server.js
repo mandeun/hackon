@@ -2200,8 +2200,17 @@ const wwwTo = (host) => {
   const bare = h.slice(4);
   return SITES.some((s) => s.toLowerCase().replace(/^https?:\/\//, '') === bare) ? 'https://' + bare : '';
 };
+/* 검색·답변은 들이고, 학습용 수집은 막는다.
+   네이버(Yeti)·구글·빙·다음과 ChatGPT 검색·Claude 검색·Perplexity 는 «찾아서 우리 주소를 대는» 쪽이라 들인다 —
+   GPT·Claude 답변에 hackon.kr 이 출처로 붙는 길이 이것이다.
+   GPTBot·ClaudeBot·CCBot·Google-Extended 같은 «모델 학습용» 은 우리 글을 가져가도 출처를 안 남긴다.
+   robots 는 부탁이라 안 지키는 놈은 아래 BLOCK_UA 가 문에서 403 으로 막는다. */
+const TRAIN_BOTS = ['GPTBot', 'ClaudeBot', 'anthropic-ai', 'CCBot', 'Google-Extended', 'Applebot-Extended',
+                    'Bytespider', 'meta-externalagent', 'FacebookBot', 'Diffbot', 'omgili', 'Timpibot', 'ImagesiftBot', 'cohere-ai'];
+const BLOCK_UA = new RegExp(TRAIN_BOTS.map(b => b.replace(/-/g, '\\-')).join('|'), 'i');
 function robots() {
-  return 'User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /j/\nDisallow: /p/\nDisallow: /r/\nDisallow: /s/\n'
+  return TRAIN_BOTS.map(b => 'User-agent: ' + b).join('\n') + '\nDisallow: /\n\n'
+    + 'User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /j/\nDisallow: /p/\nDisallow: /r/\nDisallow: /s/\n'
     + (CANON() ? 'Sitemap: ' + CANON() + '/sitemap.xml\n' : '');
 }
 /* 열린 대회 줄 세우기.
@@ -4084,6 +4093,10 @@ function tooMany(ip, limit = 30) {
 }
 /* 열쇠 없는 쓰기(신청·후원·질문·피드백·요청·whoami)는 IP+길로 10분에 WRITE_LIMIT 번(감사 7·9). 검사는 한 IP 라 넉넉히 둔다 */
 const WRITE_LIMIT = +(process.env.WRITE_LIMIT || 300);
+/* 읽기도 IP 하나에 10분 READ_LIMIT 번(초당 30여 번). 넉넉하게 둔 까닭: 대회 날 현장 와이파이는 오십 명이
+   IP 하나를 같이 쓴다 — 빡빡하게 걸면 긁는 놈보다 참가자가 먼저 막힌다. 이 문은 «쉬지 않고 도는 수집 스크립트» 용이다.
+   검사 서버는 한 IP 로 수천 번 부르니 checklib 이 더 올린다 */
+const READ_LIMIT = +(process.env.READ_LIMIT || 20000);
 /* 한 대회에 같은 IP 가 팀을 계속 만드는 것은 따로 조인다. WRITE_LIMIT 은 길 단위라
    «한 대회를 가짜 팀으로 채워 정원을 잠그는 것» 을 못 막는다. 10분에 APPLY_LIMIT 팀. */
 const APPLY_LIMIT = +(process.env.APPLY_LIMIT || 3);
@@ -6451,6 +6464,8 @@ function routes(db) {
       }
       const bare = wwwTo(req.headers.host);
       if (bare) { res.writeHead(301, { location: bare + req.url }); return res.end(); }
+      /* 학습용 수집기는 문에서 돌려보낸다(robots 를 안 지키는 놈까지) */
+      if (BLOCK_UA.test(String(req.headers['user-agent'] || ''))) { res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('no training crawl'); }
       /* 화면을 연 것만 센다. api 호출까지 세면 한 사람이 열 번으로 보인다. */
       if (req.method === 'GET' && !p.startsWith('/api/'))
         try { countVisit(db, p, req.headers.referer || '', req.headers.host); } catch { /* 셈이 사이트를 죽이면 안 된다 */ }
@@ -6538,6 +6553,8 @@ function routes(db) {
            운영자·심사위원이 손해 보지 않는다: 창구는 IP + 주소꼴(`/api/teams/#/score`)이라
            10분에 WRITE_LIMIT(300)번이고, 한 사람이 그만큼 누를 일은 없다. */
         if (req.method !== 'GET' && tooMany('w:' + clientIp(req) + ':' + p.replace(/\d+/g, '#'), WRITE_LIMIT))
+          throw new HttpError(429, '요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
+        if (req.method === 'GET' && tooMany('r:' + clientIp(req), READ_LIMIT))
           throw new HttpError(429, '요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
 
         if (p === '/api/events' && req.method === 'POST') {
@@ -7927,6 +7944,13 @@ function routes(db) {
 
       /* #region reuse:static — 화이트리스트 + 경로 탈출 방지 + MIME + 스트림.
          뿌리가 프로젝트 폴더라 server.js·package.json·data/ 까지 열렸다(감사 5·6, 오답노트 E7). 이제 화면 파일만 나간다 */
+      /* 네이버 서치어드바이저 소유 확인. 받은 값을 NAVER_VERIFY 에 넣으면 첫 화면 머리에 실린다 — 코드를 안 고치고 */
+      const nv = String(process.env.NAVER_VERIFY || '');
+      if (p === '/' && /^[A-Za-z0-9_-]{8,80}$/.test(nv)) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...SEC_HEADERS });
+        return res.end(fs.readFileSync(path.join(ROOT, 'home.html'), 'utf8')
+          .replace('<link rel="canonical"', `<meta name="naver-site-verification" content="${nv}">\n<link rel="canonical"`));
+      }
       const name = p === '/' ? 'home.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
       if (!STATIC_OK.has(name)) throw new HttpError(404, '없습니다');
       const f = path.join(ROOT, name);
@@ -8699,6 +8723,18 @@ async function selftest() {
     ok(wwwTo('www.evil.example') === '', '목록에 없는 www 는 안 보낸다 — 열린 리다이렉트 방지');
     ok(robots().includes('Sitemap: https://hackon.kr/sitemap.xml'), 'robots 가 대표 주소의 sitemap 을 가리킨다');
     ok(robots().includes('Disallow: /api/') && robots().includes('Disallow: /j/'), 'API 와 심사 링크는 색인 제외');
+    {
+      const rb = robots(), grp = rb.split('\n\n');
+      ok(grp[0].includes('User-agent: GPTBot') && grp[0].includes('User-agent: ClaudeBot') && grp[0].includes('User-agent: CCBot') && grp[0].endsWith('Disallow: /'),
+         '학습용 수집기는 robots 에서 전부 막는다');
+      ok(!/Yeti|Googlebot|OAI-SearchBot|ChatGPT-User|Claude-User|PerplexityBot/.test(grp[0]), '검색·답변 봇은 막는 무리에 없다');
+      const ua = (x) => BLOCK_UA.test(x);
+      ok(ua('Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)') && ua('CCBot/2.0') && ua('Mozilla/5.0 (compatible; ClaudeBot/1.0)'),
+         '학습용 수집기는 문에서 막힌다');
+      ok(!['Mozilla/5.0 (compatible; Yeti/1.1; +https://naver.me/spd)', 'Mozilla/5.0 (compatible; Googlebot/2.1)', 'OAI-SearchBot/1.0', 'ChatGPT-User/1.0',
+           'Claude-User/1.0', 'kakaotalk-scrap/1.0', 'facebookexternalhit/1.1', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)'].some(ua),
+         '검색·답변 봇·링크 미리보기·사람 브라우저는 안 막힌다');
+    }
     {
       const sm = sitemap(db);
       ok(sm.includes('<loc>https://hackon.kr/</loc>') && sm.includes('<loc>https://hackon.kr/manual</loc>'), 'sitemap 에 첫 화면과 매뉴얼');
