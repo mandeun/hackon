@@ -4337,12 +4337,18 @@ with sync_playwright() as pw:
     b.close()
 ok("기업·기관 안내(사내 해커톤·출제형·워크숍·스타트업, 업종별 사례)와 크루 모집(홍보·운영·개발)")
 
-# ── 해외 — /en(한국 말 다섯 개를 원리로), hreflang, 한국어 아닌 브라우저엔 대회 페이지에 영어 한 줄 ──
+# ── 해외 — /en·/zh(쓰는 법 세 걸음, 문화 설명은 한 줄), hreflang, 한국어 아닌 브라우저엔 대회 페이지에 영어 한 줄 ──
 A(code_of("/en") == 200, "/en 이 안 열린다")
 _enh = urllib.request.urlopen(BASE + "/en").read().decode()
-A('hreflang="ko"' in _enh and "빨리빨리" in _enh and "품앗이" in _enh, "/en 에 hreflang·한국 말 원리가 없다")
+A('hreflang="ko"' in _enh and 'hreflang="zh-Hans"' in _enh and "How it works" in _enh, "/en 에 hreflang·쓰는 법이 없다")
+A("빨리빨리" not in _enh and "jeong" not in _enh, "/en 에 과한 한국 말 풀이가 남아 있다(10/05 줄임)")
+A(code_of("/zh") == 200, "/zh 가 안 열린다")
+_zhh = urllib.request.urlopen(BASE + "/zh").read().decode()
+A('<html lang="zh-Hans">' in _zhh and "怎么参加" in _zhh and 'hreflang="en"' in _zhh and 'hreflang="ko"' in _zhh, "/zh 가 중국어판이 아니거나 hreflang 이 없다")
+A('hreflang="zh-Hans"' in urllib.request.urlopen(BASE + "/").read().decode(), "첫 화면이 중국어판을 hreflang 으로 안 가리킨다")
 A('hreflang="en"' in urllib.request.urlopen(BASE + "/").read().decode(), "첫 화면이 영어판을 hreflang 으로 안 가리킨다")
-A("/en</loc>" in urllib.request.urlopen(BASE + "/sitemap.xml").read().decode(), "sitemap 에 /en 이 없다")
+_sm = urllib.request.urlopen(BASE + "/sitemap.xml").read().decode()
+A("/en</loc>" in _sm and "/zh</loc>" in _sm, "sitemap 에 /en·/zh 가 없다")
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     _ev = post("/api/events", {"title": "해외 검사 대회"})[1]
@@ -4351,10 +4357,14 @@ with sync_playwright() as pw:
         pg.goto(BASE + f"/e/{_ev['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-name")
         A((pg.query_selector("#en-note") is not None) == _want, f"{_loc} 브라우저에서 영어 안내 한 줄이 {'안 ' if _want else ''}뜬다")
         ctx.close()
-    pg = b.new_page(viewport={"width": 390, "height": 844}); pg.goto(BASE + "/en", wait_until="networkidle"); pg.wait_for_timeout(500)
-    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/en 이 폰 폭에서 옆으로 밀린다")
+    for _p in ("/en", "/zh"):
+        pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("intl: " + str(e)))
+        pg.goto(BASE + _p, wait_until="networkidle"); pg.wait_for_timeout(500)
+        A(pg.evaluate("document.documentElement.scrollWidth") <= 391, f"{_p} 이 폰 폭에서 옆으로 밀린다")
+        _evt = pg.inner_text("#ev-list")
+        A("Loading" not in _evt and "加载中" not in _evt and len(_evt) > 5, f"{_p} 대회 목록이 «불러오는 중» 에 멈춰 있다: {_evt[:80]}")
     b.close()
-ok("해외 — /en(빨리빨리·품앗이·정·켜다·너랑), hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
+ok("해외 — /en·/zh(세 걸음·대회 목록), 과한 한국 말 풀이 뺌, hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
 # ── 대회 혜택 탭 — 열린 대회에서 받는 것(확정된 것만). 장학금 목록은 이 탭에서 뺐다 ──
 _, _bev = post("/api/events", {"title": "혜택 화면 검사", "starts": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")})
 post(f"/api/events/{_bev['id']}", {"prize": 500000, "topic": "생활 불편", "place": "온라인"}, key=_bev["okey"], method="PATCH")

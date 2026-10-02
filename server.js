@@ -1802,6 +1802,7 @@ function llmsTxt(db) {
     `- [추천인 코드](${base}/ref): 남의 코드를 써 준 만큼 내 코드가 앞에 선다`,
     `- [운영 매뉴얼](${base}/manual): 대회를 여는 방법`,
     `- [English](${base}/en): Korean vibe-coding hackathons you can join from anywhere`,
+    `- [中文](${base}/zh): 在韩国参加 Vibe Coding 黑客松（简体中文）`,
     `- [기업·기관](${base}/biz): 사내 해커톤·AI 도입 워크숍`,
     '',
     '## 기계가 읽는 주소',
@@ -3104,7 +3105,7 @@ function visitsOf(db, days) {
 
 function sitemap(db) {
   const base = CANON();
-  const urls = ['/', '/en', '/club', '/tools', '/manual', '/launch', '/biz', '/partner', '/crew'].concat(
+  const urls = ['/', '/en', '/zh', '/club', '/tools', '/manual', '/launch', '/biz', '/partner', '/crew'].concat(
     db.prepare('SELECT 1 FROM lectures LIMIT 1').get() ? ['/learn'] : [],
     db.prepare("SELECT 1 FROM listings WHERE ok=1 AND off='' LIMIT 1").get() ? ['/market'] : [],
     db.prepare("SELECT 1 FROM spots WHERE state<>'hidden' LIMIT 1").get() ? ['/around'] : [],
@@ -7464,7 +7465,7 @@ const hueOf = (hex) => {
   return Math.round(((h * 60) + 360) % 360);
 };
 
-const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg',
+const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 'zh.html', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg',
   /* 첫 화면 표제 사진과 링크 미리보기 그림. 빠져 있어서 둘 다 404 였다 — CSS 는 있는데 사진만 안 나왔다 */
   'hero.jpg', 'og.png',
   /* 노랑이. 평면 SVG 라 셋 합쳐 5KB 가 안 된다 — 그림 파일로 두면 색을 고칠 때마다 다시 만들어야 한다 */
@@ -9133,7 +9134,7 @@ function routes(db) {
         return res.end(fs.readFileSync(path.join(ROOT, 'home.html'), 'utf8')
           .replace('<link rel="canonical"', `<meta name="naver-site-verification" content="${nv}">\n<link rel="canonical"`));
       }
-      const name = p === '/' ? 'home.html' : p === '/en' ? 'en.html' : p === '/club' ? 'club.html' : p === '/tools' ? 'tools.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
+      const name = p === '/' ? 'home.html' : p === '/en' ? 'en.html' : p === '/zh' ? 'zh.html' : p === '/club' ? 'club.html' : p === '/tools' ? 'tools.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
       if (!STATIC_OK.has(name)) throw new HttpError(404, '없습니다');
       const f = path.join(ROOT, name);
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
