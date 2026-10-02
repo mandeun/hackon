@@ -74,6 +74,10 @@ main{max-width:1060px;margin:0 auto;padding:10px 20px 60px}
 /* «그래서 뭘 하나» — 이 한 줄이 이 화면의 값이다. 제목 다음으로 눈에 들어오게 */
 .shr{margin-left:6px;border:1px solid var(--line,#DEDACB);background:transparent;border-radius:999px;padding:1px 9px;font-size:12px;cursor:pointer;color:inherit}
 .it .do{font-size:13.5px;color:var(--moss);line-height:1.5;margin-top:4px;font-weight:600}
+/* 쉽게 — 5살도 알아듣게. «그래서 뭘 하나» 보다 먼저 «이게 뭔데» */
+.it .ez{font-size:13.5px;color:#4A5160;line-height:1.55;margin-top:4px}
+.it .ez b{color:var(--ink,#0B1020);font-weight:700}
+.it .gain{font-weight:800;color:#C2410C}
 .it .n{font-size:12.5px;color:var(--grey);margin-top:3px;line-height:1.5}
 .new{display:inline-block;background:var(--on);color:var(--ink);font-size:10.5px;font-weight:900;border-radius:6px;padding:2px 6px;margin-right:6px;vertical-align:middle}
 .also{display:inline-block;background:#EAF3EF;color:var(--moss);font-size:11px;font-weight:800;border-radius:6px;padding:2px 6px;margin-left:6px;vertical-align:middle;white-space:nowrap}
@@ -113,6 +117,7 @@ input,select{width:100%;min-height:44px;border:1.5px solid var(--hair);border-ra
       <div class="card" id="srcs" hidden><h2>이 화면이 보는 곳</h2><div class="m" id="srcs-m"></div></div>
     </aside>
     <div id="feed">
+      <div id="hotbox"></div>
       <div id="list"><div class="empty">모으는 중…</div></div>
     </div>
   </div>
@@ -149,7 +154,7 @@ const HOW = {
   /* 서버가 못 오는 것과 «소식이 0건»인 것은 다르다 — 있음 / 없음 / 모름 */
   let d, down = false;
   try { d = await (await fetch('/api/news')).json(); } catch { down = true; d = {}; }
-  const SRC = d.src || {}, JOBS = d.jobs || Object.keys(HOW), rows = d.rows || [];
+  const SRC = d.src || {}, JOBS = d.jobs || Object.keys(HOW), rows = d.rows || [], hot = d.hot || [];
   const KINDS = d.kinds || [['pick', '오늘 꼭 볼 것', ''], ['tool', '새로 나온 도구', ''], ['read', '읽을거리', ''], ['ours', '우리 대회에서 나온 것', '']];
   const BUCKETS = d.buckets || ['오늘', '어제', '이번 주', '그전'];
   const P = d.pick || { n: 5, min: 4, per: 2, perKind: 2 }, FULL = d.full || 10;
@@ -193,7 +198,8 @@ const HOW = {
     const meta = [];
     if (r.by) meta.push('제보 ' + esc(r.by));
     if (r.job && cur === 'all') meta.push(`<span class="j">${esc(r.job)}</span>`);
-    if (r.note) meta.push(esc(r.note));
+    if (o.hot) meta.push(`${esc(o.hot.mark)} 지금 ${esc(o.hot.to.toLocaleString())} · <span class="gain">${esc(o.hot.days)}일 동안 +${esc(o.hot.gain.toLocaleString())}</span>`);
+    else if (r.note) meta.push(esc(r.note));
     if (r.also && r.also.length) meta.push('또 ' + r.also.map(srcName).map(esc).join(' · '));
     if (o.why && r.why && r.why.length) meta.unshift(esc(r.why.join(' · ')));
     const also = r.also && r.also.length ? `<span class="also">${r.also.length + 1}곳에서 다룸</span>` : '';
@@ -201,6 +207,7 @@ const HOW = {
     const dm = dom(r.url);
     return `<div class="it${o.rank ? ' pk' : ''}${o.tight ? ' q' : ''}">${lead}<div class="b">
       <div>${isNew(r) ? '<span class="new">NEW</span>' : ''}<a class="t" href="${ok(r.url) ? esc(r.url) : '#'}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>${dm ? ` <span class="dm">${esc(dm)}</span>` : ''}${also}</div>
+      ${o.tight || !r.easy ? '' : `<div class="ez"><b>쉽게:</b> ${esc(r.easy)}</div>`}
       ${o.tight || o.sameDo ? '' : `<div class="do">→ ${esc(r.do || '')} <button type="button" class="shr" data-share="${esc(String(r.id))}" aria-label="이 소식 보내기">보내기</button></div>`}
       ${meta.length ? `<div class="n">${o.rank ? esc(srcName(r.src)) + ' · ' : ''}${meta.join(' · ')}</div>` : (o.rank ? `<div class="n">${esc(srcName(r.src))}</div>` : '')}
     </div></div>`;
@@ -244,6 +251,16 @@ const HOW = {
     sc.hidden = !names.length;
     if (names.length) document.getElementById('srcs-m').textContent = names.join(' · ') + ' — 3시간마다 다시 봅니다. 제목과 주소만 가져옵니다.';
 
+    /* 이번 주 확 뜬 것 — 오늘 새로 생긴 것이 아니라 7일 동안 별·하트가 많이 는 것.
+       세 상태를 가른다: 있음(줄) / 없음(이틀 넘게 쟀는데 는 게 없다) / 모름(아직 이틀 치가 안 쌓였다) */
+    const hb = document.getElementById('hotbox');
+    const hs = hot.filter(r => cur === 'all' || r.job === cur || r.src === 'hackon');
+    if (hs.length) hb.innerHTML = `<section class="grp" id="hot"><h2>이번 주 확 뜬 것<span class="c">${hs.length}</span></h2>
+      <p class="sub">오늘 새로 생긴 것 말고, 7일 동안 별·하트가 많이 는 것입니다.</p>`
+      + hs.map((r, i) => rowHtml(r, { rank: i + 1, hot: r })).join('') + `</section>`;
+    else if (!down && d.hotKnown === false) hb.innerHTML = `<section class="grp" id="hot"><h2>이번 주 확 뜬 것</h2>
+      <p class="sub">아직 모릅니다 — 별·하트 수를 이틀 넘게 적어 둬야 «얼마나 늘었나» 를 셀 수 있습니다.</p></section>`;
+    else hb.innerHTML = '';
     if (!scope.length) {
       list.innerHTML = `<div class="empty">${down ? '소식을 못 불러왔습니다 — 잠시 뒤 새로고침해 주세요.'
         : cur === 'all' ? '아직 모인 소식이 없습니다. 몇 분 뒤 다시 열어 보세요.'
@@ -253,6 +270,7 @@ const HOW = {
     const picks = pickOf(scope);
     const pickIds = new Set(picks.map(r => r.id));
     let html = '';
+
     for (const [k, t, sub] of KINDS) {
       let mine, body;
       if (k === 'pick') {

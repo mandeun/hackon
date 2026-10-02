@@ -1699,10 +1699,17 @@ with sync_playwright() as p:
     A(cp.query_selector("#rs-file") is None, "열쇠 없는 첫 화면에 사본 첨부 칸이 그대로 있다")
     A("사본 파일" not in cp.inner_text("#view"), "첫 화면에 «사본 파일» 안내가 남아 있다")
     A(cp.query_selector('nav button[data-t="mine"]') is not None, "아래 탭에 «내 대회» 가 없다")
-    # 아래 탭은 넷이다. 순위·후원 보고는 «한 대회 안»의 화면이라 대회 화면에서 연다.
-    # 390px 에서 여섯 개는 글자가 줄바꿈되고, 첫 방문자가 못 쓰는 탭이 둘이었다.
+    # 아래 탭은 다섯이다. 순위·후원 보고는 «한 대회 안»의 화면이라 여전히 대회 화면에서 연다 —
+    # 여섯에서 넷으로 줄인 그 규칙은 그대로다.
+    # «혜택»(2026-09-28 추가)은 그 규칙에 걸리지 않는다. 한 대회 안이 아니라 대회를
+    # 가로지르는 화면이고(«자리»와 같은 층), 열쇠가 없는 첫 방문자도 바로 쓸 수 있다 —
+    # 넷으로 줄일 때 뺀 탭들은 «첫 방문자가 못 쓰는» 것이었다는 점에서 성질이 다르다.
+    # 붙인 근거는 수요다: 국가장학금 2147 · 청년 지원금 407 대 해커톤 62
+    # (앵커 차례상=100, docs/수요측정_20260928.md).
+    # 여섯이 안 되는 이유였던 «390px 에서 줄바꿈» 은 아래 혜택 블록이 폭·높이로 잰다.
     navs = cp.eval_on_selector_all('nav button', 'bs => bs.map(b => b.dataset.t)')
-    A(navs == ["home", "find", "make", "mine"], f"아래 탭이 넷(대회·구하기·열기·내 대회)이 아니다: {navs}")
+    A(navs == ["home", "find", "make", "benefit", "mine"],
+      f"아래 탭이 다섯(대회·자리·열기·혜택·내 대회)이 아니다: {navs}")
     cp.click('nav button[data-t="mine"]'); cp.wait_for_selector("#view a.ev", timeout=8000)
     mtxt = cp.inner_text("#view")
     for must in ("참여한 대회", "맡은 심사", "내가 준 것", "내가 낸 것"):
@@ -1724,9 +1731,10 @@ with sync_playwright() as p:
             r.selectNodeContents(t);
             return [b.textContent.trim(), r.getClientRects().length];
         })""")
-    A(len(navw) == 4, f"아래 탭이 넷이 아니다: {navw}")
+    A([n for n, _ in navw] == ["대회", "자리", "열기", "혜택", "내 대회"],
+      f"아래 탭이 다섯(대회·자리·열기·혜택·내 대회)이 아니다: {navw}")
     A(all(lines == 1 for _, lines in navw), f"390px 에서 탭 이름이 두 줄로 접힌다: {navw}")
-    ok("«내 대회» — 역할 다섯이 한 화면에·지워진 열쇠는 «지워짐»·열쇠는 주소에 안 실림·탭 넷이 390px 에 들어감")
+    ok("«내 대회» — 역할 다섯이 한 화면에·지워진 열쇠는 «지워짐»·열쇠는 주소에 안 실림·탭 다섯이 390px 에 들어감")
     cctx.close()
     # 받는 사람 열쇠 새로 — 옛 열쇠는 죽고 새 열쇠로 열린다
     old_rk = RK
@@ -2039,7 +2047,13 @@ with sync_playwright() as p:
     pg.evaluate("localStorage.removeItem('hackon.judge')")
     # 발표 타이머 — 진행 순서의 «발표» 줄이 지금이면 큰 화면이 다음 줄까지 센다
     now = datetime.now(); hm = lambda dt: dt.strftime("%H:%M")
-    post(f"/api/events/{FE}", {"plan": [{"at": hm(now - timedelta(minutes=2)), "what": "발표"}, {"at": hm(now + timedelta(minutes=8)), "what": "시상"}]}, FK, method="PATCH")
+    # 진행표는 «시:분» 만 담는다 — 날짜가 없다. 그래서 now-2분 이 어제로 넘어가면
+    # 화면은 그 줄을 «아직 안 온 줄» 로 읽고 발표 타이머가 안 뜬다(2026-09-29 00:00 에 실제로 터졌다).
+    # 오늘 안으로 가둔다. 자정 직후엔 «지금»(00:00) 이 곧 이미 시작한 줄이다.
+    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    past = max(now - timedelta(minutes=2), day0)
+    fut = min(now + timedelta(minutes=8), now.replace(hour=23, minute=59, second=0, microsecond=0))
+    post(f"/api/events/{FE}", {"plan": [{"at": hm(past), "what": "발표"}, {"at": hm(fut), "what": "시상"}]}, FK, method="PATCH")
     visit(f"/tv/{FE}"); pg.wait_for_timeout(1300)
     A(pg.query_selector("#tv-pitch") is not None and "분" in pg.inner_text("#tv-pitch"), f"발표 타이머가 큰 화면에 없다: {pg.inner_text('.tvbig')[:60] if pg.query_selector('.tvbig') else '?'}")
     ok("접근성 critical·serious 0 (다섯 화면) · 발표 타이머")
@@ -2247,6 +2261,9 @@ with sync_playwright() as p:
     _, he = post("/api/events", {"title": "여는사람검사"}); HE, HK = he["id"], he["okey"]
     pg.evaluate(f"localStorage.setItem('hackon.okey.{HE}', '{HK}')"); visit(f"/app#{HE}")
     A(pg.query_selector("#e-host") is not None, "대회 정보에 «여는 사람» 칸이 없다")
+    # 운영 화면에 같은 id 가 둘이면 저장은 첫 칸만 읽는다 — «여는 사람» 칸이 둘이라 둘째에 적은 것이 사라졌다(10/02)
+    _dup = pg.evaluate("() => { const c = {}; document.querySelectorAll('[id]').forEach(e => c[e.id] = (c[e.id] || 0) + 1); return Object.keys(c).filter(k => c[k] > 1); }")
+    A(not _dup, f"운영 화면에 같은 id 가 둘 넘게 있다: {_dup}")
     pg.fill("#e-host", "동네 모임"); pg.click("#e-save"); pg.wait_for_timeout(800)
     A(api(f"/api/events/{HE}")["host"] == "동네 모임", "«여는 사람»이 저장되지 않는다")
     # ① 참가자는 공개 페이지에서 바로 결과물을 낸다 — «다음에 할 일»의 단추가 팀 화면(제출 칸)을 연다
@@ -4331,5 +4348,143 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/en 이 폰 폭에서 옆으로 밀린다")
     b.close()
 ok("해외 — /en(빨리빨리·품앗이·정·켜다·너랑), hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
+# ── 혜택 탭. 자료는 밖에서 받아 오므로 «목록이 있다»를 단언하지 않는다 —
+# 대신 ① 탭이 있고 눌러서 그려지는가 ② 기본 갈래가 장학금인가
+# ③ 모르는 값을 «없음»으로 그리지 않는가(순수 함수로 못박는다) 를 본다.
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 390, "height": 900})
+    pg = ctx.new_page()
+    pg.goto(f"{BASE}/app", wait_until="networkidle")
+    pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+
+    A(pg.locator("nav button[data-t='benefit']").count() == 1, "아래 탭에 «혜택» 이 없다")
+    A(pg.inner_text("nav button[data-t='benefit']").strip().endswith("혜택"),
+      "탭 이름이 «혜택» 이 아니다: " + pg.inner_text("nav button[data-t='benefit']"))
+    # 390px 에서 탭 다섯이 다 보여야 한다 — 하나가 잘리면 넷으로 줄인 뜻이 없어진다
+    tabs = pg.eval_on_selector_all("nav button", "els => els.map(e => e.getBoundingClientRect())")
+    A(len(tabs) == 5, f"아래 탭이 다섯이 아니다: {len(tabs)}")
+    A(all(t["width"] > 40 for t in tabs), f"탭 하나가 너무 좁다: {[round(t['width']) for t in tabs]}")
+    A(max(t["right"] for t in tabs) <= 391, f"탭이 화면 밖으로 넘친다: {max(t['right'] for t in tabs)}")
+    # 줄바꿈과 이름은 «내 대회» 블록이 Range 사각형 수로 이미 잰다 — 두 곳에 안 적는다
+
+    pg.click("nav button[data-t='benefit']")
+    # data-ready 는 이미 '1' 이라 그걸 기다리면 그냥 지나간다 — 이 화면의 표식을 기다린다.
+    # 자료를 밖에서 받아 오므로 넉넉히 준다.
+    pg.wait_for_selector("#ben-h", timeout=40000)
+    pg.wait_for_selector("#ben-segs, #ben-off", timeout=40000)
+    body = pg.inner_text("body")
+    A("혜택" in body, "혜택 화면이 안 그려졌다")
+    # 자료를 받았으면 갈래가 뜨고, 못 받았으면 «못 가져왔습니다» 가 뜬다. 둘 중 하나여야 한다
+    got = pg.locator("#ben-segs").count() == 1
+    A(got or pg.locator("#ben-off").count() == 1,
+      "자료도 없고 못 가져왔다는 말도 없다 — 빈 화면이다")
+    if got:
+        A(pg.inner_text("#ben-segs button.on").strip() == "장학금",
+          "기본 갈래가 장학금이 아니다: " + pg.inner_text("#ben-segs button.on"))
+        A("기관 공고가 우선" in body, "기관 공고가 우선이라는 말이 없다")
+        # 갈래를 눌러 실제로 바뀌는가
+        pg.click("#ben-segs button[data-bseg='support']")
+        pg.wait_for_function(
+            "() => { const b = document.querySelector('#ben-segs button.on');"
+            " return b && b.textContent.trim() === '지원금'; }", timeout=40000)
+        A(pg.inner_text("#ben-segs button.on").strip() == "지원금",
+          "갈래를 눌렀는데 안 바뀐다")
+
+    # 순수 함수 — 여기가 «모름을 없음으로 그리지 않는다» 를 지키는 자리다
+    A(pg.evaluate("benWhere([])") == "", "지역을 모를 때 뭔가를 적고 있다")
+    A(pg.evaluate("benWhere(['all'])") == "전국", "자료가 전국이라 적은 것을 안 쓰고 있다")
+    A(pg.evaluate("benWhere(['seoul','busan'])") == "서울·부산", "지역 이름을 한글로 안 바꾼다")
+    A("외 1곳" in pg.evaluate("benWhere(['seoul','busan','daegu','jeju'])"), "넷 이상을 줄여 적지 않는다")
+    A(pg.evaluate("benDday('')") == "", "마감을 모를 때 날짜를 지어낸다")
+    A(pg.evaluate("benDday('2000-01-01')") == "지남", "지난 것을 열려 있는 것처럼 그린다")
+    ctx.close()
+    b.close()
+ok("혜택 탭 — 탭 다섯이 390px 에 들어가고, 기본 갈래가 장학금이며, 모르는 값을 «없음» 으로 안 그린다")
+
+# ── 이번 주 확 뜬 것 + «쉽게:» — 별·하트를 날짜별로 적어 둔 DB 를 바깥에서 만들고 띄운다 ──
+# 소식은 남의 사이트에서 오므로 실행마다 다르다 — 그래서 우리가 넣은 줄로만 단언한다.
+_hdir = _tf.mkdtemp(prefix="hackon-hot-")
+_hdb = os.path.join(_hdir, "hot.db")
+HOT_BASE = checklib.start(extra_env={"DB": _hdb})   # 한 번 띄워 표를 만든다
+checklib.stop(HOT_BASE)
+_today = datetime.now().strftime("%Y-%m-%d")
+_d3 = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+con = _sq.connect(_hdb)
+for _src, _u, _t, _note, _job in (("gh", "https://github.com/e2e/agent-kit", "e2e/agent-kit — MCP agent 도구", "★ 1500", "개발"),
+                                  ("hf", "https://huggingface.co/e2e/tiny", "e2e/tiny", "♥ 40", ""),
+                                  ("geek", "https://geek.example/1", "e2e 읽을거리 한 줄", "", "")):
+    con.execute("INSERT INTO news(src,key,title,url,note,job,at) VALUES(?,?,?,?,?,?,?)", (_src, _u, _t, _u, _note, _job, _today))
+con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://github.com/e2e/agent-kit", _d3, 1200))
+con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://github.com/e2e/agent-kit", _today, 1500))
+con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://huggingface.co/e2e/tiny", _today, 40))
+con.commit(); con.close()
+HOT_BASE = checklib.start(extra_env={"DB": _hdb})
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_context(viewport={"width": 390, "height": 844}).new_page()
+    pg.on("pageerror", lambda e: errs.append("hot: " + str(e)))
+    pg.goto(HOT_BASE + "/news", wait_until="networkidle"); pg.wait_for_selector("#hot")
+    _h = pg.inner_text("#hot")
+    A("e2e/agent-kit" in _h and "+300" in _h, f"확 뜬 것 판에 +300 이 없다: {_h}")
+    A("e2e/tiny" not in _h, "하루치뿐인 것(는 만큼 모름)이 확 뜬 것 판에 올랐다")
+    A("쉽게:" in _h and "MCP" in _h, f"확 뜬 것 줄에 «쉽게» 가 없다: {_h}")
+    # 아래 목록 줄에도 «쉽게» — 그리고 확 뜬 것 판은 목록(#list) 밖이라 칩 수와 그린 줄 수가 그대로 맞는다
+    A(pg.locator("#list .ez").count() >= 3, "목록 줄에 «쉽게» 가 안 붙는다")
+    _all = pg.evaluate("document.querySelector('.chip[data-k=\"all\"]').dataset.n")
+    A(int(_all) == pg.locator("#list .it").count(), "확 뜬 것 판이 칩 수와 목록 줄 수를 어긋나게 한다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "뉴스가 폰 폭에서 옆으로 밀린다")
+    pg.goto(HOT_BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#br-hot")
+    A("+300" in pg.inner_text("#br-hot") and "쉽게:" in pg.inner_text("#br-hot"), f"브리핑에 확 뜬 것이 없다: {pg.inner_text('#br-hot')}")
+    b.close()
+checklib.stop(HOT_BASE)
+# 기록이 하루치뿐인 새 DB — «없음» 이 아니라 «모름» 으로 그려야 한다
+_hdb2 = os.path.join(_hdir, "hot2.db")
+HOT_BASE = checklib.start(extra_env={"DB": _hdb2})
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page()
+    pg.goto(HOT_BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#br-hot")
+    A("아직 모릅니다" in pg.inner_text("#br-hot"), f"기록이 없는데 «모름» 이 아니다: {pg.inner_text('#br-hot')}")
+    b.close()
+checklib.stop(HOT_BASE)
+ok("이번 주 확 뜬 것 — 7일 동안 는 만큼(+300), 하루치는 판 밖, 줄마다 «쉽게», 기록 없으면 «모름», 브리핑에도")
+
+# ── 첫 화면 고리 — 늘 보이는 것은 다섯, 나머지는 «더 보기» 안에서 «참가할 때·열 때·같이 할 때» 셋으로 ──
+# 고리를 «빼도» 주소는 산다(밖에 뿌린 링크) — 더 보기 안 고리가 전부 200 인지 같이 본다.
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.goto(BASE + "/", wait_until="networkidle")
+    # «있을 때만 뜨는 것»(id 가 nav- 로 시작 — 강의·마켓·순위·그날의 조건)은 자료가 생기면 켜진다. 늘 보이는 고리만 센다
+    _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
+    A(len(_vis) <= 5, f"첫 화면 늘 보이는 고리가 다섯을 넘는다: {_vis}")
+    _groups = pg.evaluate("[...document.querySelectorAll('nav.sec .more-in .mg')].map(x => x.textContent.trim())")
+    A(_groups == ["참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 셋이 아니다: {_groups}")
+    _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
+    for _h in _hrefs:
+        try:
+            _code = urllib.request.urlopen(BASE + _h, timeout=10).status
+        except urllib.error.HTTPError as _e:
+            _code = _e.code
+        A(_code == 200, f"첫 화면 고리 {_h} 가 {_code}")
+    pg.click("nav.sec details.navmore summary"); pg.wait_for_timeout(200)
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "더 보기를 펴면 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("첫 화면 고리 — 늘 보이는 것 다섯 이하, 더 보기는 셋으로 묶고 고리마다 200")
+
+# ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
+_, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
+post(f"/api/events/{_kev['id']}", {"due": "2099-01-01T00:00"}, key=_kev["owner"], method="PATCH")
+_, _kt = post(f"/api/events/{_kev['id']}/teams", {"name": "막힘검사팀이름", "email": "k@example.com", "agree": True})
+A(post(f"/api/teams/{_kt['id']}/submit", {"url": "https://k.example/x", "stuck": "배포 설정에서 두 시간 막힘"}, tkey=_kt["tkey"])[0] == 200, "막힌 것 한 줄을 못 낸다")
+post(f"/api/events/{_kev['id']}", {"due": "2026-01-10T00:00"}, key=_kev["owner"], method="PATCH")
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.on("pageerror", lambda e: errs.append("stuck: " + str(e)))
+    pg.goto(f"{BASE}/e/{_kev['id']}", wait_until="networkidle"); pg.wait_for_selector("#stuck")
+    _st = pg.inner_text("#stuck")
+    A("배포 설정에서 두 시간 막힘" in _st and "막힘검사팀이름" not in _st, f"막힌 곳 모음이 이상하다: {_st}")
+    b.close()
+ok("막힌 곳 모음 — 끝난 뒤 공개 페이지에 팀 이름 없이")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

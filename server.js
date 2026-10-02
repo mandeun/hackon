@@ -702,6 +702,17 @@ function ownsPerson(db, pid, tkey) {
   return !!db.prepare("SELECT 1 FROM teams WHERE (tkey=? AND tkey<>'' AND person=?) OR (mate_key=? AND mate_key<>'' AND mate=?)")
     .get(tk, pid, tk, pid);
 }
+/** 공개 칸에 연락처가 섞였나. 레드팀(10/03)에서 «o1o-1234-5678»·«공일공 1234 5678»·«카톡 abc123» 이 빠져나갔다.
+    한글 숫자·o/O 를 숫자로 바꾸고 구분자를 지운 뒤 01X 로 시작하는 10~11자리를 본다. 메신저 이름 뒤 아이디도 막는다.
+    완벽할 수는 없다 — 목표는 «긁어 가기 쉬운 꼴» 을 공개 칸에서 없애는 것이다 */
+const KO_DIGIT = { 공: '0', 영: '0', 일: '1', 이: '2', 삼: '3', 사: '4', 오: '5', 육: '6', 칠: '7', 팔: '8', 구: '9' };
+function looksContact(t) {
+  const s = String(t || '');
+  if (/@|open\.kakao\.com|https?:\/\/(?!hackon\.kr)/i.test(s)) return true;
+  if (/(카톡|카카오|kakao|오픈\s?채팅|텔레(그램)?|telegram|라인|\bline\b|디엠|\bdm\b|인스타|insta(gram)?|위챗|wechat)\s*(아이디|id)?\s*[:：]?\s*[a-z0-9_.-]{3,}/i.test(s)) return true;
+  const digits = s.replace(/[공영일이삼사오육칠팔구]/g, c => KO_DIGIT[c]).replace(/[oO]/g, '0').replace(/[\s\-.()·]/g, '');
+  return /01[016789]\d{7,8}/.test(digits);
+}
 /** 첫 입장 세 칸. 본인(그 사람의 팀·짝 열쇠)만 고친다. 연락처·주소처럼 보이는 것은 받지 않는다 — 이 세 칸은 공개라서 */
 const INTRO_KEYS = ['intro', 'doing', 'seeking'];
 function setIntro(db, pid, tkey, b) {
@@ -711,7 +722,7 @@ function setIntro(db, pid, tkey, b) {
   for (const k of INTRO_KEYS) {
     if (b[k] === undefined) continue;
     const t = plain(b[k], 80);
-    if (/@|\b01[016789][-\s]?\d{3,4}[-\s]?\d{4}\b|open\.kakao\.com/i.test(t)) throw new HttpError(400, '공개되는 칸이라 연락처는 적지 마세요 — 연락처는 서로 좋아요일 때 열립니다');
+    if (looksContact(t)) throw new HttpError(400, '공개되는 칸이라 연락처는 적지 마세요 — 연락처는 서로 좋아요일 때 열립니다');
     v[k] = t;
   }
   const ks = Object.keys(v);
@@ -2490,9 +2501,9 @@ async function newsTick(db) {
   const got = [];
   const j = async u => { const r = await fetch(u, { headers: { 'user-agent': 'hackon.kr', accept: 'application/json' }, signal: AbortSignal.timeout(8000) }); return r.ok ? r.json() : null; };
   try { for (const m of (await j('https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=8')) || [])
-    got.push({ src: 'hf', title: m.id, url: 'https://huggingface.co/' + m.id, note: `♥ ${m.likes || 0}` }); } catch {}
+    got.push({ src: 'hf', title: m.id, url: 'https://huggingface.co/' + m.id, note: `♥ ${m.likes || 0}`, born: m.createdAt }); } catch {}
   try { for (const p of (await j('https://huggingface.co/api/daily_papers?limit=8')) || []) if (p.paper && p.paper.title)
-    got.push({ src: 'paper', title: p.paper.title, url: 'https://huggingface.co/papers/' + p.paper.id, note: `▲ ${p.paper.upvotes || 0}` }); } catch {}
+    got.push({ src: 'paper', title: p.paper.title, url: 'https://huggingface.co/papers/' + p.paper.id, note: `▲ ${p.paper.upvotes || 0}`, born: p.publishedAt || p.paper.publishedAt }); } catch {}
   try { for (const sp of (await j('https://huggingface.co/api/spaces?sort=trendingScore&direction=-1&limit=5')) || [])
     got.push({ src: 'space', title: sp.id, url: 'https://huggingface.co/spaces/' + sp.id, note: `♥ ${sp.likes || 0}` }); } catch {}
   /* RSS 여럿 — 제목·주소만. 어느 하나가 죽어도 나머지는 산다. 레딧은 서버 fetch 가 UA 무관 403(09-25 실측), .rss 는 연속 호출 시 429 — 안 붙인다 */
@@ -2507,7 +2518,7 @@ async function newsTick(db) {
   try {
     const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     for (const r of ((await j(`https://api.github.com/search/repositories?q=created:%3E${since}&sort=stars&order=desc&per_page=6`)) || {}).items || [])
-      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 80) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발' });
+      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 80) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발', born: r.created_at });
   } catch {}
   try { for (const d of (await j('https://huggingface.co/api/datasets?sort=trendingScore&direction=-1&limit=4')) || [])
     got.push({ src: 'ds', title: d.id, url: 'https://huggingface.co/datasets/' + d.id, note: `♥ ${d.likes || 0}`, job: '데이터' }); } catch {}
@@ -2521,8 +2532,10 @@ async function newsTick(db) {
   const ins = db.prepare('INSERT OR IGNORE INTO news(src,key,title,url,note,job) VALUES(?,?,?,?,?,?)');
   let added = 0;
   for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 160), g.url.slice(0, 500), String(g.note).slice(0, 200), g.src === 'hackon' ? '' : (g.job || jobOf(g.title))).changes);
+  const snapped = newsSnap(db, got);
   db.prepare("DELETE FROM news WHERE at < date('now','-30 days')").run();
-  return { got: got.length, added };
+  db.prepare("DELETE FROM news_counts WHERE day < date('now','-30 days')").run();
+  return { got: got.length, added, snapped };
 }
 function newsList(db, days = 9, job = '') {
   return db.prepare("SELECT id, src, title, url, note, at, job, by FROM news WHERE at >= date('now', ?) AND (?='' OR job=?) ORDER BY at DESC, id DESC").all(`-${days} days`, job, job);
@@ -2629,6 +2642,104 @@ function newsNormTitle(t) {
   return String(t || '').split(' — ')[0].normalize('NFKC').toLowerCase()
     .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/[^0-9a-z가-힣]+/g, '').slice(0, 60);
 }
+/* ── 5살도 알아듣게 — 줄마다 «쉽게:» 한 줄 ───────────────────────────────────────
+   AI 를 부르지 않는다. 출처 종류로 «이게 뭔지» 한 문장, 제목 속 어려운 말을 사전에서 둘까지 푼다.
+   사전에 없는 말은 설명하지 않는다(모르는 것을 지어내면 그게 제일 나쁜 설명이다). */
+const NEWS_EASY_SRC = {
+  hf: '누구나 받아 쓸 수 있게 공개된 AI 두뇌(모델)예요.',
+  paper: '연구자들이 «이렇게 하니 더 잘 되더라» 하고 쓴 글이에요.',
+  space: '웹에서 바로 눌러 볼 수 있는 AI 놀이터예요.',
+  ds: 'AI 를 가르칠 때 쓰는 공부 자료 묶음이에요.',
+  gh: '누구나 보고 고쳐 쓸 수 있게 공개된 프로그램이에요.',
+  hackon: '우리 대회에서 하루 만에 만든 것 중 1등이에요.',
+  tube: '새 도구를 먼저 써 본 사람이 영상으로 알려 주는 거예요.',
+  ph: '새로 나온 앱·서비스를 소개하는 곳에 올라온 거예요.',
+  show: '누가 직접 만들어서 «이거 봐 주세요» 하고 올린 거예요.',
+  tip: '같은 일 하는 사람이 써 보고 좋아서 알려 준 거예요.',
+};
+const NEWS_EASY_KIND = { deal: '공짜로 주거나 싸게 해 주는 소식이에요.', read: '요즘 AI 쪽에서 무슨 일이 있었는지 알려 주는 글이에요.', tool: '새로 나온 도구 소식이에요.' };
+/* 위에서부터 먼저 걸리는 둘. 영어 낱말은 \b 로 묶어 «drag» 속 «rag» 같은 것을 안 잡는다 */
+const NEWS_GLOSS = [
+  [/\bmcp\b|model context protocol/i, 'MCP', 'AI 가 다른 앱을 쓸 수 있게 꽂는 플러그'],
+  [/\brag\b|retrieval/i, 'RAG', '대답하기 전에 자료를 먼저 찾아보는 방법'],
+  [/\bagents?\b|agentic|에이전트/i, '에이전트', '시키면 혼자 여러 단계를 해내는 AI 비서'],
+  [/fine.?tun|파인\s?튜닝|미세\s?조정/i, '파인튜닝', '이미 똑똑한 AI 에게 한 가지를 더 가르치기'],
+  [/\blora\b/i, 'LoRA', '작은 덧붙임 하나로 AI 를 조금 바꾸는 방법'],
+  [/\bgguf\b|quantiz|양자화/i, '양자화', '덩치를 줄여 작은 컴퓨터에서도 돌게 만든 것'],
+  [/reason|추론|thinking/i, '추론', '바로 답하지 않고 차근차근 생각하고 답하는 것'],
+  [/\btts\b|text.to.speech|음성 합성/i, 'TTS', '글을 소리 내어 읽어 주는 AI'],
+  [/\basr\b|whisper|speech.to.text|받아쓰기/i, '받아쓰기', '말소리를 글로 적어 주는 AI'],
+  [/text.to.video|video gen|영상 생성/i, '영상 생성', '말로 설명하면 영상을 만들어 주는 AI'],
+  [/diffusion|text.to.image|image gen|이미지 생성/i, '그림 생성', '말로 설명하면 그림을 그려 주는 AI'],
+  [/\bvlm\b|vision|multimodal|멀티모달/i, '멀티모달', '글만이 아니라 그림·소리도 알아보는 AI'],
+  [/embedding|임베딩/i, '임베딩', '글의 뜻을 숫자로 바꿔 비슷한 것끼리 찾게 하는 것'],
+  [/benchmark|벤치마크|leaderboard/i, '벤치마크', 'AI 끼리 성적을 매기는 시험지'],
+  [/\bcod(e|er|ing)\b|코딩/i, '코딩 AI', '코드를 대신 짜 주는 AI'],
+  [/robot|로봇/i, '로봇', '몸을 움직이는 AI'],
+  [/\bllms?\b|language model|언어\s?모델/i, 'LLM', '말을 알아듣고 글을 쓰는 AI'],
+  [/open.?source|오픈\s?소스|open.?weight/i, '오픈소스', '누구나 공짜로 보고 고쳐 쓸 수 있는 것'],
+];
+function newsEasy(r) {
+  const base = NEWS_EASY_SRC[r.src] || NEWS_EASY_KIND[r.kind || newsKind(r.src)] || '';
+  const t = String(r.title || ''), terms = [];
+  for (const [re, w, say] of NEWS_GLOSS) { if (terms.length >= 2) break; if (re.test(t)) terms.push(`«${w}» 는 ${say}.`); }
+  return [base, ...terms].filter(Boolean).join(' ');
+}
+
+/* ── 이번 주 확 뜬 것 — «오늘 새로 생긴 것» 이 아니라 «7일 동안 별·하트가 많이 는 것» ─────────────
+   모을 때마다 별·하트 수를 날짜별로 적어 둔다(news_counts). 숫자가 없는 출처(기사 RSS)는 이 판에 안 낀다 —
+   모름은 0 이 아니다. 기록이 하루치뿐이면 는 만큼을 모른다 → 판에 안 올린다.
+   예외 하나: 태어난 날을 아는 것(이번 주 생긴 저장소·논문·모델)은 «태어난 날 0» 이 확실하므로 그날 0 을 적어 둔다. */
+const NEWS_COUNT_RE = /[★♥▲]\s*([\d,]+)/;
+function newsCountOf(note) { const m = NEWS_COUNT_RE.exec(String(note || '')); return m ? +m[1].replace(/,/g, '') : null; }
+function newsSnap(db, got, day = today()) {
+  const put = db.prepare('INSERT INTO news_counts(key, day, n) VALUES(?,?,?) ON CONFLICT(key, day) DO UPDATE SET n=excluded.n');
+  const born = db.prepare('INSERT OR IGNORE INTO news_counts(key, day, n) VALUES(?,?,0)');
+  const note = db.prepare('UPDATE news SET note=? WHERE key=?');
+  const weekAgo = new Date(Date.parse(day + 'T00:00:00Z') - 7 * 86400000).toISOString().slice(0, 10);
+  let n = 0;
+  for (const g of got) {
+    const c = newsCountOf(g.note);
+    if (c === null || !g.url) continue;
+    const b = String(g.born || '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(b) && b >= weekAgo && b < day) born.run(g.url, b);
+    put.run(g.url, day, c);
+    note.run(String(g.note).slice(0, 200), g.url);       /* 처음 본 날 숫자에 멈춰 있던 note 도 새로 */
+    n++;
+  }
+  return n;
+}
+function newsHot(db, { n = 8, per = 3, day = today() } = {}) {
+  const weekAgo = new Date(Date.parse(day + 'T00:00:00Z') - 7 * 86400000).toISOString().slice(0, 10);
+  const snaps = db.prepare('SELECT key, day, n FROM news_counts WHERE day >= ? AND day <= ? ORDER BY key, day').all(weekAgo, day);
+  const by = new Map();
+  for (const s of snaps) { if (!by.has(s.key)) by.set(s.key, []); by.get(s.key).push(s); }
+  const info = db.prepare('SELECT id, src, title, url, note, at, job FROM news WHERE key=?');
+  const out = [];
+  for (const [key, ss] of by) {
+    if (ss.length < 2) continue;                          /* 하루치뿐 — 는 만큼을 모른다 */
+    const first = ss[0], last = ss[ss.length - 1], gain = last.n - first.n;
+    if (gain <= 0) continue;
+    const r = info.get(key);
+    if (!r) continue;
+    const days = Math.max(1, Math.round((Date.parse(last.day) - Date.parse(first.day)) / 86400000));
+    out.push({ ...r, gain, from: first.n, to: last.n, since: first.day, days, mark: (NEWS_COUNT_RE.exec(r.note) || ['★'])[0][0] });
+  }
+  /* 출처마다 단위가 다르다(깃허브 별은 수천, 논문 추천은 수십) — 그대로 줄 세우면 깃허브가 다 먹는다.
+     그래서 출처 안에서 줄 세우고, 출처당 per 개까지만 받아 는 비율(gain/첫 수)로 섞는다. */
+  const per0 = {}, picked = [];
+  for (const r of out.sort((a, b) => b.gain - a.gain || b.id - a.id)) {
+    if ((per0[r.src] = (per0[r.src] || 0) + 1) > per) continue;
+    picked.push(r);
+  }
+  return picked.sort((a, b) => (b.gain / Math.max(10, b.from)) - (a.gain / Math.max(10, a.from)) || b.gain - a.gain)
+    .slice(0, n).map(r => ({ ...r, kind: newsKind(r.src), easy: newsEasy({ ...r, kind: newsKind(r.src) }) }));
+}
+/* 판이 비었을 때 «없음» 과 «아직 모름» 을 가른다 — 기록이 이틀 치 이상 쌓였나 */
+function newsHotKnown(db, day = today()) {
+  const r = db.prepare("SELECT COUNT(DISTINCT day) d FROM news_counts WHERE day >= date(?, '-7 days')").get(day);
+  return (r && r.d) >= 2;
+}
 /* 모은 줄을 «합치고 · 점수 매기고 · 종류를 붙여» 돌려준다. 원본은 안 고친다. */
 function newsEnrich(rows, now = today()) {
   const home = new Map(), clusters = [];
@@ -2658,6 +2769,7 @@ function newsEnrich(rows, now = today()) {
       + also.length * 18                                                                 /* 여러 곳이 같이 다뤘다 = 가장 센 신호 */
       + (rep.job ? 4 : 0);                                                               /* 직무가 붙었다 = 누군가의 일에 닿는다 */
     o.do = newsDo(o);
+    o.easy = newsEasy(o);
     o.why = [];
     if (also.length) o.why.push(`${also.length + 1}곳에서 같이 다뤘다`);
     if (rep.src === 'tip') o.why.push('같은 일 하는 사람의 제보');
@@ -2740,7 +2852,7 @@ function newsMd(db, job = '') {
   const line = (r, tight) => `- [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}`
     + (r.also.length ? ` +${r.also.map(s2 => NEWS_SRC[s2] || s2).join('·')}` : '')
     + (r.job ? ' · ' + r.job : '') + (r.by ? ' · 제보 ' + r.by : '') + (r.note ? ' · ' + r.note : '')
-    + (tight || r.bucket === '그전' ? '\n' : `\n  - 그래서 뭘 하나: ${r.do}\n`);
+    + (tight || r.bucket === '그전' ? '\n' : `\n  - 쉽게: ${r.easy}\n  - 그래서 뭘 하나: ${r.do}\n`);
   let out = `# 해커온뉴스${job ? ' · ' + job : ''} — hackon.kr/news (${today()})\n\n` +
     `> **AI 에게 주는 지시.** 이 문서를 받은 AI 는 요약하지 말고 **지금 바로 내 작업 환경을 세팅**한다.\n` +
     `> 1) 내 직무(${job || '아래 목록 중 하나를 물어본다'})에 맞는 «세팅 레시피» 를 아래에서 골라, 설치 명령·설정 파일·첫 작업을 **실제로 실행하거나 복붙 가능한 명령 블록으로** 준다.\n` +
@@ -2748,12 +2860,15 @@ function newsMd(db, job = '') {
     `> 3) 각 줄의 «그래서 뭘 하나» 는 출처만 보고 기계가 붙인 것이다. 원문을 열어 본 뒤 틀렸으면 고쳐서 말한다.\n` +
     `> 4) 마지막에 «오늘 첫 작업» 한 줄만 남긴다. 설명은 생략한다.\n\n` +
     `## 세팅 레시피${job ? ' — ' + job : ''}\n${setup}\n\n`;
+  const hot = newsHot(db).filter(r => newsInJob(r, job));
+  if (hot.length) out += `## 이번 주 확 뜬 것 — 7일 동안 별·하트가 많이 는 순\n` +
+    hot.map((r, i) => `${i + 1}. [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src} · ${r.mark} +${r.gain} (${r.since} 이후)\n   - 쉽게: ${r.easy}\n`).join('') + '\n';
   if (!rows.length) return out + `## 새로 뜬 것\n\n아직 모인 소식이 없습니다.\n`;
   for (const [k, t, sub] of NEWS_KINDS) {
     if (k === 'pick') {
       if (!picks.length) continue;
       out += `## ${t} — ${sub}\n`;
-      picks.forEach((r, i) => { out += `${i + 1}. [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}${r.why.length ? ' · ' + r.why.join(' · ') : ''}\n   - 그래서 뭘 하나: ${r.do}\n`; });
+      picks.forEach((r, i) => { out += `${i + 1}. [${r.title}](${r.url}) — ${NEWS_SRC[r.src] || r.src}${r.why.length ? ' · ' + r.why.join(' · ') : ''}\n   - 쉽게: ${r.easy}\n   - 그래서 뭘 하나: ${r.do}\n`; });
       out += '\n'; continue;
     }
     const mine = rows.filter(r => r.kind === k && !pickIds.has(r.id));
@@ -3386,7 +3501,7 @@ function open(file) {
      «모름» 을 «있음» 으로 그리지 않는다(오답노트 E22). 동의는 본인이 켜야 생긴다. */
   try { db.exec("ALTER TABLE submissions ADD COLUMN show INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE submissions ADD COLUMN show_at TEXT NOT NULL DEFAULT ''"); } catch {}
-  for (const c of ['aiuse', 'aidrop'])
+  for (const c of ['aiuse', 'aidrop', 'stuck'])
     try { db.exec(`ALTER TABLE submissions ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
   /* 데모데이 제출 둘 — 1분 시연 영상(유튜브 id 11자만, 주소·iframe 은 안 받는다)과 발표 자료 주소 */
   for (const c of ['video', 'deck'])
@@ -3724,6 +3839,8 @@ function open(file) {
   db.exec(`CREATE TABLE IF NOT EXISTS news(
     id INTEGER PRIMARY KEY, src TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);
+  /* 별·하트 수를 날짜별로 — «이번 주 확 뜬 것» 을 세려고. 한 주소에 하루 한 줄 */
+  db.exec(`CREATE TABLE IF NOT EXISTS news_counts(key TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY(key, day))`);
   /* 짝 신청 — 둘이 같이 오는 길. 초대 코드는 팀 열쇠와 다른 것이다 */
   for (const c of ['invite', 'mate', 'mate_name', 'mate_key', 'mate_contact'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
@@ -4747,6 +4864,8 @@ function getEvent(db, id) {
   /* 그날의 조건은 오프닝에서 공개하는 것이다. 끝나기 전에 공개 응답에 실리면
      참가자가 미리 준비해 온다 — 그러면 «현장 조건» 이 아니다. 운영자에게만 따로 붙인다. */
   if (!closed({ due: e.due, ends: e.ends })) delete e.twist;
+  /* 막힌 곳 모음 — 제출이 끝난 뒤에만, 팀 이름 없이. 끝나기 전엔 «모름» 이라 아예 안 싣는다(빈 배열과 다르다) */
+  if (closed({ due: e.due, ends: e.ends })) e.stuck = stuckList(db, id);
   e.rubric = JSON.parse(e.rubric);
   for (const r of e.rubric) if (!r.hint && RUBRIC_HINT[r.key]) r.hint = RUBRIC_HINT[r.key];
   try { e.plan = JSON.parse(e.plan || '[]'); } catch { e.plan = []; }
@@ -4757,6 +4876,12 @@ function getEvent(db, id) {
   e.sponsors = db.prepare('SELECT * FROM sponsors WHERE event=? ORDER BY amount DESC').all(id);
   e.missing = ready(e);
   return e;
+}
+
+/* 이 대회 팀들이 남긴 «막힌 것» — 팀 이름·순위는 안 붙인다. 들어온 차례로 */
+function stuckList(db, event) {
+  return db.prepare(`SELECT s.stuck FROM submissions s JOIN teams t ON t.id = s.team
+                     WHERE t.event = ? AND s.stuck <> '' ORDER BY s.at, s.team`).all(event).map(r => r.stuck);
 }
 
 function joinTeam(db, event, b) {
@@ -4847,6 +4972,13 @@ function submit(db, team, b) {
     const v = String(b.video || '').trim(), id = v ? ytId(v) : '';
     if (v && !id) throw new HttpError(400, '시연 영상은 유튜브 주소로 넣어 주세요');
     db.prepare('UPDATE submissions SET video=? WHERE team=?').run(id, team);
+  }
+  /* 막힌 것 한 줄 — «실패도 자산»(가짜연구소). 끝난 뒤 공개 페이지에 팀 이름 없이 모인다.
+     안 보내면 그대로, 빈 값이면 지운다. 연락처처럼 보이면 막는다 — 이름 없이 모이는 곳이라 더 그렇다 */
+  if (b.stuck !== undefined) {
+    const st = plain(b.stuck, 200);
+    if (looksContact(st)) throw new HttpError(400, '막힌 것 칸에는 연락처를 적지 않습니다');
+    db.prepare('UPDATE submissions SET stuck=? WHERE team=?').run(st, team);
   }
   if (b.deck !== undefined) {
     const d = String(b.deck || '').trim(), u = d ? webUrl(d) : '';
@@ -5116,7 +5248,7 @@ function board(db, event, admin = false, mine = 0) {
   const teams = db.prepare(`
     SELECT t.id, t.name, t.contact, t.role, t.solo, t.found, t.note AS apply, t.featured, t.request, t.confirmed,
            t.agreed, t.photo, t.came, t.size, t.want, t.no, t.bring, t.deposit, t.pick,
-           s.url, s.note, s.aiuse, s.aidrop, s.show, s.show_at, s.video, s.deck
+           s.url, s.note, s.aiuse, s.aidrop, s.stuck, s.show, s.show_at, s.video, s.deck
     FROM teams t LEFT JOIN submissions s ON s.team = t.id
     WHERE t.event = ? ORDER BY t.id`).all(event);
   /* 심사위원별 등수 보정(MLH 의 stack ranking 을 눈금으로). 관대한 심사위원의 90점과 짠 심사위원의 70점이
@@ -5203,6 +5335,8 @@ function board(db, event, admin = false, mine = 0) {
     if (!admin && mine && String(t.id) === String(mine)) { row.hasContact = !!t.contact; row.hasFound = !!t.found; }
     /* 예약금 상태는 돈 이야기다 — 운영자와 그 팀 자신에게만 */
     if (!admin && !(mine && String(t.id) === String(mine))) delete row.deposit;
+    /* 막힌 것은 팀 이름 없이만 공개한다(getEvent 의 stuck 목록). 순위표 줄에 붙으면 이름과 묶인다 — 운영자와 본인 줄에만 */
+    if (!admin && !(mine && String(t.id) === String(mine))) delete row.stuck;
     /* 선발 전·거절된 지원자의 연락처는 리더(운영자)에게도 안 간다 — 수락해야 받는다 */
     if (t.pick === 'applied' || t.pick === 'rejected') delete row.contact;
     if (e.kind === '프로젝트') {
@@ -5682,6 +5816,25 @@ const PLACEHOLDERS = new Set([
   '테스트', '테스트요', '테스트입니다', '테스트중', '시험', '실험',
   'test', 'testing', 'asdf', 'qwer', 'aaa', 'abc', '123', '1234', 'ㅌㅅㅌ', 'ㅎㅇ', 'hello', 'hi',
 ]);
+/* 혼자서는 아무 뜻도 없는 말. 자리 채우기 뒤에 붙어 목록을 통과시키던 것들이다 —
+   라이브 문제 은행에 «테스트 요청» 이 그렇게 실려 있었다(2026-09-28 확인).
+   **길이로 거르지 않는다**(P3). «테스트» 와 «요청» 을 걷어내고도 남는 글자가
+   하나라도 있으면 통과시킨다 — «테스트 자동화가 손으로만 됩니다» 는 그대로 실린다. */
+const FILLER = new Set([
+  '요청', '입니다', '이다', '중', '용', '글', '게시물', '샘플', '더미', '데이터',
+  '임', '예시', '확인', '해봄', '해봅니다', '올려봄', '올립니다', 'sample', 'dummy', 'demo', 'foo', 'bar',
+]);
+/* 자리 채우기 말과 빈 말만으로 이뤄졌나.
+   **긴 것부터 지워 나가는 방식은 틀린다** — «테스트요청» 에서 «테스트요» 가 먼저 먹혀
+   «청» 이 남고, 그러면 통과해 버린다. 나눠 읽기는 되돌아갈 수 있어야 한다.
+   그래서 «이 말들만 이어 붙인 글인가» 를 정규식 하나로 묻는다 — 정규식이 알아서 되돌아간다. */
+const FILLER_RE = new RegExp('^(?:' +
+  [...PLACEHOLDERS, ...FILLER].map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')+$');
+function onlyFiller(k) {
+  const s = String(k || '').toLowerCase();
+  if (!s) return false;                       // 빈 글은 위에서 이미 걸렀다
+  return FILLER_RE.test(s);
+}
 
 /** 글이 아닌 것. 뜻을 판정하지 않는다 — 모양만 본다. */
 function notWriting(text) {
@@ -5694,6 +5847,7 @@ function notWriting(text) {
   if (/^(.)\1{3,}$/.test(k)) return true;                        // 같은 글자만 넷 이상
   if (/^https?:\/\/\S+$/i.test(t)) return true;                 // 주소 하나뿐
   if (PLACEHOLDERS.has(k.toLowerCase())) return true;             // 글 전체가 자리 채우기 값
+  if (onlyFiller(k)) return true;                                 // 자리 채우기 + 빈 말로만 이뤄진 글
   return false;
 }
 
@@ -7820,7 +7974,7 @@ function routes(db) {
         /* 줄은 이미 «합쳐지고 점수 매겨지고 종류가 붙은» 채로 나간다 — 화면은 그리기만 한다(server.js 의 newsEnrich).
            providers 도 같이 싣는다 — 제보 칸의 로그인 단추를 그리는 데 쓴다. 소식 화면이 /api/auth 를 또 부르지 않게.
            kinds·pick 도 함께 내려보낸다. 묶음 이름과 «꼭 볼 것» 개수 규칙이 화면에 또 적히면 둘이 어긋난다. */
-        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, kinds: NEWS_KINDS, buckets: NEWS_BUCKETS, pick: { n: NEWS_PICK_N, min: NEWS_PICK_MIN, per: NEWS_PICK_PER_SRC, perKind: NEWS_PICK_PER_KIND }, full: NEWS_FULL, rows: newsFeed(db, JOBS.includes(q.job) ? q.job : ''), setup: JOBS.includes(q.job) ? (SETUP[q.job] || '') : '', loggedIn: !!cookieOwner, providers: loginMenu() });
+        if (p === '/api/news' && req.method === 'GET') return json(res, 200, { src: NEWS_SRC, jobs: JOBS, kinds: NEWS_KINDS, buckets: NEWS_BUCKETS, pick: { n: NEWS_PICK_N, min: NEWS_PICK_MIN, per: NEWS_PICK_PER_SRC, perKind: NEWS_PICK_PER_KIND }, full: NEWS_FULL, rows: newsFeed(db, JOBS.includes(q.job) ? q.job : ''), hot: newsHot(db).filter(r => newsInJob(r, JOBS.includes(q.job) ? q.job : '')), hotKnown: newsHotKnown(db), setup: JOBS.includes(q.job) ? (SETUP[q.job] || '') : '', loggedIn: !!cookieOwner, providers: loginMenu() });
         if (p === '/api/news/tip' && req.method === 'POST') {
           if (!cookieOwner) throw new HttpError(401, '제보는 로그인이 필요합니다');
           const o = db.prepare('SELECT name FROM owners WHERE id=?').get(cookieOwner);
@@ -8190,11 +8344,31 @@ function routes(db) {
       /* e.code 가 숫자가 아닌 오류(ERR_SQLITE_ERROR·ERR_INVALID_ARG_TYPE)가 writeHead 로 가면 프로세스가 죽는다(감사 1·2·3·20) */
       const code = Number.isInteger(e.code) && e.code >= 400 && e.code < 600 ? e.code : 500;
       if (code === 500) console.error('[500]', p, e && e.message);
+      /* 로그인 돌아오는 길(/auth/<공급자>/done)은 사람이 보는 화면이다 — JSON 한 줄에서 멈추면 되돌아갈 길이 없다.
+         무엇이 틀렸는지(공급자 코드)는 그대로 보여 주고, 다시 하기·그냥 쓰기 두 길을 단다. */
+      if (req.method === 'GET' && /^\/auth\/[a-z]+\/done$/.test(p)) {
+        res.writeHead(code, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...SEC_HEADERS });
+        return res.end(loginFailHtml(code === 500 ? '서버 오류' : e.message));
+      }
       json(res, code, { error: code === 500 ? '서버 오류' : e.message });
     }
   };
 }
 /* #endregion reuse:router */
+
+/* 로그인 실패 화면 — 외부 스크립트 없이 한 장. 메시지는 글자로만 넣는다 */
+function loginFailHtml(msg) {
+  const e = String(msg || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>로그인을 못 했습니다 — HACK:ON</title><meta name="robots" content="noindex">
+<style>body{margin:0;background:#EEF1F4;color:#0B1020;font:16px/1.6 'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;word-break:keep-all}
+.c{max-width:420px;margin:12vh auto;padding:24px 20px;background:#fff;border-radius:20px}h1{font-size:21px;margin:0 0 8px}
+.m{color:#5B6470;font-size:14px}a.b{display:block;text-align:center;margin-top:12px;padding:13px;border-radius:14px;font-weight:800;text-decoration:none;background:#C8F53B;color:#0B1020}
+a.s{background:#fff;border:1px solid #DDE1E6}</style></head><body><div class="c">
+<h1>로그인을 못 했습니다</h1><p class="m">${e}</p>
+<p class="m">잠깐 뒤 다시 하면 대개 됩니다. 로그인 없이도 대회 열기·신청은 그대로 됩니다.</p>
+<a class="b" href="/app?login=1" id="again">다시 로그인하기</a><a class="b s" href="/app">로그인 없이 계속</a></div></body></html>`;
+}
 
 /* ───────────────────── 자체 점검 ───────────────────── */
 async function selftest() {
@@ -8878,6 +9052,28 @@ async function selftest() {
       moreTeam(db, tb, { bring: 'record' }, { tkey: tk });
       ok(board(db, eb.id).rows[0].bring === 'record', '선언은 공개된다 (손님에게도 보인다)');
       db.prepare('DELETE FROM events WHERE id=?').run(eb.id);
+    }
+    /* 막힌 곳 모음 — 끝난 뒤에만, 팀 이름 없이. 순위표 줄에는 운영자·본인에게만 */
+    {
+      const ek = createEvent(db, { title: '막힌 곳 검사', starts: '2026-01-10', ends: '2026-01-10' });
+      db.prepare('UPDATE events SET due=? WHERE id=?').run('2099-01-01T00:00', ek.id);
+      const k1 = joinTeam(db, ek.id, { name: '막힌팀이름', agree: true, email: 'k1@x.test' });
+      const k2 = joinTeam(db, ek.id, { name: '조용한팀', agree: true, email: 'k2@x.test' });
+      submit(db, k1, { url: 'https://example.com/k1', stuck: '로그인 붙이다 3시간 <b>날림</b>' });
+      submit(db, k2, { url: 'https://example.com/k2' });
+      ok(getEvent(db, ek.id).stuck === undefined, '막힌 곳 — 끝나기 전엔 공개 응답에 아예 안 싣는다(빈 목록과 다르다)');
+      let kc = false; try { submit(db, k2, { url: 'https://example.com/k2', stuck: '카톡 abc1234 로 물어보세요' }); } catch (e) { kc = e.code === 400; }
+      ok(kc, '막힌 곳 — 연락처처럼 보이면 막는다');
+      submit(db, k1, { url: 'https://example.com/k1b' });
+      ok(db.prepare('SELECT stuck FROM submissions WHERE team=?').get(k1).stuck === '로그인 붙이다 3시간 b날림/b', '막힌 곳 — 안 보내면 그대로, 꺾쇠는 빠진다');
+      db.prepare('UPDATE events SET due=? WHERE id=?').run('2026-01-10T00:00', ek.id);
+      const pub = getEvent(db, ek.id);
+      ok(Array.isArray(pub.stuck) && pub.stuck.length === 1 && pub.stuck[0].includes('3시간') && !JSON.stringify(pub.stuck).includes('막힌팀이름'),
+         '막힌 곳 — 끝난 뒤 팀 이름 없이 모인다');
+      const bpub = board(db, ek.id, false).rows, bmine = board(db, ek.id, false, k1).rows, badm = board(db, ek.id, true).rows;
+      ok(bpub.every(r => r.stuck === undefined), '막힌 곳 — 공개 순위표 줄에는 안 붙는다(이름과 묶이지 않게)');
+      ok(bmine.find(r => r.id === k1).stuck.includes('3시간') && bmine.filter(r => r.stuck !== undefined).length === 1, '막힌 곳 — 본인 줄에만 보인다');
+      ok(badm.find(r => r.id === k1).stuck.includes('3시간'), '막힌 곳 — 운영자는 본다');
     }
     /* 결과물 «넘길 수 있어요» — 마감 뒤 받는 화면에만 보인다. 만든 것 링크 — 주소 꼴만 남는다 */
     {
@@ -9575,6 +9771,17 @@ async function selftest() {
     const 주소 = addRequest(db, { kind: 'requester', name: '아무개', pain: 'https://example.com/spam' });
     ok(!openRequests(db).some(r => r.id === 주소.id), '주소 하나뿐인 글은 안 실린다');
 
+    /* 라이브에서 실제로 새어 있던 값 그대로 넣는다(2026-09-28 /api/requests 확인) */
+    const 테스트요청 = addRequest(db, { kind: 'requester', name: '테스터', pain: '테스트 요청' });
+    ok(!openRequests(db).some(r => r.id === 테스트요청.id), '«테스트 요청» 은 공개 목록에 안 실린다');
+    ok(openRequests(db, true).some(r => r.id === 테스트요청.id), '«테스트 요청» 도 운영자에게는 보인다');
+
+    /* 반대쪽 — 이 줄이 없으면 위 규칙은 멀쩡한 의뢰까지 지우는 그물이 된다.
+       «테스트» 하나짜리 반례는 아래 자리 채우기 묶음에 이미 있다(진짜). 여기서는
+       **자리 채우기 말이 둘 이상 겹쳐도** 뒤에 글이 있으면 실리는지를 본다 */
+    const 샘플업무 = addRequest(db, { kind: 'requester', name: '아무개', pain: '샘플 데이터를 고객마다 손으로 만들어 보냅니다' });
+    ok(openRequests(db).some(r => r.id === 샘플업무.id), '«샘플 데이터» 로 시작해도 뒤에 글이 있으면 실린다');
+
     const 멀쩡 = addRequest(db, { kind: 'requester', name: '시장 2층 김씨', pain: '주문을 손으로 적는데 나중에 못 찾겠어요' });
     ok(openRequests(db).some(r => r.id === 멀쩡.id), '멀쩡한 글은 그대로 실린다 — 너무 많이 거르지 않는다');
     /* 멀쩡한 말을 잡지 않는지 — 낱말 목록을 좁힌 까닭이다 */
@@ -9878,6 +10085,10 @@ async function selftest() {
         let ic = 0; try { setIntro(cdb, b.person, b.tkey, { seeking: '연락 주세요 010-1234-5678' }); } catch (e) { ic = e.code; }
         let ie = 0; try { setIntro(cdb, b.person, b.tkey, { intro: 'me@x.com 으로' }); } catch (e) { ie = e.code; }
         ok(ic === 400 && ie === 400, '공개 칸에 전화·이메일은 못 적는다 (400)');
+        ok(['o1o-1234-5678', '공일공 1234 5678', '카톡 abc123', 'kakao id: my_id', '텔레그램 @x', 'https://open.kakao.com/o/abc'].every(looksContact),
+           '레드팀: 바꿔 쓴 전화번호·메신저 아이디도 연락처로 본다');
+        ok(!['기획하는 직장인, 바이브코딩 2주차', '2026년 10월 데모데이', '디자인 3년 차', '오늘 일 끝내기'].some(looksContact),
+           '평범한 소개는 연락처로 잘못 막지 않는다');
         let self = 0; try { likeMatch(cdb, me.id, a.tkey, a.id); } catch (e) { self = e.code; }
         ok(self === 400, '내 팀은 고를 수 없다 (400)');
       }
@@ -11444,6 +11655,49 @@ async function selftest() {
      && NEWS_FEEDS.filter(f => f[0] === 'tube').length === 7
      && NEWS_FEEDS.every(f => typeof f[3] === 'boolean'),
      '수집원 표 — 모든 행이 관문 값을 명시하고, AI 만 거르는 곳은 일반 매체 둘과 사람 일곱 (전체 23줄)');
+  /* 이번 주 확 뜬 것 — 별·하트를 날짜별로 적고 7일 동안 는 만큼으로 줄 세운다. 다른 검사와 섞이지 않게 따로 연 DB 에서 */
+  {
+    const hdb = open(':memory:');
+    const D = '2026-10-02', ago = k => new Date(Date.parse(D + 'T00:00:00Z') - k * 86400000).toISOString().slice(0, 10);
+    const put = hdb.prepare('INSERT INTO news(src,key,title,url,note,job,at) VALUES(?,?,?,?,?,?,?)');
+    const row = (src, url, title, note, job = '') => put.run(src, url, title, url, note, job, ago(3));
+    row('gh', 'https://github.com/old/big', 'old/big — 큰 저장소', '★ 20000', '개발');
+    row('gh', 'https://github.com/new/kid', 'new/kid — MCP agent 도구', '★ 80', '개발');
+    row('gh', 'https://github.com/down/one', 'down/one — 줄어든 것', '★ 100', '개발');
+    row('hf', 'https://huggingface.co/acme/once', 'acme/once', '♥ 50');
+    row('yozm', 'https://yozm.example/1', '숫자 없는 기사', '');
+    ok(!newsHotKnown(hdb, D) && newsHot(hdb, { day: D }).length === 0, '확 뜬 것 — 기록이 없으면 «모름» 이고 판이 비어 있다');
+    newsSnap(hdb, [{ url: 'https://github.com/old/big', note: '★ 20000' }, { url: 'https://github.com/down/one', note: '★ 100' },
+      { url: 'https://yozm.example/1', note: '' }], ago(3));
+    ok(!newsHotKnown(hdb, D), '확 뜬 것 — 하루치만 적었으면 아직 «모름» 이다');
+    newsSnap(hdb, [{ url: 'https://github.com/old/big', note: '★ 20300' }, { url: 'https://github.com/down/one', note: '★ 90' },
+      { url: 'https://github.com/new/kid', note: '★ 80', born: ago(2) + 'T05:00:00Z' },
+      { url: 'https://huggingface.co/acme/once', note: '♥ 50' }, { url: 'https://yozm.example/1', note: '' }], D);
+    const hot = newsHot(hdb, { day: D }), at = u => hot.find(r => r.url === u);
+    ok(newsHotKnown(hdb, D), '확 뜬 것 — 이틀 치가 쌓이면 «모름» 에서 벗어난다');
+    ok(at('https://github.com/old/big') && at('https://github.com/old/big').gain === 300, '확 뜬 것 — 사흘 전 20000 → 오늘 20300 은 +300');
+    ok(at('https://github.com/new/kid') && at('https://github.com/new/kid').gain === 80, '확 뜬 것 — 이번 주 태어난 저장소는 태어난 날 0 에서 센다');
+    ok(!at('https://huggingface.co/acme/once'), '확 뜬 것 — 하루치뿐인 것은 는 만큼을 모르니 판에 안 올린다');
+    ok(!at('https://github.com/down/one'), '확 뜬 것 — 줄어든 것은 안 올린다');
+    ok(!hdb.prepare("SELECT 1 FROM news_counts WHERE key='https://yozm.example/1'").get(), '확 뜬 것 — 숫자 없는 출처는 기록 자체를 안 한다(모름은 0 이 아니다)');
+    ok(hdb.prepare("SELECT note FROM news WHERE key='https://github.com/old/big'").get().note === '★ 20300', '확 뜬 것 — 처음 본 날 숫자에 멈춰 있던 note 가 새 숫자로 바뀐다');
+    /* 단위가 다른 출처끼리 — 별 수천의 +300 보다 80개에서 태어난 +80 이 «확» 뜬 것이다 */
+    ok(hot[0].url === 'https://github.com/new/kid', '확 뜬 것 — 는 비율로 섞어 큰 저장소가 맨 위를 늘 먹지 않는다: ' + hot.map(r => r.url).join(','));
+    ok(newsHot(hdb, { day: D, per: 1 }).filter(r => r.src === 'gh').length === 1, '확 뜬 것 — 한 출처가 판을 다 먹지 않는다');
+    ok(/«MCP» 는/.test(at('https://github.com/new/kid').easy) && /«에이전트» 는/.test(at('https://github.com/new/kid').easy), '확 뜬 것 — 줄마다 «쉽게» 가 붙는다');
+    ok(newsFeed(hdb).length >= 5 && newsFeed(hdb).every(r => r.easy), '쉽게 — 모든 소식 줄에 «쉽게» 가 붙는다');
+    const md = newsMd(hdb);
+    ok(md.includes('## 이번 주 확 뜬 것') && md.includes('+300') && md.includes('쉽게:'), '확 뜬 것 — 마크다운에도 같은 판과 «쉽게» 가 실린다');
+  }
+  ok(loginFailHtml('<b>x</b> 실패 (KOE320)').includes('&lt;b&gt;x&lt;/b&gt; 실패 (KOE320)') && loginFailHtml('x').includes('href="/app?login=1"'),
+     '로그인 실패 화면 — 공급자 메시지는 글자로만, 다시 하기 길이 있다');
+  /* 5살 설명 — 출처 종류 한 문장 + 제목 속 어려운 말 둘까지. 모르는 말은 풀지 않는다 */
+  ok(newsEasy({ src: 'hf', title: 'acme/tiny-7b' }).startsWith('누구나 받아 쓸 수 있게 공개된 AI 두뇌'), '쉽게 — 허깅페이스 모델은 «공개된 AI 두뇌»');
+  ok(newsEasy({ src: 'paper', title: 'A RAG pipeline for reasoning' }).includes('«RAG» 는') && newsEasy({ src: 'paper', title: 'A RAG pipeline for reasoning' }).includes('«추론» 는'), '쉽게 — 제목 속 RAG·추론을 푼다');
+  ok(!newsEasy({ src: 'gh', title: 'drag-and-drop builder' }).includes('RAG'), '쉽게 — «drag» 속 «rag» 를 RAG 로 잘못 풀지 않는다');
+  ok((newsEasy({ src: 'gh', title: 'MCP agent for LLM coding with RAG' }).match(/«/g) || []).length === 2, '쉽게 — 어려운 말은 둘까지만');
+  ok(newsEasy({ src: 'gh', title: 'zzqx frobnicator' }) === NEWS_EASY_SRC.gh, '쉽게 — 사전에 없는 말은 설명을 지어내지 않는다');
+  ok(newsEasy({ src: 'geek', title: '오늘의 소식', kind: 'read' }) === NEWS_EASY_KIND.read, '쉽게 — 기사 출처는 종류(읽을거리)로 한 문장');
   /* 관문 값을 안 넘기면 조용히 꺼지지 않고 터진다 */
   ok((() => { try { pickFeed('x', [], undefined); return false; } catch { return true; } })(),
      'AI 관문 — aiOnly 를 안 넘기면 그 자리에서 터진다');

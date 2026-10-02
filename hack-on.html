@@ -28,7 +28,11 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;word-break:keep-all;overflow-wrap:break-word;
      display:flex;justify-content:center;min-height:100dvh;
-     -webkit-font-smoothing:antialiased}
+     -webkit-font-smoothing:antialiased;
+     /* 한국어는 낱말 안에서 끊으면 안 읽힌다 — «혼자» 가 «혼/자» 로 갈라져 있었다.
+        home.html 은 처음부터 이 규칙이 있었는데 앱에만 없었다. 주소처럼 긴 것은
+        break-word 가 받아 준다. URL 칸의 break-all 은 더 구체적이라 그대로 이긴다. */
+     word-break:keep-all;overflow-wrap:break-word}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;border:0;background:none}
 button{cursor:pointer}
 input,select,textarea{border:1px solid var(--rule);border-radius:9px;padding:9px 11px;width:100%;background:#fff}
@@ -716,6 +720,7 @@ body.tv #cta{display:none}
     <button data-t="home" class="on"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg></span>대회</button>
     <button data-t="find"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>자리</button>
     <button data-t="make"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="6"/><path d="M12 8v8M8 12h8"/></svg></span>열기</button>
+    <button data-t="benefit"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8M2 7h20v5H2zM12 21V7M12 7S10.5 3 8 3a2 2 0 0 0 0 4M12 7s1.5-4 4-4a2 2 0 0 1 0 4"/></svg></span>혜택</button>
     <button data-t="mine"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg></span>내 대회</button>
   </nav>
 </div>
@@ -1737,6 +1742,11 @@ let PLAN_NOW = [];
 let vArea = '';   // 구하기 화면에서 고른 자치구
 let mineSeg = 'all';      // 내 대회 화면에서 고른 역할 칩
 let findSide = 'get';     // 자리 탭의 방향 — get 구해요(주최자) | give 드려요(기여자)
+/* 혜택 탭의 갈래. **기본이 «전체»가 아니라 «장학금»이다** — 자료는 체험·활동이
+   3,765건이고 장학금은 65건이라(2026-09-28), 전체로 두면 장학금이 묻힌다.
+   그런데 사람들이 찾는 것은 장학금 쪽이다(실측: 국가장학금 2147 · 청년 지원금 407,
+   앵커 차례상=100 기준 · docs/수요측정_20260928.md). 공급 순서가 아니라 수요 순서로 둔다. */
+let benSeg = 'scholarship';
 let openKind = '';        // «드려요» 에서 고른 자리 종류
 let findSeg = 'people';   // 구하기 화면의 갈래 — 사람 | 장소 | 연락한 곳. 기본은 사람이다
 /* 처음에 본인이 고르는 실력. 서버의 LEVELS 와 같아야 한다. */
@@ -2230,6 +2240,29 @@ function dday(starts) {
   return n === 0 ? '오늘' : n > 0 ? 'D-' + n : '';
 }
 
+/* 혜택 마감까지 며칠. 지난 것은 «지남»이라고 적는다 — 빈칸으로 두면 열려 있는 것처럼 보인다. */
+function benDday(end) {
+  const d0 = new Date(String(end || '').slice(0, 10) + 'T00:00:00');
+  if (isNaN(+d0)) return '';
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const n = Math.round((d0 - t0) / 86400000);
+  return n === 0 ? '오늘 마감' : n > 0 ? 'D-' + n : '지남';
+}
+
+/* 지역 표시. **없으면 «전국»이라고 단정하지 않는다** — 안 적힌 것과 전국은 다른 말이다 (E22).
+   'all' 은 자료가 실제로 «전국»이라고 적은 것이라 그때만 전국이라 쓴다. */
+const BEN_REGION = {
+  seoul: '서울', busan: '부산', daegu: '대구', incheon: '인천', gwangju: '광주', daejeon: '대전',
+  ulsan: '울산', sejong: '세종', gyeonggi: '경기', gangwon: '강원', chungbuk: '충북', chungnam: '충남',
+  jeonbuk: '전북', jeonnam: '전남', gyeongbuk: '경북', gyeongnam: '경남', jeju: '제주', all: '전국',
+};
+function benWhere(regions) {
+  const rs = Array.isArray(regions) ? regions.filter(Boolean) : [];
+  if (!rs.length) return '';                                  // 모름 — 아무것도 안 적는다
+  const names = rs.map(r => BEN_REGION[r] || r);
+  return names.length > 3 ? names.slice(0, 3).join('·') + ` 외 ${names.length - 3}곳` : names.join('·');
+}
+
 /* 목록 카드의 둘째 줄. 여기 있는 것은 전부 서버가 이미 세어서 보내는 값이다(/api/events) —
    전에는 다 버리고 띠·주최자·상금만 그렸다. 고를 근거가 카드에 없으면 아무도 안 들어가 본다. */
 function evLine(e) {
@@ -2416,6 +2449,10 @@ const SCREEN = {
           비밀번호는 없습니다.</div>
         ${loginBtns()}
       </div>` : '';
+    /* 첫 화면이 대회 한 건으로 끝나면 아래가 통째로 빈다. 랜딩(home.html)에는 이미
+       «풀어 달라는 문제» 가 실려 있는데 앱에만 없었다 — 인스타·유튜브로 들어오는 사람은
+       거의 폰이고, 폰에서 처음 보는 화면이 바로 여기다. 문제는 대회가 0건이어도 남아 있다. */
+    const reqs = LIVE ? await api('/requests').catch(() => []) : [];
     const mineBox = my && my.events.length ? `
       <h2>내가 연 대회</h2>
 
@@ -2480,15 +2517,26 @@ const SCREEN = {
           <div style="height:8px"></div><button class="btn sec sm" data-untrash-ev="${+t.id}">되살리기</button></div>`).join('')
           : `<div class="meta">지운 대회가 없습니다.</div>`}
       </details>` : ''}`;
+    /* 대회가 아니라 «문제» 로도 들어올 수 있게. 0건이면 칸 자체를 안 그린다 —
+       빈 칸은 «여기는 비어 있는 곳» 이라고 말한다. 셋까지만 보이고 나머지는 문제 은행으로. */
+    const askBox = reqs.length ? `<h2 style="margin-top:22px">풀어 달라는 문제 <span class="pill">${reqs.length}</span></h2>
+      <p class="sub">동네 가게·모임이 올린 «번거로운 일» 입니다. 아직 어느 대회에도 안 붙었습니다.</p>
+      ${reqs.slice(0, 3).map(r => `<div class="card" role="button" tabindex="0" data-go="problems" style="padding:13px 15px">
+        <div class="top"><span class="pill">${r.kind === 'sponsor' ? '후원자' : '의뢰자'}</span><span>${esc(r.name)}</span>${r.solutions ? `<span class="pill ok">풀이 ${r.solutions}</span>` : ''}</div>
+        <h3 style="margin-top:4px">${esc(r.topic || r.pain)}</h3>
+        ${r.done ? `<div class="meta"><b>«됐다»의 기준:</b> ${esc(r.done)}</div>` : ''}
+      </div>`).join('')}
+      <button class="btn sec sm" data-go="problems">문제 ${reqs.length}개 다 보기</button>` : '';
+
     /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
        그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
     if (!list.length && my && my.events.length) return loginBox + claimBox + adminBox + mineBox + acctBox + `
       <div class="card">
         <h3>다음에 할 일</h3>
         <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
-      </div>` + findBox;
+      </div>` + askBox + findBox;
     if (!list.length) return loginBox + claimBox + adminBox + mineBox + acctBox + `<h2>아직 열린 대회가 없습니다</h2>
-      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
+      <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + askBox + findBox;
     return loginBox + claimBox + adminBox + mineBox + acctBox + `<h2>열린 대회</h2>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
@@ -2496,7 +2544,7 @@ const SCREEN = {
         <div class="meta">${badge(e)} ${esc(e.host)}${+e.prize ? ' · 상금 ' + won(e.prize) : ''}</div>
         ${evLine(e)}</div>
       </div>`).join('') +
-      (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '') + findBox;
+      (cur ? `<button class="btn sec" data-go="board">지금 보던 대회 순위 보기</button>` : '') + askBox + findBox;
   },
 
   /* ── 내 대회 — 이 브라우저가 든 열쇠를 모아 역할별로 세운다 ──
@@ -2741,6 +2789,45 @@ const SCREEN = {
           <span class="when">직접 고르기</span></summary><div class="in">${giveBox()}</div></details>
         <div class="card" style="padding:11px 13px"><div class="meta">
         맡은 것은 <b>내 대회</b> 탭에 남습니다. 대회가 끝나면 공개 장부와 결과 보고서에 이름이 오릅니다.</div></div>`;
+  },
+
+  /* 혜택 — 지금 신청할 수 있는 장학금·지원금·활동. 대회를 가로지르는 화면이라
+     «자리»와 같은 층에 둔다(한 대회 안의 화면이 아니다).
+     자료는 서버 /api/benefits 가 **공공 출처만** 걸러 준 것이다. 여기서 다시 안 고른다. */
+  async benefit() {
+    if (!LIVE) return `<h2 id="ben-h">혜택</h2><p class="sub">서버로 열어야 합니다.</p>`;
+    const b = await api(`/benefits?type=${encodeURIComponent(benSeg === 'all' ? '' : benSeg)}`)
+      .catch(() => null);
+    if (!b) return `<h2 id="ben-h">혜택</h2>
+      <p class="sub" id="ben-off">혜택 자료를 지금 못 가져왔습니다. 잠시 뒤에 다시 열어 주세요.</p>
+      <div class="meta">이 화면만 비어 있고 다른 탭은 그대로 됩니다.</div>`;
+
+    const segs = [['scholarship', '장학금'], ['support', '지원금'], ['experience', '활동·봉사'], ['all', '전체']];
+    const segHtml = `<div class="htabs" id="ben-segs">${segs.map(([k, t]) =>
+      `<button type="button" data-bseg="${k}"${k === benSeg ? ' class="on"' : ''}>${t}</button>`).join('')}</div>`;
+
+    const rows = b.rows.slice(0, 60);
+    const list = rows.length ? rows.map(r => {
+      const d = benDday(r.end);
+      /* 지역이 비었으면 «전국»이라고 단정하지 않는다 — 모르는 것이다 (E22) */
+      const where = benWhere(r.regions);
+      const head = r.url
+        ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>`
+        : esc(r.title);
+      return `<div class="card">
+        <h3 style="margin:0">${head}</h3>
+        <div class="meta" style="margin-top:6px">${esc(r.provider || '어디서 주는지 안 적혀 있음')}${where ? ' · ' + esc(where) : ''}</div>
+        <div class="meta" style="margin-top:4px">${d ? `<b>${esc(d)}</b> · ` : ''}마감 ${esc(r.end || '모름')}</div>
+      </div>`;
+    }).join('') : `<div class="card"><div class="meta">이 갈래에는 지금 열린 것이 없습니다. 다른 갈래를 보세요.</div></div>`;
+
+    return `<h2 id="ben-h">혜택</h2>
+      <p class="sub">지금 <b>신청할 수 있는 것</b>을 마감 가까운 순으로. 공공 출처만 모았습니다.</p>
+      ${segHtml}
+      <div class="meta" style="margin:2px 0 10px">${b.total}건 가운데 ${rows.length}건 · ${esc(b.asOf)} 기준
+        ${b.total > rows.length ? ' — 마감이 가까운 것부터 보여 줍니다' : ''}</div>
+      ${list}
+      <div class="meta" style="margin-top:12px">신청 조건과 마감은 <b>기관 공고가 우선</b>입니다. 누르면 그 기관 쪽으로 갑니다.</div>`;
   },
 
   async find() {
@@ -3182,7 +3269,7 @@ const SCREEN = {
         <div class="meta">비워 둬도 대회는 돌아갑니다.</div>
         <div class="row">
           <div><label>대회 이름</label><input id="e-title" value="${esc(e.title)}"></div>
-          <div><label>여는 사람</label><input id="e-host" value="${esc(e.host)}" placeholder="동아리·모임·본인 이름"></div>
+          <div><label>여는 사람 <span class="pill">공개 페이지에 «○○ 주최»로</span></label><input id="e-host" value="${esc(e.host || '')}" maxlength="40" placeholder="동아리·모임·본인 이름"></div>
         </div>
         <div class="row">
           <div><label>시작</label><input id="e-starts" type="date" value="${esc(e.starts)}"></div>
@@ -3193,7 +3280,6 @@ const SCREEN = {
           <div><label>정원 (0=무제한)</label><input id="e-cap" type="number" value="${e.cap}">
             ${e.cap ? nudge(`실제로는 <b>${Math.round(e.cap / 2)}명</b>쯤 옵니다`) : ''}</div>
         </div>
-        <label>여는 사람 <span class="pill">공개 페이지에 «○○ 주최»로</span></label><input id="e-host" value="${esc(e.host || '')}" maxlength="40" placeholder="이름 또는 모임 이름">
         <label>주제</label><input id="e-topic" value="${esc(e.topic)}" placeholder="예) 생활 불편">
         <label>모이는 곳 <span class="pill">공개 페이지 «언제» 옆에 뜹니다</span></label>
         <input id="e-place" value="${esc(e.place || '')}" maxlength="120" placeholder="예) 서울 마포구 와우산로 94 학생회관 3층 · 온라인이면 «온라인»">
@@ -3615,7 +3701,7 @@ const SCREEN = {
         <div class="meta">명단은 정산이나 다음 회차 모집에 씁니다.</div>
         <div style="height:10px"></div>
         <button class="btn sec sm" id="b-report">결과 보고서 보기</button>
-        <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>
+        <button class="btn sec sm" id="b-csv-end">명단 내려받기 (엑셀)</button>
 
         <h3 style="font-size:15px;margin:20px 0 3px">3. 증서</h3>
         <div class="meta">심사위원 <b>위촉장</b> · 문제를 낸 분께 <b>감사장</b> · 자리를 맡아 준 분께 <b>확인증</b>.
@@ -3703,6 +3789,9 @@ const SCREEN = {
                  : `<div class="gsteps" id="how3" style="margin:12px 0 0"><span class="on">① 신청</span><span class="sep">→</span><span>② 그날 와서 만들기</span><span class="sep">→</span><span>③ 제출</span></div>`}
       </section>
       ${(e.sponsors || []).length ? `<div class="card" id="spon-top" style="padding:14px 16px"><div class="meta" style="margin-bottom:6px">함께한 곳</div>${logoBand(e.sponsors).replace('class="logos"', 'class="logos big"')}</div>` : ''}
+      ${Array.isArray(e.stuck) && e.stuck.length ? `<div class="card" id="stuck"><h3>막힌 곳 모음 <span class="pill">${e.stuck.length}</span></h3>
+        <div class="meta">이 대회 팀들이 «여기서 막혔다» 고 남긴 것입니다. 팀 이름은 안 붙입니다 — 다음 대회의 지도로 씁니다.</div>
+        <ul style="margin:8px 0 0 18px">${e.stuck.map(x => `<li style="margin:4px 0">${esc(x)}</li>`).join('')}</ul></div>` : ''}
       ${e.notice ? `<div class="notice">📢 ${esc(e.notice)}</div>` : ''}
       ${(notes.length || !ended) ? `<div class="card" id="news"><h3>소식 <span class="pill" id="news-n">${notes.length}</span></h3>
         <div class="meta">운영자 공지가 시각과 함께 남습니다. 메일·문자는 안 보내니 이 페이지를 열어 두세요.</div>
@@ -4517,12 +4606,15 @@ const SCREEN = {
     const readable = r => !/[\u4e00-\u9fff]{4,}/.test(r.title || '');
     const fresh = rows.filter(r => r.kind !== 'deal' && readable(r) && (r.kind === 'tool' || r.kind === 'pick' || LAUNCH.test(r.title || '')))
       .sort((a, b) => (LAUNCH.test(b.title || '') ? 1 : 0) - (LAUNCH.test(a.title || '') ? 1 : 0)).slice(0, 3);
+    /* 이번 주 확 뜬 것 — 7일 동안 별·하트가 많이 는 것 셋. 서버가 세서 준다(news_counts) */
+    const hot = news && Array.isArray(news.hot) ? news.hot.filter(readable).slice(0, 3) : [];
     const tip = recipe ? String(recipe).split('\n').find(l => /^첫 작업/.test(l)) || String(recipe).split('\n')[0] : '';
     const day = new Date(now + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
     BRIEF_TEXT = ['☀️ HACK:ON 오늘 켤 것 — ' + day,
       ...(work.length ? ['', '[켜 둔 일]', ...work.map(w => `· ${w.e.title} ${dd(String(w.e.starts).slice(0, 10))}${w.pub ? ` · 신청 ${w.pub.teams}팀` : ''}${w.todo && w.todo.length ? ` · 할 일: ${w.todo[0].title}` : ''}`)] : []),
       ...(wal.length ? ['', '[꺼지기 전에]', ...wal.map(it => `· ${it.name} ${WAL_KIND[it.kind] || ''} ${dd(it.next)}`)] : []),
       ...(fresh.length ? ['', '[새로 켜진 것]', ...fresh.map(r => `· ${r.title}`)] : []),
+      ...(hot.length ? ['', '[이번 주 확 뜬 것]', ...hot.map(r => `· ${r.title} (${r.mark}+${r.gain})`)] : []),
       ...(deals.length ? ['', '[할인·무료]', ...deals.map(r => `· ${r.title}`)] : []),
       ...(tip ? ['', '[오늘의 스위치] ' + tip.replace(/^첫 작업:\s*/, '')] : []),
       '', `${location.origin}/brief`].join('\n');
@@ -4543,7 +4635,10 @@ const SCREEN = {
         ${wal.length ? wal.map(it => item(`${it.name} — ${WAL_KIND[it.kind] || ''}`, `${esc(dd(it.next))} · ${esc(it.next.slice(5).replace('-', '/'))}${it.memo ? ' · ' + esc(it.memo) : ''}`)).join('')
           : '<div class="meta">7일 안에 다가오는 마감이 없습니다. 메일·공지를 <a href="/wallet">AI 지갑</a>에 붙여 넣으면 여기 뜹니다.</div>'}</div>
       <div class="card" id="br-new"><h3>새로 켜진 것 <span class="meta">새 모델·도구</span></h3>
-        ${news === null ? unk : fresh.length ? fresh.map(r => item(r.title, r.note ? esc(r.note) : '', r.url)).join('') : '<div class="meta">오늘은 새 소식이 없습니다.</div>'}</div>
+        ${news === null ? unk : fresh.length ? fresh.map(r => item(r.title, [r.note ? esc(r.note) : '', r.easy ? '쉽게: ' + esc(r.easy) : ''].filter(Boolean).join('<br>'), r.url)).join('') : '<div class="meta">오늘은 새 소식이 없습니다.</div>'}</div>
+      <div class="card" id="br-hot"><h3>이번 주 확 뜬 것 <span class="meta">7일 동안 별·하트가 는 순</span></h3>
+        ${news === null ? unk : hot.length ? hot.map(r => item(r.title, `<b style="color:#C2410C">${esc(r.mark)} +${esc(r.gain.toLocaleString())}</b> · ${esc(r.days)}일 동안${r.easy ? `<br>쉽게: ${esc(r.easy)}` : ''}`, r.url)).join('')
+          : news.hotKnown === false ? '<div class="meta">아직 모릅니다 — 별·하트 수를 이틀 넘게 적어야 셀 수 있습니다.</div>' : '<div class="meta">이번 주에 확 는 것이 없습니다.</div>'}</div>
       <div class="card" id="br-deal"><h3>할인·무료</h3>
         ${news === null ? unk : deals.length ? deals.map(r => item(r.title, r.note ? esc(r.note) : '', r.url)).join('') : '<div class="meta">지금 모인 할인 소식이 없습니다.</div>'}</div>
       <div class="card" id="br-tip"><h3>오늘의 스위치 <span class="meta">${WAL_JOB ? esc(WAL_JOB) : '직무를 고르면 맞춰 드립니다'}</span></h3>
@@ -5644,6 +5739,10 @@ const SCREEN = {
         <label>버린 판단이 있으면 한 줄 <span class="pill">선택</span></label>
         <input id="s-aidrop" maxlength="200"
           placeholder="예) 추천 로직이 우리 문제와 안 맞아서 버렸습니다" value="${esc(t.aidrop || '')}">
+        <label>막힌 것 한 줄 — 다음 사람을 위해 <span class="pill">선택</span></label>
+        <input id="s-stuck" maxlength="200"
+          placeholder="예) 로그인 붙이다 3시간 날림 — 다음엔 로그인 없이 시작" value="${esc(t.stuck || '')}">
+        <div class="meta">대회가 끝나면 공개 페이지 «막힌 곳 모음» 에 <b>팀 이름 없이</b> 모입니다. 실패도 다음 사람의 지도입니다.</div>
         ${reqs.length ? `<label>어느 주제·요청으로 만들었나요 <span class="pill">선택</span></label>
           <select id="s-request"><option value="">자유 주제</option>${reqs.map(r => `<option value="${esc(r.id)}"${t.request === r.id ? ' selected' : ''}>${esc(r.kind === 'sponsor' ? '후원자' : '의뢰자')} · ${esc(r.topic || r.pain)}</option>`).join('')}</select>
           <div class="meta">고르면 마감 뒤 결과물을 받고 «됐다/아니다»를 답합니다.</div>` : ''}
@@ -6134,7 +6233,6 @@ function wire() {
         hours: $('#e-hours') ? $('#e-hours').value : undefined,
         deposit: $('#e-deposit') ? $('#e-deposit').value : undefined,
         twist: $('#e-twist') ? $('#e-twist').value.trim() : undefined,
-        host: $('#e-host') ? $('#e-host').value.trim() : undefined,
         topic: $('#e-topic').value, due: $('#e-due').value, plan } });
       flash('채웠습니다');
     } catch (e) { flash(e.message, true); }
@@ -6290,7 +6388,7 @@ function wire() {
     try {
       await api(`/teams/${curTeam}/submit`, { method: 'POST', tkey: tkeyOf(curTeam),
         body: { url: $('#s-url').value.trim(), note: $('#s-note').value.trim(),
-                aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(),
+                aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(), stuck: $('#s-stuck') ? $('#s-stuck').value.trim() : undefined,
                 show: $('#s-show') ? $('#s-show').checked : undefined,
                 sale: $('#s-sale') ? $('#s-sale').value.trim() : undefined,
                 video: $('#s-video') ? $('#s-video').value.trim() : undefined,
@@ -6593,6 +6691,10 @@ function wire() {
   document.querySelectorAll('[data-untrash]').forEach(b => b.onclick = async () => {
     try { const r = await api(`/trash/${b.dataset.untrash}/restore`, { method: 'POST' }); flash(r.same ? '되살렸습니다. 팀 링크도 그대로입니다' : '되살렸습니다'); render(); }
     catch (e) { flash(e.message, true); }
+  });
+  /* 혜택 화면의 갈래 */
+  document.querySelectorAll('[data-bseg]').forEach(b => b.onclick = () => {
+    benSeg = b.dataset.bseg; render();
   });
   /* 구하기 화면의 갈래 — 누르면 그 갈래만 그린다(앵커 이동이 아니다) */
   document.querySelectorAll('[data-seg]').forEach(b => b.onclick = () => {
@@ -7235,6 +7337,9 @@ function wire() {
   if (jb) jb.onclick = () => window.open(
     `${shareBase()}/j/${cur}${jkeyOf(cur) ? '?k=' + jkeyOf(cur) : ''}`, '_blank');
 
+  /* 끝난 뒤 묶음의 «명단 내려받기» — 같은 id 를 둘 쓰면 둘째 단추는 아무 일도 안 했다. 위 단추를 그대로 누른다 */
+  const csvEnd = $('#b-csv-end');
+  if (csvEnd) csvEnd.onclick = () => { const b = $('#b-csv'); if (b) b.click(); else flash('위 «내보내기» 를 눌러 주세요', true); };
   const csv = $('#b-csv');
   if (csv) csv.onclick = async () => {
     if (!LIVE) return flash('데모에서는 못 내려받습니다', true);
