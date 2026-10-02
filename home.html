@@ -155,6 +155,12 @@ input::placeholder{color:var(--mute)}
 .hero .btn.o{background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.55)}
 .hero .btn.o:hover{background:rgba(255,255,255,.12);border-color:#fff}
 .hero .eyebrow{font-size:14px;font-weight:700;color:var(--on);margin-bottom:10px}
+.hero .mk-h{margin-top:26px;font-size:13px;font-weight:800;color:#C9CFDA;letter-spacing:.02em}
+.hero .mk{list-style:none;display:flex;gap:8px;overflow-x:auto;padding:8px 0 4px;margin:0 -16px;padding-left:16px;padding-right:16px;scrollbar-width:none}
+.hero .mk::-webkit-scrollbar{display:none}
+.hero .mk li{flex:none;padding:9px 13px;border-radius:999px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);font-size:14px;font-weight:700;color:#fff;white-space:nowrap}
+.hero .mk-trust{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:10px;font-size:13px;color:#C9CFDA}
+.hero .mk-trust span::before{content:'✓ ';color:var(--on);font-weight:900}
 .hero h1{font-size:clamp(30px,7.2vw,46px);font-weight:850;letter-spacing:-.045em;line-height:1.12}
 .hero .lead{margin-top:14px;font-size:17px;color:#D5DAE6;line-height:1.6;text-wrap:pretty}
 .hero .cta{margin-top:var(--s5);display:flex;flex-wrap:wrap;gap:var(--s3)}
@@ -340,6 +346,12 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a class="btn" id="hero-open" href="/app?make=1">대회 열기</a>
       <a class="btn o" id="hero-go" href="#list">참가할 대회 보기</a>
     </div>
+    <!-- 10/05 — 개발자만의 곳이 아니라는 것을 «만드는 것» 으로 보여 준다(2030·직장인·셀러). 설명 대신 예시 여섯 -->
+    <p class="mk-h">퇴근 후 한 시간, 이런 걸 만들어요</p>
+    <ul class="mk" id="hero-made" tabindex="0" aria-label="코딩 몰라도 만드는 것 예시">
+      <li>💌 모바일 청첩장</li><li>🧾 가계부 자동 정리</li><li>🛍️ 스마트스토어 주문 정리</li><li>📚 독서 기록 앱</li><li>🐶 반려동물 병원 기록</li><li>✈️ 여행 일정표</li>
+    </ul>
+    <p class="mk-trust" id="hero-trust"><span>혼자 와도 팀 찾아 드려요</span><span>처음이어도 OK</span><span>낮 2시간</span><span>악플은 거르고 차단</span></p>
   </div>
 </div>
 

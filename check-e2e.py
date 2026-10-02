@@ -4452,6 +4452,7 @@ with sync_playwright() as pw:
     # «있을 때만 뜨는 것»(id 가 nav- 로 시작 — 강의·마켓·순위·그날의 조건)은 자료가 생기면 켜진다. 늘 보이는 고리만 센다
     _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
     A(len(_vis) <= 3, f"첫 화면 늘 보이는 고리가 셋을 넘는다: {_vis}")
+    A(pg.locator("#hero-made li").count() == 6 and "혼자 와도" in pg.inner_text("#hero-trust"), "첫 화면에 «코딩 몰라도 만드는 것»·«혼자 와도» 가 없다(개발자만의 곳처럼 보인다)")
     _groups = pg.evaluate("[...document.querySelectorAll('#menu-sheet .mg')].map(x => x.textContent.trim())")
     A(_groups == ["매일", "같이", "만들기", "그 밖에"], f"전체 메뉴 묶음이 다르다: {_groups}")
     A(pg.locator("#menu-sheet .tiles a").count() <= 12, "메뉴 타일이 열둘을 넘는다 — 덜 쓰는 것은 «그 밖에» 로")
