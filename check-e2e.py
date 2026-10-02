@@ -4301,5 +4301,24 @@ with sync_playwright() as pw:
     A(pg.locator("[data-track]").count() == 3 and "지원하기" in pg.inner_text("#view"), "크루 모집이 덜 그려진다")
     b.close()
 ok("기업·기관 안내(사내 해커톤·출제형·워크숍·스타트업, 업종별 사례)와 크루 모집(홍보·운영·개발)")
+
+# ── 해외 — /en(한국 말 다섯 개를 원리로), hreflang, 한국어 아닌 브라우저엔 대회 페이지에 영어 한 줄 ──
+A(code_of("/en") == 200, "/en 이 안 열린다")
+_enh = urllib.request.urlopen(BASE + "/en").read().decode()
+A('hreflang="ko"' in _enh and "빨리빨리" in _enh and "품앗이" in _enh, "/en 에 hreflang·한국 말 원리가 없다")
+A('hreflang="en"' in urllib.request.urlopen(BASE + "/").read().decode(), "첫 화면이 영어판을 hreflang 으로 안 가리킨다")
+A("/en</loc>" in urllib.request.urlopen(BASE + "/sitemap.xml").read().decode(), "sitemap 에 /en 이 없다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    _ev = post("/api/events", {"title": "해외 검사 대회"})[1]
+    for _loc, _want in (("en-US", True), ("ko-KR", False)):
+        ctx = b.new_context(locale=_loc, viewport={"width": 390, "height": 844}); pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("en: " + str(e)))
+        pg.goto(BASE + f"/e/{_ev['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-name")
+        A((pg.query_selector("#en-note") is not None) == _want, f"{_loc} 브라우저에서 영어 안내 한 줄이 {'안 ' if _want else ''}뜬다")
+        ctx.close()
+    pg = b.new_page(viewport={"width": 390, "height": 844}); pg.goto(BASE + "/en", wait_until="networkidle"); pg.wait_for_timeout(500)
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/en 이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("해외 — /en(빨리빨리·품앗이·정·켜다·너랑), hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

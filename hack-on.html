@@ -3674,7 +3674,9 @@ const SCREEN = {
     /* «줄 수 있는 것» 은 이 대회로 정해져 있다. 다른 대회에서 오던 단계는 버린다. */
     if (G.event !== cur) giveReset(false);
     G.event = cur; G.fixed = true; G.events = [e];
-    return `<section class="hero pub">
+    /* 해외에서 온 사람 — 브라우저 언어가 한국어가 아니면 영어 한 줄. 신청은 이름·이메일뿐이라 번역 없이도 된다 */
+    const foreign = !/^ko/i.test(navigator.language || 'ko');
+    return `${foreign ? `<div class="notice" id="en-note" lang="en" style="margin-bottom:10px">🌏 This page is in Korean. To join: <b>name + email</b> in the sign-up box below, then «참가 신청하기». Questions in English are welcome in «질문». <a href="/en">About HACK:ON in English</a></div>` : ''}<section class="hero pub">
         <div class="top">${badge(e)}<span>${esc(e.host)} 주최</span></div>
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
