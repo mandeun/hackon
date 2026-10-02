@@ -3416,6 +3416,32 @@ function open(file) {
       hidden  INTEGER NOT NULL DEFAULT 0,
       created TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    /* 게시판 — 주제(갤러리)별 글·댓글·추천. 디시·레딧식이지만 연락처는 안 싣는다(공개 칸 원칙 그대로).
+       지우기 열쇠(bkey·ckey)는 쓴 사람 브라우저에만 — 헤더로만 받는다. 신고 셋이면 저절로 숨김. */
+    CREATE TABLE IF NOT EXISTS board_posts(
+      id      INTEGER PRIMARY KEY,
+      topic   TEXT NOT NULL,
+      title   TEXT NOT NULL,
+      body    TEXT NOT NULL DEFAULT '',
+      nick    TEXT NOT NULL DEFAULT '익명',
+      bkey    TEXT NOT NULL,
+      up      INTEGER NOT NULL DEFAULT 0,
+      comments INTEGER NOT NULL DEFAULT 0,
+      hidden  INTEGER NOT NULL DEFAULT 0,
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS board_posts_t ON board_posts(topic, created);
+    CREATE TABLE IF NOT EXISTS board_comments(
+      id      INTEGER PRIMARY KEY,
+      post    INTEGER NOT NULL REFERENCES board_posts(id) ON DELETE CASCADE,
+      body    TEXT NOT NULL,
+      nick    TEXT NOT NULL DEFAULT '익명',
+      ckey    TEXT NOT NULL,
+      hidden  INTEGER NOT NULL DEFAULT 0,
+      created TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS board_votes(post INTEGER NOT NULL, voter TEXT NOT NULL, PRIMARY KEY(post, voter));
+    CREATE TABLE IF NOT EXISTS board_reports(kind TEXT NOT NULL, ref INTEGER NOT NULL, voter TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', PRIMARY KEY(kind, ref, voter));
     /* 내 달력 구독 — 폰 달력이 주기적으로 읽어 가는 주소(/cal/<token>.ics). 열쇠 대신 «어느 대회에 무슨 역할» 만 적어 둔다.
        열쇠를 주소에 싣지 않으려고 만든 표다 — 토큰이 새도 드러나는 것은 공개 대회 날짜뿐이다. */
     CREATE TABLE IF NOT EXISTS cal_subs(
@@ -6318,6 +6344,94 @@ function setOffer(db, id, b) {
   return { id, status: b.status };
 }
 
+/* ── 게시판 — 주제별 글·댓글·추천(▲). 개념글은 추천 BOARD_BEST 이상 ───────────────────────────── */
+const BOARD_TOPICS = [['free', '자유'], ['vibe', '바이브코딩'], ['ai', 'AI 도구'], ['team', '팀원 구함'], ['show', '자랑·데모'], ['career', '취업·커리어'], ['shop', '사장님'], ['qna', '질문']];
+const BOARD_TOPIC_KEYS = BOARD_TOPICS.map(t => t[0]);
+const BOARD_BEST = 10, BOARD_HIDE_AT = 3, BOARD_PAGE = 30;
+const BOARD_LIMIT = +(process.env.BOARD_LIMIT || 6);   // IP 하나가 10분에 쓸 수 있는 글 수(댓글은 ×3)
+const boardNick = v => plain(v, 16).replace(/\s+/g, ' ') || '익명';
+function boardClean(title, body) {
+  const t = plain(title, 80), b = String(body == null || typeof body === 'object' ? '' : body).replace(/[<>]/g, '').trim().slice(0, 3000);
+  return { t, b };
+}
+function boardPost(db, x) {
+  const topic = BOARD_TOPIC_KEYS.includes(x.topic) ? x.topic : '';
+  if (!topic) throw new HttpError(400, '주제를 골라 주세요');
+  const { t, b } = boardClean(x.title, x.body);
+  if (!t) throw new HttpError(400, '제목을 적어 주세요');
+  if (notWriting(t) && !b) throw new HttpError(400, '글이 아닌 것 같습니다 — 한 줄이라도 적어 주세요');
+  if (looksContact(t) || looksContact(b)) throw new HttpError(400, '연락처는 공개 글에 적지 않습니다 — 팀원은 대회 «같이 할 사람 추천» 의 서로 좋아요로 이어집니다');
+  const bkey = crypto.randomBytes(8).toString('hex');
+  const r = db.prepare('INSERT INTO board_posts(topic,title,body,nick,bkey) VALUES(?,?,?,?,?)').run(topic, t, b, boardNick(x.nick), bkey);
+  return { id: Number(r.lastInsertRowid), bkey };
+}
+function boardList(db, { topic = '', sort = 'hot', page = 0, now = Date.now() } = {}) {
+  const tp = BOARD_TOPIC_KEYS.includes(topic) ? topic : '';
+  const since = sort === 'top' ? new Date(now - 7 * 86400000).toISOString().replace('T', ' ').slice(0, 19) : '';
+  let rows = db.prepare(`SELECT id, topic, title, nick, up, comments, created, substr(body, 1, 140) AS peek FROM board_posts
+    WHERE hidden = 0 AND (? = '' OR topic = ?) AND (? = '' OR created >= ?) ORDER BY id DESC LIMIT 600`).all(tp, tp, since, since);
+  const hrs = r => Math.max(0, (now - Date.parse(String(r.created).replace(' ', 'T') + 'Z')) / 3600000);
+  /* 인기: 레딧·해커뉴스식 — 추천은 로그로 눌러 «오래된 글이 영원히 위» 를 막고, 시간이 지날수록 내려간다 */
+  if (sort === 'hot') rows.sort((a, b) => (Math.log10(1 + b.up) + b.comments * 0.05 + 1) / Math.pow(hrs(b) + 2, 1.2) - (Math.log10(1 + a.up) + a.comments * 0.05 + 1) / Math.pow(hrs(a) + 2, 1.2) || b.id - a.id);
+  else if (sort === 'top') rows.sort((a, b) => b.up - a.up || b.id - a.id);
+  const total = rows.length, p = Math.max(0, parseInt(page, 10) || 0);
+  rows = rows.slice(p * BOARD_PAGE, (p + 1) * BOARD_PAGE).map(r => ({ ...r, best: r.up >= BOARD_BEST }));
+  return { topics: BOARD_TOPICS, rows, total, page: p, pageSize: BOARD_PAGE, best: BOARD_BEST };
+}
+function boardView(db, id, voter = '') {
+  const post = db.prepare('SELECT id, topic, title, body, nick, up, comments, created FROM board_posts WHERE id=? AND hidden=0').get(+id);
+  if (!post) throw new HttpError(404, '없거나 내려간 글입니다');
+  post.best = post.up >= BOARD_BEST;
+  post.voted = !!(voter && db.prepare('SELECT 1 FROM board_votes WHERE post=? AND voter=?').get(post.id, String(voter)));
+  const comments = db.prepare('SELECT id, body, nick, created FROM board_comments WHERE post=? AND hidden=0 ORDER BY id').all(post.id);
+  return { post, comments, topics: BOARD_TOPICS };
+}
+function boardComment(db, id, x) {
+  const p = db.prepare('SELECT id FROM board_posts WHERE id=? AND hidden=0').get(+id);
+  if (!p) throw new HttpError(404, '없거나 내려간 글입니다');
+  const b = String(x.body == null || typeof x.body === 'object' ? '' : x.body).replace(/[<>]/g, '').trim().slice(0, 1000);
+  if (!b) throw new HttpError(400, '댓글을 적어 주세요');
+  if (looksContact(b)) throw new HttpError(400, '연락처는 공개 댓글에 적지 않습니다');
+  const ckey = crypto.randomBytes(8).toString('hex');
+  const r = db.prepare('INSERT INTO board_comments(post,body,nick,ckey) VALUES(?,?,?,?)').run(p.id, b, boardNick(x.nick), ckey);
+  db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(p.id, p.id);
+  return { id: Number(r.lastInsertRowid), ckey };
+}
+/* 추천 — 한 브라우저(voter 토큰) 한 번. 다시 누르면 취소. 토큰이 없으면 못 누른다(새로고침 연타 막기) */
+function boardVote(db, id, voter) {
+  const v = String(voter || '');
+  if (!/^[0-9a-z]{12,40}$/i.test(v)) throw new HttpError(400, '추천 표가 없습니다 — 새로고침 뒤 다시 눌러 주세요');
+  const p = db.prepare('SELECT id FROM board_posts WHERE id=? AND hidden=0').get(+id);
+  if (!p) throw new HttpError(404, '없거나 내려간 글입니다');
+  const had = db.prepare('SELECT 1 FROM board_votes WHERE post=? AND voter=?').get(p.id, v);
+  if (had) db.prepare('DELETE FROM board_votes WHERE post=? AND voter=?').run(p.id, v);
+  else db.prepare('INSERT INTO board_votes(post,voter) VALUES(?,?)').run(p.id, v);
+  const up = db.prepare('SELECT COUNT(*) c FROM board_votes WHERE post=?').get(p.id).c;
+  db.prepare('UPDATE board_posts SET up=? WHERE id=?').run(up, p.id);
+  return { up, voted: !had };
+}
+/* 신고 — 서로 다른 셋이면 저절로 숨김(운영자가 보기 전에). 같은 사람 연타는 한 번 */
+function boardReport(db, kind, id, voter, reason) {
+  const v = String(voter || '');
+  if (!/^[0-9a-z]{12,40}$/i.test(v)) throw new HttpError(400, '신고 표가 없습니다');
+  const tbl = kind === 'c' ? 'board_comments' : 'board_posts';
+  if (!db.prepare(`SELECT 1 FROM ${tbl} WHERE id=?`).get(+id)) throw new HttpError(404, '없는 글입니다');
+  db.prepare('INSERT OR IGNORE INTO board_reports(kind,ref,voter,reason) VALUES(?,?,?,?)').run(kind === 'c' ? 'c' : 'p', +id, v, plain(reason, 100));
+  const n = db.prepare('SELECT COUNT(*) c FROM board_reports WHERE kind=? AND ref=?').get(kind === 'c' ? 'c' : 'p', +id).c;
+  if (n >= BOARD_HIDE_AT) db.prepare(`UPDATE ${tbl} SET hidden=1 WHERE id=?`).run(+id);
+  if (n >= BOARD_HIDE_AT && kind === 'c') { const c = db.prepare('SELECT post FROM board_comments WHERE id=?').get(+id); db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(c.post, c.post); }
+  return { reports: n, hidden: n >= BOARD_HIDE_AT };
+}
+function boardDelete(db, kind, id, key, admin = false) {
+  const tbl = kind === 'c' ? 'board_comments' : 'board_posts', col = kind === 'c' ? 'ckey' : 'bkey';
+  const r = db.prepare(`SELECT * FROM ${tbl} WHERE id=?`).get(+id);
+  if (!r) throw new HttpError(404, '없는 글입니다');
+  if (!admin && (!key || String(key) !== r[col])) throw new HttpError(403, '쓴 사람만 지울 수 있습니다');
+  db.prepare(`UPDATE ${tbl} SET hidden=1 WHERE id=?`).run(r.id);
+  if (kind === 'c') db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(r.post, r.post);
+  return { ok: true };
+}
+
 /* ── 내 달력 — 연 대회·신청한 대회·심사 맡은 대회의 날짜·마감·재확인·할 일 ──────────────
    열쇠는 브라우저에 있다. 화면이 든 열쇠를 보내면 하나씩 맞춰 보고 맞는 것만 «내 것» 으로 친다.
    구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에. 폰 달력은 구독 주소로(내보내기만). */
@@ -8374,6 +8488,25 @@ function routes(db) {
           return res.end(calIcs(db, JSON.parse(sub.refs), siteOf(req)));
         }
         if (p === '/api/cal/sub' && req.method === 'POST') return json(res, 201, calSub(db, calRefs(db, await body(req), owner)));
+        /* 게시판 */
+        if (p === '/api/board' && req.method === 'GET')
+          return json(res, 200, boardList(db, { topic: String(q.topic || ''), sort: ['hot', 'new', 'top'].includes(q.sort) ? q.sort : 'hot', page: q.page }));
+        if (p === '/api/board' && req.method === 'POST') {
+          if (tooMany('bp:' + clientIp(req), BOARD_LIMIT)) throw new HttpError(429, '글을 너무 빨리 올리고 있습니다. 10분 뒤에 다시 해 주세요');
+          return json(res, 201, boardPost(db, await body(req)));
+        }
+        if ((m = p.match(/^\/api\/board\/(\d+)$/)) && req.method === 'GET')
+          return json(res, 200, boardView(db, m[1], String(req.headers['x-voter'] || '')));
+        if ((m = p.match(/^\/api\/board\/(\d+)\/comments$/)) && req.method === 'POST') {
+          if (tooMany('bc:' + clientIp(req), BOARD_LIMIT * 3)) throw new HttpError(429, '댓글을 너무 빨리 달고 있습니다. 잠시 뒤에 다시 해 주세요');
+          return json(res, 201, boardComment(db, m[1], await body(req)));
+        }
+        if ((m = p.match(/^\/api\/board\/(\d+)\/up$/)) && req.method === 'POST')
+          return json(res, 200, boardVote(db, m[1], req.headers['x-voter']));
+        if ((m = p.match(/^\/api\/board\/(p|c)\/(\d+)\/report$/)) && req.method === 'POST')
+          return json(res, 200, boardReport(db, m[1], m[2], req.headers['x-voter'], (await body(req)).reason));
+        if ((m = p.match(/^\/api\/board\/(p|c)\/(\d+)\/delete$/)) && req.method === 'POST')
+          return json(res, 200, boardDelete(db, m[1], m[2], req.headers['x-bkey'] || '', siteAdmin));
         /* 자리 매칭 — 카드(공개 목록·올리기·내 카드)와 요청(보내기·답하기·거두기) */
         if (p === '/api/givers' && req.method === 'GET')
           return json(res, 200, giversList(db, { kind: NEED_KINDS.includes(q.kind) ? q.kind : '', event: /^[a-z0-9]+$/.test(q.event || '') ? q.event : '' }));
@@ -8612,7 +8745,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/board' || p.match(/^\/board\/\d+$/) || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -9373,6 +9506,42 @@ async function selftest() {
       ok(bpub.every(r => r.stuck === undefined), '막힌 곳 — 공개 순위표 줄에는 안 붙는다(이름과 묶이지 않게)');
       ok(bmine.find(r => r.id === k1).stuck.includes('3시간') && bmine.filter(r => r.stuck !== undefined).length === 1, '막힌 곳 — 본인 줄에만 보인다');
       ok(badm.find(r => r.id === k1).stuck.includes('3시간'), '막힌 곳 — 운영자는 본다');
+    }
+    /* 게시판 — 주제·연락처·추천 한 번·개념글·신고 셋 숨김·지우기 열쇠·정렬 */
+    {
+      const bdb = open(':memory:');
+      let bad = false; try { boardPost(bdb, { topic: 'nope', title: 'x' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 없는 주제에는 못 쓴다');
+      bad = false; try { boardPost(bdb, { topic: 'team', title: '팀원 구해요', body: '카톡 hackme12 로 연락 주세요' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 공개 글에 연락처를 적으면 막는다');
+      bad = false; try { boardPost(bdb, { topic: 'free', title: '   ', body: '본문만 있는 글' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 본문이 있어도 빈 제목은 안 받는다');
+      const p1 = boardPost(bdb, { topic: 'vibe', title: '<script>alert(1)</script> 커서로 하루 만에', body: '후기 <b>입니다</b>', nick: '  ' });
+      const v1 = boardView(bdb, p1.id);
+      ok(!v1.post.title.includes('<') && !v1.post.body.includes('<') && v1.post.nick === '익명', '게시판 — 꺾쇠는 빠지고 빈 닉은 «익명»');
+      ok(!JSON.stringify(v1).includes(p1.bkey) && !JSON.stringify(boardList(bdb)).includes(p1.bkey), '게시판 — 지우기 열쇠는 응답에 안 나간다');
+      bad = false; try { boardVote(bdb, p1.id, ''); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 추천 표 없이는 못 누른다');
+      const vv = 'voter' + 'a'.repeat(12);
+      ok(boardVote(bdb, p1.id, vv).up === 1 && boardVote(bdb, p1.id, vv).up === 0, '게시판 — 같은 표로 두 번 누르면 취소(부풀리기 없음)');
+      for (let i = 0; i < BOARD_BEST; i++) boardVote(bdb, p1.id, 'v' + String(i).padStart(12, '0'));
+      ok(boardList(bdb).rows.find(r => r.id === p1.id).best, `게시판 — 추천 ${BOARD_BEST} 이상이면 개념글`);
+      const p2 = boardPost(bdb, { topic: 'qna', title: '질문 하나요', body: '로그인 붙이는 법' });
+      ok(boardList(bdb, { topic: 'qna' }).rows.every(r => r.topic === 'qna') && boardList(bdb, { topic: 'qna' }).rows.length === 1, '게시판 — 주제로 거른다');
+      ok(boardList(bdb, { sort: 'top' }).rows[0].id === p1.id && boardList(bdb, { sort: 'new' }).rows[0].id === p2.id, '게시판 — 주간 TOP 은 추천순, 최신은 새 글부터');
+      bad = false; try { boardComment(bdb, p2.id, { body: '010-1234-5678 로 전화 주세요' }); } catch (e) { bad = e.code === 400; } ok(bad, '게시판 — 댓글에 연락처를 적으면 막는다');
+      const c1 = boardComment(bdb, p2.id, { body: '세션 쿠키부터 보세요', nick: '선배' });
+      ok(boardView(bdb, p2.id).post.comments === 1 && boardView(bdb, p2.id).comments[0].nick === '선배', '게시판 — 댓글이 달리고 수가 센다');
+      bad = false; try { boardDelete(bdb, 'p', p2.id, 'wrong'); } catch (e) { bad = e.code === 403; } ok(bad, '게시판 — 남의 글은 못 지운다');
+      bad = false; try { boardDelete(bdb, 'c', c1.id, p2.bkey); } catch (e) { bad = e.code === 403; } ok(bad, '게시판 — 글 열쇠로 남의 댓글을 못 지운다');
+      boardDelete(bdb, 'c', c1.id, c1.ckey);
+      ok(boardView(bdb, p2.id).post.comments === 0, '게시판 — 지운 댓글은 수에서 빠진다');
+      const r1 = 'r'.repeat(12);
+      boardReport(bdb, 'p', p2.id, r1, '광고'); boardReport(bdb, 'p', p2.id, r1, '광고'); boardReport(bdb, 'p', p2.id, 'r'.repeat(13), '');
+      ok(boardList(bdb).rows.some(r => r.id === p2.id), '게시판 — 같은 사람이 여러 번 신고해도 한 번(아직 안 숨김)');
+      ok(boardReport(bdb, 'p', p2.id, 'r'.repeat(14), '').hidden && !boardList(bdb).rows.some(r => r.id === p2.id), `게시판 — 서로 다른 ${BOARD_HIDE_AT}명이 신고하면 숨김`);
+      bad = false; try { boardView(bdb, p2.id); } catch (e) { bad = e.code === 404; } ok(bad, '게시판 — 숨긴 글은 열리지 않는다');
+      /* 인기: 오래된 추천 많은 글보다 방금 올라온 추천 몇 개 글이 위로 갈 수 있어야 한다(영원히 고정 안 됨) */
+      bdb.prepare("UPDATE board_posts SET created=datetime('now','-10 days') WHERE id=?").run(p1.id);
+      const p3 = boardPost(bdb, { topic: 'show', title: '방금 켰습니다', body: '데모' });
+      for (let i = 0; i < 3; i++) boardVote(bdb, p3.id, 'w' + String(i).padStart(12, '0'));
+      ok(boardList(bdb, { sort: 'hot' }).rows[0].id === p3.id, '게시판 — 인기는 시간이 지나면 내려간다(열흘 된 개념글보다 방금 글)');
     }
     /* 내 달력 — 든 열쇠가 맞는 대회만, 역할별 날짜·마감·재확인·할 일 */
     {
