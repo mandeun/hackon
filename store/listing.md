@@ -60,7 +60,7 @@ HACK:ON 은 작은 해커톤을 여는 사람을 위한 운영 도구입니다.
 ■ 안전
 공개 글(질문·제출작)은 누구나 신고하고 차단할 수 있고, 운영자가 내립니다.
 연락처는 그 대회 운영자만 봅니다. 광고·추적·위치 수집을 하지 않습니다.
-계정은 앱 안 «대회» 탭 → «계정 삭제» 에서 직접 지울 수 있습니다.
+계정은 직접 지울 수 있습니다: 앱이나 hackon.kr/app 에서 로그인 → 아래 «대회» 탭 → 위쪽 «계정 삭제» → «탈퇴» 라고 적고 지우기.
 
 웹(hackon.kr)과 같은 계정, 같은 대회를 씁니다. 노트북으로 준비하고 당일엔 폰으로 굴리세요.
 문의: hi@mandeun.com
@@ -128,7 +128,7 @@ One page: your events' countdown, deadlines within 7 days, new AI models and too
 ■ Safety
 Anyone can report or block public posts (questions, submissions); organizers take them down.
 Contact details are visible only to that event's organizers. No ads, no tracking, no location.
-Delete your account in the app: «대회» (Events) tab → «계정 삭제» (Delete account).
+Delete your account yourself: log in → bottom «대회» (Events) tab → «계정 삭제» (Delete account) near the top → type 탈퇴 → delete.
 
 The interface is in Korean. Same account and events as the web (hackon.kr).
 Contact: hi@mandeun.com
@@ -184,7 +184,7 @@ Creating an event needs only a name:
   c) In the organizer tabs, tap «주소» (Links) to see the public page link, the judge link and the big-screen (/tv) link.
   d) Open the public page (/e/<id>) to apply as a participant (any name + any email, check the consent box).
 Login (Kakao, Google or Naver) is optional; it only lets one person open the same events on several devices.
-Account deletion: «대회» tab → bottom «계정 삭제» → type 탈퇴 → delete. Also documented at https://hackon.kr/delete-account
+Account deletion: log in → bottom «대회» (Events) tab → «계정 삭제» (Delete account) near the top → type 탈퇴 → delete. Also documented at https://hackon.kr/delete-account
 Report/block: on a public event page, every question and submission has «신고» (report) and «차단» (block).
 
 3. External services
@@ -231,7 +231,7 @@ hi@mandeun.com
 |---|---|
 | 데이터를 수집하나 | 예 |
 | 전송 중 암호화 | 예 (https 전용, Fly.io TLS) |
-| 삭제 요청 수단 | 예 — 앱 안(«대회» → «계정 삭제») + https://hackon.kr/delete-account + hi@mandeun.com |
+| 삭제 요청 수단 | 예 — 앱이나 hackon.kr/app 에서 로그인 → 아래 «대회» 탭 → 위쪽 «계정 삭제» → «탈퇴» 라고 적고 지우기 + https://hackon.kr/delete-account + hi@mandeun.com |
 | 제3자 공유 | **예, 한 가지** — 참가자가 «협찬사 제공 동의»(`teams.share`/`sponsor_ok`)를 따로 켠 경우에만 그 대회 협찬사에 이메일이 간다. 처리 위탁(Resend·Fly.io)은 공유가 아니다 |
 
 | 데이터 유형 | 수집 | 공유 | 필수/선택 | 목적 |
