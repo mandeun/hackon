@@ -4431,9 +4431,9 @@ with sync_playwright() as pw:
     pg.goto(BASE + "/", wait_until="networkidle")
     # «있을 때만 뜨는 것»(id 가 nav- 로 시작 — 강의·마켓·순위·그날의 조건)은 자료가 생기면 켜진다. 늘 보이는 고리만 센다
     _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
-    A(len(_vis) <= 5, f"첫 화면 늘 보이는 고리가 다섯을 넘는다: {_vis}")
+    A(len(_vis) <= 3, f"첫 화면 늘 보이는 고리가 셋을 넘는다: {_vis}")
     _groups = pg.evaluate("[...document.querySelectorAll('nav.sec .more-in .mg')].map(x => x.textContent.trim())")
-    A(_groups == ["참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 셋이 아니다: {_groups}")
+    A(_groups == ["매일", "참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 다르다: {_groups}")
     _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
     for _h in _hrefs:
         try:
@@ -4444,7 +4444,7 @@ with sync_playwright() as pw:
     pg.click("nav.sec details.navmore summary"); pg.wait_for_timeout(200)
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "더 보기를 펴면 폰 폭에서 옆으로 밀린다")
     b.close()
-ok("첫 화면 고리 — 늘 보이는 것 다섯 이하, 더 보기는 셋으로 묶고 고리마다 200")
+ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식), 더 보기는 넷으로 묶고 고리마다 200")
 
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
