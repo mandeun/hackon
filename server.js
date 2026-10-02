@@ -904,6 +904,61 @@ function decideWork(db, id, act, { siteAdmin } = {}) {
   return { ok: true };
 }
 
+/* ── 외주 (/gigs) ── 의뢰에는 «제안», 서비스에는 «문의». 둘 다 같은 표(gig_offers)에 들어가고 올린 사람만 본다.
+   제안한 사람의 «만든 것» 수를 같이 보여 준다 — 말이 아니라 눌러 볼 수 있는 결과물이 이 연결의 근거다 */
+const GIG_KINDS = ['의뢰', '서비스'];
+const won0 = v => Math.min(1000000000, Math.max(0, Math.floor(+v || 0)));
+const gigOut = (db, g) => ({ id: g.id, kind: g.kind, title: g.title, job: g.job, lo: g.lo, hi: g.hi, due: g.due, scope: g.scope, closed: !!g.closed, at: g.at,
+  offers: db.prepare('SELECT COUNT(*) c FROM gig_offers WHERE gig=?').get(g.id).c,
+  by: (db.prepare('SELECT name FROM owners WHERE id=?').get(g.owner) || {}).name || '',
+  works: db.prepare('SELECT COUNT(*) c FROM works WHERE owner=? AND hidden=0').get(g.owner).c });
+function gigList(db, q = {}) {
+  const kind = GIG_KINDS.includes(q.kind) ? q.kind : '', job = JOBS.includes(q.job) ? q.job : '';
+  return db.prepare('SELECT * FROM gigs WHERE hidden=0 AND closed=0' + (kind ? ' AND kind=?' : '') + ' ORDER BY id DESC LIMIT 300').all(...(kind ? [kind] : []))
+    .filter(g => !job || g.job === job)
+    /* 마감이 지난 의뢰는 안 보인다. 마감 모름은 남긴다 */
+    .filter(g => !(g.kind === '의뢰' && isDay(g.due) && g.due < today()))
+    .map(g => gigOut(db, g));
+}
+function addGig(db, owner, b) {
+  needAcct(db, owner);
+  const kind = GIG_KINDS.includes(b.kind) ? b.kind : '';
+  if (!kind) throw new HttpError(400, '맡길 것인지(의뢰) 받을 것인지(서비스) 골라 주세요');
+  const title = plain(b.title, 70), scope = plain(b.scope, 1000);
+  if (!title || scope.length < 10) throw new HttpError(400, '제목과 무엇을 하는지(10자 이상)를 적어 주세요');
+  if (b.due && !isDay(b.due)) throw new HttpError(400, '날짜는 YYYY-MM-DD 로 넣어 주세요');
+  let lo = won0(b.lo), hi = won0(b.hi);
+  if (hi && lo > hi) [lo, hi] = [hi, lo];
+  if (db.prepare("SELECT COUNT(*) c FROM gigs WHERE owner=? AND at >= datetime('now','-1 day')").get(owner).c >= 5) throw new HttpError(429, '하루 5개까지 올릴 수 있습니다');
+  return { id: Number(db.prepare('INSERT INTO gigs(owner,kind,title,job,lo,hi,due,scope) VALUES(?,?,?,?,?,?,?,?)')
+    .run(owner, kind, title, JOBS.includes(b.job) ? b.job : '', lo, hi, kind === '의뢰' ? String(b.due || '') : '', scope).lastInsertRowid) };
+}
+function gigView(db, id, owner) {
+  const g = db.prepare('SELECT * FROM gigs WHERE id=? AND hidden=0').get(+id);
+  if (!g) throw new HttpError(404, '없거나 내려간 글입니다');
+  const mine = !!owner && g.owner === owner;
+  return { ...gigOut(db, g), mine,
+    sent: !!owner && !!db.prepare('SELECT 1 FROM gig_offers WHERE gig=? AND owner=?').get(g.id, owner),
+    list: mine ? db.prepare(`SELECT f.id, f.price, f.note, f.at, o.name, (SELECT COUNT(*) FROM works w WHERE w.owner=f.owner AND w.hidden=0) AS works
+                             FROM gig_offers f LEFT JOIN owners o ON o.id=f.owner WHERE f.gig=? ORDER BY f.id DESC`).all(g.id) : undefined };
+}
+function offerGig(db, id, owner, b) {
+  needAcct(db, owner);
+  const g = db.prepare('SELECT owner, closed FROM gigs WHERE id=? AND hidden=0').get(+id);
+  if (!g) throw new HttpError(404, '없거나 내려간 글입니다');
+  if (g.closed) throw new HttpError(409, '마감된 글입니다');
+  if (g.owner === owner) throw new HttpError(400, '내 글에는 보내지 않습니다');
+  const note = plain(b.note, 400);
+  if (note.length < 10) throw new HttpError(400, '무엇을 어떻게 할지, 어떻게 연락하면 되는지 적어 주세요(10자 이상)');
+  db.prepare("INSERT INTO gig_offers(gig,owner,price,note) VALUES(?,?,?,?) ON CONFLICT(gig,owner) DO UPDATE SET price=excluded.price, note=excluded.note, at=datetime('now')")
+    .run(+id, owner, won0(b.price), note);
+  return { ok: true };
+}
+function closeGig(db, id, owner) {
+  if (!db.prepare('UPDATE gigs SET closed=1 WHERE id=? AND owner=?').run(+id, owner || '-').changes) throw new HttpError(403, '올린 사람만 마감합니다');
+  return { ok: true };
+}
+
 /* ── 세팅 모음 (/setups) ──
    낸 사람만 최신판을 받는다 — 받으려면 90일 안에 하나를 내야 한다(SETUP_WINDOW). 관리자는 늘 받는다.
    세팅 본문은 관리자와 낸 사람만 본다. 공개되는 것은 «무엇을 묶었나»(판·메모·제목)뿐이다 */
@@ -3242,6 +3297,29 @@ function open(file) {
       note  TEXT NOT NULL,                     -- 무엇을 할 수 있나·어떻게 연락하나. 작업물 주인만 본다
       at    TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(work, owner))`);
+  /* 외주 — 프리랜서 개발·마케팅. 두 방향: 의뢰(맡길 사람이 올림) · 서비스(받을 사람이 올림).
+     제안·문의 메모는 올린 사람만 본다. 돈·계약·세금은 당사자끼리 — HACK:ON 은 잇기만 한다 */
+  db.exec(`CREATE TABLE IF NOT EXISTS gigs(
+      id      INTEGER PRIMARY KEY,
+      owner   TEXT NOT NULL,
+      kind    TEXT NOT NULL,                  -- 의뢰 | 서비스
+      title   TEXT NOT NULL,
+      job     TEXT NOT NULL DEFAULT '',
+      lo      INTEGER NOT NULL DEFAULT 0,     -- 예산·가격 하한(원). 0 이면 «협의»
+      hi      INTEGER NOT NULL DEFAULT 0,
+      due     TEXT NOT NULL DEFAULT '',       -- 의뢰 마감(YYYY-MM-DD). 비면 «협의»
+      scope   TEXT NOT NULL DEFAULT '',
+      closed  INTEGER NOT NULL DEFAULT 0,
+      hidden  INTEGER NOT NULL DEFAULT 0,
+      at      TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS gig_offers(
+      id    INTEGER PRIMARY KEY,
+      gig   INTEGER NOT NULL REFERENCES gigs(id) ON DELETE CASCADE,
+      owner TEXT NOT NULL,
+      price INTEGER NOT NULL DEFAULT 0,
+      note  TEXT NOT NULL,
+      at    TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(gig, owner))`);
   /* 연락 대장 «다음 연락일». 비면 보낸 날 +3일로 본다 */
   try { db.exec("ALTER TABLE leads ADD COLUMN next_at TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
@@ -3709,6 +3787,9 @@ function mergeOwners(db, from, into) {
     db.prepare('DELETE FROM work_stars WHERE owner=?').run(from);
     db.prepare('UPDATE OR IGNORE work_joins SET owner=? WHERE owner=?').run(into, from);
     db.prepare('DELETE FROM work_joins WHERE owner=?').run(from);
+    db.prepare('UPDATE gigs SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('UPDATE OR IGNORE gig_offers SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('DELETE FROM gig_offers WHERE owner=?').run(from);
     db.prepare('UPDATE logins SET owner=? WHERE owner=?').run(into, from);
     /* 사이트 운영자 자격도 따라간다. 둘 다 운영자면 한 줄만 남아야 해서 OR REPLACE 를 쓴다
        — 그냥 UPDATE 면 PRIMARY KEY 가 부딪혀 합치기 전체가 굴러떨어진다. */
@@ -3752,6 +3833,8 @@ async function deleteAccount(db, owner, b, notify) {
     db.prepare('DELETE FROM works WHERE owner=?').run(owner);
     db.prepare('DELETE FROM work_stars WHERE owner=?').run(owner);
     db.prepare('DELETE FROM work_joins WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM gigs WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM gig_offers WHERE owner=?').run(owner);
     db.prepare('DELETE FROM logins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM site_admins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM owners WHERE id=?').run(owner);
@@ -6581,6 +6664,12 @@ function routes(db) {
           return json(res, 200, reviewOutside(db, m[1], !!(await body(req)).ok, { siteAdmin }));
         /* 마켓 — 읽기는 누구나, 판매 등록은 본인(팀·짝 열쇠), 확인·내리기·검사는 사이트 운영자 */
         if (p === '/api/market' && req.method === 'GET') return json(res, 200, { rows: marketList(db) });
+        /* 외주 — 보는 것은 누구나, 올리기·제안은 계정으로, 제안 내용은 올린 사람만 */
+        if (p === '/api/gigs' && req.method === 'GET') return json(res, 200, { kinds: GIG_KINDS, jobs: JOBS, rows: gigList(db, q), loggedIn: !!owner });
+        if (p === '/api/gigs' && req.method === 'POST') return json(res, 201, addGig(db, owner, await body(req)));
+        if ((m = p.match(/^\/api\/gigs\/(\d+)$/)) && req.method === 'GET') return json(res, 200, gigView(db, m[1], owner));
+        if ((m = p.match(/^\/api\/gigs\/(\d+)\/offer$/)) && req.method === 'POST') return json(res, 200, offerGig(db, m[1], owner, await body(req)));
+        if ((m = p.match(/^\/api\/gigs\/(\d+)\/close$/)) && req.method === 'POST') return json(res, 200, closeGig(db, m[1], owner));
         /* 만든 것 — 보는 것은 누구나, 올리기·별·함께하기는 계정으로 */
         if (p === '/api/works' && req.method === 'GET') return json(res, 200, { jobs: JOBS, rows: worksList(db, q), loggedIn: !!owner });
         if (p === '/api/works' && req.method === 'POST') return json(res, 201, addWork(db, owner, await body(req)));
@@ -7568,7 +7657,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -7872,8 +7961,8 @@ async function selftest() {
     const owned = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
       .map((t) => t.name)
       .filter((n) => db.prepare('SELECT COUNT(*) c FROM pragma_table_info(?) WHERE name=\'owner\'').get(n).c);
-    ok(owned.join(',') === 'event_trash,events,logins,news,pack_curators,setups,site_admins,work_joins,work_stars,works',
-       'owner 를 가진 표는 열 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
+    ok(owned.join(',') === 'event_trash,events,gig_offers,gigs,logins,news,pack_curators,setups,site_admins,work_joins,work_stars,works',
+       'owner 를 가진 표는 열둘 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
     /* 소식(제보)도 따라간다 */
     const o1 = crypto.randomBytes(6).toString('hex'), o2 = crypto.randomBytes(6).toString('hex');
     db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o1, '갑');
@@ -7901,6 +7990,7 @@ async function selftest() {
     db.prepare('INSERT INTO pack_curators(pack,owner) VALUES(?,?)').run(dpk, a);
     db.prepare("INSERT INTO setups(pack,owner,title,body) VALUES(?,?,'내 세팅','지울 사람의 세팅 본문입니다')").run(dpk, a);
     db.prepare("INSERT INTO works(owner,title,demo) VALUES(?,'지울 작업물','https://w.example')").run(a);
+    db.prepare("INSERT INTO gigs(owner,kind,title,scope) VALUES(?,'의뢰','지울 의뢰','지울 사람이 올린 외주 의뢰')").run(a);
     let code = 0; try { await deleteAccount(db, a, {}); } catch (e) { code = e.code; }
     ok(code === 409 && db.prepare('SELECT 1 FROM owners WHERE id=?').get(a), '계정 지우기: «탈퇴» 라고 안 적으면 안 지운다');
     const r = await deleteAccount(db, a, { confirm: '탈퇴' }, async () => 0);
@@ -7917,7 +8007,7 @@ async function selftest() {
     db.prepare('DELETE FROM spots WHERE url=?').run('https://del-' + a + '.example');
     ok(!db.prepare('SELECT 1 FROM setups WHERE owner=?').get(a) && !db.prepare('SELECT 1 FROM pack_curators WHERE owner=?').get(a),
        '계정 지우기: 낸 세팅과 모음 관리자 자리도 지운다');
-    ok(!db.prepare('SELECT 1 FROM works WHERE owner=?').get(a), '계정 지우기: 올린 작업물도 지운다');
+    ok(!db.prepare('SELECT 1 FROM works WHERE owner=?').get(a) && !db.prepare('SELECT 1 FROM gigs WHERE owner=?').get(a), '계정 지우기: 올린 작업물·외주 글도 지운다');
     db.prepare('DELETE FROM packs WHERE id=?').run(dpk);
     ok(db.prepare('SELECT 1 FROM owners WHERE id=?').get(other) && db.prepare('SELECT 1 FROM events WHERE id=?').get(eo.id),
        '계정 지우기: 남의 계정과 대회는 그대로다');
@@ -7964,6 +8054,28 @@ async function selftest() {
     ok(bad === 400, '활동 보고서: 시작이 끝보다 늦으면 400');
     for (const r of db.prepare('SELECT id FROM events WHERE owner=?').all(ow)) db.prepare('DELETE FROM events WHERE id=?').run(r.id);
     db.prepare('DELETE FROM owners WHERE id=?').run(ow);
+  }
+  /* 외주 — 의뢰·서비스 두 방향, 제안은 올린 사람만 보고, 마감 지난 의뢰는 안 보인다 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const [cl, fr] = ['gc', 'gf'].map(x => x + crypto.randomBytes(5).toString('hex'));
+    db.prepare('INSERT INTO owners(id,name) VALUES(?,?),(?,?)').run(cl, '의뢰인', fr, '프리랜서');
+    db.prepare("INSERT INTO works(owner,title,demo) VALUES(?,'포트폴리오 앱','https://pf.example')").run(fr);
+    ok(raises(() => addGig(db, cl, { kind: '아무거나', title: 'x', scope: '열 글자 넘는 설명입니다' }), 400), '외주: 의뢰·서비스 말고는 막는다');
+    const g1 = addGig(db, cl, { kind: '의뢰', title: '쇼핑몰 상세페이지 자동화', job: '마케팅', lo: 800000, hi: 300000, due: addDays(today(), 14), scope: '상품 사진 올리면 상세페이지 문구까지 나오게' }).id;
+    const g2 = addGig(db, cl, { kind: '의뢰', title: '끝난 의뢰', scope: '마감이 지난 의뢰입니다 확인용', due: addDays(today(), -1) }).id;
+    const v1 = gigList(db, { kind: '의뢰' }).find(g => g.id === g1);
+    ok(v1 && v1.lo === 300000 && v1.hi === 800000 && !gigList(db).some(g => g.id === g2), '외주: 예산 위아래를 바로잡고, 마감 지난 의뢰는 안 보인다');
+    ok(raises(() => offerGig(db, g1, cl, { note: '내 글에 내가 보내기 시험' }), 400), '외주: 내 글에는 못 보낸다');
+    offerGig(db, g1, fr, { price: 500000, note: '비슷한 걸 만들어 봤어요. 만든 것에 올려 둔 앱을 보세요' });
+    ok(gigView(db, g1, fr).list === undefined && gigView(db, g1, fr).sent, '외주: 제안 내용은 남이 못 보고, 보낸 사람은 «보냈음» 을 안다');
+    const mine = gigView(db, g1, cl).list;
+    ok(mine.length === 1 && mine[0].price === 500000 && mine[0].works === 1 && mine[0].name === '프리랜서', '외주: 올린 사람은 제안·금액·제안한 사람의 «만든 것» 수를 본다');
+    ok(raises(() => closeGig(db, g1, fr), 403), '외주: 올린 사람만 마감한다');
+    closeGig(db, g1, cl);
+    ok(!gigList(db).some(g => g.id === g1) && raises(() => offerGig(db, g1, fr, { note: '마감 뒤에 보내기 시험' }), 409), '외주: 마감하면 목록에서 빠지고 더 못 보낸다');
+    db.prepare('DELETE FROM gigs WHERE owner=?').run(cl); db.prepare('DELETE FROM works WHERE owner=?').run(fr);
+    db.prepare('DELETE FROM owners WHERE id IN (?,?)').run(cl, fr);
   }
   /* 만든 것 — 보여 줄 것(주소·영상)이 있어야 올리고, 시연은 운영자가 열어 본 뒤에만 페이지 안에, 함께하기 메모는 주인만 */
   {

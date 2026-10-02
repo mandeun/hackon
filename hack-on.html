@@ -1589,7 +1589,8 @@ let msg = null;
 let ARD_KIND = '', ARD_Q = '';
 let SETP = 0, SETLATEST = null;
 let RCT_JOB = '', RCT_RW = '';
-let MDP = 0, MD_JOB = '', MD_NEED = false;   // 만든 것 — 열어 본 작업물, 거르기   // 모집공고 — 고른 직무·보상
+let MDP = 0, MD_JOB = '', MD_NEED = false;
+let GIGP = 0, GIG_KIND = '의뢰', GIG_JOB = '';   // 외주 — 열어 본 글, 고른 방향·직무   // 만든 것 — 열어 본 작업물, 거르기   // 모집공고 — 고른 직무·보상
 /* AI 지갑. 서버에 안 보낸다 — 무엇을 구독하는지는 그 사람 일이다. 사생활 모드에서 localStorage 가 던지면 빈 지갑 */
 const WAL_KEY = 'hackon.wallet';
 const walLoad = () => { try { return JSON.parse(localStorage.getItem(WAL_KEY) || '[]'); } catch (_) { return []; } };
@@ -4100,18 +4101,25 @@ const SCREEN = {
   async wallet() {
     const list = walLoad().map((it, i) => ({ ...it, i, next: walNext(it) }))
       .sort((a, b) => (a.next || '9') < (b.next || '9') ? -1 : 1);
-    const monthly = list.filter(it => it.kind === 'renew' && +it.won).reduce((n, it) => n + (it.every === 'week' ? it.won * 4 : +it.won), 0);
+    const perMonth = it => it.kind === 'renew' && +it.won ? (it.every === 'week' ? it.won * 4 : +it.won) : 0;
+    const monthly = list.reduce((n, it) => n + perMonth(it), 0);
+    /* 해지 후보 — «안 씀» 인 구독. «가끔» 은 다음 갱신 전에 한 번 더 보자고만 한다. 고르지 않은 것은 모름이라 안 센다 */
+    const cut = list.filter(it => it.use === 'none' && perMonth(it)), maybe = list.filter(it => it.use === 'some' && perMonth(it));
+    const save = cut.reduce((n, it) => n + perMonth(it), 0);
     const badge = n => n === null ? '<span class="pill">날짜 모름</span>' : n < 0 ? '<span class="pill">지남</span>'
       : n === 0 ? '<span class="pill warn">오늘</span>' : n <= 7 ? `<span class="pill warn">D-${n}</span>` : `<span class="pill">D-${n}</span>`;
     return `<section class="hero"><div class="top"><span class="pill">AI 지갑</span></div>
         <h2>구독·크레딧·리셋, 한 장에</h2>
         <p class="sub" style="margin-bottom:0">언제 갱신되고, 언제 사라지고, 언제 다시 쓸 수 있는지. <b>이 기기에만</b> 저장합니다 — 서버로 안 보냅니다.</p></section>
       ${list.length ? `<div class="card" id="wal-list">
-          ${monthly ? `<div class="meta" style="margin-bottom:6px">한 달 구독료 어림 <b>${won(monthly)}</b></div>` : ''}
+          ${monthly ? `<div class="meta" style="margin-bottom:6px">한 달 구독료 어림 <b>${won(monthly)}</b>${save ? ` · 안 쓰는 것 끊으면 <b style="color:var(--bad,#C2410C)">${won(save)}</b> 아낌` : ''}</div>` : ''}
+          ${cut.length || maybe.length ? `<div class="notice" style="margin:4px 0 8px">${cut.length ? `<b>해지 후보</b> ${cut.map(it => esc(it.name)).join(' · ')} — 갱신일 전에 끊으세요. ` : ''}${maybe.length ? `<b>갱신 전에 다시 보기</b> ${maybe.map(it => esc(it.name)).join(' · ')}` : ''}</div>` : ''}
           ${list.map(it => `<div style="padding:10px 0;border-top:1px solid var(--rule);display:flex;gap:10px;align-items:flex-start">
             <div style="flex:1"><div style="font-size:17px;font-weight:800">${esc(it.name)} ${badge(walDays(it.next))}</div>
               <div class="meta">${esc(WAL_KIND[it.kind] || '')} · ${it.next ? esc(it.next.slice(5).replace('-', '/')) : '날짜 모름'}${it.every ? (it.every === 'week' ? ' · 매주' : ' · 매월') : ''}${+it.won ? ' · ' + won(it.won) : ''}${it.memo ? ' · ' + esc(it.memo) : ''}</div></div>
-            <button class="lnk" data-wdel="${it.i}" aria-label="${esc(it.name)} 지우기">지움</button></div>`).join('')}
+            <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+              ${it.kind === 'renew' ? `<select data-wuse="${it.i}" aria-label="${esc(it.name)} 얼마나 쓰나" style="font-size:12.5px;padding:3px 6px">${[['', '얼마나 쓰나?'], ['much', '자주 씀'], ['some', '가끔'], ['none', '안 씀']].map(([v, t]) => `<option value="${v}"${(it.use || '') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>` : ''}
+              <button class="lnk" data-wdel="${it.i}" aria-label="${esc(it.name)} 지우기">지움</button></div></div>`).join('')}
           <div class="shrow" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn" id="wal-ics">달력에 한 번에 넣기</button><button class="btn sec" id="wal-share">친구에게 알려 주기</button></div>
           <div class="meta" style="margin-top:6px">달력 파일을 열면 날짜마다 <b>하루 전 알림</b>이 붙습니다.</div></div>`
         : '<div class="card"><h3>아직 비어 있습니다</h3><div class="meta">아래에서 쓰는 것을 하나 넣어 보세요. 30초면 됩니다.</div></div>'}
@@ -4210,6 +4218,59 @@ const SCREEN = {
         <label>함께할 사람 — 필요한 직무</label><div class="gchips">${jobs.map(j => `<button type="button" class="pick" data-mwn="${j}">${j}</button>`).join('')}</div>
         <button class="btn sm" id="mw-go" style="margin-top:10px">올리기</button>`}</details>
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/recruit">모집공고</a> · <a href="/market">마켓</a></p>`;
+  },
+
+  /* 외주 — 프리랜서 개발·마케팅. 맡기기(의뢰)와 받기(서비스) 두 방향. 제안·문의 메모는 올린 사람만 본다.
+     제안한 사람의 «만든 것» 수가 같이 보인다 — 말이 아니라 눌러 볼 수 있는 결과물이 근거다 */
+  async gigs() {
+    const acct = (AUTH && AUTH.loggedIn) || !!myKey();
+    const jobs = ['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'];
+    const money = g => g.lo || g.hi ? `${g.lo ? won(g.lo) : ''}${g.hi && g.hi !== g.lo ? ' ~ ' + won(g.hi) : ''}` : '금액 협의';
+    const loginBox = `<div class="meta" style="margin-top:8px">누가 보냈는지 알아야 이어 드릴 수 있어서 로그인한 뒤에 받습니다.</div>${loginBtns('', 'margin-top:8px')}`;
+    if (GIGP) {
+      let g; try { g = await api(`/gigs/${GIGP}`); }
+      catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없거나 내려간 글입니다' : '불러오지 못했습니다'}</h3><button class="btn sec sm" id="gg-back">목록으로</button></div>`; }
+      const verb = g.kind === '의뢰' ? '제안' : '문의';
+      return `<section class="hero"><div class="top"><span class="pill">${g.kind === '의뢰' ? '외주 맡김' : '외주 받음'}</span>${g.job ? `<span class="pill">${esc(g.job)}</span>` : ''}${g.closed ? '<span class="pill">마감</span>' : ''}</div>
+          <h2>${esc(g.title)}</h2>
+          <div class="meta">${money(g)}${g.due ? ' · 마감 ' + esc(g.due) : ''} · ${esc(g.by || '이름 없음')}${g.works ? ` · 만든 것 ${g.works}개` : ''} · ${verb} ${g.offers}</div></section>
+        <div class="card"><h3>무엇을 하나</h3><div style="white-space:pre-wrap">${esc(g.scope)}</div></div>
+        <div class="card" id="gg-offers"><h3>${verb}</h3>
+          ${g.mine ? (g.list.length ? g.list.map(f => `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)"><b>${esc(f.name || '이름 없음')}</b>${f.price ? ` <span class="pill">${won(f.price)}</span>` : ''}${f.works ? ` <span class="pill ok">만든 것 ${f.works}</span>` : ''}
+                <div class="meta" style="white-space:pre-wrap">${esc(f.note)}</div></div>`).join('') : `<div class="meta">아직 ${verb}이 없습니다. «보내기» 로 알려 보세요.</div>`)
+              + (g.closed ? '' : '<button class="btn sec sm" id="gg-close" style="margin-top:10px">마감하기</button>')
+            : g.closed ? '<div class="meta">마감된 글입니다.</div>'
+            : !acct ? loginBox
+            : `${g.sent ? `<div class="meta">${verb}했습니다. 고쳐서 다시 보낼 수 있습니다.</div>` : ''}
+              <label>${g.kind === '의뢰' ? '제안 금액(원, 선택)' : '생각하는 예산(원, 선택)'}</label><input id="go-price" type="number" min="0" step="10000">
+              <label>${g.kind === '의뢰' ? '어떻게 할지 · 연락 방법' : '맡기고 싶은 일 · 연락 방법'}</label><textarea id="go-note" rows="4" maxlength="400" placeholder="예) 비슷한 걸 만들어 봤어요(«만든 것» 에 올림). 카톡 오픈채팅 …"></textarea>
+              <button class="btn sm" id="go-send" style="margin-top:8px">${verb} 보내기</button>
+              <div class="meta" style="margin-top:4px">이 메모는 올린 사람만 봅니다. 돈·계약·세금은 당사자끼리 정합니다.</div>`}</div>
+        <div class="shrow" style="gap:8px;margin:4px 0 10px"><button class="btn sec sm" id="gg-share">보내기</button><button class="lnk" data-rep="other" data-ev="" data-ref="gig:${g.id}" data-team="${esc(g.title)}">신고</button></div>
+        <button class="btn sec sm" id="gg-back" style="margin:10px 0">목록으로</button>`;
+    }
+    let d = null; try { d = await api(`/gigs?kind=${encodeURIComponent(GIG_KIND)}&job=${encodeURIComponent(GIG_JOB)}`); } catch { d = null; }
+    return `<section class="hero"><div class="top"><span class="pill">외주</span></div>
+        <h2>맡기고, 받고, 바로 잇기</h2>
+        <p class="sub" style="margin-bottom:0">프리랜서 개발·마케팅·디자인. 맡길 일을 올리면 제안이 오고, 내 서비스를 올리면 문의가 옵니다.
+          제안한 사람의 <b>«만든 것»</b>(바로 눌러 보는 결과물)이 같이 보입니다.</p></section>
+      <div class="htabs">${['의뢰', '서비스'].map(k => `<button type="button" data-ggk="${k}"${GIG_KIND === k ? ' class="on"' : ''}>${k === '의뢰' ? '외주 맡김(일 찾기)' : '외주 받음(사람 찾기)'}</button>`).join('')}</div>
+      <div class="gchips" style="margin-bottom:10px">${['', ...jobs].map(j => `<button type="button" class="pick${GIG_JOB === j ? ' on' : ''}" data-ggj="${esc(j)}">${j ? esc(j) : '모든 직무'}</button>`).join('')}</div>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? '<div class="card"><h3>아직 올라온 것이 없습니다</h3><div class="meta">첫 글을 올려 보세요.</div></div>'
+        : d.rows.map(g => `<a class="card" href="#" data-gig="${g.id}" style="display:block;text-decoration:none;color:inherit">
+            <div class="top">${g.job ? `<span class="pill">${esc(g.job)}</span>` : ''}<span class="pill ok">${money(g)}</span>${g.due ? `<span class="pill">마감 ${esc(g.due.slice(5).replace('-', '/'))}</span>` : ''}</div>
+            <h3 style="margin:6px 0 2px">${esc(g.title)}</h3><div class="meta">${esc(g.by || '이름 없음')}${g.works ? ` · 만든 것 ${g.works}개` : ''} · ${g.kind === '의뢰' ? '제안' : '문의'} ${g.offers}</div></a>`).join('')}
+      <details class="card" id="gg-new"><summary style="cursor:pointer;font-weight:700">올리기</summary>
+        ${!acct ? loginBox : `<div class="gchips" style="margin-top:8px">${['의뢰', '서비스'].map((k, i) => `<button type="button" class="pick${i ? '' : ' on'}" data-ngk="${k}">${k === '의뢰' ? '외주 맡기기' : '내 서비스 올리기'}</button>`).join('')}</div>
+        <label>제목</label><input id="ng-title" maxlength="70" placeholder="예) 쇼핑몰 상세페이지 자동화 / 랜딩페이지 하루 만에 만들어 드립니다">
+        <label>직무</label><select id="ng-job"><option value="">안 정함</option>${jobs.map(j => `<option>${j}</option>`).join('')}</select>
+        <div class="row"><div><label>금액 하한(원)</label><input id="ng-lo" type="number" min="0" step="10000"></div><div><label>상한(원)</label><input id="ng-hi" type="number" min="0" step="10000"></div></div>
+        <label>마감(맡길 때만)</label><input id="ng-due" type="date">
+        <label>무엇을 하나</label><textarea id="ng-scope" rows="5" maxlength="1000" placeholder="결과물·범위·쓰는 도구·참고 링크"></textarea>
+        <button class="btn sm" id="ng-go" style="margin-top:10px">올리기</button>
+        <div class="meta" style="margin-top:6px">HACK:ON 은 잇기만 합니다. 돈·계약·세금은 당사자끼리 — 큰 금액은 계약서를 쓰세요.</div>`}</details>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/made">만든 것</a> · <a href="/recruit">모집공고</a> · <a href="/wallet">AI 지갑</a></p>`;
   },
 
   async market() {
@@ -6430,6 +6491,7 @@ function wire() {
     flash('넣었습니다');
   };
   document.querySelectorAll('[data-wdel]').forEach(b => b.onclick = () => { const l = walLoad(); l.splice(+b.dataset.wdel, 1); walSave(l); render(); });
+  document.querySelectorAll('[data-wuse]').forEach(sel => sel.onchange = () => { const l = walLoad(); if (l[+sel.dataset.wuse]) { l[+sel.dataset.wuse].use = sel.value; walSave(l); } render(); });
   if ($('#wal-ics')) $('#wal-ics').onclick = () => {
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([walIcs(walLoad())], { type: 'text/calendar' }));
     a.download = 'AI지갑.ics'; a.click(); URL.revokeObjectURL(a.href);
@@ -6470,6 +6532,27 @@ function wire() {
     try { await api(`/admin/works/${b.dataset.wka}`, { method: 'POST', body: { act: b.dataset.act } }); flash(b.dataset.act === 'ok' ? '열었습니다 — 이제 안에서 눌러 볼 수 있습니다' : '내렸습니다'); }
     catch (e) { flash(e.message, true); }
   });
+  document.querySelectorAll('[data-gig]').forEach(a => a.onclick = (ev) => { ev.preventDefault(); GIGP = +a.dataset.gig; render(); });
+  document.querySelectorAll('[data-ggk]').forEach(b => b.onclick = () => { GIG_KIND = b.dataset.ggk; render(); });
+  document.querySelectorAll('[data-ggj]').forEach(b => b.onclick = () => { GIG_JOB = b.dataset.ggj; render(); });
+  if ($('#gg-back')) $('#gg-back').onclick = () => { GIGP = 0; render(); };
+  let newGigKind = '의뢰';
+  document.querySelectorAll('[data-ngk]').forEach(b => b.onclick = () => { newGigKind = b.dataset.ngk; document.querySelectorAll('[data-ngk]').forEach(x => x.classList.toggle('on', x === b)); });
+  if ($('#ng-go')) $('#ng-go').onclick = async () => {
+    const v = id => ($('#' + id) || {}).value || '';
+    try { const r = await api('/gigs', { method: 'POST', body: { kind: newGigKind, title: v('ng-title').trim(), job: v('ng-job'), lo: v('ng-lo'), hi: v('ng-hi'), due: v('ng-due'), scope: v('ng-scope').trim() } });
+          GIGP = r.id; flash('올렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#go-send')) $('#go-send').onclick = async () => {
+    try { await api(`/gigs/${GIGP}/offer`, { method: 'POST', body: { price: $('#go-price').value, note: $('#go-note').value.trim() } }); flash('보냈습니다. 올린 분이 연락드립니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#gg-close')) $('#gg-close').onclick = async () => { try { await api(`/gigs/${GIGP}/close`, { method: 'POST', body: {} }); flash('마감했습니다'); } catch (e) { flash(e.message, true); } };
+  if ($('#gg-share')) $('#gg-share').onclick = async () => {
+    const url = `${location.origin}/gigs?g=${GIGP}`, title = ($('h2') || {}).textContent || 'HACK:ON 외주';
+    try { if (navigator.share) await navigator.share({ title, url }); else { await navigator.clipboard.writeText(url); flash('주소를 복사했습니다'); } } catch (_) {}
+  };
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -7286,6 +7369,7 @@ const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 —
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
+const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
 const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
 const WAL = location.pathname === '/wallet';     // AI 지갑 — 구독 갱신·크레딧 만료·한도 리셋을 한 장에. 이 기기에만 저장
@@ -7328,6 +7412,7 @@ if (TVM) {
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (WAL) { tab = 'wallet'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
