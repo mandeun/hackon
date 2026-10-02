@@ -4449,5 +4449,26 @@ with sync_playwright() as pw:
 checklib.stop(HOT_BASE)
 ok("이번 주 확 뜬 것 — 7일 동안 는 만큼(+300), 하루치는 판 밖, 줄마다 «쉽게», 기록 없으면 «모름», 브리핑에도")
 
+# ── 첫 화면 고리 — 늘 보이는 것은 다섯, 나머지는 «더 보기» 안에서 «참가할 때·열 때·같이 할 때» 셋으로 ──
+# 고리를 «빼도» 주소는 산다(밖에 뿌린 링크) — 더 보기 안 고리가 전부 200 인지 같이 본다.
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.goto(BASE + "/", wait_until="networkidle")
+    _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !a.hidden && a.offsetParent).map(a => a.textContent.trim())")
+    A(len(_vis) <= 5, f"첫 화면 고리가 다섯을 넘는다: {_vis}")
+    _groups = pg.evaluate("[...document.querySelectorAll('nav.sec .more-in .mg')].map(x => x.textContent.trim())")
+    A(_groups == ["참가할 때", "열 때", "같이 할 때"], f"더 보기 묶음이 셋이 아니다: {_groups}")
+    _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
+    for _h in _hrefs:
+        try:
+            _code = urllib.request.urlopen(BASE + _h, timeout=10).status
+        except urllib.error.HTTPError as _e:
+            _code = _e.code
+        A(_code == 200, f"첫 화면 고리 {_h} 가 {_code}")
+    pg.click("nav.sec details.navmore summary"); pg.wait_for_timeout(200)
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "더 보기를 펴면 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("첫 화면 고리 — 늘 보이는 것 다섯 이하, 더 보기는 셋으로 묶고 고리마다 200")
+
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

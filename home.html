@@ -96,6 +96,7 @@ input::placeholder{color:var(--mute)}
 .top nav.sec details.navmore summary::after{content:" ▾";font-size:11px;margin-left:3px}
 .top nav.sec details.navmore[open] summary::after{content:" ▴"}
 .top nav.sec .more-in{display:flex;flex-wrap:wrap;column-gap:16px;width:100%}
+.top nav.sec .more-in .mg{width:100%;font-size:12px;font-weight:700;color:var(--mute);margin-top:6px;letter-spacing:.02em}
 .top nav.tools{display:flex;gap:12px;align-items:center}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
@@ -261,29 +262,33 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <nav class="sec" aria-label="절">
       <!-- 폰에서 열두 고리가 세 줄을 먹었다. 자주 가는 다섯과 «있을 때만 뜨는 것» 만 꺼내 두고 나머지는 «더 보기» 에 -->
       <a href="/brief">오늘 브리핑</a>
-      <a href="/launch">시작하면 받는 것</a>
       <a href="#list">대회 찾기</a>
       <a href="/news">해커온뉴스</a>
       <a href="/wallet">AI 지갑</a>
       <a href="/made">만든 것</a>
-      <a href="/recruit">모집공고</a>
       <a id="nav-learn" href="/learn" hidden>강의</a>
       <a id="nav-market" href="/market" hidden>마켓</a>
       <a id="nav-rank" href="/rank" hidden>순위</a>
       <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
+      <!-- 열세 고리가 한 줄로 섞여 있었다(10/02 사용성 검토). «무엇을 하러 왔나» 셋으로 나눈다.
+           주소는 하나도 안 지웠다 — 밖에 뿌린 링크가 그대로 산다. «#give» 는 같은 쪽 아래라 «협찬·협업 안내» 하나로 -->
       <details class="navmore"><summary>더 보기</summary><span class="more-in">
+        <b class="mg">참가할 때</b>
+        <a href="/recruit">모집공고</a>
+        <a href="/problems">문제 은행</a>
         <a href="/gigs">외주</a>
+        <a href="/cert">실무 기록 단계</a>
         <a href="/ref">추천 코드</a>
+        <b class="mg">열 때</b>
+        <a id="nav-manual" href="#">운영 매뉴얼</a>
         <a href="/setups">세팅 모음</a>
         <a href="/around">모아 보기</a>
-        <a href="/problems">문제 은행</a>
+        <a href="/launch">시작하면 받는 것</a>
+        <b class="mg">같이 할 때</b>
+        <a href="/partner">협찬·협업 안내</a>
         <a href="/biz">기업·기관</a>
         <a href="/crew">크루 모집</a>
-        <a href="/cert">실무 기록 단계</a>
-        <a href="/partner">협찬·협업 안내</a>
-        <a href="#give">협찬·돕기</a>
         <a href="/thanks">기여자</a>
-        <a id="nav-manual" href="#">운영 매뉴얼</a>
         <a href="/en" hreflang="en" lang="en">English</a></span></details>
     </nav>
     <nav class="tools" aria-label="도구">
