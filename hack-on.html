@@ -1590,7 +1590,8 @@ let ARD_KIND = '', ARD_Q = '';
 let SETP = 0, SETLATEST = null;
 let RCT_JOB = '', RCT_RW = '';
 let MDP = 0, MD_JOB = '', MD_NEED = false;
-let GIGP = 0, GIG_KIND = '의뢰', GIG_JOB = '';   // 외주 — 열어 본 글, 고른 방향·직무   // 만든 것 — 열어 본 작업물, 거르기   // 모집공고 — 고른 직무·보상
+let GIGP = 0, GIG_KIND = '의뢰', GIG_JOB = '';
+const REFGOT = {};   // 서비스별로 방금 받은 코드 { id, code }   // 외주 — 열어 본 글, 고른 방향·직무   // 만든 것 — 열어 본 작업물, 거르기   // 모집공고 — 고른 직무·보상
 /* AI 지갑. 서버에 안 보낸다 — 무엇을 구독하는지는 그 사람 일이다. 사생활 모드에서 localStorage 가 던지면 빈 지갑 */
 const WAL_KEY = 'hackon.wallet';
 const walLoad = () => { try { return JSON.parse(localStorage.getItem(WAL_KEY) || '[]'); } catch (_) { return []; } };
@@ -2198,6 +2199,7 @@ const SCREEN = {
     const mkadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/market').then(r => r.rows).catch(() => null) : [];
     const spadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/spots').then(r => r.rows).catch(() => null) : [];
     const wkadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/works').then(r => r.rows).catch(() => null) : [];
+    const rfadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/ref').then(r => r.rows).catch(() => null) : [];
     const claimBox = (AUTH && AUTH.claimable) ? `
       <div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
         <h3 style="color:var(--warn)">첫 사이트 운영자 앉히기</h3>
@@ -2223,6 +2225,12 @@ const SCREEN = {
             ${e.listed ? '' : ' <span class="pill warn">초안</span>'}
             · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
         </div>`).join('')}` : ''}
+      <div class="card" id="ref-admin"><h3>추천 코드 — 서비스 열기 ${rfadm && rfadm.length ? `<span class="pill warn">${rfadm.length}</span>` : ''}</h3>
+        <div class="meta">그 서비스 약관에서 추천 코드를 공개된 곳에 올려도 되는지 본 뒤에만 엽니다. 금지면 열지 않습니다.</div>
+        ${rfadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !rfadm.length ? '<div class="meta" style="margin-top:8px">기다리는 것이 없습니다.</div>'
+          : rfadm.map(r => `<div style="margin-top:10px"><b>${esc(r.name)}</b> <span class="meta">${esc(r.host || '')} · ${esc(r.note || '')}</span> <button class="btn sm" data-rsok="${r.id}">열기</button></div>`).join('')}
+      </div>
       <div class="card" id="works-admin"><h3>만든 것 — 시연 열어 보기 ${wkadm && wkadm.length ? `<span class="pill warn">${wkadm.length}</span>` : ''}</h3>
         <div class="meta">새 창으로 열어 보고 멀쩡하면 «열기» — 그때부터 페이지 안에서 눌러 볼 수 있습니다. 피싱·성인물이면 «내리기».</div>
         ${wkadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
@@ -4271,6 +4279,42 @@ const SCREEN = {
         <button class="btn sm" id="ng-go" style="margin-top:10px">올리기</button>
         <div class="meta" style="margin-top:6px">HACK:ON 은 잇기만 합니다. 돈·계약·세금은 당사자끼리 — 큰 금액은 계약서를 쓰세요.</div>`}</details>
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/made">만든 것</a> · <a href="/recruit">모집공고</a> · <a href="/wallet">AI 지갑</a></p>`;
+  },
+
+  /* 추천인 코드 품앗이. 코드를 목록으로 안 보여 주고 «다음 코드» 하나씩. 남의 코드를 써 준 사람 코드가 먼저 나온다 */
+  async ref() {
+    const acct = (AUTH && AUTH.loggedIn) || !!myKey();
+    let d = null; try { d = await api('/ref'); } catch { d = null; }
+    const loginBox = `<div class="meta" style="margin-top:6px">누가 써 줬는지 세야 차례가 돌아서 로그인한 뒤에 씁니다.</div>${loginBtns('', 'margin-top:6px')}`;
+    const isUrl = c => /^https:\/\//i.test(c || '');
+    return `<section class="hero"><div class="top"><span class="pill">추천인 코드 품앗이</span></div>
+        <h2>써 주면, 내 차례가 온다</h2>
+        <p class="sub" style="margin-bottom:0">남의 추천 코드를 하나 써 주면 내 코드가 다음 사람에게 먼저 나옵니다. 코드는 목록으로 안 보이고 한 번에 하나씩 차례로 나옵니다.</p></section>
+      <div class="card"><h3>규칙</h3><ul class="meta" style="margin:4px 0 0;padding-left:18px">
+        <li>서비스당 한 사람 한 코드. 30일마다 «아직 돼요» 를 눌러야 차례에 남습니다</li>
+        <li>남의 코드를 한 번도 안 써 준 코드는 차례에 들지 않습니다(그 서비스의 첫 코드만 예외)</li>
+        <li>«안 돼요» 신고 셋이면 내려갑니다. «썼어요» 는 하루 10번까지</li>
+        <li>운영진이 약관에서 코드 공유가 허용되는지 본 서비스만 엽니다</li></ul></div>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? '<div class="card"><h3>아직 열린 서비스가 없습니다</h3><div class="meta">아래에서 서비스를 제안해 주세요. 운영진이 약관을 본 뒤 엽니다.</div></div>'
+        : d.rows.map(r => { const got = REFGOT[r.id]; return `<div class="card" id="ref-${r.id}">
+            <div class="top"><span class="pill">살아 있는 코드 ${r.codes}</span><span class="pill">이번 주 품앗이 ${r.week}</span>${r.gave ? `<span class="pill ok">내가 써 준 것 ${r.gave}</span>` : ''}</div>
+            <h3 style="margin:6px 0 2px">${esc(r.name)}</h3>${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
+            ${!acct ? loginBox : `
+              ${got ? (got.code ? `<div class="share" style="margin-top:10px;word-break:break-all">${esc(got.code)}</div>
+                  <div class="shrow" style="gap:6px;margin-top:6px;flex-wrap:wrap">${isUrl(got.code) ? `<a class="btn sm" href="${esc(got.code)}" target="_blank" rel="noopener noreferrer">열어서 가입</a>` : `<button class="btn sm" data-refcopy="${r.id}">코드 복사</button>`}
+                  <button class="btn sec sm" data-refused="${r.id}">썼어요</button><button class="lnk" data-refdead="${r.id}">안 돼요</button></div>`
+                : '<div class="meta" style="margin-top:10px">지금 받을 수 있는 코드가 없습니다. 내 코드를 올려 첫 차례를 열어 보세요.</div>')
+              : `<button class="btn sm" data-refnext="${r.id}" style="margin-top:10px">다음 코드 받기</button>`}
+              <details style="margin-top:10px"${r.mine ? '' : ' open'}><summary class="meta" style="cursor:pointer">내 코드${r.mine ? ` — ${r.mine.got}명이 썼다고 함${r.mine.dead ? ` · 안 돼요 ${r.mine.dead}` : ''}` : ' 올리기'}</summary>
+                <div class="shrow" style="margin-top:6px"><input id="refc-${r.id}" value="${esc(r.mine ? r.mine.code : '')}" placeholder="코드 또는 추천 주소" style="flex:1"><button class="btn sec sm" data-refpost="${r.id}">${r.mine ? '아직 돼요' : '올리기'}</button></div>
+              </details>`}</div>`; }).join('')}
+      <details class="card"><summary style="cursor:pointer;font-weight:700">서비스 제안하기</summary>
+        ${!acct ? loginBox : `<label>서비스 이름</label><input id="rs-name" maxlength="40" placeholder="예) Muse">
+        <label>추천 안내 주소</label><input id="rs-url" placeholder="https://… (추천 프로그램 설명 페이지)">
+        <label>둘 다 받는 것</label><input id="rs-note" maxlength="120" placeholder="예) 가입한 사람·추천한 사람 모두 크레딧 10">
+        <button class="btn sm" id="rs-go" style="margin-top:10px">제안</button>`}</details>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/wallet">AI 지갑</a> · <a href="/news">해커온뉴스</a></p>`;
   },
 
   async market() {
@@ -6553,6 +6597,29 @@ function wire() {
     const url = `${location.origin}/gigs?g=${GIGP}`, title = ($('h2') || {}).textContent || 'HACK:ON 외주';
     try { if (navigator.share) await navigator.share({ title, url }); else { await navigator.clipboard.writeText(url); flash('주소를 복사했습니다'); } } catch (_) {}
   };
+  document.querySelectorAll('[data-refnext]').forEach(b => b.onclick = async () => {
+    try { REFGOT[b.dataset.refnext] = await api(`/ref/${b.dataset.refnext}/next`, { method: 'POST', body: {} }); render(); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-refcopy]').forEach(b => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(REFGOT[b.dataset.refcopy].code); flash('복사했습니다'); } catch (_) { flash('길게 눌러 복사하세요', true); }
+  });
+  document.querySelectorAll('[data-refused]').forEach(b => b.onclick = async () => {
+    const g = REFGOT[b.dataset.refused];
+    try { await api(`/ref/code/${g.id}/used`, { method: 'POST', body: {} }); delete REFGOT[b.dataset.refused]; flash('고맙습니다 — 내 코드 차례가 앞당겨졌습니다'); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-refdead]').forEach(b => b.onclick = async () => {
+    const g = REFGOT[b.dataset.refdead];
+    try { await api(`/ref/code/${g.id}/dead`, { method: 'POST', body: {} }); delete REFGOT[b.dataset.refdead]; flash('알려 주셔서 고맙습니다. 다음 코드를 받아 보세요'); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-refpost]').forEach(b => b.onclick = async () => {
+    try { await api(`/ref/${b.dataset.refpost}/code`, { method: 'POST', body: { code: $('#refc-' + b.dataset.refpost).value.trim() } }); flash('올렸습니다. 남의 코드를 하나 써 주면 차례에 듭니다'); } catch (e) { flash(e.message, true); }
+  });
+  if ($('#rs-go')) $('#rs-go').onclick = async () => {
+    try { await api('/ref', { method: 'POST', body: { name: $('#rs-name').value.trim(), url: $('#rs-url').value.trim(), note: $('#rs-note').value.trim() } }); flash('제안했습니다. 운영진이 약관을 본 뒤 엽니다'); } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-rsok]').forEach(b => b.onclick = async () => {
+    try { await api(`/admin/ref/${b.dataset.rsok}`, { method: 'POST', body: {} }); flash('열었습니다'); } catch (e) { flash(e.message, true); }
+  });
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -7369,6 +7436,7 @@ const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 —
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
+const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
 const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
 const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
@@ -7412,6 +7480,7 @@ if (TVM) {
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

@@ -959,6 +959,83 @@ function closeGig(db, id, owner) {
   return { ok: true };
 }
 
+/* ── 추천인 코드 품앗이 (/ref) ──
+   차례: 살아 있는 코드(신고 3 미만·30일 안) 가운데 «준 것 − 받은 것» 이 큰 사람 먼저, 같으면 오래 안 보인 것 먼저.
+   준 것 = 그 서비스에서 내가 남의 코드를 쓴 수. 처음 올린 사람(그 서비스에 다른 코드가 없을 때)은 바로 차례에 든다.
+   내 코드·내가 이미 쓴 코드는 나에게 안 나온다 */
+const REF_DAYS = 30, REF_DEAD = 3, REF_DAILY = 10;
+const refAlive = "c.dead < 3 AND c.fresh >= datetime('now','-30 days')";
+function refServices(db, owner) {
+  return db.prepare('SELECT * FROM ref_services WHERE ok=1 ORDER BY name').all().map(s => ({
+    id: s.id, name: s.name, note: s.note,
+    codes: db.prepare(`SELECT COUNT(*) n FROM ref_codes c WHERE c.service=? AND ${refAlive}`).get(s.id).n,
+    week: db.prepare("SELECT COUNT(*) n FROM ref_uses u JOIN ref_codes c ON c.id=u.code WHERE c.service=? AND u.at >= datetime('now','-7 days')").get(s.id).n,
+    mine: owner ? (db.prepare('SELECT id, code, fresh, dead, (SELECT COUNT(*) FROM ref_uses WHERE code=c.id) AS got FROM ref_codes c WHERE service=? AND owner=?').get(s.id, owner) || null) : null,
+    gave: owner ? db.prepare('SELECT COUNT(*) n FROM ref_uses u JOIN ref_codes c ON c.id=u.code WHERE c.service=? AND u.owner=?').get(s.id, owner).n : 0,
+  }));
+}
+function suggestService(db, owner, b) {
+  needAcct(db, owner);
+  const name = plain(b.name, 40);
+  if (!name) throw new HttpError(400, '서비스 이름을 적어 주세요');
+  if (db.prepare('SELECT 1 FROM ref_services WHERE name=?').get(name)) throw new HttpError(409, '이미 있는 서비스입니다');
+  let host = '';
+  if (b.url) { try { host = new URL(webUrl(b.url)).hostname.replace(/^www\./, ''); } catch { throw new HttpError(400, '추천 안내 주소는 https:// 로 넣어 주세요'); } }
+  return { id: Number(db.prepare('INSERT INTO ref_services(name,host,note) VALUES(?,?,?)').run(name, host, plain(b.note, 120)).lastInsertRowid), ok: false };
+}
+function okService(db, id, { siteAdmin } = {}) {
+  if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 엽니다 — 약관(코드 공유 허용)을 본 뒤에');
+  if (!db.prepare('UPDATE ref_services SET ok=1 WHERE id=?').run(+id).changes) throw new HttpError(404, '없는 서비스입니다');
+  return { ok: true };
+}
+function postRefCode(db, sid, owner, b) {
+  needAcct(db, owner);
+  const s = db.prepare('SELECT * FROM ref_services WHERE id=? AND ok=1').get(+sid);
+  if (!s) throw new HttpError(404, '열린 서비스가 아닙니다');
+  /* 갓 만든 계정은 하루 기다린다 — 계정 여럿으로 자기 코드를 돌리는 것을 늦춘다 */
+  const o = db.prepare('SELECT created FROM owners WHERE id=?').get(owner);
+  if (o && o.created > new Date(Date.now() - 864e5).toISOString().replace('T', ' ').slice(0, 19)) throw new HttpError(403, '계정을 만든 지 하루가 지나야 코드를 올릴 수 있습니다');
+  const code = String(b.code || '').trim().slice(0, 200);
+  if (!code) throw new HttpError(400, '코드나 추천 주소를 넣어 주세요');
+  if (/^https?:/i.test(code)) {
+    const u = webUrl(code);
+    let h = ''; try { h = new URL(u).hostname.replace(/^www\./, ''); } catch {}
+    if (!u || (s.host && h !== s.host && !h.endsWith('.' + s.host))) throw new HttpError(400, `추천 주소는 ${s.host || 'https'} 주소만 받습니다`);
+  } else if (!/^[A-Za-z0-9_-]{3,40}$/.test(code)) throw new HttpError(400, '코드는 영문·숫자·-_ 3~40자입니다');
+  db.prepare("INSERT INTO ref_codes(service,owner,code) VALUES(?,?,?) ON CONFLICT(service,owner) DO UPDATE SET code=excluded.code, dead=0, fresh=datetime('now')").run(s.id, owner, code);
+  return { ok: true };
+}
+function nextRefCode(db, sid, owner) {
+  if (!db.prepare('SELECT 1 FROM ref_services WHERE id=? AND ok=1').get(+sid)) throw new HttpError(404, '열린 서비스가 아닙니다');
+  const rows = db.prepare(`SELECT c.id, c.code, c.owner, c.shown,
+      (SELECT COUNT(*) FROM ref_uses u JOIN ref_codes c2 ON c2.id=u.code WHERE c2.service=c.service AND u.owner=c.owner) AS gave,
+      (SELECT COUNT(*) FROM ref_uses u WHERE u.code=c.id) AS got,
+      (SELECT MIN(id) FROM ref_codes WHERE service=c.service) AS first
+    FROM ref_codes c WHERE c.service=? AND ${refAlive} AND c.owner<>?
+      AND NOT EXISTS (SELECT 1 FROM ref_uses u WHERE u.code=c.id AND u.owner=?)`).all(+sid, owner || '-', owner || '-')
+    /* 품앗이: 남의 것을 한 번도 안 쓴 사람은 차례에 안 든다 — 그 서비스 첫 코드만 예외(시작할 사람이 있어야 돈다) */
+    .filter(r => r.gave > 0 || r.id === r.first)
+    .sort((a, b) => (b.gave - b.got) - (a.gave - a.got) || String(a.shown).localeCompare(String(b.shown)) || a.id - b.id);
+  if (!rows.length) return { code: null };
+  db.prepare("UPDATE ref_codes SET shown=datetime('now') WHERE id=?").run(rows[0].id);
+  return { id: rows[0].id, code: rows[0].code };
+}
+function usedRefCode(db, cid, owner) {
+  needAcct(db, owner);
+  const c = db.prepare('SELECT owner FROM ref_codes WHERE id=?').get(+cid);
+  if (!c) throw new HttpError(404, '없는 코드입니다');
+  if (c.owner === owner) throw new HttpError(400, '내 코드는 내가 쓸 수 없습니다');
+  if (db.prepare("SELECT COUNT(*) n FROM ref_uses WHERE owner=? AND at >= datetime('now','-1 day')").get(owner).n >= REF_DAILY)
+    throw new HttpError(429, `«썼어요» 는 하루 ${REF_DAILY}번까지입니다`);
+  db.prepare('INSERT OR IGNORE INTO ref_uses(code,owner) VALUES(?,?)').run(+cid, owner);
+  return { ok: true };
+}
+function deadRefCode(db, cid, owner) {
+  needAcct(db, owner);
+  if (!db.prepare('UPDATE ref_codes SET dead=dead+1 WHERE id=? AND owner<>?').run(+cid, owner).changes) throw new HttpError(404, '없는 코드입니다');
+  return { ok: true };
+}
+
 /* ── 세팅 모음 (/setups) ──
    낸 사람만 최신판을 받는다 — 받으려면 90일 안에 하나를 내야 한다(SETUP_WINDOW). 관리자는 늘 받는다.
    세팅 본문은 관리자와 낸 사람만 본다. 공개되는 것은 «무엇을 묶었나»(판·메모·제목)뿐이다 */
@@ -3320,6 +3397,31 @@ function open(file) {
       note  TEXT NOT NULL,
       at    TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(gig, owner))`);
+  /* 추천인 코드 품앗이 — 남의 코드를 써 준 만큼 내 코드 차례가 앞당겨진다.
+     코드는 목록으로 안 보여 준다 — 한 번에 하나씩 차례로(긁어 가서 자기 것만 돌리는 것을 막는다).
+     서비스는 운영진이 약관(코드 공유 허용)을 본 것만 연다(ok=1). «썼어요» 는 자기 신고라 상한·신고로 막는다 */
+  db.exec(`CREATE TABLE IF NOT EXISTS ref_services(
+      id    INTEGER PRIMARY KEY,
+      name  TEXT NOT NULL,
+      host  TEXT NOT NULL DEFAULT '',       -- 코드가 주소일 때 이 도메인만 받는다(피싱 막기)
+      note  TEXT NOT NULL DEFAULT '',       -- 무엇을 받나(둘 다 받는 보상)
+      ok    INTEGER NOT NULL DEFAULT 0,     -- 운영진이 약관을 봤다
+      at    TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS ref_codes(
+      id      INTEGER PRIMARY KEY,
+      service INTEGER NOT NULL REFERENCES ref_services(id) ON DELETE CASCADE,
+      owner   TEXT NOT NULL,
+      code    TEXT NOT NULL,
+      shown   TEXT NOT NULL DEFAULT '',     -- 마지막으로 남에게 보여 준 때(차례 돌리기)
+      dead    INTEGER NOT NULL DEFAULT 0,   -- «안 되는 코드» 신고 수
+      fresh   TEXT NOT NULL DEFAULT (datetime('now')),   -- 올리거나 «아직 돼요» 를 누른 때. 30일 지나면 쉰다
+      UNIQUE(service, owner))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS ref_uses(
+      id    INTEGER PRIMARY KEY,
+      code  INTEGER NOT NULL REFERENCES ref_codes(id) ON DELETE CASCADE,
+      owner TEXT NOT NULL,                  -- 쓴 사람
+      at    TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(code, owner))`);
   /* 연락 대장 «다음 연락일». 비면 보낸 날 +3일로 본다 */
   try { db.exec("ALTER TABLE leads ADD COLUMN next_at TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec('ALTER TABLE teams ADD COLUMN size INTEGER NOT NULL DEFAULT 1'); } catch {}
@@ -3790,6 +3892,10 @@ function mergeOwners(db, from, into) {
     db.prepare('UPDATE gigs SET owner=? WHERE owner=?').run(into, from);
     db.prepare('UPDATE OR IGNORE gig_offers SET owner=? WHERE owner=?').run(into, from);
     db.prepare('DELETE FROM gig_offers WHERE owner=?').run(from);
+    db.prepare('UPDATE OR IGNORE ref_codes SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('DELETE FROM ref_codes WHERE owner=?').run(from);
+    db.prepare('UPDATE OR IGNORE ref_uses SET owner=? WHERE owner=?').run(into, from);
+    db.prepare('DELETE FROM ref_uses WHERE owner=?').run(from);
     db.prepare('UPDATE logins SET owner=? WHERE owner=?').run(into, from);
     /* 사이트 운영자 자격도 따라간다. 둘 다 운영자면 한 줄만 남아야 해서 OR REPLACE 를 쓴다
        — 그냥 UPDATE 면 PRIMARY KEY 가 부딪혀 합치기 전체가 굴러떨어진다. */
@@ -3835,6 +3941,8 @@ async function deleteAccount(db, owner, b, notify) {
     db.prepare('DELETE FROM work_joins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM gigs WHERE owner=?').run(owner);
     db.prepare('DELETE FROM gig_offers WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM ref_codes WHERE owner=?').run(owner);
+    db.prepare('DELETE FROM ref_uses WHERE owner=?').run(owner);
     db.prepare('DELETE FROM logins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM site_admins WHERE owner=?').run(owner);
     db.prepare('DELETE FROM owners WHERE id=?').run(owner);
@@ -6664,6 +6772,15 @@ function routes(db) {
           return json(res, 200, reviewOutside(db, m[1], !!(await body(req)).ok, { siteAdmin }));
         /* 마켓 — 읽기는 누구나, 판매 등록은 본인(팀·짝 열쇠), 확인·내리기·검사는 사이트 운영자 */
         if (p === '/api/market' && req.method === 'GET') return json(res, 200, { rows: marketList(db) });
+        /* 추천인 코드 품앗이 — 서비스 목록은 누구나, 다음 코드·올리기·썼어요는 계정으로 */
+        if (p === '/api/ref' && req.method === 'GET') return json(res, 200, { rows: refServices(db, owner), loggedIn: !!owner, days: REF_DAYS });
+        if (p === '/api/ref' && req.method === 'POST') return json(res, 201, suggestService(db, owner, await body(req)));
+        if ((m = p.match(/^\/api\/ref\/(\d+)\/code$/)) && req.method === 'POST') return json(res, 200, postRefCode(db, m[1], owner, await body(req)));
+        if ((m = p.match(/^\/api\/ref\/(\d+)\/next$/)) && req.method === 'POST') { needAcct(db, owner); return json(res, 200, nextRefCode(db, m[1], owner)); }
+        if ((m = p.match(/^\/api\/ref\/code\/(\d+)\/used$/)) && req.method === 'POST') return json(res, 200, usedRefCode(db, m[1], owner));
+        if ((m = p.match(/^\/api\/ref\/code\/(\d+)\/dead$/)) && req.method === 'POST') return json(res, 200, deadRefCode(db, m[1], owner));
+        if (p === '/api/admin/ref' && req.method === 'GET') { if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 봅니다'); return json(res, 200, { rows: db.prepare('SELECT * FROM ref_services WHERE ok=0 ORDER BY id DESC').all() }); }
+        if ((m = p.match(/^\/api\/admin\/ref\/(\d+)$/)) && req.method === 'POST') return json(res, 200, okService(db, m[1], { siteAdmin }));
         /* 외주 — 보는 것은 누구나, 올리기·제안은 계정으로, 제안 내용은 올린 사람만 */
         if (p === '/api/gigs' && req.method === 'GET') return json(res, 200, { kinds: GIG_KINDS, jobs: JOBS, rows: gigList(db, q), loggedIn: !!owner });
         if (p === '/api/gigs' && req.method === 'POST') return json(res, 201, addGig(db, owner, await body(req)));
@@ -7657,7 +7774,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -7961,8 +8078,8 @@ async function selftest() {
     const owned = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
       .map((t) => t.name)
       .filter((n) => db.prepare('SELECT COUNT(*) c FROM pragma_table_info(?) WHERE name=\'owner\'').get(n).c);
-    ok(owned.join(',') === 'event_trash,events,gig_offers,gigs,logins,news,pack_curators,setups,site_admins,work_joins,work_stars,works',
-       'owner 를 가진 표는 열둘 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
+    ok(owned.join(',') === 'event_trash,events,gig_offers,gigs,logins,news,pack_curators,ref_codes,ref_uses,setups,site_admins,work_joins,work_stars,works',
+       'owner 를 가진 표는 열넷 — 늘었으면 mergeOwners·deleteAccount 도 고쳐야 한다: ' + owned.join(','));
     /* 소식(제보)도 따라간다 */
     const o1 = crypto.randomBytes(6).toString('hex'), o2 = crypto.randomBytes(6).toString('hex');
     db.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(o1, '갑');
@@ -8054,6 +8171,35 @@ async function selftest() {
     ok(bad === 400, '활동 보고서: 시작이 끝보다 늦으면 400');
     for (const r of db.prepare('SELECT id FROM events WHERE owner=?').all(ow)) db.prepare('DELETE FROM events WHERE id=?').run(r.id);
     db.prepare('DELETE FROM owners WHERE id=?').run(ow);
+  }
+  /* 추천인 코드 품앗이 — 써 준 사람 코드가 먼저, 안 써 준 사람은 차례에 안 듦(첫 코드만 예외), 자기 코드·피싱 주소·상한 */
+  {
+    const raises = (fn, code) => { try { fn(); return false; } catch (e) { return e.code === code; } };
+    const [A1, B1, C1, D1] = ['ra', 'rb', 'rc', 'rd'].map(x => x + crypto.randomBytes(5).toString('hex'));
+    for (const o of [A1, B1, C1, D1]) db.prepare("INSERT INTO owners(id,name,created) VALUES(?,?,datetime('now','-3 days'))").run(o, o);
+    const sid = suggestService(db, A1, { name: '뮤즈시험' + A1, url: 'https://muse.example/invite', note: '둘 다 크레딧' }).id;
+    ok(raises(() => postRefCode(db, sid, A1, { code: 'AAA111' }), 404), '품앗이: 운영진이 열기 전 서비스엔 못 올린다');
+    okService(db, sid, { siteAdmin: true });
+    ok(raises(() => postRefCode(db, sid, A1, { code: 'https://evil.example/x' }), 400), '품앗이: 그 서비스 도메인이 아닌 주소는 막는다');
+    postRefCode(db, sid, A1, { code: 'https://muse.example/invite/A1' });   // 첫 코드 — 바로 차례에 든다
+    postRefCode(db, sid, B1, { code: 'BBB222' });                           // 아직 아무것도 안 써 줌
+    let n = nextRefCode(db, sid, C1);
+    ok(n.code === 'https://muse.example/invite/A1', '품앗이: 남의 것을 안 써 준 B 는 차례에 없고 첫 코드 A 가 나온다');
+    ok(nextRefCode(db, sid, A1).code === null, '품앗이: 내 코드는 나에게 안 나온다(B 는 아직 차례 밖)');
+    usedRefCode(db, n.id, B1);   // B 가 A 의 코드를 써 줌 → B 도 차례에 든다
+    ok(nextRefCode(db, sid, C1).code === 'BBB222', '품앗이: 써 준 사람(준 1 받은 0)이 먼저 나온다');
+    ok(raises(() => usedRefCode(db, n.id, A1), 400), '품앗이: 내 코드는 내가 «썼어요» 못 한다');
+    /* 방금 보여 준 B 가 또 먼저 나온다 — 오래 안 보인 A 보다 «준 것 − 받은 것» 이 앞선다 */
+    const nb = nextRefCode(db, sid, D1);
+    ok(nb.code === 'BBB222' && nextRefCode(db, sid, C1).code === 'BBB222', '품앗이: 차례는 «준 것 − 받은 것» 이 먼저, 보인 때는 그다음');
+    usedRefCode(db, nb.id, D1); usedRefCode(db, nb.id, D1);
+    ok(db.prepare('SELECT COUNT(*) n FROM ref_uses WHERE code=? AND owner=?').get(nb.id, D1).n === 1, '품앗이: 같은 코드에 «썼어요» 는 한 번');
+    for (const o of [A1, C1, D1]) deadRefCode(db, nb.id, o);
+    ok(nextRefCode(db, sid, C1).code === 'https://muse.example/invite/A1', '품앗이: «안 되는 코드» 셋이면 앞서던 코드도 차례에서 빠진다');
+    db.prepare("UPDATE owners SET created=datetime('now') WHERE id=?").run(D1);
+    ok(raises(() => postRefCode(db, sid, D1, { code: 'DDD444' }), 403), '품앗이: 갓 만든 계정은 하루 뒤에 올린다');
+    db.prepare('DELETE FROM ref_services WHERE id=?').run(sid);
+    for (const o of [A1, B1, C1, D1]) db.prepare('DELETE FROM owners WHERE id=?').run(o);
   }
   /* 외주 — 의뢰·서비스 두 방향, 제안은 올린 사람만 보고, 마감 지난 의뢰는 안 보인다 */
   {
