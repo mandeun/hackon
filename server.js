@@ -702,6 +702,23 @@ function ownsPerson(db, pid, tkey) {
   return !!db.prepare("SELECT 1 FROM teams WHERE (tkey=? AND tkey<>'' AND person=?) OR (mate_key=? AND mate_key<>'' AND mate=?)")
     .get(tk, pid, tk, pid);
 }
+/** 첫 입장 세 칸. 본인(그 사람의 팀·짝 열쇠)만 고친다. 연락처·주소처럼 보이는 것은 받지 않는다 — 이 세 칸은 공개라서 */
+const INTRO_KEYS = ['intro', 'doing', 'seeking'];
+function setIntro(db, pid, tkey, b) {
+  if (!db.prepare('SELECT 1 FROM people WHERE id=?').get(pid)) throw new HttpError(404, '없는 사람입니다');
+  if (!ownsPerson(db, pid, tkey)) throw new HttpError(403, '본인만 고칠 수 있습니다 — 신청한 브라우저에서');
+  const v = {};
+  for (const k of INTRO_KEYS) {
+    if (b[k] === undefined) continue;
+    const t = plain(b[k], 80);
+    if (/@|\b01[016789][-\s]?\d{3,4}[-\s]?\d{4}\b|open\.kakao\.com/i.test(t)) throw new HttpError(400, '공개되는 칸이라 연락처는 적지 마세요 — 연락처는 서로 좋아요일 때 열립니다');
+    v[k] = t;
+  }
+  const ks = Object.keys(v);
+  if (ks.length) db.prepare(`UPDATE people SET ${ks.map(k => k + '=?').join(',')} WHERE id=?`).run(...ks.map(k => v[k]), pid);
+  const r = db.prepare('SELECT intro, doing, seeking FROM people WHERE id=?').get(pid);
+  return { intro: r.intro, doing: r.doing, seeking: r.seeking };
+}
 const OUTSIDE_MAX = 20;
 function outsideOf(db, pid, { self, admin } = {}) {
   const all = self || admin;
@@ -1388,7 +1405,7 @@ function profile(db, pid) {
   const tier = rankOf(made, wins, skillAvg, rt.length);
 
   return {
-    id: me.id, handle: me.handle, level: me.level,
+    id: me.id, handle: me.handle, level: me.level, intro: me.intro || '', doing: me.doing || '', seeking: me.seeking || '',
     events: past.length, wins, tier, xp: xpOf(db, pid),
     /* 이번 시즌 기여. 통산과 «같이» 낸다 — 시즌만 두면 지난 기록이 사라진 것처럼 보인다 */
     season: seasonNow(), xpSeason: xpOf(db, pid, seasonNow()),
@@ -3709,6 +3726,8 @@ function open(file) {
     points  INTEGER NOT NULL,
     why     TEXT NOT NULL,
     at      TEXT NOT NULL DEFAULT (datetime('now')))`);
+  /* 첫 입장 세 칸 — 한 줄 소개·지금 하는 일·찾는 사람. 적을수록 발견되고 연결된다(사이먼스큅 입장 안내처럼). 공개된다 */
+  for (const c of ['intro', 'doing', 'seeking']) { try { db.exec(`ALTER TABLE people ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {} }
   /* 강점과 원하는 것 — 팀원 추천이 «서로 채워 주는 강점 + 같은 방향» 을 찾는 데 쓴다 */
   try { db.exec("ALTER TABLE teams ADD COLUMN strengths TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE teams ADD COLUMN aim TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -3836,6 +3855,7 @@ function privacyPage() {
 <li><b>주제·문제 올리기(받는 사람)</b> — 공개될 이름, 연락처. 결과 안내에만 씁니다.</li>
 <li><b>앱 피드백</b> — 적은 글, 연락처(선택).</li>
 <li><b>팀원 추천(선택)</b> — 고른 강점·하려는 이유, 누구에게 «좋아요» 를 눌렀는지. 같은 대회 안에서 맞을 사람을 권하는 데만 씁니다.</li>
+<li><b>소개 세 칸(선택)</b> — 한 줄 소개·지금 하는 일·찾는 사람. 프로필과 팀원 추천에 <b>공개</b>됩니다. 연락처는 적을 수 없게 막아 두었습니다.</li>
 <li><b>AI 지갑·아침 브리핑</b> — 구독·마감·붙여 넣은 글은 <b>그 기기에만</b> 저장되고 서버로 오지 않습니다.</li>
 <li><b>푸시 알림</b> — 기기 토큰. 사람 정보가 아니며 «따라가기»를 끄면 지웁니다.</li>
 <li><b>로그인(선택)</b> — 카카오·구글·네이버 중 고른 곳에서 <b>회원번호와 별명</b>. 어느 기기에서든 내 대회를 열기 위해서. 회원번호는 HACK:ON 에만 발급되는 번호라 그 서비스의 아이디가 아니며, 비밀번호는 받지 않습니다.</li>
@@ -5370,12 +5390,15 @@ function matchOf(db, event, tkey) {
     if (mine.aim && r.aim === mine.aim) { score += 2; why.push(`원하는 게 같아요 — ${r.aim}`); }
     if (r.solo) { score += 1; why.push('혼자 왔어요'); } else { score += 1; why.push(`자리 ${s.free}개 남음`); }
     if (likedMe.has(r.id)) { score += 3; why.push('나를 좋아요 했어요'); }
-    picks.push({ id: r.id, name: r.name, role: r.role, solo: !!r.solo, free: r.solo ? null : s.free, level: l >= 0 ? LEVELS[l] : '', strengths: strengthList(r.strengths), aim: r.aim, why, score, liked: liked.has(r.id) });
+    const pi = r.person ? db.prepare('SELECT intro, seeking FROM people WHERE id=?').get(r.person) : null;
+    picks.push({ id: r.id, name: r.name, role: r.role, solo: !!r.solo, free: r.solo ? null : s.free, level: l >= 0 ? LEVELS[l] : '', strengths: strengthList(r.strengths), aim: r.aim,
+                 intro: pi ? pi.intro : '', seeking: pi ? pi.seeking : '', why, score, liked: liked.has(r.id) });
   }
   picks.sort((a, b) => b.score - a.score || a.id - b.id);
   /* 서로 좋아요 — 이 둘에게만 연락처 */
   const mutual = rows.filter(r => liked.has(r.id) && likedMe.has(r.id)).map(r => ({ id: r.id, name: r.name, role: r.role, contact: r.contact }));
-  return { picks: picks.slice(0, 3).map(({ score, ...x }) => x), mutual, me: { id: mine.id, role: mine.role, strengths: strengthList(mine.strengths), aim: mine.aim },
+  const myIntro = me.person ? db.prepare('SELECT intro, doing, seeking FROM people WHERE id=?').get(me.person) : null;
+  return { picks: picks.slice(0, 3).map(({ score, ...x }) => x), mutual, me: { id: mine.id, role: mine.role, strengths: strengthList(mine.strengths), aim: mine.aim, person: me.person || '', ...(myIntro || {}) },
            options: { strengths: STRENGTHS, aims: AIMS } };
 }
 function likeMatch(db, event, tkey, to, on = true) {
@@ -7059,6 +7082,8 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/peers$/)) && req.method === 'GET')
           return json(res, 200, peersOf(db, m[1], req.headers['x-tkey'] || ''));
         /* 밖에서 만든 것 — 본인(팀·짝 열쇠)이 올리고 지운다. 확인은 사이트 운영자 */
+        if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/intro$/)) && req.method === 'POST')
+          return json(res, 200, setIntro(db, m[1], req.headers['x-tkey'] || '', await body(req)));
         if ((m = p.match(/^\/api\/people\/([0-9a-f]{12})\/outside$/)) && req.method === 'GET') {
           const self = ownsPerson(db, m[1], req.headers['x-tkey'] || '');
           return json(res, 200, { self, rows: outsideOf(db, m[1], { self, admin: siteAdmin }) });
@@ -8111,7 +8136,7 @@ function routes(db) {
                || p.match(/^\/tv\/[a-z0-9]+$/) || p.match(/^\/p\/[0-9a-f]{12}$/)
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
-               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/thanks' || p === '/partner' || p === '/launch' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
+               || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
                || p === '/conditions'
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
@@ -9820,6 +9845,15 @@ async function selftest() {
            '목록에 없는 강점·원하는 것은 버린다');
         let sx = 0; try { moreTeam(cdb, s2.id, { strengths: '글쓰기' }, { tkey: s1.tkey }); } catch (e) { sx = e.code; }
         ok(sx === 403, '남의 강점은 못 고친다 (403)');
+        /* 첫 입장 세 칸 — 본인만, 연락처는 못 적고, 추천과 프로필에 보인다 */
+        const it = setIntro(cdb, b.person, b.tkey, { intro: '기획하는 직장인', doing: '사내 AI 도입', seeking: '같이 만들 개발자' });
+        ok(it.seeking === '같이 만들 개발자' && profile(cdb, b.person).intro === '기획하는 직장인', '첫 입장 세 칸이 저장되고 프로필에 보인다');
+        ok(matchOf(cdb, me.id, a.tkey).picks.find(x => x.id === b.id).seeking === '같이 만들 개발자', '팀원 추천에 그 사람의 «찾는 사람» 이 같이 보인다');
+        let ia = 0; try { setIntro(cdb, b.person, a.tkey, { intro: '남이 고침' }); } catch (e) { ia = e.code; }
+        ok(ia === 403, '남의 소개는 못 고친다 (403)');
+        let ic = 0; try { setIntro(cdb, b.person, b.tkey, { seeking: '연락 주세요 010-1234-5678' }); } catch (e) { ic = e.code; }
+        let ie = 0; try { setIntro(cdb, b.person, b.tkey, { intro: 'me@x.com 으로' }); } catch (e) { ie = e.code; }
+        ok(ic === 400 && ie === 400, '공개 칸에 전화·이메일은 못 적는다 (400)');
         let self = 0; try { likeMatch(cdb, me.id, a.tkey, a.id); } catch (e) { self = e.code; }
         ok(self === 400, '내 팀은 고를 수 없다 (400)');
       }

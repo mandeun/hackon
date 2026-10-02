@@ -4249,10 +4249,16 @@ with sync_playwright() as pw:
     A("나를 좋아요 했어요" in _pb.inner_text("#match") and "ma@example.com" not in _pb.inner_text("#match"), "좋아요 받은 쪽에 표시가 없거나, 한쪽 좋아요로 연락처가 열린다")
     _pb.locator("#match > div", has_text="추천A").locator("[data-mlike]").click(); _pb.wait_for_timeout(900)
     A("ma@example.com" in _pb.inner_text("#match"), "서로 좋아요인데 연락처가 안 열린다")
+    # 첫 입장 세 칸 — 적으면 상대의 추천에 보이고, 공개 칸이라 연락처는 막힌다
+    _pb.fill("#in-intro", "기획하는 직장인"); _pb.fill("#in-seeking", "화면 만들 개발자"); _pb.click("#m-strsave"); _pb.wait_for_timeout(900)
+    _pa.reload(wait_until="networkidle"); _pa.wait_for_selector("#match")
+    A("기획하는 직장인" in _pa.inner_text("#match") and "화면 만들 개발자" in _pa.inner_text("#match"), "소개 세 칸이 팀원 추천에 안 보인다")
+    _pb.fill("#in-seeking", "연락 010-1234-5678"); _pb.click("#m-strsave"); _pb.wait_for_timeout(700)
+    A("연락처는 적지" in _pb.inner_text("body"), "공개 소개 칸에 전화번호가 들어간다")
     _pc.reload(wait_until="networkidle"); _pc.wait_for_selector("#match")
     A("ma@example.com" not in _pc.inner_text("#match") and "mb@example.com" not in _pc.inner_text("#match"), "셋째 사람에게 둘의 연락처가 보인다")
     b.close()
-ok("팀원 추천 — 역할 보완 추천·좋아요 표시·서로 좋아요일 때만 그 둘에게 연락처")
+ok("팀원 추천 — 역할 보완 추천·좋아요 표시·서로 좋아요일 때만 그 둘에게 연락처·소개 세 칸(연락처 막힘)")
 
 # ── 기여자 장부 /thanks — 공개 화면, 운영자 아니면 못 적음, 수익 나눔 계산은 운영자만 ──
 A(code_of("/thanks") == 200, "/thanks 가 안 열린다")
@@ -4284,5 +4290,16 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "시작 인센티브가 폰 폭에서 옆으로 밀린다")
     b.close()
 ok("시작하면 받는 것 — 지금 되는 것·조건부 갈라 적기")
+
+# ── 기업·기관 /biz, 크루 모집 /crew ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("biz/crew: " + str(e)))
+    pg.goto(BASE + "/biz", wait_until="networkidle"); pg.wait_for_selector("[data-offer]")
+    A(pg.locator("[data-offer]").count() == 4 and "업종별로 쌓습니다" in pg.inner_text("#view") and "제안가" in pg.inner_text("#view"), "기업·기관 안내가 덜 그려진다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "기업·기관 안내가 옆으로 밀린다")
+    pg.goto(BASE + "/crew", wait_until="networkidle"); pg.wait_for_selector("[data-track]")
+    A(pg.locator("[data-track]").count() == 3 and "지원하기" in pg.inner_text("#view"), "크루 모집이 덜 그려진다")
+    b.close()
+ok("기업·기관 안내(사내 해커톤·출제형·워크숍·스타트업, 업종별 사례)와 크루 모집(홍보·운영·개발)")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

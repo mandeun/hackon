@@ -1650,6 +1650,10 @@ function matchCard(m) {
   return `<div class="card" id="match">
     <h3>같이 할 사람 추천</h3>
     <div class="meta">역할이 겹치지 않고, 실력이 비슷하고, 내게 없는 강점이 있고, 원하는 게 같은 사람. 마지막은 현장에서 얼굴 보고 정하세요.</div>
+    ${m.me.person ? `<div style="margin-top:10px"><b>내 소개 세 칸</b> <span class="meta">적을수록 발견되고 연결됩니다 · 공개되니 연락처는 빼고</span>
+      <input id="in-intro" maxlength="80" placeholder="한 줄 소개 — 예) 기획하는 직장인, 바이브코딩 2주차" value="${esc(m.me.intro || '')}">
+      <input id="in-doing" maxlength="80" placeholder="지금 하는 일 — 예) 동네 가게 예약 앱" value="${esc(m.me.doing || '')}">
+      <input id="in-seeking" maxlength="80" placeholder="찾는 사람 — 예) 화면 만들 줄 아는 분" value="${esc(m.me.seeking || '')}"></div>` : ''}
     <label>내 강점 <span class="pill ok">셋까지</span></label>${chips(m.options.strengths, m.me.strengths, 'mst', true)}
     <label>왜 하나요</label>${chips(m.options.aims, m.me.aim, 'maim', false)}
     <button class="btn sec sm" id="m-strsave" style="margin-top:8px">저장하고 다시 찾기</button>
@@ -1657,6 +1661,7 @@ function matchCard(m) {
     ${!m.picks.length ? '<div class="meta" style="margin-top:12px">아직 권할 사람이 없습니다. 신청이 더 들어오면 여기 뜹니다.</div>'
       : m.picks.map(x => `<div style="padding:10px 0;border-top:1px solid var(--rule);margin-top:8px;display:flex;gap:10px;align-items:flex-start">
           <div style="flex:1;min-width:0"><b>${esc(x.name)}</b> ${x.role ? `<span class="pill">${esc(x.role)}</span>` : ''}${x.level ? ` <span class="pill">${esc(x.level)}</span>` : ''}
+            ${x.intro ? `<div>${esc(x.intro)}</div>` : ''}${x.seeking ? `<div class="meta">찾는 사람: ${esc(x.seeking)}</div>` : ''}
             <div class="meta">${x.why.map(esc).join(' · ')}</div></div>
           <button class="btn ${x.liked ? '' : 'sec '}sm" data-mlike="${x.id}" data-on="${x.liked ? 0 : 1}">${x.liked ? '좋아요 ✓' : '좋아요'}</button></div>`).join('')}
     <div class="meta" style="margin-top:8px">좋아요는 상대에게 «누가» 눌렀는지만 보입니다. 둘 다 누르면 그 둘에게만 연락처가 열립니다.</div></div>`;
@@ -4334,6 +4339,51 @@ const SCREEN = {
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/setups">세팅 모음</a> · <a href="/news">해커온뉴스</a></p>`;
   },
 
+  /* 기업·기관·전통 산업·스타트업. «AI 를 도입하라» 는 말은 많고 «첫날 무엇을 하나» 는 없다 — 그 첫날을 해커톤 하루로 판다.
+     결과물·사람·보고서가 남고, 업종별 «문제와 풀이» 는 해커온의 도메인 지식으로 쌓인다(회사 이름·내부 자료는 빼고, 동의한 것만) */
+  async biz() {
+    const offers = [
+      ['사내 해커톤 하루', '우리 회사 문제 셋 → 직원 팀이 하루 만에 눌러 보는 시제품', ['문제 고르기 30분 통화', '진행표·큰 화면·심사·결과 보고서 그대로', '처음 해 보는 직원도 직무 레시피로 시작'], '200만 원~ (30명 기준)'],
+      ['문제 출제형 공개 해커톤', '회사 문제를 공개 대회 주제로 — 밖의 바이브코더가 풉니다', ['결과물 마감 직후 먼저 보기', '채용·협업 제안에 동의한 참가자에게 연락할 길', '협찬 «발전소» 와 같은 자리'], '300만 원~'],
+      ['직무별 AI 도입 워크숍', '마케팅·기획·영업·CS·데이터 — 각자 자기 업무 하나를 그 자리에서 자동화', ['2시간 실습, 해커온 직무 레시피로', '끝나면 «누가 무엇을 줄였나» 표', '사내 해커톤의 예선으로 써도 됩니다'], '50만 원~'],
+      ['스타트업', '해커온에서 켜고, 대회로 첫 사용자를', ['/launch — 노출·팀원·피드백 무료', '대회 협찬으로 참가자에게 크레딧·사용 후기', '결과물·참가자 중 첫 팀원 찾기'], '무료부터'],
+    ];
+    const inds = ['제조', '유통·물류', '외식·소상공인', '교육', '공공·지자체', '금융', '부동산·건설', '미디어·콘텐츠'];
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">기업·기관</span></div>
+        <h2>AI 도입, 해커톤 하루로 시작</h2>
+        <p class="sub" style="margin-bottom:0">«AI 를 써야 한다» 는 다 압니다. 첫날 무엇을 하는지가 없을 뿐. 우리 문제를 들고 오시면 하루 뒤엔 눌러 보는 것이 있습니다.</p></section>
+      ${offers.map(([name, sub, gets, price]) => `<div class="card" data-offer="${esc(name)}"><h3>${esc(name)}</h3><div class="meta">${esc(sub)}</div>
+          <ul class="checks" style="margin-top:8px">${gets.map(g => `<li><span>${esc(g)}</span></li>`).join('')}</ul>
+          <div class="price">${esc(price)}<small>제안가</small></div></div>`).join('')}
+      <div class="card" id="biz-ind"><h3>업종별로 쌓습니다</h3>
+        <div class="gchips">${inds.map(x => `<span class="pick" style="cursor:default">${esc(x)}</span>`).join('')}</div>
+        <div class="meta" style="margin-top:8px">대회마다 «어떤 문제를 어떻게 풀었나» 가 업종별 사례로 남습니다. 회사 이름·내부 자료는 빼고, 동의한 것만. 다음 회사는 그 사례에서 시작합니다.</div></div>
+      <div class="card"><h3>순서</h3><ol class="steps">
+        <li>30분 통화 — 문제 셋과 사람 수</li><li>날짜·장소 — 사내든 밖이든</li><li>당일 — 진행표대로, 결과물은 그날 제출</li><li>보고서 — 참가·완주·결과물·다음 할 일</li></ol></div>
+      <div class="card"><a class="btn" style="display:block;text-align:center;text-decoration:none" href="mailto:hi@mandeun.com?subject=${encodeURIComponent('[기업·기관] AI 도입 해커톤 문의')}">30분 통화 잡기 — hi@mandeun.com</a>
+        <div class="meta" style="margin-top:8px">금액은 제안가이고 규모·장소에 따라 정합니다. 해커온은 돈을 받아 두지 않습니다 — 계약은 운영 주체와 직접 합니다.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/partner">협찬·협업</a> · <a href="/launch">시작하면 받는 것</a></p>`;
+  },
+
+  /* 해커온 크루 — 대외활동. 학생에게는 «스펙», 해커온에게는 손. 받는 것을 기록으로 준다(기여자 장부·명찰·추천서) */
+  async crew() {
+    const tracks = [['홍보', '인스타·숏폼·커뮤니티 방장 협조', '방마다 초대 링크로 몇 명 데려왔는지가 성과로 남습니다'],
+                    ['운영', '대회 하나를 매니저로 끝까지', '진행표·심사·결과 보고서 — 운영 회고가 포트폴리오'],
+                    ['개발', '해커온 코드·새 서비스', '풀 리퀘스트가 합쳐지면 기여자 장부 점수, 약정 시 분기 수익 나눔']];
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">해커온 크루 1기</span></div>
+        <h2>같이 켜는 사람 모집</h2>
+        <p class="sub" style="margin-bottom:0">8주. 대학생·직장인 누구나. 경력보다 «끝까지 해 본 것» 하나를 봅니다.</p></section>
+      ${tracks.map(([t, what, gets]) => `<div class="card" data-track="${esc(t)}"><h3>${esc(t)}</h3><div>${esc(what)}</div><div class="meta" style="margin-top:4px">${esc(gets)}</div></div>`).join('')}
+      <div class="card"><h3>받는 것</h3><ul class="checks">
+        <li><span><a href="/thanks">기여자 장부</a>에 이름과 «무엇을 했나» — 링크드인·링커리어로 복사됩니다</span></li>
+        <li><span>크루 명찰·티셔츠(«끄지 말고, 너랑 켜자»)</span></li>
+        <li><span>8주를 마치면 운영진 추천서, 협찬사·기관 미팅에 같이</span></li>
+        <li><span>잘한 분은 매니저 — 한 곳을 맡아 결정을 먼저 내립니다</span></li></ul></div>
+      <div class="card"><a class="btn" style="display:block;text-align:center;text-decoration:none" href="mailto:hi@mandeun.com?subject=${encodeURIComponent('[크루 1기 지원] 이름 · 갈래')}&body=${encodeURIComponent('갈래(홍보/운영/개발):\n끝까지 해 본 것 하나(링크):\n일주일에 쓸 수 있는 시간:\n')}">지원하기 — 메일 한 통</a>
+        <div class="meta" style="margin-top:8px">세 줄이면 됩니다. 10/31 데모데이에 와 보시면 더 좋습니다.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/launch">시작하면 받는 것</a></p>`;
+  },
+
   /* 해커온에서 시작하면 받는 것. 금 캐러 온 사람에게 삽을 판다 — 우리는 금광이 아니라 삽·지도·동료를 낸다.
      약속은 «지금 되는 것» 과 «기록이 쌓이면 되는 것» 을 갈라 적는다. 안 되는 것을 된다고 적으면 그게 가장 큰 거짓 광고다 */
   async launch() {
@@ -5175,6 +5225,7 @@ const SCREEN = {
         <div class="meta">HACK:ON 티어</div>
         <div style="font-size:34px;font-weight:900;color:${TC};letter-spacing:-.02em;line-height:1.1;margin:4px 0">${esc(T.name)}</div>
         <div class="meta">완주 ${d.finished} · 수상 ${d.wins || 0}${d.skill && d.skill.show ? ' · 동료 실력 ' + d.skill.score : ''}</div>
+        ${d.intro || d.doing || d.seeking ? `<div id="p-intro" style="margin-top:10px;text-align:left">${d.intro ? `<div style="font-weight:700">${esc(d.intro)}</div>` : ''}${d.doing ? `<div class="meta">지금 하는 일 · ${esc(d.doing)}</div>` : ''}${d.seeking ? `<div class="meta">찾는 사람 · ${esc(d.seeking)}</div>` : ''}</div>` : ''}
         ${T.next ? `<div class="meta" style="margin-top:6px">${esc(T.next)}</div>` : ''}
         <div class="meta" style="margin-top:10px;font-family:var(--mono,monospace)">${esc(location.host)}/p/${esc(d.id)}</div>
         <div class="meta">이 주소를 이력서·프로필에 붙이세요. 숫자는 대회 기록에서만 나옵니다.</div>
@@ -6895,6 +6946,10 @@ function wire() {
   document.querySelectorAll('[data-maim]').forEach(b => b.onclick = () => document.querySelectorAll('[data-maim]').forEach(x => x.classList.toggle('on', x === b && !b.classList.contains('on'))));
   if ($('#m-strsave')) $('#m-strsave').onclick = async () => {
     const myId = localStorage.getItem('hackon.team.' + cur);
+    if ($('#in-intro') && MATCH && MATCH.me.person) {
+      try { await api(`/people/${MATCH.me.person}/intro`, { method: 'POST', tkey: tkeyOf(myId), body: { intro: $('#in-intro').value.trim(), doing: $('#in-doing').value.trim(), seeking: $('#in-seeking').value.trim() } }); }
+      catch (e) { return flash(e.message, true); }
+    }
     try { await api(`/teams/${myId}/more`, { method: 'POST', tkey: tkeyOf(myId), body: {
             strengths: [...document.querySelectorAll('[data-mst].on')].map(x => x.dataset.mst).join(','),
             aim: (document.querySelector('[data-maim].on') || {}).dataset?.maim || '' } });
@@ -7871,6 +7926,8 @@ const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
 const PTN = location.pathname === '/partner';    // 협찬·협업 안내 — 주시는 것별로 받는 것 한 장
 const LCH = location.pathname === '/launch';     // 해커온에서 시작하면 받는 것 — 바이브코딩 금광의 삽
+const BIZ = location.pathname === '/biz';        // 기업·기관·전통 산업·스타트업 — AI 도입을 해커톤 하루로
+const CRW = location.pathname === '/crew';       // 해커온 크루 모집 — 홍보·운영·개발
 const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
 const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
@@ -7919,6 +7976,8 @@ else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'no
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (PTN) { tab = 'partner'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LCH) { tab = 'launch'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (BIZ) { tab = 'biz'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (CRW) { tab = 'crew'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
