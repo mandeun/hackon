@@ -4171,6 +4171,19 @@ const SCREEN = {
   async wallet() {
     const list = walLoad().map((it, i) => ({ ...it, i, next: walNext(it) }))
       .sort((a, b) => (a.next || '9') < (b.next || '9') ? -1 : 1);
+    /* 내 도구에 붙는 혜택 — 할인 소식(해커온뉴스 «무료·할인·리셋»)과 추천 코드(/ref).
+       목록 전체를 받아 이 기기에서 맞춰 본다. 무엇을 구독하는지는 서버로 안 간다.
+       못 받으면 null — «혜택 없음» 이 아니라 «모름» 으로 그린다 */
+    const [wNews, wRef] = list.length && LIVE ? await Promise.all([
+      api('/news').then(d => d.rows.filter(r => r.kind === 'deal')).catch(() => null),
+      api('/ref').then(d => d.rows).catch(() => null)]) : [[], []];
+    const toolKey = n => String(n || '').toLowerCase().replace(/\s*(pro|plus|max|team|teams|premium|구독|요금제)\b.*$/i, '').trim();
+    const perks = list.map(it => {
+      const k = toolKey(it.name); if (k.length < 2) return null;
+      return { name: it.name,
+        deals: wNews === null ? null : wNews.filter(r => (r.title || '').toLowerCase().includes(k)).slice(0, 2),
+        ref: wRef === null ? null : wRef.find(r => toolKey(r.name).includes(k) || k.includes(toolKey(r.name))) || false };
+    }).filter(p => p && (p.deals === null || p.deals.length || p.ref === null || p.ref));
     const perMonth = it => it.kind === 'renew' && +it.won ? (it.every === 'week' ? it.won * 4 : +it.won) : 0;
     const monthly = list.reduce((n, it) => n + perMonth(it), 0);
     /* 해지 후보 — «안 씀» 인 구독. «가끔» 은 다음 갱신 전에 한 번 더 보자고만 한다. 고르지 않은 것은 모름이라 안 센다 */
@@ -4193,6 +4206,13 @@ const SCREEN = {
           <div class="shrow" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn" id="wal-ics">달력에 한 번에 넣기</button><button class="btn sec" id="wal-share">친구에게 알려 주기</button></div>
           <div class="meta" style="margin-top:6px">달력 파일을 열면 날짜마다 <b>하루 전 알림</b>이 붙습니다.</div></div>`
         : '<div class="card"><h3>아직 비어 있습니다</h3><div class="meta">아래에서 쓰는 것을 하나 넣어 보세요. 30초면 됩니다.</div></div>'}
+      ${list.length ? `<div class="card" id="wal-perks"><h3>내 도구에 붙는 혜택</h3>
+        ${wNews === null && wRef === null ? '<div class="meta">혜택 소식을 불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !perks.length ? '<div class="meta">지금 넣은 도구에 맞는 할인 소식·추천 코드가 없습니다.</div>'
+          : perks.map(p => `<div style="padding:8px 0;border-top:1px solid var(--rule)"><b>${esc(p.name)}</b>
+              ${p.deals === null ? '<div class="meta">할인 소식 — 모름(못 불러옴)</div>' : p.deals.map(r => `<div class="meta">🏷️ <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></div>`).join('')}
+              ${p.ref ? `<div class="meta">🤝 추천 코드 ${p.ref.codes}개 돌고 있음 — <a href="/ref">써 주고 내 차례 받기</a></div>` : ''}</div>`).join('')}
+        <div class="meta" style="margin-top:6px">맞춰 보기는 이 기기에서 합니다. 무엇을 쓰는지는 서버로 안 갑니다.</div></div>` : ''}
       <div class="card" id="wal-paste"><h3>붙여 넣어 한 번에</h3>
         <div class="meta">메일·공지·카톡을 통째로 붙이세요. 줄마다 날짜를 찾아 <b>마감·회신</b>과 <b>일정·출시</b>로 나눕니다. 글은 이 기기 밖으로 안 나갑니다.</div>
         <textarea id="wl-paste" rows="4" placeholder="예)&#10;서류 제출 10월 20일까지&#10;데모데이 10/31(금) 오후 1시&#10;회신 부탁드립니다 — 내일까지"></textarea>
