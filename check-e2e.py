@@ -4395,7 +4395,8 @@ con = _sq.connect(_hdb)
 for _src, _u, _t, _note, _job in (("gh", "https://github.com/e2e/agent-kit", "e2e/agent-kit — MCP agent 도구", "★ 1500", "개발"),
                                   ("hf", "https://huggingface.co/e2e/tiny", "e2e/tiny", "♥ 40", ""),
                                   ("geek", "https://geek.example/1", "e2e 읽을거리 한 줄", "", "")):
-    con.execute("INSERT INTO news(src,key,title,url,note,job,at) VALUES(?,?,?,?,?,?,?)", (_src, _u, _t, _u, _note, _job, _today))
+    con.execute("INSERT INTO news(src,key,title,url,note,job,at,meta) VALUES(?,?,?,?,?,?,?,?)", (_src, _u, _t, _u, _note, _job, _today,
+                '{"lang":"TypeScript","topics":["mcp","agent"],"license":"MIT"}' if _src == "gh" else ""))
 con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://github.com/e2e/agent-kit", _d3, 1200))
 con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://github.com/e2e/agent-kit", _today, 1500))
 con.execute("INSERT INTO news_counts(key,day,n) VALUES(?,?,?)", ("https://huggingface.co/e2e/tiny", _today, 40))
@@ -4417,6 +4418,13 @@ with sync_playwright() as pw:
     _try = pg.locator(".it .try code").first.inner_text()
     A(_try.startswith("git clone https://github.com/e2e/agent-kit"), f"깃허브 줄에 바로 해 보기 명령이 없다: {_try}")
     A(pg.locator(".it .do").filter(has_text="README").count() == 0, "출처마다 같던 «할 일» 문장이 아직 붙는다")
+    # 무슨 프로그램인가 — 언어·주제·라이선스, «상업 OK 만» 거르기(10/04)
+    _w = pg.locator("#list .it", has_text="e2e/agent-kit").locator(".what").inner_text()
+    A("TypeScript 프로그램" in _w and "상업 OK" in _w and "MIT" in _w, f"프로그램 설명·라이선스가 없다: {_w}")
+    A("라이선스 모름" in pg.locator("#list .it", has_text="e2e/tiny").inner_text(), "라이선스 없는 모델을 «모름» 으로 안 그린다")
+    pg.check("#com-ok"); pg.wait_for_timeout(200)
+    A("e2e/tiny" not in pg.inner_text("#list") and "e2e/agent-kit" in pg.inner_text("#list") and "e2e 읽을거리" in pg.inner_text("#list"), "«상업 OK 만» 이 프로그램만 거르지 않는다")
+    pg.uncheck("#com-ok"); pg.wait_for_timeout(200)
     A("누구나 보고 고쳐 쓸 수 있게" not in pg.inner_text("#view, body"), "출처 종류로 붙이던 뻔한 «쉽게» 문장이 아직 있다")
     _all = pg.evaluate("document.querySelector('.chip[data-k=\"all\"]').dataset.n")
     A(int(_all) == pg.locator("#list .it").count(), "확 뜬 것 판이 칩 수와 목록 줄 수를 어긋나게 한다")

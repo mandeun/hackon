@@ -2503,11 +2503,12 @@ async function newsTick(db) {
   const got = [];
   const j = async u => { const r = await fetch(u, { headers: { 'user-agent': 'hackon.kr', accept: 'application/json' }, signal: AbortSignal.timeout(8000) }); return r.ok ? r.json() : null; };
   try { for (const m of (await j('https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=8')) || [])
-    got.push({ src: 'hf', title: m.id, url: 'https://huggingface.co/' + m.id, note: `♥ ${m.likes || 0}`, born: m.createdAt }); } catch {}
+    got.push({ src: 'hf', title: m.id, url: 'https://huggingface.co/' + m.id, note: `♥ ${m.likes || 0}`, born: m.createdAt,
+      meta: { task: m.pipeline_tag || '', lib: m.library_name || '', license: ((m.tags || []).find(t => /^license:/.test(t)) || '').slice(8) } }); } catch {}
   try { for (const p of (await j('https://huggingface.co/api/daily_papers?limit=8')) || []) if (p.paper && p.paper.title)
     got.push({ src: 'paper', title: p.paper.title, url: 'https://huggingface.co/papers/' + p.paper.id, note: `▲ ${p.paper.upvotes || 0}`, born: p.publishedAt || p.paper.publishedAt }); } catch {}
   try { for (const sp of (await j('https://huggingface.co/api/spaces?sort=trendingScore&direction=-1&limit=5')) || [])
-    got.push({ src: 'space', title: sp.id, url: 'https://huggingface.co/spaces/' + sp.id, note: `♥ ${sp.likes || 0}` }); } catch {}
+    got.push({ src: 'space', title: sp.id, url: 'https://huggingface.co/spaces/' + sp.id, note: `♥ ${sp.likes || 0}`, meta: { sdk: sp.sdk || '' } }); } catch {}
   /* RSS 여럿 — 제목·주소만. 어느 하나가 죽어도 나머지는 산다. 레딧은 서버 fetch 가 UA 무관 403(09-25 실측), .rss 는 연속 호출 시 429 — 안 붙인다 */
   const de = t => String(t || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
   for (const [src, feed, max, aiOnly] of NEWS_FEEDS) {
@@ -2520,10 +2521,11 @@ async function newsTick(db) {
   try {
     const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     for (const r of ((await j(`https://api.github.com/search/repositories?q=created:%3E${since}&sort=stars&order=desc&per_page=6`)) || {}).items || [])
-      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 200) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발', born: r.created_at });
+      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 200) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발', born: r.created_at,
+        meta: { lang: r.language || '', topics: (r.topics || []).slice(0, 5), license: (r.license && r.license.spdx_id && r.license.spdx_id !== 'NOASSERTION') ? r.license.spdx_id : '', home: webUrl(r.homepage || '') || '' } });
   } catch {}
   try { for (const d of (await j('https://huggingface.co/api/datasets?sort=trendingScore&direction=-1&limit=4')) || [])
-    got.push({ src: 'ds', title: d.id, url: 'https://huggingface.co/datasets/' + d.id, note: `♥ ${d.likes || 0}`, job: '데이터' }); } catch {}
+    got.push({ src: 'ds', title: d.id, url: 'https://huggingface.co/datasets/' + d.id, note: `♥ ${d.likes || 0}`, job: '데이터', meta: { license: ((d.tags || []).find(t => /^license:/.test(t)) || '').slice(8) } }); } catch {}
   /* 우리 우승작 — 끝난 대회의 1위, 쇼케이스에 동의(show)한 팀만. */
   try {
     for (const e of db.prepare("SELECT id, title FROM events WHERE listed=1 AND ends < date('now') ORDER BY ends DESC LIMIT 20").all()) {
@@ -2534,13 +2536,15 @@ async function newsTick(db) {
   const ins = db.prepare('INSERT OR IGNORE INTO news(src,key,title,url,note,job) VALUES(?,?,?,?,?,?)');
   let added = 0;
   for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 260), g.url.slice(0, 500), String(g.note).slice(0, 200), g.src === 'hackon' ? '' : (g.job || jobOf(g.title))).changes);
+  const metaUp = db.prepare('UPDATE news SET meta=? WHERE key=?');
+  for (const g of got) if (g.meta && /^https?:\/\//.test(g.url)) metaUp.run(JSON.stringify(g.meta).slice(0, 600), g.url);
   const snapped = newsSnap(db, got);
   db.prepare("DELETE FROM news WHERE at < date('now','-30 days')").run();
   db.prepare("DELETE FROM news_counts WHERE day < date('now','-30 days')").run();
   return { got: got.length, added, snapped };
 }
 function newsList(db, days = 9, job = '') {
-  return db.prepare("SELECT id, src, title, url, note, at, job, by FROM news WHERE at >= date('now', ?) AND (?='' OR job=?) ORDER BY at DESC, id DESC").all(`-${days} days`, job, job);
+  return db.prepare("SELECT id, src, title, url, note, at, job, by, meta FROM news WHERE at >= date('now', ?) AND (?='' OR job=?) ORDER BY at DESC, id DESC").all(`-${days} days`, job, job);
 }
 /* ── 뜻으로 묶는다 ──────────────────────────────────────────────────────────────
    예전엔 «출처별로 모은 것을 날짜순으로 쏟아» 놓았다. 스무 곳에서 온 60줄이 한 벽이라
@@ -2625,6 +2629,35 @@ const NEWS_DO_RE = [
 /* ── 시간 아끼기 — 줄마다 «몇 분 걸리나» 와 «바로 해 보는 명령 한 줄» ──────────────────────────
    읽고 끝나는 소식은 명령이 없다(빈 값). 명령은 주소에서만 만든다 — 지어내지 않는다 */
 const NEWS_MINS = { gh: 10, hf: 15, space: 3, ds: 10, paper: 5, tube: 10, ph: 5, show: 5, hackon: 3, tip: 5 };
+/* ── 무슨 프로그램인가 — 언어·주제·하는 일·라이선스. 상업 이용은 넷으로: ok · cond(조건부) · no · null(모름) ── */
+const HF_TASK = { 'text-generation': '글 생성 모델', 'text-to-image': '그림 생성 모델', 'image-to-image': '그림 고치기 모델', 'automatic-speech-recognition': '음성 받아쓰기 모델',
+  'text-to-speech': '음성 합성(TTS) 모델', 'image-text-to-text': '그림 보고 답하는(멀티모달) 모델', 'feature-extraction': '임베딩(검색용) 모델', 'sentence-similarity': '임베딩(검색용) 모델',
+  'text-to-video': '영상 생성 모델', 'image-to-video': '그림→영상 모델', 'translation': '번역 모델', 'summarization': '요약 모델', 'object-detection': '물체 찾기 모델',
+  'image-classification': '이미지 분류 모델', 'any-to-any': '여러 입출력 모델', 'robotics': '로봇 제어 모델', 'text-classification': '글 분류 모델', 'audio-to-audio': '소리 변환 모델',
+  'image-segmentation': '이미지 영역 나누기 모델', 'depth-estimation': '깊이 추정 모델', 'text-ranking': '검색 순위 모델', 'visual-question-answering': '그림 질문 답하기 모델' };
+const LIC_OK = /^(mit|apache-2\.0|bsd-[23]-clause|isc|unlicense|cc0-1\.0|0bsd|zlib|cc-by-4\.0|cc-by-sa-4\.0|mpl-2\.0|wtfpl|postgresql|bsl-1\.0)$/i;
+const LIC_COND = /^(gpl|agpl|lgpl|openrail|creativeml-openrail|llama|gemma|other|bigscience|deepseek|qwen|cc-by-nc-sa-4\.0-but)/i;
+const LIC_NO = /(^|-)nc(-|$)|non-?commercial|research-only|cc-by-nc/i;
+function licenseOf(id) {
+  const l = String(id || '').trim();
+  if (!l) return { license: '', commercial: null, say: '라이선스 표시 없음 — 상업 사용은 허락 없이는 못 한다고 보세요' };
+  if (LIC_NO.test(l)) return { license: l, commercial: 'no', say: `${l} — 상업 이용 불가` };
+  if (LIC_OK.test(l)) return { license: l, commercial: 'ok', say: `${l} — 상업 이용 OK(저작권 표시만)` };
+  if (/^(a|l)?gpl/i.test(l)) return { license: l, commercial: 'cond', say: `${l} — 상업 이용은 되지만 고친 코드를 공개해야` };
+  if (LIC_COND.test(l)) return { license: l, commercial: 'cond', say: `${l} — 조건부(약관 확인)` };
+  return { license: l, commercial: null, say: `${l} — 약관 확인 필요` };
+}
+function newsWhat(r) {
+  let m = {}; try { m = typeof r.meta === 'string' ? (r.meta ? JSON.parse(r.meta) : {}) : (r.meta || {}); } catch { m = {}; }
+  if (!['gh', 'hf', 'ds', 'space'].includes(r.src)) return null;
+  const bits = [];
+  if (r.src === 'gh') { if (m.lang) bits.push(`${m.lang} 프로그램`); if ((m.topics || []).length) bits.push('주제 ' + m.topics.slice(0, 4).join('·')); }
+  if (r.src === 'hf') { bits.push(HF_TASK[m.task] || (m.task ? m.task + ' 모델' : 'AI 모델')); if (m.lib) bits.push(m.lib); }
+  if (r.src === 'ds') bits.push('AI 학습용 데이터');
+  if (r.src === 'space') bits.push(`웹에서 바로 눌러 보는 앱${m.sdk ? '(' + m.sdk + ')' : ''}`);
+  const lic = r.src === 'space' ? { license: '', commercial: null, say: '' } : licenseOf(m.license);
+  return { line: bits.join(' · '), license: lic.license, commercial: lic.commercial, licSay: lic.say, home: m.home || '' };
+}
 function newsMins(r) { return r.kind === 'deal' ? 2 : NEWS_MINS[r.src] || 3; }
 function newsTry(r) {
   const u = String(r.url || '');
@@ -2750,7 +2783,7 @@ function newsHot(db, { n = 8, per = 3, day = today() } = {}) {
   const snaps = db.prepare('SELECT key, day, n FROM news_counts WHERE day >= ? AND day <= ? ORDER BY key, day').all(weekAgo, day);
   const by = new Map();
   for (const s of snaps) { if (!by.has(s.key)) by.set(s.key, []); by.get(s.key).push(s); }
-  const info = db.prepare('SELECT id, src, title, url, note, at, job FROM news WHERE key=?');
+  const info = db.prepare('SELECT id, src, title, url, note, at, job, meta FROM news WHERE key=?');
   const out = [];
   for (const [key, ss] of by) {
     if (ss.length < 2) continue;                          /* 하루치뿐 — 는 만큼을 모른다 */
@@ -2769,7 +2802,7 @@ function newsHot(db, { n = 8, per = 3, day = today() } = {}) {
     picked.push(r);
   }
   return picked.sort((a, b) => (b.gain / Math.max(10, b.from)) - (a.gain / Math.max(10, a.from)) || b.gain - a.gain)
-    .slice(0, n).map(r => { const k = newsKind(r.src), o = { ...r, kind: k }; return { ...o, easy: newsEasy(o), mins: newsMins(o), try: newsTry(o), zh: newsZh(r.title) }; });
+    .slice(0, n).map(r => { const k = newsKind(r.src), o = { ...r, kind: k }; return { ...o, easy: newsEasy(o), mins: newsMins(o), try: newsTry(o), zh: newsZh(r.title), what: newsWhat(o), meta: undefined }; });
 }
 /* 판이 비었을 때 «없음» 과 «아직 모름» 을 가른다 — 기록이 이틀 치 이상 쌓였나 */
 function newsHotKnown(db, day = today()) {
@@ -2809,6 +2842,8 @@ function newsEnrich(rows, now = today()) {
     o.mins = newsMins(o);
     o.try = newsTry(o);
     o.zh = newsZh(rep.title);
+    o.what = newsWhat(rep);
+    delete o.meta;
     o.why = [];
     if (also.length) o.why.push(`${also.length + 1}곳에서 같이 다뤘다`);
     if (rep.src === 'tip') o.why.push('같은 일 하는 사람의 제보');
@@ -2883,7 +2918,7 @@ const SETUP = {
 첫 작업: 오늘 후기 3개에 초안으로 답글을 단다.`,
 };
 /* 줄 밑에 붙는 것 — 있는 것만(빈 «그래서 뭘 하나: » 를 찍지 않는다). 명령은 그대로 복붙되게 코드로 */
-const newsMdExtra = (r, pad) => [r.zh && `${pad}- ${r.zh}`, r.easy && `${pad}- 쉽게: ${r.easy}`, r.do && `${pad}- 그래서 뭘 하나: ${r.do}`,
+const newsMdExtra = (r, pad) => [r.what && r.what.line && `${pad}- 무엇: ${r.what.line}`, r.what && r.what.licSay && `${pad}- 라이선스: ${r.what.licSay}`, r.zh && `${pad}- ${r.zh}`, r.easy && `${pad}- 쉽게: ${r.easy}`, r.do && `${pad}- 그래서 뭘 하나: ${r.do}`,
   r.try && `${pad}- 바로 해 보기(⏱ ${r.mins}분): \`${r.try}\``].filter(Boolean).map(x => x + '\n').join('');
 /* 클로드에 붙여넣는 마크다운. 첫 줄이 «세팅해라» 지시라 링크만 복붙해도 된다. */
 function newsMd(db, job = '') {
@@ -3963,6 +3998,8 @@ function open(file) {
     note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (date('now')))`);
   /* 별·하트 수를 날짜별로 — «이번 주 확 뜬 것» 을 세려고. 한 주소에 하루 한 줄 */
   db.exec(`CREATE TABLE IF NOT EXISTS news_counts(key TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY(key, day))`);
+  /* 소식 덧붙임(언어·주제·라이선스·하는 일) — JSON 한 칸. «무슨 프로그램인지» 를 제목만으로는 몰랐다(10/04) */
+  try { db.exec("ALTER TABLE news ADD COLUMN meta TEXT NOT NULL DEFAULT ''"); } catch {}
   /* 짝 신청 — 둘이 같이 오는 길. 초대 코드는 팀 열쇠와 다른 것이다 */
   for (const c of ['invite', 'mate', 'mate_name', 'mate_key', 'mate_contact'])
     try { db.exec(`ALTER TABLE teams ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
@@ -12582,6 +12619,16 @@ async function selftest() {
     const ed = editPropose(adb, ch, { body: '광고 문구', base: 0 });
     for (const ip of ['i1', 'i2', 'i3']) boardReport(adb, 'e', ed.id, ip + 'x'.repeat(12), '광고', ip);
     ok(chapterView(adb, ch).edits.length === 0, '1.2 — 서로 다른 셋이 신고한 제안은 공개 차이 보기에서 빠진다');
+  }
+  /* 무슨 프로그램인가 — 언어·주제·하는 일·라이선스·상업 이용 */
+  {
+    const w1 = newsWhat({ src: 'gh', meta: JSON.stringify({ lang: 'Python', topics: ['llm', 'rag'], license: 'MIT' }) });
+    ok(w1.line === 'Python 프로그램 · 주제 llm·rag' && w1.commercial === 'ok', '무엇 — 깃허브: 언어·주제, MIT 는 상업 OK');
+    const w2 = newsWhat({ src: 'hf', meta: { task: 'automatic-speech-recognition', lib: 'transformers', license: 'cc-by-nc-4.0' } });
+    ok(w2.line.startsWith('음성 받아쓰기 모델') && w2.commercial === 'no', '무엇 — 허깅페이스: 하는 일을 한국어로, NC 라이선스는 상업 불가');
+    ok(newsWhat({ src: 'gh', meta: { license: 'AGPL-3.0' } }).commercial === 'cond' && newsWhat({ src: 'hf', meta: { license: 'llama3.1' } }).commercial === 'cond', '무엇 — GPL·라마 약관은 조건부');
+    ok(newsWhat({ src: 'gh', meta: {} }).commercial === null && /허락 없이는/.test(newsWhat({ src: 'gh', meta: {} }).licSay), '무엇 — 라이선스가 없으면 «모름» 이고 상업 사용 불가로 보라고 말한다');
+    ok(newsWhat({ src: 'geek', meta: {} }) === null, '무엇 — 기사에는 프로그램 설명을 안 붙인다');
   }
   /* 시간 아끼기 — ⏱ 와 바로 해 보는 명령, 중국어 풀이 */
   ok(newsTry({ src: 'gh', url: 'https://github.com/acme/tool' }) === 'git clone https://github.com/acme/tool && cd tool'
