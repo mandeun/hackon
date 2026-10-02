@@ -5559,7 +5559,9 @@ const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'qr.js', 's
   'hero.jpg', 'og.png',
   /* 노랑이. 평면 SVG 라 셋 합쳐 5KB 가 안 된다 — 그림 파일로 두면 색을 고칠 때마다 다시 만들어야 한다 */
   'norangi.svg', 'norangi-run.svg', 'norangi-hi.svg', 'story-norangi.svg',
-  'brand.html']);
+  'brand.html',
+  /* 계정 삭제 안내 — 구글 플레이가 앱 밖 주소를 요구한다(/delete-account) */
+  'delete-account.html']);
 /* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
 /* ── 토스 미니앱에서 오는 요청만 교차 출처를 허용한다.
    앱인토스 문서: «실제 서비스 환경 https://<appName>.apps.tossmini.com ·
@@ -7009,7 +7011,7 @@ function routes(db) {
 
       /* #region reuse:static — 화이트리스트 + 경로 탈출 방지 + MIME + 스트림.
          뿌리가 프로젝트 폴더라 server.js·package.json·data/ 까지 열렸다(감사 5·6, 오답노트 E7). 이제 화면 파일만 나간다 */
-      const name = p === '/' ? 'home.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
+      const name = p === '/' ? 'home.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
       if (!STATIC_OK.has(name)) throw new HttpError(404, '없습니다');
       const f = path.join(ROOT, name);
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
@@ -7289,6 +7291,9 @@ async function selftest() {
     const copy = (dock.match(/^COPY (?!--from).*\.\/$/m) || [''])[0];
     ok(copy, 'Dockerfile 에서 소스를 넣는 COPY 줄을 못 찾았다');
     const missing = [...STATIC_OK].filter((f) => !copy.includes(' ' + f + ' '));
+    /* 플레이 스토어에 적어 낸 주소. 목록에서 빠지면 심사 중에 404 가 난다 */
+    ok(STATIC_OK.has('delete-account.html') && copy.includes(' delete-account.html '),
+       '/delete-account 안내 페이지가 서빙 목록이나 배포 이미지에 없다 — 플레이 스토어의 삭제 안내 주소가 404 가 된다');
     ok(!missing.length,
        '서빙 목록에 있는데 배포 이미지에 안 들어가는 파일: ' + missing.join(', ') + ' — Dockerfile 의 COPY 에 적는다');
   }
