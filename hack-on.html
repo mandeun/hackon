@@ -1600,7 +1600,37 @@ const REFGOT = {};   // 서비스별로 방금 받은 코드 { id, code }   // �
 const WAL_KEY = 'hackon.wallet';
 const walLoad = () => { try { return JSON.parse(localStorage.getItem(WAL_KEY) || '[]'); } catch (_) { return []; } };
 const walSave = l => { try { localStorage.setItem(WAL_KEY, JSON.stringify(l)); return true; } catch (_) { return false; } };
-const WAL_KIND = { renew: '구독 갱신', expire: '크레딧 만료', reset: '사용 한도 리셋', trial: '무료 체험 끝' };
+const WAL_KIND = { renew: '구독 갱신', expire: '크레딧 만료', reset: '사용 한도 리셋', trial: '무료 체험 끝', due: '마감·회신', event: '일정·출시' };
+/* 붙여 넣은 글(메일·공지·카톡)에서 날짜를 줄마다 하나씩 건진다. 서버로 안 보낸다 — 메일 본문은 그 사람 것이다.
+   해가 안 적힌 날짜는 올해로 보되, 한 달 넘게 지났으면 내년으로 넘긴다(12월에 받은 «1/5 마감»).
+   못 읽은 줄은 버리지 않고 «날짜 못 찾음» 으로 세어 보여 준다 — 조용히 빠지면 놓친 줄 모른다. */
+function pasteDates(text, now = ymdLocal()) {
+  const [ty] = now.split('-').map(Number);
+  const pad = n => String(n).padStart(2, '0');
+  const ok = (y, m, d) => m >= 1 && m <= 12 && d >= 1 && d <= 31 && !isNaN(new Date(`${y}-${pad(m)}-${pad(d)}T00:00:00`));
+  const roll = (m, d) => { let y = ty; if (`${y}-${pad(m)}-${pad(d)}` < walShift(now, -31)) y++; return y; };
+  const out = [], miss = [];
+  for (const raw of String(text || '').split(/\n+/)) {
+    const line = raw.trim(); if (!line) continue;
+    let y, m, d, hit = '', mm;
+    if ((mm = line.match(/(20\d{2})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})\s*일?/))) [hit, y, m, d] = [mm[0], +mm[1], +mm[2], +mm[3]];
+    else if ((mm = line.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/))) [hit, m, d] = [mm[0], +mm[1], +mm[2]];
+    /* 10/31 은 날짜다. 점은 «3.5 버전» 일 수 있어서 10.31(금)·10.31.·10.31까지 처럼 날짜 꼴이 붙을 때만 */
+    else if ((mm = line.match(/(?:^|[^\d.])(\d{1,2})\/(\d{1,2})(?![\d/])/) || line.match(/(?:^|[^\d.])(\d{1,2})\.(\d{1,2})(?=\.|\s*\([월화수목금토일]|\s*(?:까지|마감|일))/))) [hit, m, d] = [mm[0].replace(/^[^\d]/, ''), +mm[1], +mm[2]];
+    else if ((mm = line.match(/오늘|내일|모레/))) { const off = { 오늘: 0, 내일: 1, 모레: 2 }[mm[0]]; [hit] = mm; [y, m, d] = walShift(now, off).split('-').map(Number); }
+    if (!hit || !ok(y || ty, m, d)) { miss.push(line); continue; }
+    if (!y) y = roll(m, d);
+    const tm = line.match(/(\d{1,2}):(\d{2})/) || line.match(/(오전|오후)\s*(\d{1,2})\s*시/);
+    const time = !tm ? '' : tm[0].includes(':') ? `${pad(+tm[1])}:${tm[2]}` : `${pad((+tm[2] % 12) + (tm[1] === '오후' ? 12 : 0))}:00`;
+    const kind = /까지|마감|기한|회신|답장|제출|접수|신청|due|deadline/i.test(line) ? 'due' : 'event';
+    const name = line.replace(hit, ' ').replace(/\([월화수목금토일]\)/g, ' ').replace(tm ? tm[0] : '\u0000', ' ')
+      .replace(/(^|\s)(까지|부터|에|에서)(?=\s|$)/g, ' ').replace(/^[\s\-·•*>:|,~.]+|[\s\-·•*>:|,~.]+$/g, '').replace(/\s+/g, ' ').slice(0, 40) || (kind === 'due' ? '마감' : '일정');
+    out.push({ name, kind, date: `${y}-${pad(m)}-${pad(d)}`, memo: time });
+  }
+  return { found: out, miss };
+}
+const walShift = (day, n) => { const d = new Date(day + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+let WAL_FOUND = null;   // 붙여 넣기에서 건진 것 — 넣기 전에 사람이 본다
 const WAL_TOOLS = ['Claude Pro', 'Claude Max', 'Claude Code 클라우드 크레딧', 'ChatGPT Plus', 'Gemini', 'Cursor', 'GitHub Copilot', 'Perplexity', 'Midjourney', 'Higgsfield', 'Canva', 'Notion AI', 'ElevenLabs'];
 /* 반복이 있으면 오늘 이후 첫 날로 굴린다. 날짜가 없으면 «모름» — 맨 뒤 */
 function walNext(it, now = ymdLocal()) {
@@ -4149,8 +4179,8 @@ const SCREEN = {
     const badge = n => n === null ? '<span class="pill">날짜 모름</span>' : n < 0 ? '<span class="pill">지남</span>'
       : n === 0 ? '<span class="pill warn">오늘</span>' : n <= 7 ? `<span class="pill warn">D-${n}</span>` : `<span class="pill">D-${n}</span>`;
     return `<section class="hero"><div class="top"><span class="pill">AI 지갑</span></div>
-        <h2>구독·크레딧·리셋, 한 장에</h2>
-        <p class="sub" style="margin-bottom:0">언제 갱신되고, 언제 사라지고, 언제 다시 쓸 수 있는지. <b>이 기기에만</b> 저장합니다 — 서버로 안 보냅니다.</p></section>
+        <h2>구독·크레딧·마감, 한 장에</h2>
+        <p class="sub" style="margin-bottom:0">언제 갱신되고, 언제 사라지고, 언제까지 답해야 하는지. <b>이 기기에만</b> 저장합니다 — 서버로 안 보냅니다.</p></section>
       ${list.length ? `<div class="card" id="wal-list">
           ${monthly ? `<div class="meta" style="margin-bottom:6px">한 달 구독료 어림 <b>${won(monthly)}</b>${save ? ` · 안 쓰는 것 끊으면 <b style="color:var(--bad,#C2410C)">${won(save)}</b> 아낌` : ''}</div>` : ''}
           ${cut.length || maybe.length ? `<div class="notice" style="margin:4px 0 8px">${cut.length ? `<b>해지 후보</b> ${cut.map(it => esc(it.name)).join(' · ')} — 갱신일 전에 끊으세요. ` : ''}${maybe.length ? `<b>갱신 전에 다시 보기</b> ${maybe.map(it => esc(it.name)).join(' · ')}` : ''}</div>` : ''}
@@ -4163,6 +4193,17 @@ const SCREEN = {
           <div class="shrow" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn" id="wal-ics">달력에 한 번에 넣기</button><button class="btn sec" id="wal-share">친구에게 알려 주기</button></div>
           <div class="meta" style="margin-top:6px">달력 파일을 열면 날짜마다 <b>하루 전 알림</b>이 붙습니다.</div></div>`
         : '<div class="card"><h3>아직 비어 있습니다</h3><div class="meta">아래에서 쓰는 것을 하나 넣어 보세요. 30초면 됩니다.</div></div>'}
+      <div class="card" id="wal-paste"><h3>붙여 넣어 한 번에</h3>
+        <div class="meta">메일·공지·카톡을 통째로 붙이세요. 줄마다 날짜를 찾아 <b>마감·회신</b>과 <b>일정·출시</b>로 나눕니다. 글은 이 기기 밖으로 안 나갑니다.</div>
+        <textarea id="wl-paste" rows="4" placeholder="예)&#10;서류 제출 10월 20일까지&#10;데모데이 10/31(금) 오후 1시&#10;회신 부탁드립니다 — 내일까지"></textarea>
+        <button class="btn sec" id="wl-parse" style="margin-top:8px;width:100%">날짜 찾기</button>
+        ${WAL_FOUND ? `<div id="wl-found" style="margin-top:10px">
+          ${WAL_FOUND.found.length ? WAL_FOUND.found.map((f, i) => `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:6px;font-weight:400">
+              <input type="checkbox" data-wfound="${i}" checked style="width:auto;margin-top:3px">
+              <span style="min-width:0;overflow-wrap:anywhere"><b>${esc(f.name)}</b><br><span class="meta">${esc(WAL_KIND[f.kind])} · ${esc(f.date)}${f.memo ? ' ' + esc(f.memo) : ''}</span></span></label>`).join('')
+            : '<div class="meta">날짜를 하나도 못 찾았습니다.</div>'}
+          ${WAL_FOUND.miss.length ? `<div class="meta" style="margin-top:6px">날짜 못 찾은 줄 ${WAL_FOUND.miss.length}개 — 필요하면 아래 «넣기» 로 직접.</div>` : ''}
+          ${WAL_FOUND.found.length ? '<button class="btn" id="wl-addall" style="margin-top:10px;width:100%">고른 것 넣기</button>' : ''}</div>` : ''}</div>
       <div class="card" id="wal-add"><h3>넣기</h3>
         <label>무엇</label><input id="wl-name" list="wl-tools" maxlength="40" placeholder="예) Claude Pro" style="font-size:17px">
         <datalist id="wl-tools">${WAL_TOOLS.map(t => `<option value="${esc(t)}">`).join('')}</datalist>
@@ -6566,6 +6607,13 @@ function wire() {
     l.push({ name: name.slice(0, 40), kind: walKind, date: $('#wl-date').value, every: $('#wl-every').value, won: Math.max(0, +$('#wl-won').value || 0), memo: $('#wl-memo').value.trim().slice(0, 60) });
     if (!walSave(l)) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
     flash('넣었습니다');
+  };
+  if ($('#wl-parse')) $('#wl-parse').onclick = () => { WAL_FOUND = pasteDates($('#wl-paste').value); render(); };
+  if ($('#wl-addall')) $('#wl-addall').onclick = () => {
+    const pick = [...document.querySelectorAll('[data-wfound]:checked')].map(c => WAL_FOUND.found[+c.dataset.wfound]);
+    if (!pick.length) return flash('고른 것이 없습니다', true);
+    if (!walSave(walLoad().concat(pick.map(f => ({ ...f, every: '', won: 0 }))))) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
+    WAL_FOUND = null; flash(`${pick.length}개 넣었습니다`);
   };
   document.querySelectorAll('[data-wdel]').forEach(b => b.onclick = () => { const l = walLoad(); l.splice(+b.dataset.wdel, 1); walSave(l); render(); });
   document.querySelectorAll('[data-wuse]').forEach(sel => sel.onchange = () => { const l = walLoad(); if (l[+sel.dataset.wuse]) { l[+sel.dataset.wuse].use = sel.value; walSave(l); } render(); });
