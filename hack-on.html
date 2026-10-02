@@ -946,6 +946,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .mechips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
 .mechips button{font-size:13px;font-weight:800;padding:7px 11px;border-radius:99px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
 .mechips button.on{background:#C8F53B;color:#0B1020;border-color:#C8F53B}
+.nsay{margin-top:10px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.07);color:#E8ECF3;font-size:14px;line-height:1.5}
 .lvbar{height:10px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden;margin:12px 0 6px}
 .lvbar span{display:block;height:100%;background:#C8F53B;border-radius:99px}
 .mgoal{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--rule);text-decoration:none;color:var(--ink)}
@@ -2488,6 +2489,37 @@ const ownedCard = e => `<div class="card ev" role="button" tabindex="0" data-ope
 </div>`;
 /* 이 브라우저가 든 열쇠를 접두사별로 모은다. localStorage 를 못 읽는 브라우저(사생활 모드)면 빈 목록 */
 const keyIds = pre => { try { return Object.keys(localStorage).filter(k => k.startsWith(pre)).map(k => k.slice(pre.length)).filter(Boolean); } catch (_) { return []; } };
+/* 노랑이 한마디 — 듀오링고 부엉이처럼 성격이 있되, 죄책감은 안 준다(쉬었다 와도 반긴다) */
+let ME_LAST = null;
+function norangiSays(m) {
+  const c = m.counts, n = m.next[0];
+  if (!c.acts) return '아직 플러그만 꽂혀 있어요. 아무거나 하나 눌러 주면 제가 켜져요.';
+  if (n && n.goal - n.have === 1) return `${n.name}까지 딱 하나. 지금 하면 오늘 저녁이 자랑이 됩니다.`;
+  if (m.days.length && m.days[m.days.length - 1] < ymdLocal()) return '오랜만이에요! 쉬어도 모은 건 그대로예요. 다시 켜 볼까요?';
+  if (c.submitted) return '만든 걸 낸 사람만 아는 기분, 그거 맞아요. 다음 판도 같이 가요.';
+  return m.level >= 3 ? '이 정도면 동네에서 소문나요. 친구 한 명만 데려와 볼래요?' : '좋아요, 불 들어왔어요. 다음 배지가 저기 보여요.';
+}
+/* 자랑 카드 — 인스타 스토리 크기(1080×1920) 한 장. 이 기기에서 그리고, 서버로 안 보낸다 */
+async function meCardBlob(m) {
+  const W = 1080, H = 1920, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'), F = (w, s) => `${w} ${s}px Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif`;
+  g.fillStyle = '#0B1020'; g.fillRect(0, 0, W, H);
+  const gl = g.createRadialGradient(W / 2, 520, 40, W / 2, 520, 620); gl.addColorStop(0, 'rgba(200,245,59,.35)'); gl.addColorStop(1, 'rgba(200,245,59,0)');
+  g.fillStyle = gl; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#C8F53B'; g.font = F(800, 44); g.textAlign = 'left'; g.fillText('HACK:ON', 80, 130);
+  await new Promise(ok => { const im = new Image(); im.onload = () => { g.drawImage(im, W / 2 - 200, 260, 400, 400); ok(); }; im.onerror = ok; im.src = '/norangi-on.svg'; });
+  g.textAlign = 'center';
+  g.fillStyle = '#C8F53B'; g.font = F(900, 72); g.fillText(`Lv.${m.level}`, W / 2, 790);
+  g.fillStyle = '#fff'; g.font = F(900, 110); g.fillText(m.title, W / 2, 920);
+  const got = m.badges.filter(b => b.got);
+  g.fillStyle = '#C9CFDA'; g.font = F(700, 46); g.fillText(`배지 ${got.length} / ${m.badges.length}  ·  켜진 날 ${m.days.length}일`, W / 2, 1020);
+  g.font = F(400, 96);
+  const sh = got.slice(0, 12); sh.forEach((b, i) => { const row = Math.floor(i / 4), inRow = Math.min(4, sh.length - row * 4); g.fillText(b.icon, W / 2 + ((i % 4) - (inRow - 1) / 2) * 190, 1180 + row * 170); });
+  if (!got.length) { g.fillStyle = '#C9CFDA'; g.font = F(700, 44); g.fillText('첫 배지를 켜는 중', W / 2, 1200); }
+  g.fillStyle = '#fff'; g.font = F(700, 44); g.fillText(m.next[0] ? `다음 목표 — ${m.next[0].name} ${m.next[0].have}/${m.next[0].goal}` : '배지를 다 모았어요', W / 2, 1720);
+  g.fillStyle = '#C8F53B'; g.font = F(800, 40); g.fillText('hackon.kr — 코딩 몰라도, 혼자 와도', W / 2, 1810);
+  return new Promise(ok => cv.toBlob(ok, 'image/png'));
+}
 /* 나(/me) — 이 기기에 든 열쇠를 모아 보낸다. 서버가 하나씩 맞춰 보고 맞는 것만 센다 */
 const meBody = () => {
   const kv = pre => { try { return keyIds(pre).map(id => ({ id, key: localStorage.getItem(pre + id) || '' })).slice(-200); } catch { return []; } };
@@ -4983,7 +5015,7 @@ const SCREEN = {
      열쇠는 이 기기에 있으니 화면이 모아 보내고, 서버는 맞는 것만 내 일정으로 돌려준다(/api/cal). */
   async mypage() {
     let m = null, unknown = false;
-    if (LIVE) { try { m = await api('/me', { method: 'POST', body: meBody(), voter: voterTok() }); meSave(m); } catch { unknown = true; } }
+    if (LIVE) { try { m = await api('/me', { method: 'POST', body: meBody(), voter: voterTok() }); meSave(m); ME_LAST = m; } catch { unknown = true; } }
     else unknown = true;
     if (!m) return `<section class="mhero" id="me-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi.svg" alt="" width="34" height="34"><span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">나</span></div>
         <h2 style="margin-top:10px">지금은 못 읽었습니다</h2><p>모은 배지가 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요 — 모은 것은 사라지지 않습니다.</p></section>`;
@@ -4998,7 +5030,9 @@ const SCREEN = {
         <span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">Lv.${m.level}</span><b style="color:#fff">${esc(m.title)}</b></div>
         <h2 style="margin-top:10px" id="me-lv">${got ? `배지 <span class="lime">${got}</span> / ${m.badges.length}` : '첫 배지까지 한 걸음'}</h2>
         <div class="lvbar" role="progressbar" aria-label="다음 레벨까지" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
-        <p>${m.xp} XP · 다음 레벨까지 <b>${Math.max(0, m.lvTo - m.xp)} XP</b></p></section>
+        <p>${m.xp} XP · 다음 레벨까지 <b>${Math.max(0, m.lvTo - m.xp)} XP</b></p>
+        <p class="nsay" id="me-say">🔌 ${esc(norangiSays(m))}</p>
+        <button type="button" class="btn sm" id="me-share" style="margin-top:12px;background:#C8F53B;color:#0B1020">자랑 카드 만들기</button><div id="me-shareout"></div></section>
       <div class="card" id="me-next"><h3>다음 목표</h3>
         ${m.next.map(b => `<a class="mgoal" href="${esc(b.href)}"><span class="mi">${b.icon}</span><span class="mt"><b>${esc(b.name)}</b><em>${esc(b.how)}</em>
           <span class="mbar"><span style="width:${Math.round(b.have / b.goal * 100)}%"></span></span></span><span class="mn">${b.have}/${b.goal}</span><span aria-hidden="true">›</span></a>`).join('') || '<div class="meta">배지를 다 모았습니다. 전설입니다.</div>'}</div>
@@ -7886,6 +7920,19 @@ function wire() {
   if (gveLink) gveLink.onclick = async () => { const me = myGiver(); if (!me) return;
     try { await navigator.clipboard.writeText(`${location.origin}/card#${me.id}.${me.gkey}`); flash('복사했습니다 — 다른 기기에서 열면 내 카드가 따라옵니다'); } catch { flash(`${location.origin}/card#${me.id}.${me.gkey}`); } };
 
+  const meShare = $('#me-share');
+  if (meShare) meShare.addEventListener('click', async () => {
+    if (!ME_LAST) return;
+    meShare.disabled = true;
+    try {
+      const blob = await meCardBlob(ME_LAST), file = new File([blob], 'hackon-me.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: `HACK:ON Lv.${ME_LAST.level} ${ME_LAST.title} — hackon.kr` }); } catch {} }
+      const url = URL.createObjectURL(blob);
+      $('#me-shareout').innerHTML = `<img id="me-card" src="${url}" alt="자랑 카드 — Lv.${ME_LAST.level} ${esc(ME_LAST.title)}" style="width:160px;border-radius:14px;margin-top:12px;display:block">
+        <a class="btn sec sm" id="me-dl" href="${url}" download="hackon-me.png" style="margin-top:8px">이미지 저장</a>`;
+    } catch (e) { flash('카드를 못 그렸습니다', true); }
+    meShare.disabled = false;
+  });
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';

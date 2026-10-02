@@ -4756,6 +4756,10 @@ with sync_playwright() as pw:
     A(_lv and _lv["level"] >= 1 and _lv["next"], f"메뉴 «나» 카드용 요약이 안 남는다: {_lv}")
     pg.wait_for_timeout(1400)
     A('"/me"' in (pg.evaluate("localStorage.getItem('hackon.recent')") or ""), "연 화면이 «최근 간 곳» 에 안 적힌다")
+    A(len(pg.inner_text("#me-say")) > 10, "노랑이 한마디가 없다")
+    pg.click("#me-share"); pg.wait_for_selector("#me-card")
+    _wh = pg.evaluate("new Promise(ok => { const i = document.querySelector('#me-card'); const f = () => ok([i.naturalWidth, i.naturalHeight]); i.complete ? f() : i.onload = f; })")
+    A(_wh == [1080, 1920] and pg.get_attribute("#me-dl", "download") == "hackon-me.png", f"자랑 카드가 스토리 크기(1080×1920)로 안 나온다: {_wh}")
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "나 화면이 폰 폭에서 옆으로 밀린다")
     from axe_playwright_python.sync_playwright import Axe as _AxeMe
     _bad = [v for v in _AxeMe().run(pg).response["violations"] if v["impact"] in ("critical", "serious")]
