@@ -3489,7 +3489,7 @@ with sync_playwright() as pw:
         md = urllib.request.urlopen(BASE + "/news.md").read().decode("utf-8")
         mdpick = re.findall(r"^\d+\. \[(.+?)\]\(", md.split("## 오늘 꼭 볼 것")[1].split("\n## ")[0], re.M) if "## 오늘 꼭 볼 것" in md else []
         A(screen and screen == mdpick, f"화면과 /news.md 의 «꼭 볼 것» 이 다르다\n  화면: {screen}\n  md  : {mdpick}")
-        ok(f"뜻으로 묶임 {heads} · 통 {sorted(set(bks))} · «그래서 뭘 하나» {dos}줄 · 화면=md 꼭 볼 것 {len(screen)}줄")
+        ok(f"뜻으로 묶임 {heads} · 통 {sorted(set(bks))} · 할 일·명령·풀이 붙은 줄 {useful} · 화면=md 꼭 볼 것 {len(screen)}줄")
     else:
         ok(f"소식이 {total}건뿐이라 묶음 검사는 건너뜀 (남의 RSS 가 안 올 때)")
 
