@@ -4349,59 +4349,33 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/en 이 폰 폭에서 옆으로 밀린다")
     b.close()
 ok("해외 — /en(빨리빨리·품앗이·정·켜다·너랑), hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
-# ── 혜택 탭. 자료는 밖에서 받아 오므로 «목록이 있다»를 단언하지 않는다 —
-# 대신 ① 탭이 있고 눌러서 그려지는가 ② 기본 갈래가 장학금인가
-# ③ 모르는 값을 «없음»으로 그리지 않는가(순수 함수로 못박는다) 를 본다.
+# ── 대회 혜택 탭 — 열린 대회에서 받는 것(확정된 것만). 장학금 목록은 이 탭에서 뺐다 ──
+_, _bev = post("/api/events", {"title": "혜택 화면 검사", "starts": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")})
+post(f"/api/events/{_bev['id']}", {"prize": 500000, "topic": "생활 불편", "place": "온라인"}, key=_bev["okey"], method="PATCH")
+post(f"/api/events/{_bev['id']}/list", {"on": True}, key=_bev["okey"])
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     ctx = b.new_context(viewport={"width": 390, "height": 900})
-    pg = ctx.new_page()
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("perks: " + str(e)))
     pg.goto(f"{BASE}/app", wait_until="networkidle")
     pg.wait_for_selector("body[data-ready='1']", timeout=10000)
-
-    A(pg.locator("nav button[data-t='benefit']").count() == 1, "아래 탭에 «혜택» 이 없다")
-    A(pg.inner_text("nav button[data-t='benefit']").strip().endswith("혜택"),
-      "탭 이름이 «혜택» 이 아니다: " + pg.inner_text("nav button[data-t='benefit']"))
-    # 390px 에서 탭 다섯이 다 보여야 한다 — 하나가 잘리면 넷으로 줄인 뜻이 없어진다
     tabs = pg.eval_on_selector_all("nav button", "els => els.map(e => e.getBoundingClientRect())")
     A(len(tabs) == 5, f"아래 탭이 다섯이 아니다: {len(tabs)}")
-    A(all(t["width"] > 40 for t in tabs), f"탭 하나가 너무 좁다: {[round(t['width']) for t in tabs]}")
-    A(max(t["right"] for t in tabs) <= 391, f"탭이 화면 밖으로 넘친다: {max(t['right'] for t in tabs)}")
-    # 줄바꿈과 이름은 «내 대회» 블록이 Range 사각형 수로 이미 잰다 — 두 곳에 안 적는다
-
+    A(all(t["width"] > 40 for t in tabs) and max(t["right"] for t in tabs) <= 391, f"탭이 좁거나 넘친다: {[round(t['width']) for t in tabs]}")
     pg.click("nav button[data-t='benefit']")
-    # data-ready 는 이미 '1' 이라 그걸 기다리면 그냥 지나간다 — 이 화면의 표식을 기다린다.
-    # 자료를 밖에서 받아 오므로 넉넉히 준다.
-    pg.wait_for_selector("#ben-h", timeout=40000)
-    pg.wait_for_selector("#ben-segs, #ben-off", timeout=40000)
-    body = pg.inner_text("body")
-    A("혜택" in body, "혜택 화면이 안 그려졌다")
-    # 자료를 받았으면 갈래가 뜨고, 못 받았으면 «못 가져왔습니다» 가 뜬다. 둘 중 하나여야 한다
-    got = pg.locator("#ben-segs").count() == 1
-    A(got or pg.locator("#ben-off").count() == 1,
-      "자료도 없고 못 가져왔다는 말도 없다 — 빈 화면이다")
-    if got:
-        A(pg.inner_text("#ben-segs button.on").strip() == "장학금",
-          "기본 갈래가 장학금이 아니다: " + pg.inner_text("#ben-segs button.on"))
-        A("기관 공고가 우선" in body, "기관 공고가 우선이라는 말이 없다")
-        # 갈래를 눌러 실제로 바뀌는가
-        pg.click("#ben-segs button[data-bseg='support']")
-        pg.wait_for_function(
-            "() => { const b = document.querySelector('#ben-segs button.on');"
-            " return b && b.textContent.trim() === '지원금'; }", timeout=40000)
-        A(pg.inner_text("#ben-segs button.on").strip() == "지원금",
-          "갈래를 눌렀는데 안 바뀐다")
-
-    # 순수 함수 — 여기가 «모름을 없음으로 그리지 않는다» 를 지키는 자리다
-    A(pg.evaluate("benWhere([])") == "", "지역을 모를 때 뭔가를 적고 있다")
-    A(pg.evaluate("benWhere(['all'])") == "전국", "자료가 전국이라 적은 것을 안 쓰고 있다")
-    A(pg.evaluate("benWhere(['seoul','busan'])") == "서울·부산", "지역 이름을 한글로 안 바꾼다")
-    A("외 1곳" in pg.evaluate("benWhere(['seoul','busan','daegu','jeju'])"), "넷 이상을 줄여 적지 않는다")
-    A(pg.evaluate("benDday('')") == "", "마감을 모를 때 날짜를 지어낸다")
-    A(pg.evaluate("benDday('2000-01-01')") == "지남", "지난 것을 열려 있는 것처럼 그린다")
-    ctx.close()
-    b.close()
-ok("혜택 탭 — 탭 다섯이 390px 에 들어가고, 기본 갈래가 장학금이며, 모르는 값을 «없음» 으로 안 그린다")
+    pg.wait_for_selector("#ben-h", timeout=20000)
+    body = pg.inner_text("#view")
+    A("장학금" not in body, "혜택 탭에 아직 장학금 목록이 있다")
+    A(any(e["id"] == _bev["id"] for e in api("/api/events")), "검사 대회가 목록에 안 올랐다 — 아래 단언이 공회전한다")
+    if True:
+        _card = pg.locator(".perk", has_text="혜택 화면 검사")
+        A("상금 500,000원" in _card.inner_text(), f"상금이 받는 것으로 안 뜬다: {_card.inner_text()}")
+        A("실무 기록" in _card.inner_text(), "누구나 받는 것(실무 기록)이 없다")
+        pg.click("#ben-segs button[data-bseg='prize']"); pg.wait_for_timeout(300)
+        A(pg.locator(".perk", has_text="혜택 화면 검사").count() == 1, "상금 갈래에서 상금 있는 대회가 빠진다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "혜택 화면이 폰 폭에서 옆으로 밀린다")
+    ctx.close(); b.close()
+ok("대회 혜택 — 열린 대회의 상금·협찬·누구나 받는 것, 장학금은 빠짐, 탭 다섯이 390px 에")
 
 # ── 이번 주 확 뜬 것 + «쉽게:» — 별·하트를 날짜별로 적어 둔 DB 를 바깥에서 만들고 띄운다 ──
 # 소식은 남의 사이트에서 오므로 실행마다 다르다 — 그래서 우리가 넣은 줄로만 단언한다.

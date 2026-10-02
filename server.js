@@ -6320,6 +6320,34 @@ function setOffer(db, id, b) {
   return { id, status: b.status };
 }
 
+/* ── 대회 혜택 — 지금 열린 대회에 참가하면 받는 것 ─────────────────────────────
+   상금·협찬(크레딧·상품)·확정된 멘토·심사·간식 + 누구나 받는 것(완주 증서·실무 기록·팀원 추천).
+   «받는 것» 은 확정된 것만 적는다 — 신청만 들어온 후원(pending)을 혜택으로 적으면 거짓 약속이 된다. */
+function perksOf(db, day = today()) {
+  const evs = db.prepare(`SELECT id, title, host, starts, ends, place, prize, cap FROM events
+    WHERE listed = 1 AND sample = 0 AND (ends = '' OR ends >= ?) ORDER BY starts, id LIMIT 60`).all(day);
+  const won = n => Number(n).toLocaleString('ko-KR') + '원';
+  return evs.map(e => {
+    const gets = [];
+    if (+e.prize > 0) gets.push({ k: 'prize', t: `상금 ${won(e.prize)}` });
+    for (const sp of db.prepare('SELECT name, kind, amount FROM sponsors WHERE event=? ORDER BY amount DESC, id').all(e.id)) {
+      const k = /크레딧/.test(sp.kind) ? 'credit' : /상품/.test(sp.kind) ? 'goods' : /멘토/.test(sp.kind) ? 'people' : 'sponsor';
+      gets.push({ k, t: `${sp.name} ${sp.kind}${+sp.amount > 0 && k !== 'people' ? ' ' + won(sp.amount) + ' 어치' : ''}` });
+    }
+    const ok = db.prepare(`SELECT n.kind, n.label, p.name, p.org FROM pledges p JOIN needs n ON n.id = p.need
+      WHERE p.event = ? AND p.status IN ('ok','done')`).all(e.id);
+    for (const r of ok.filter(r => r.kind === 'credit' || r.kind === 'prize'))
+      gets.push({ k: r.kind === 'credit' ? 'credit' : 'goods', t: `${r.label} — ${r.org || r.name} 제공` });
+    const ppl = ok.filter(r => r.kind === 'mentor' || r.kind === 'judge').length;
+    if (ppl) gets.push({ k: 'people', t: `현업 멘토·심사 ${ppl}명에게 피드백` });
+    if (ok.some(r => r.kind === 'snack')) gets.push({ k: 'snack', t: '간식' });
+    const always = [{ k: 'record', t: '완주하면 실무 기록 1단계 · 완주 증서' }, { k: 'mate', t: '같이 할 사람 추천(서로 좋아요면 연락처)' }];
+    const teams = db.prepare("SELECT COUNT(*) c FROM teams WHERE event=? AND confirmed<>'no'").get(e.id).c;
+    return { id: e.id, title: e.title, host: e.host, starts: e.starts, ends: e.ends, place: e.place,
+      seatsLeft: e.cap ? Math.max(0, e.cap - teams) : null, gets, always, extra: gets.length };
+  });
+}
+
 /* ── 자리 매칭 — 줄 사람 카드(givers)와 요청(asks) ─────────────────────────────
    메일 복붙 문구 대신 앱 안에서: 카드 올리기 → 주최자 요청 → 카드 주인 수락 → 둘에게만 연락처.
    수락하면 그 대회 자리에 확정 기여(pledge ok)로 오른다 — 공개 장부·결과 보고서가 그대로 쓴다. */
@@ -8278,6 +8306,7 @@ function routes(db) {
           needAdmin(db, r.event, key, owner, siteAdmin);
           return json(res, 200, setPledge(db, +m[1], await body(req)));
         }
+        if (p === '/api/perks' && req.method === 'GET') return json(res, 200, perksOf(db));
         /* 자리 매칭 — 카드(공개 목록·올리기·내 카드)와 요청(보내기·답하기·거두기) */
         if (p === '/api/givers' && req.method === 'GET')
           return json(res, 200, giversList(db, { kind: NEED_KINDS.includes(q.kind) ? q.kind : '', event: /^[a-z0-9]+$/.test(q.event || '') ? q.event : '' }));
@@ -9277,6 +9306,28 @@ async function selftest() {
       ok(bpub.every(r => r.stuck === undefined), '막힌 곳 — 공개 순위표 줄에는 안 붙는다(이름과 묶이지 않게)');
       ok(bmine.find(r => r.id === k1).stuck.includes('3시간') && bmine.filter(r => r.stuck !== undefined).length === 1, '막힌 곳 — 본인 줄에만 보인다');
       ok(badm.find(r => r.id === k1).stuck.includes('3시간'), '막힌 곳 — 운영자는 본다');
+    }
+    /* 대회 혜택 — 확정된 것만, 끝난 대회·비공개 대회는 빼고 */
+    {
+      const pe = createEvent(db, { title: '혜택 검사', starts: '2099-06-01', ends: '2099-06-01', prize: 300000 });
+      db.prepare('UPDATE events SET listed=1, prize=300000 WHERE id=?').run(pe.id);
+      db.prepare("INSERT INTO sponsors(event,name,kind,amount) VALUES(?,?,?,?)").run(pe.id, '구름', '크레딧', 500000);
+      const cn = Number(db.prepare("INSERT INTO needs(event,kind,label) VALUES(?,'credit','클로드 크레딧 30만원')").run(pe.id).lastInsertRowid);
+      db.prepare("INSERT INTO pledges(need,event,name,org,status) VALUES(?,?,?,?,'ok')").run(cn, pe.id, '담당자', '앤트로픽');
+      const pn = Number(db.prepare("INSERT INTO needs(event,kind,label) VALUES(?,'prize','키보드')").run(pe.id).lastInsertRowid);
+      db.prepare("INSERT INTO pledges(need,event,name,org,status) VALUES(?,?,?,?,'pending')").run(pn, pe.id, '아직', '확인 전');
+      const jn = Number(db.prepare("INSERT INTO needs(event,kind,label) VALUES(?,'judge','심사')").run(pe.id).lastInsertRowid);
+      db.prepare("INSERT INTO pledges(need,event,name,status) VALUES(?,?,?,'ok')").run(jn, pe.id, '김심사');
+      const hidden = createEvent(db, { title: '비공개 혜택', starts: '2099-06-01', ends: '2099-06-01' });
+      const old = createEvent(db, { title: '끝난 혜택', starts: '2020-06-01', ends: '2020-06-01' });
+      db.prepare('UPDATE events SET listed=1 WHERE id=?').run(old.id);
+      const pk = perksOf(db), mine = pk.find(x => x.id === pe.id), txt = JSON.stringify(mine.gets);
+      ok(txt.includes('상금 300,000원') && txt.includes('구름 크레딧 500,000원 어치') && txt.includes('클로드 크레딧 30만원 — 앤트로픽 제공') && txt.includes('멘토·심사 1명'),
+         '대회 혜택 — 상금·협찬·확정 크레딧·심사가 받는 것으로 모인다: ' + txt);
+      ok(!txt.includes('키보드'), '대회 혜택 — 확인 전 후원은 혜택으로 안 적는다');
+      ok(!pk.some(x => x.id === hidden.id) && !pk.some(x => x.id === old.id), '대회 혜택 — 비공개·끝난 대회는 안 실린다');
+      ok(!JSON.stringify(pk).includes('contact'), '대회 혜택 — 연락처 칸이 없다');
+      db.prepare('UPDATE events SET listed=0 WHERE id IN (?,?)').run(pe.id, old.id);   /* 아래 «공개한 것만» 검사와 안 섞이게 */
     }
     /* 자리 매칭 — 카드 올리기 → 주최자 요청 → 카드 주인 수락 → 둘에게만 연락처, 확정 기여로 */
     {

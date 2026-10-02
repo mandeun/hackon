@@ -936,6 +936,10 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .mhero .steps3{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
 .mhero .steps3 span{font-size:12px;font-weight:800;padding:5px 10px;border-radius:99px;background:rgba(200,245,59,.12);color:#C8F53B;border:1px solid rgba(200,245,59,.35)}
 .askbox{background:var(--bg2,#EAEEF5);border-radius:14px;padding:12px;margin-top:10px}
+.perks{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px}
+.perks li{font-size:13.5px;display:flex;gap:7px;align-items:flex-start;color:var(--ink2)}
+.perks li.hot{color:var(--ink);font-weight:700}
+.perks li span{flex:none;width:20px;text-align:center}
 .inbox-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:#C8F53B;color:#0B1020;font-size:12px;font-weight:800;margin-left:4px}
 /* 고르는 칩 줄은 접어서 다 보인다. 옆으로 밀어야 보이는 칩은 폰에서 «잘린 것» 으로 읽힌다 */
 .htabs.wrap{flex-wrap:wrap;overflow:visible;position:static;row-gap:6px}
@@ -1775,7 +1779,7 @@ let findSide = 'get';     // 자리 탭의 방향 — get 구해요(주최자) |
    3,765건이고 장학금은 65건이라(2026-09-28), 전체로 두면 장학금이 묻힌다.
    그런데 사람들이 찾는 것은 장학금 쪽이다(실측: 국가장학금 2147 · 청년 지원금 407,
    앵커 차례상=100 기준 · docs/수요측정_20260928.md). 공급 순서가 아니라 수요 순서로 둔다. */
-let benSeg = 'scholarship';
+let benSeg = 'all';
 let openKind = '';        // «드려요» 에서 고른 자리 종류
 let findSeg = 'match';    // 구하기 화면의 갈래 — 매칭 | 사람 | 장소 | 연락한 곳. 기본은 매칭(앱 안에서 요청·수락)이다
 /* 처음에 본인이 고르는 실력. 서버의 LEVELS 와 같아야 한다. */
@@ -2267,29 +2271,6 @@ function dday(starts) {
   const t0 = new Date(); t0.setHours(0, 0, 0, 0);
   const n = Math.round((d0 - t0) / 86400000);
   return n === 0 ? '오늘' : n > 0 ? 'D-' + n : '';
-}
-
-/* 혜택 마감까지 며칠. 지난 것은 «지남»이라고 적는다 — 빈칸으로 두면 열려 있는 것처럼 보인다. */
-function benDday(end) {
-  const d0 = new Date(String(end || '').slice(0, 10) + 'T00:00:00');
-  if (isNaN(+d0)) return '';
-  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-  const n = Math.round((d0 - t0) / 86400000);
-  return n === 0 ? '오늘 마감' : n > 0 ? 'D-' + n : '지남';
-}
-
-/* 지역 표시. **없으면 «전국»이라고 단정하지 않는다** — 안 적힌 것과 전국은 다른 말이다 (E22).
-   'all' 은 자료가 실제로 «전국»이라고 적은 것이라 그때만 전국이라 쓴다. */
-const BEN_REGION = {
-  seoul: '서울', busan: '부산', daegu: '대구', incheon: '인천', gwangju: '광주', daejeon: '대전',
-  ulsan: '울산', sejong: '세종', gyeonggi: '경기', gangwon: '강원', chungbuk: '충북', chungnam: '충남',
-  jeonbuk: '전북', jeonnam: '전남', gyeongbuk: '경북', gyeongnam: '경남', jeju: '제주', all: '전국',
-};
-function benWhere(regions) {
-  const rs = Array.isArray(regions) ? regions.filter(Boolean) : [];
-  if (!rs.length) return '';                                  // 모름 — 아무것도 안 적는다
-  const names = rs.map(r => BEN_REGION[r] || r);
-  return names.length > 3 ? names.slice(0, 3).join('·') + ` 외 ${names.length - 3}곳` : names.join('·');
 }
 
 /* 목록 카드의 둘째 줄. 여기 있는 것은 전부 서버가 이미 세어서 보내는 값이다(/api/events) —
@@ -2870,43 +2851,31 @@ const SCREEN = {
         맡은 것은 <b>내 대회</b> 탭에 남습니다. 대회가 끝나면 공개 장부와 결과 보고서에 이름이 오릅니다.</div></div>`;
   },
 
-  /* 혜택 — 지금 신청할 수 있는 장학금·지원금·활동. 대회를 가로지르는 화면이라
-     «자리»와 같은 층에 둔다(한 대회 안의 화면이 아니다).
-     자료는 서버 /api/benefits 가 **공공 출처만** 걸러 준 것이다. 여기서 다시 안 고른다. */
+  /* 대회 혜택 — 지금 열린 대회에 참가하면 받는 것. 장학금·지원금 목록은 해커톤과 상관이 없어 이 탭에서 뺐다
+     (자료 수집 /api/benefits 는 그대로 둔다). 확정된 후원만 «받는 것» 으로 적는다 — 서버 perksOf. */
   async benefit() {
-    if (!LIVE) return `<h2 id="ben-h">혜택</h2><p class="sub">서버로 열어야 합니다.</p>`;
-    const b = await api(`/benefits?type=${encodeURIComponent(benSeg === 'all' ? '' : benSeg)}`)
-      .catch(() => null);
-    if (!b) return `<h2 id="ben-h">혜택</h2>
-      <p class="sub" id="ben-off">혜택 자료를 지금 못 가져왔습니다. 잠시 뒤에 다시 열어 주세요.</p>
-      <div class="meta">이 화면만 비어 있고 다른 탭은 그대로 됩니다.</div>`;
-
-    const segs = [['scholarship', '장학금'], ['support', '지원금'], ['experience', '활동·봉사'], ['all', '전체']];
-    const segHtml = `<div class="htabs" id="ben-segs">${segs.map(([k, t]) =>
-      `<button type="button" data-bseg="${k}"${k === benSeg ? ' class="on"' : ''}>${t}</button>`).join('')}</div>`;
-
-    const rows = b.rows.slice(0, 60);
-    const list = rows.length ? rows.map(r => {
-      const d = benDday(r.end);
-      /* 지역이 비었으면 «전국»이라고 단정하지 않는다 — 모르는 것이다 (E22) */
-      const where = benWhere(r.regions);
-      const head = r.url
-        ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>`
-        : esc(r.title);
-      return `<div class="card">
-        <h3 style="margin:0">${head}</h3>
-        <div class="meta" style="margin-top:6px">${esc(r.provider || '어디서 주는지 안 적혀 있음')}${where ? ' · ' + esc(where) : ''}</div>
-        <div class="meta" style="margin-top:4px">${d ? `<b>${esc(d)}</b> · ` : ''}마감 ${esc(r.end || '모름')}</div>
-      </div>`;
-    }).join('') : `<div class="card"><div class="meta">이 갈래에는 지금 열린 것이 없습니다. 다른 갈래를 보세요.</div></div>`;
-
-    return `<h2 id="ben-h">혜택</h2>
-      <p class="sub">지금 <b>신청할 수 있는 것</b>을 마감 가까운 순으로. 공공 출처만 모았습니다.</p>
-      ${segHtml}
-      <div class="meta" style="margin:2px 0 10px">${b.total}건 가운데 ${rows.length}건 · ${esc(b.asOf)} 기준
-        ${b.total > rows.length ? ' — 마감이 가까운 것부터 보여 줍니다' : ''}</div>
-      ${list}
-      <div class="meta" style="margin-top:12px">신청 조건과 마감은 <b>기관 공고가 우선</b>입니다. 누르면 그 기관 쪽으로 갑니다.</div>`;
+    if (!LIVE) return `<h2 id="ben-h">대회 혜택</h2><p class="sub">서버로 열어야 합니다.</p>`;
+    const rows = await api('/perks').catch(() => null);
+    const head = `<div class="mhero" id="ben-h"><h2>참가만 해도 <span class="lime">켜지는 것</span></h2>
+      <p>지금 열린 대회에서 받는 상금·크레딧·상품·피드백을 모았습니다. <b>확정된 것만</b> 적습니다.</p></div>`;
+    if (rows === null) return head + `<div class="card" id="ben-off"><div class="meta">혜택 목록을 못 가져왔습니다 — 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요.</div></div>`;
+    if (!rows.length) return head + `<div class="card" id="ben-none"><h3>지금 열린 대회가 없습니다</h3><div class="meta">대회가 열리면 여기 받는 것이 모입니다. <a href="#" data-go="make">＋ 대회 열기</a></div></div>`;
+    const K = { all: '전체', prize: '상금', credit: '크레딧·상품', people: '멘토·심사' };
+    const has = (r, k) => k === 'all' || r.gets.some(g => k === 'credit' ? (g.k === 'credit' || g.k === 'goods') : g.k === k);
+    const list = rows.filter(r => has(r, benSeg in K ? benSeg : 'all'));
+    const ICON = { prize: '🏆', credit: '🔋', goods: '🎁', people: '🧭', snack: '🍩', sponsor: '🤝', record: '📜', mate: '🤝' };
+    const sumPrize = rows.reduce((n, r) => n + r.gets.filter(g => g.k === 'prize').length, 0);
+    const sumCredit = rows.reduce((n, r) => n + r.gets.filter(g => g.k === 'credit' || g.k === 'goods').length, 0);
+    return head + `<div class="stat" id="ben-stat"><div><b>${rows.length}</b><span>열린 대회</span></div><div><b>${sumPrize}</b><span>상금 있는 곳</span></div><div><b>${sumCredit}</b><span>크레딧·상품</span></div></div>
+      <div class="htabs" id="ben-segs">${Object.entries(K).map(([k, t]) => `<button type="button" data-bseg="${k}"${(benSeg in K ? benSeg : 'all') === k ? ' class="on"' : ''}>${t} ${rows.filter(r => has(r, k)).length}</button>`).join('')}</div>
+      ${list.length ? list.map(r => `<div class="card ev perk" data-open="${esc(r.id)}" role="button" tabindex="0">
+        ${dateTile(r.starts)}
+        <div class="body"><h3>${esc(r.title)}</h3>
+          <div class="meta">${esc(r.host)}${r.place ? ' · ' + esc(r.place) : ''}${r.seatsLeft !== null ? ` · <b>남은 자리 ${r.seatsLeft}팀</b>` : ''}</div>
+          <ul class="perks">${r.gets.map(g => `<li class="hot"><span aria-hidden="true">${ICON[g.k] || '✨'}</span>${esc(g.t)}</li>`).join('')}
+            ${r.always.map(g => `<li><span aria-hidden="true">${ICON[g.k] || '✨'}</span>${esc(g.t)}</li>`).join('')}</ul>
+        </div></div>`).join('') : `<div class="card"><div class="meta">이 갈래로 받는 것이 확정된 대회는 아직 없습니다. «전체» 를 보세요.</div></div>`}
+      <div class="meta" style="margin-top:10px">협찬이 확정되면 여기에 바로 붙습니다. 주최자라면 «자리 → 매칭» 에서 크레딧·상품 줄 곳을 찾으세요.</div>`;
   },
 
   async find() {
