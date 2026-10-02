@@ -4247,9 +4247,12 @@ with sync_playwright() as pw:
     pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("brief: " + str(e)))
     pg.add_init_script(f"localStorage.setItem('hackon.owner','{_bv['owner']}');localStorage.setItem('hackon.waljob','개발');"
                        f"localStorage.setItem('hackon.wallet', JSON.stringify([{{name:'브리핑 마감',kind:'due',date:'{_soon3}'}},{{name:'먼 마감',kind:'due',date:'2099-01-01'}}]))")
-    _w = []; pg.on("request", lambda r: _w.append(r.url) if "/api/" in r.url and r.method != "GET" else None)
-    pg.goto(BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#br-work")
-    A("브리핑 검사 대회" in pg.inner_text("#br-work") and "D-10" in pg.inner_text("#br-work"), f"켜 둔 일에 내 대회 D-day 가 없다: {pg.inner_text('#br-work')}")
+    # /api/cal 은 POST 지만 읽기다(열쇠를 주소가 아니라 본문에 싣느라 POST) — 쓰기로 세지 않는다
+    _w = []; pg.on("request", lambda r: _w.append(r.url) if "/api/" in r.url and r.method != "GET" and not r.url.endswith("/api/cal") else None)
+    # 브리핑은 «오늘»(/cal) 에 합쳤다 — /brief 주소는 같은 화면을 연다. 내 대회는 달력(다가오는 30일)에
+    pg.goto(BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#cal-month")
+    A(pg.query_selector("#br-cal") is not None and pg.query_selector("#br-work") is None, "오늘 화면에 브리핑 카드가 없거나 «켜 둔 일» 이 겹쳐 나온다")
+    A("브리핑 검사 대회" in pg.inner_text("#cal-next"), f"내 대회가 오늘 화면 «다가오는 30일» 에 없다: {pg.inner_text('#cal-next')}")
     _bc = pg.inner_text("#br-cal")
     A("브리핑 마감" in _bc and "D-3" in _bc and "먼 마감" not in _bc, f"7일 안 마감만 떠야 한다: {_bc}")
     A("재현" in pg.inner_text("#br-tip"), "고른 직무(개발)의 오늘의 스위치가 없다")

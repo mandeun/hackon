@@ -987,6 +987,7 @@ nav button.on::before{content:"";position:absolute;top:0;left:50%;width:22px;hei
 .evcal-m[hidden]{display:none}
 .mhero .evcal-m a,.evcal-m a{padding:13px 14px;border-radius:10px;color:#0B1020!important;font-weight:700;text-decoration:none}
 .evcal-m a:hover,.evcal-m a:focus{background:#F1FBD5}
+.calsec{margin:18px 4px 8px;font-size:13px;font-weight:800;letter-spacing:.04em;color:var(--ink3)}
 .inbox-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:#C8F53B;color:#0B1020;font-size:12px;font-weight:800;margin-left:4px}
 /* 고르는 칩 줄은 접어서 다 보인다. 옆으로 밀어야 보이는 칩은 폰에서 «잘린 것» 으로 읽힌다 */
 .htabs.wrap{flex-wrap:wrap;overflow:visible;position:static;row-gap:6px}
@@ -4774,6 +4775,11 @@ const SCREEN = {
     }
     const next30 = d.items.filter(i => i.date > today && i.date <= ymd(new Date(now.getTime() + 30 * 86400000)));
     const selItems = at(calSel);
+    /* 아침 브리핑 카드(확 뜬 것·새로 켜진 것·할인·오늘의 스위치·한 장 복사)를 그대로 가져온다. 브리핑의 머리 칸과
+       «내 대회» 칸은 이 화면 위쪽(오늘·달력)과 겹쳐 뺀다 — 화면 둘을 하나로 합친 것이다 */
+    const brHtml = (await SCREEN.brief()).replace(/^[\s\S]*?<\/section>/, '')
+      .replace(/<div class="card" id="br-work">[\s\S]*?(?=<div class="card" id="br-cal">)/, '')
+      .replace(/<p class="meta" style="margin:14px 4px">[\s\S]*?<\/p>\s*$/, '');
     return `<section class="mhero" id="cal-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi.svg" alt="" width="34" height="34">
         <span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">오늘</span><span style="color:#C9CFDA">${esc(day)}</span></div>
         <h2 style="margin-top:10px">${unknown ? '일정을 못 읽었습니다' : todays.length ? `오늘 <span class="lime">${todays.length}개</span> 켜져 있어요` : '오늘은 비어 있어요'}</h2>
@@ -4784,6 +4790,9 @@ const SCREEN = {
         : !any ? `<div class="card" id="cal-empty"><h3>아직 내 대회가 없어요</h3><div class="meta">대회를 열거나 신청하면 날짜·마감·답할 것이 여기 저절로 찍힙니다.</div>
             <div class="shrow" style="margin-top:10px"><a class="btn sm" href="/#list">대회 찾기</a><a class="btn sec sm" href="/app">＋ 대회 열기</a></div></div>`
         : todays.length ? `<div class="card" id="cal-today"><h3>오늘</h3>${todays.map(row).join('')}</div>` : ''}
+      <h3 class="calsec">아침 브리핑</h3>
+      ${brHtml}
+      <h3 class="calsec">달력</h3>
       <div class="card" id="cal-month">
         <div class="calhead"><button type="button" class="btn sec sm" data-calmove="-1" aria-label="지난달">‹</button>
           <b>${Y}년 ${M}월</b><button type="button" class="btn sec sm" data-calmove="1" aria-label="다음 달">›</button></div>
@@ -4795,7 +4804,7 @@ const SCREEN = {
       ${d.events.length ? `<div class="card" id="cal-sub"><h3>폰 달력에도 <span class="meta">구독 — 바뀌면 저절로</span></h3>
         <div class="meta">구글·애플 달력에 주소 하나만 넣으면 여기 일정이 따라갑니다. 주소에 열쇠는 안 들어갑니다.</div>
         <div style="height:8px"></div><button class="btn sm" id="cal-subbtn">구독 주소 만들기</button><div id="cal-subout"></div></div>` : ''}
-      <div class="shrow" style="margin:6px 0 20px"><a class="btn sec sm" href="/brief">아침 브리핑</a><a class="btn sec sm" href="/wallet">AI 지갑</a><a class="btn sec sm" href="/app">내 대회</a></div>`;
+      <div class="shrow" style="margin:6px 0 20px"><a class="btn sec sm" href="/wallet">AI 지갑</a><a class="btn sec sm" href="/app">내 대회</a></div>`;
   },
 
   async brief() {
@@ -8348,7 +8357,7 @@ if (location.pathname === '/card') {
   history.replaceState(null, '', '/app');
   tab = 'find'; findSide = 'give';
 }
-const CAL = location.pathname === '/cal';        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
+const CAL = location.pathname === '/cal' || location.pathname === '/brief';   /* 브리핑은 «오늘» 에 합쳤다(10/02) — /brief 주소는 살려 같은 화면으로 */        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
 const PTN = location.pathname === '/partner';    // 협찬·협업 안내 — 주시는 것별로 받는 것 한 장
