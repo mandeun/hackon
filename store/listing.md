@@ -166,7 +166,7 @@ None. The app behaves the same in every region; content is in Korean.
 hi@mandeun.com
 ```
 
-> 점검할 것: **지침 4.8(로그인 서비스)**. 카카오·구글·네이버 로그인을 제공하는데 Sign in with Apple 이 없다(`server.js` 의 `LOGINS` 에 kakao·google·naver 셋뿐). 로그인이 선택이어도 «주 계정 로그인» 으로 보면 4.8 에 걸릴 수 있다. 메모 2번에 «로그인 없이 모든 기능을 쓴다» 를 분명히 적었지만, 거절되면 Apple 로그인을 붙이는 것이 답이다.
+> 지침 4.8(로그인 서비스): **Sign in with Apple 을 붙였다**(`server.js` `LOGINS.apple`). 켜려면 fly 비밀값 넷 — `APPLE_ID`(Services ID), `APPLE_TEAM`, `APPLE_KEY_ID`, `APPLE_KEY`(p8 본문) — 을 넣고, Apple Developer 의 Services ID 에 돌아올 주소 `https://hackon.kr/auth/apple/done` 을 등록한다. 넣기 전에는 단추가 안 보이니, **심사 제출 전에 꼭 켠다.**
 > Fly.io 지역은 `fly.toml` 의 `primary_region = "nrt"`(도쿄)에서 읽었다.
 > 푸시: 서버는 `APNS_KEY` 가 없으면 토큰을 저장만 하고 보내지 않는다. 출시 때 발송을 안 켜면 메모의 APNs 줄을 «planned» 로 바꾼다.
 
