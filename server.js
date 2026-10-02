@@ -2518,7 +2518,7 @@ async function newsTick(db) {
   try {
     const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     for (const r of ((await j(`https://api.github.com/search/repositories?q=created:%3E${since}&sort=stars&order=desc&per_page=6`)) || {}).items || [])
-      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 80) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발', born: r.created_at });
+      got.push({ src: 'gh', title: r.full_name + (r.description ? ' — ' + String(r.description).slice(0, 200) : ''), url: r.html_url, note: `★ ${r.stargazers_count}`, job: '개발', born: r.created_at });
   } catch {}
   try { for (const d of (await j('https://huggingface.co/api/datasets?sort=trendingScore&direction=-1&limit=4')) || [])
     got.push({ src: 'ds', title: d.id, url: 'https://huggingface.co/datasets/' + d.id, note: `♥ ${d.likes || 0}`, job: '데이터' }); } catch {}
@@ -2531,7 +2531,7 @@ async function newsTick(db) {
   } catch {}
   const ins = db.prepare('INSERT OR IGNORE INTO news(src,key,title,url,note,job) VALUES(?,?,?,?,?,?)');
   let added = 0;
-  for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 160), g.url.slice(0, 500), String(g.note).slice(0, 200), g.src === 'hackon' ? '' : (g.job || jobOf(g.title))).changes);
+  for (const g of got) if (g.title && /^https?:\/\//.test(g.url)) added += Number(ins.run(g.src, g.url, String(g.title).slice(0, 260), g.url.slice(0, 500), String(g.note).slice(0, 200), g.src === 'hackon' ? '' : (g.job || jobOf(g.title))).changes);
   const snapped = newsSnap(db, got);
   db.prepare("DELETE FROM news WHERE at < date('now','-30 days')").run();
   db.prepare("DELETE FROM news_counts WHERE day < date('now','-30 days')").run();
@@ -2571,7 +2571,9 @@ const newsKind = src => NEWS_KIND_OF[src] || 'read';
 /* 혜택 — 무료 크레딧·할인·사용 한도 리셋. 출처가 아니라 제목으로 가른다(어느 매체에서든 나온다).
    논문·데이터셋은 뺀다 — «credit assignment» 같은 말이 걸린다. «free» 는 혼자 쓰면 오픈소스까지 다 걸려 뒤에 무엇이 붙을 때만 */
 const DEAL_RE = /무료로|무료 ?(체험|제공|크레딧|플랜|이용)|할인|공짜|크레딧|쿠폰|프로모션|리셋|초기화|한도 ?(상향|늘|두 배|2배)|free (tier|plan|credits?|trial|for|access)|\bdiscount|\d+ ?% off|\bcredits\b|\bpromo(tion)?\b|giveaway|(rate|usage) limits?|price (cut|drop)|half[- ]price/i;
-const newsKindOf = r => (!['paper', 'ds', 'hf'].includes(r.src) && DEAL_RE.test(String(r.title || ''))) ? 'deal' : newsKind(r.src);
+/* 할인·무료는 **AI 모델·AI 도구의 구독·요금·크레딧** 만(10/02 요청). 운동화 할인·숙박 쿠폰이 «무료·할인» 칸을 먹지 않게 */
+const AI_DEAL_RE = /gpt|chatgpt|챗\s?gpt|챗지피티|claude|클로드|gemini|제미나이|llm|openai|오픈에이아이|anthropic|앤트로픽|copilot|코파일럿|cursor|커서|perplexity|퍼플렉시티|midjourney|미드저니|grok|deepseek|딥시크|mistral|llama|qwen|sora|runway|elevenlabs|notebooklm|hugging\s?face|허깅페이스|groq|together\s?ai|replicate|\bapi\b|토큰|token|모델|\bmodels?\b|\bai\b|인공지능|생성형|에이전트|agent/i;
+const newsKindOf = r => (!['paper', 'ds', 'hf'].includes(r.src) && DEAL_RE.test(String(r.title || '')) && AI_DEAL_RE.test(String(r.title || ''))) ? 'deal' : newsKind(r.src);
 /* 출처 무게 — «읽고 나서 오늘 할 일이 생기는 정도». 보는 사람이 한국에서 일하는 사람이라
    한국어로 읽히고 바로 손에 잡히는 곳이 높다. 제보·우승작이 가장 높다(우리 사람이 써 본 것).
    2026-09-27 실측으로 한 번 고쳤다: 논문(paper)이 12 였을 때 ▲수가 붙어 «오늘 꼭 볼 것» 다섯 자리 중
@@ -2645,19 +2647,6 @@ function newsNormTitle(t) {
 /* ── 5살도 알아듣게 — 줄마다 «쉽게:» 한 줄 ───────────────────────────────────────
    AI 를 부르지 않는다. 출처 종류로 «이게 뭔지» 한 문장, 제목 속 어려운 말을 사전에서 둘까지 푼다.
    사전에 없는 말은 설명하지 않는다(모르는 것을 지어내면 그게 제일 나쁜 설명이다). */
-const NEWS_EASY_SRC = {
-  hf: '누구나 받아 쓸 수 있게 공개된 AI 두뇌(모델)예요.',
-  paper: '연구자들이 «이렇게 하니 더 잘 되더라» 하고 쓴 글이에요.',
-  space: '웹에서 바로 눌러 볼 수 있는 AI 놀이터예요.',
-  ds: 'AI 를 가르칠 때 쓰는 공부 자료 묶음이에요.',
-  gh: '누구나 보고 고쳐 쓸 수 있게 공개된 프로그램이에요.',
-  hackon: '우리 대회에서 하루 만에 만든 것 중 1등이에요.',
-  tube: '새 도구를 먼저 써 본 사람이 영상으로 알려 주는 거예요.',
-  ph: '새로 나온 앱·서비스를 소개하는 곳에 올라온 거예요.',
-  show: '누가 직접 만들어서 «이거 봐 주세요» 하고 올린 거예요.',
-  tip: '같은 일 하는 사람이 써 보고 좋아서 알려 준 거예요.',
-};
-const NEWS_EASY_KIND = { deal: '공짜로 주거나 싸게 해 주는 소식이에요.', read: '요즘 AI 쪽에서 무슨 일이 있었는지 알려 주는 글이에요.', tool: '새로 나온 도구 소식이에요.' };
 /* 위에서부터 먼저 걸리는 둘. 영어 낱말은 \b 로 묶어 «drag» 속 «rag» 같은 것을 안 잡는다 */
 const NEWS_GLOSS = [
   [/\bmcp\b|model context protocol/i, 'MCP', 'AI 가 다른 앱을 쓸 수 있게 꽂는 플러그'],
@@ -2679,8 +2668,10 @@ const NEWS_GLOSS = [
   [/\bllms?\b|language model|언어\s?모델/i, 'LLM', '말을 알아듣고 글을 쓰는 AI'],
   [/open.?source|오픈\s?소스|open.?weight/i, '오픈소스', '누구나 공짜로 보고 고쳐 쓸 수 있는 것'],
 ];
+/* 출처 종류로 붙이던 한 문장(«누구나 보고 고쳐 쓸 수 있게 공개된 프로그램이에요»)은 뺐다 — 줄마다 같은 말이라
+   관심을 끌지 못했다(10/02). 이제 제목에 어려운 말이 있을 때만 그 말을 푼다. 없으면 «쉽게» 줄 자체가 없다. */
 function newsEasy(r) {
-  const base = NEWS_EASY_SRC[r.src] || NEWS_EASY_KIND[r.kind || newsKind(r.src)] || '';
+  const base = '';
   const t = String(r.title || ''), terms = [];
   for (const [re, w, say] of NEWS_GLOSS) { if (terms.length >= 2) break; if (re.test(t)) terms.push(`«${w}» 는 ${say}.`); }
   return [base, ...terms].filter(Boolean).join(' ');
@@ -11975,7 +11966,7 @@ async function selftest() {
     ok(tiny.length === 2, '제목이 짧다고 서로 다른 글이 하나로 뭉쳤다');
     /* 혜택 묶음 — 무료 크레딧·할인·한도 리셋은 출처와 상관없이 «무료·할인·리셋» 으로 간다 */
     const dl = newsEnrich([{ id: 1, src: 'geek', title: 'Claude Code 사용 한도 리셋 — 주간 한도 두 배', url: 'https://d.example/1', note: '', at: T, job: '' },
-                           { id: 2, src: 'ph', title: 'Get $50 free credits for new users', url: 'https://d.example/2', note: '', at: T, job: '' },
+                           { id: 2, src: 'ph', title: 'Get $50 free OpenAI API credits for new users', url: 'https://d.example/2', note: '', at: T, job: '' },
                            { id: 3, src: 'paper', title: 'Credits assignment for free agents', url: 'https://d.example/3', note: '', at: T, job: '' },
                            { id: 4, src: 'gh', title: 'A free and open source note app', url: 'https://d.example/4', note: '', at: T, job: '' }], T);
     const kk = Object.fromEntries(dl.map(r => [r.id, r.kind]));
@@ -12097,19 +12088,23 @@ async function selftest() {
     ok(hot[0].url === 'https://github.com/new/kid', '확 뜬 것 — 는 비율로 섞어 큰 저장소가 맨 위를 늘 먹지 않는다: ' + hot.map(r => r.url).join(','));
     ok(newsHot(hdb, { day: D, per: 1 }).filter(r => r.src === 'gh').length === 1, '확 뜬 것 — 한 출처가 판을 다 먹지 않는다');
     ok(/«MCP» 는/.test(at('https://github.com/new/kid').easy) && /«에이전트» 는/.test(at('https://github.com/new/kid').easy), '확 뜬 것 — 줄마다 «쉽게» 가 붙는다');
-    ok(newsFeed(hdb).length >= 5 && newsFeed(hdb).every(r => r.easy), '쉽게 — 모든 소식 줄에 «쉽게» 가 붙는다');
+    ok(newsFeed(hdb).find(r => r.url === 'https://github.com/new/kid').easy.includes('«MCP» 는') && newsFeed(hdb).find(r => r.url === 'https://yozm.example/1').easy === '', '쉽게 — 어려운 말이 있는 줄에만 «쉽게» 가 붙는다');
     const md = newsMd(hdb);
     ok(md.includes('## 이번 주 확 뜬 것') && md.includes('+300') && md.includes('쉽게:'), '확 뜬 것 — 마크다운에도 같은 판과 «쉽게» 가 실린다');
   }
   ok(loginFailHtml('<b>x</b> 실패 (KOE320)').includes('&lt;b&gt;x&lt;/b&gt; 실패 (KOE320)') && loginFailHtml('x').includes('href="/app?login=1"'),
      '로그인 실패 화면 — 공급자 메시지는 글자로만, 다시 하기 길이 있다');
+  ok(newsKindOf({ src: 'geek', title: 'ChatGPT Plus 첫 달 무료 체험' }) === 'deal' && newsKindOf({ src: 'geek', title: 'Claude API 크레딧 50% 할인' }) === 'deal',
+     '할인·무료 — AI 모델 구독·크레딧 소식은 «무료·할인» 으로');
+  ok(newsKindOf({ src: 'geek', title: '운동화 30% 할인 쿠폰' }) !== 'deal' && newsKindOf({ src: 'ph', title: '숙박 무료 체험 프로모션' }) !== 'deal',
+     '할인·무료 — AI 와 상관없는 할인은 «무료·할인» 에 안 든다');
   /* 5살 설명 — 출처 종류 한 문장 + 제목 속 어려운 말 둘까지. 모르는 말은 풀지 않는다 */
-  ok(newsEasy({ src: 'hf', title: 'acme/tiny-7b' }).startsWith('누구나 받아 쓸 수 있게 공개된 AI 두뇌'), '쉽게 — 허깅페이스 모델은 «공개된 AI 두뇌»');
+  ok(newsEasy({ src: 'hf', title: 'acme/tiny-7b' }) === '', '쉽게 — 어려운 말이 없으면 «쉽게» 를 안 붙인다(출처 종류로 뻔한 말을 붙이지 않는다)');
   ok(newsEasy({ src: 'paper', title: 'A RAG pipeline for reasoning' }).includes('«RAG» 는') && newsEasy({ src: 'paper', title: 'A RAG pipeline for reasoning' }).includes('«추론» 는'), '쉽게 — 제목 속 RAG·추론을 푼다');
   ok(!newsEasy({ src: 'gh', title: 'drag-and-drop builder' }).includes('RAG'), '쉽게 — «drag» 속 «rag» 를 RAG 로 잘못 풀지 않는다');
   ok((newsEasy({ src: 'gh', title: 'MCP agent for LLM coding with RAG' }).match(/«/g) || []).length === 2, '쉽게 — 어려운 말은 둘까지만');
-  ok(newsEasy({ src: 'gh', title: 'zzqx frobnicator' }) === NEWS_EASY_SRC.gh, '쉽게 — 사전에 없는 말은 설명을 지어내지 않는다');
-  ok(newsEasy({ src: 'geek', title: '오늘의 소식', kind: 'read' }) === NEWS_EASY_KIND.read, '쉽게 — 기사 출처는 종류(읽을거리)로 한 문장');
+  ok(newsEasy({ src: 'gh', title: 'zzqx frobnicator' }) === '', '쉽게 — 사전에 없는 말은 설명을 지어내지 않는다');
+  ok(newsEasy({ src: 'geek', title: 'RAG 로 사내 문서 검색 붙이기', kind: 'read' }).startsWith('«RAG» 는'), '쉽게 — 기사 제목 속 어려운 말도 푼다');
   /* 관문 값을 안 넘기면 조용히 꺼지지 않고 터진다 */
   ok((() => { try { pickFeed('x', [], undefined); return false; } catch { return true; } })(),
      'AI 관문 — aiOnly 를 안 넘기면 그 자리에서 터진다');

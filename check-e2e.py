@@ -4407,7 +4407,9 @@ with sync_playwright() as pw:
     A("e2e/tiny" not in _h, "하루치뿐인 것(는 만큼 모름)이 확 뜬 것 판에 올랐다")
     A("쉽게:" in _h and "MCP" in _h, f"확 뜬 것 줄에 «쉽게» 가 없다: {_h}")
     # 아래 목록 줄에도 «쉽게» — 그리고 확 뜬 것 판은 목록(#list) 밖이라 칩 수와 그린 줄 수가 그대로 맞는다
-    A(pg.locator("#list .ez").count() >= 3, "목록 줄에 «쉽게» 가 안 붙는다")
+    # «쉽게» 는 어려운 말이 있는 줄에만(10/02 — 출처 종류로 붙이던 뻔한 문장은 뺐다)
+    A(pg.locator("#list .ez").count() >= 1, "어려운 말(MCP·에이전트)이 있는 줄에 «쉽게» 가 안 붙는다")
+    A("누구나 보고 고쳐 쓸 수 있게" not in pg.inner_text("#view, body"), "출처 종류로 붙이던 뻔한 «쉽게» 문장이 아직 있다")
     _all = pg.evaluate("document.querySelector('.chip[data-k=\"all\"]').dataset.n")
     A(int(_all) == pg.locator("#list .it").count(), "확 뜬 것 판이 칩 수와 목록 줄 수를 어긋나게 한다")
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "뉴스가 폰 폭에서 옆으로 밀린다")
