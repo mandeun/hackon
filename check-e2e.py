@@ -4275,5 +4275,14 @@ with sync_playwright() as pw:
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "협찬·협업 안내가 폰 폭에서 옆으로 밀린다")
     b.close()
 ok("협찬·협업 안내 — 현물·금액·정기·공동 주최 여섯 갈래, 제안가, 개인정보는 동의한 것만")
+
+# ── 시작하면 받는 것 /launch — 지금 되는 것과 조건부를 갈라 적는다 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("launch: " + str(e)))
+    pg.goto(BASE + "/launch", wait_until="networkidle"); pg.wait_for_selector("#launch-now")
+    A("팀원 추천" in pg.inner_text("#launch-now") and "약속이 아니라 조건" in pg.inner_text("#launch-later"), "시작 인센티브가 «지금» 과 «조건부» 로 안 갈린다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "시작 인센티브가 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("시작하면 받는 것 — 지금 되는 것·조건부 갈라 적기")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

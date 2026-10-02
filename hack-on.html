@@ -4334,6 +4334,38 @@ const SCREEN = {
       <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/setups">세팅 모음</a> · <a href="/news">해커온뉴스</a></p>`;
   },
 
+  /* 해커온에서 시작하면 받는 것. 금 캐러 온 사람에게 삽을 판다 — 우리는 금광이 아니라 삽·지도·동료를 낸다.
+     약속은 «지금 되는 것» 과 «기록이 쌓이면 되는 것» 을 갈라 적는다. 안 되는 것을 된다고 적으면 그게 가장 큰 거짓 광고다 */
+  async launch() {
+    const now = [
+      ['노출', '아침 브리핑 «새로 켜진 것»·해커온뉴스·첫 화면에 내 서비스', '/made 에 올리고 운영진이 열어 보면'],
+      ['사람', '역할·강점·이유가 맞는 팀원 추천, 서로 좋아요면 연락처', '대회·프로젝트에 신청하면'],
+      ['피드백', '심사위원 점수·심사평, 동료 평가, «지금 열리나» 자동 확인', '대회에 내면'],
+      ['기록', '완주·수상·만든 것이 프로필에 — 링크드인·링커리어로 복사', '끝난 대회에서 냈으면'],
+      ['도구', '대회 열기·모집 링크·진행표·큰 화면·결과 보고서·AI 지갑·직무 레시피', '처음부터 무료'],
+    ];
+    const later = [
+      ['크레딧', '협찬사 AI·클라우드 크레딧 — 결과물을 낸 팀에게만', '협찬이 붙은 대회'],
+      ['상금 풀', '«첫 사용자 100명» 을 먼저 넘긴 서비스에 협찬 풀에서 상금', '협찬 풀이 모이면 공지'],
+      ['돈 일부', '해커온을 같이 키운 기여(코드·새 서비스·운영)는 분기 수익을 점수 비율로 — 약정한 분만', 'CONTRIBUTING 9절'],
+      ['연결', '협찬사·기관·VC 데모데이에 우선 소개', '완주·사용자 기록이 쌓이면'],
+    ];
+    const row = ([k, v, when]) => `<div style="padding:10px 0;border-top:1px solid var(--rule)"><b>${esc(k)}</b> <span class="meta">— ${esc(when)}</span><div>${esc(v)}</div></div>`;
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">시작하기</span></div>
+        <h2>해커온에서 켜면 받는 것</h2>
+        <p class="sub" style="margin-bottom:0">바이브코딩으로 금을 캐러 오셨다면, 삽·지도·동료는 여기 있습니다. 만드는 건 여러분, 사람과 노출과 기록은 우리가.</p></section>
+      <div class="card" id="launch-now"><h3>지금 바로</h3>${now.map(row).join('')}</div>
+      <div class="card" id="launch-later"><h3>기록이 쌓이면 <span class="meta">약속이 아니라 조건입니다</span></h3>${later.map(row).join('')}</div>
+      <div class="card"><h3>순서</h3><ol class="steps">
+          <li>아이디어 하나 — <a href="/problems">문제 은행</a>에서 골라도 됩니다</li>
+          <li>대회나 프로젝트에 들어가 만들기 — <a href="/">열린 대회</a></li>
+          <li>만든 것 올리기 — <a href="/made">만든 것</a> (시연·영상·같이 할 사람)</li>
+          <li>첫 사용자 100명 — 브리핑·뉴스 노출, 방마다 초대 링크</li>
+          <li>사업으로 — 협찬·지원사업 연결, 같이 만든 사람은 <a href="/thanks">기여자 장부</a>에</li></ol></div>
+      <div class="card"><div class="meta">해커온은 돈을 받아 두지 않습니다. 판매·결제는 각자의 판매처에서, 수익 나눔은 서면 약정한 경우만. 코인·토큰은 쓰지 않습니다.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/partner">협찬·협업</a> · <a href="/thanks">기여자</a></p>`;
+  },
+
   /* 협찬·협업 안내 — 대회 하나가 아니라 해커온 전체에 주는 것. 대회별 자리·희망가는 /give/<id> 가 맡는다.
      금액은 «제안가» 다 — 이야기해서 정한다. 개인정보는 동의한 참가자 것만, 동의 범위 안에서만 넘긴다.
      이 앱은 돈을 받지 않는다 — 주고받는 것은 주최자와 직접 */
@@ -7838,6 +7870,7 @@ const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 �
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
 const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
 const PTN = location.pathname === '/partner';    // 협찬·협업 안내 — 주시는 것별로 받는 것 한 장
+const LCH = location.pathname === '/launch';     // 해커온에서 시작하면 받는 것 — 바이브코딩 금광의 삽
 const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
 const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
 const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
@@ -7885,6 +7918,7 @@ else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (PTN) { tab = 'partner'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (LCH) { tab = 'launch'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
