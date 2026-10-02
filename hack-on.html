@@ -3269,7 +3269,7 @@ const SCREEN = {
         <div class="meta">비워 둬도 대회는 돌아갑니다.</div>
         <div class="row">
           <div><label>대회 이름</label><input id="e-title" value="${esc(e.title)}"></div>
-          <div><label>여는 사람</label><input id="e-host" value="${esc(e.host)}" placeholder="동아리·모임·본인 이름"></div>
+          <div><label>여는 사람 <span class="pill">공개 페이지에 «○○ 주최»로</span></label><input id="e-host" value="${esc(e.host || '')}" maxlength="40" placeholder="동아리·모임·본인 이름"></div>
         </div>
         <div class="row">
           <div><label>시작</label><input id="e-starts" type="date" value="${esc(e.starts)}"></div>
@@ -3280,7 +3280,6 @@ const SCREEN = {
           <div><label>정원 (0=무제한)</label><input id="e-cap" type="number" value="${e.cap}">
             ${e.cap ? nudge(`실제로는 <b>${Math.round(e.cap / 2)}명</b>쯤 옵니다`) : ''}</div>
         </div>
-        <label>여는 사람 <span class="pill">공개 페이지에 «○○ 주최»로</span></label><input id="e-host" value="${esc(e.host || '')}" maxlength="40" placeholder="이름 또는 모임 이름">
         <label>주제</label><input id="e-topic" value="${esc(e.topic)}" placeholder="예) 생활 불편">
         <label>모이는 곳 <span class="pill">공개 페이지 «언제» 옆에 뜹니다</span></label>
         <input id="e-place" value="${esc(e.place || '')}" maxlength="120" placeholder="예) 서울 마포구 와우산로 94 학생회관 3층 · 온라인이면 «온라인»">
@@ -3702,7 +3701,7 @@ const SCREEN = {
         <div class="meta">명단은 정산이나 다음 회차 모집에 씁니다.</div>
         <div style="height:10px"></div>
         <button class="btn sec sm" id="b-report">결과 보고서 보기</button>
-        <button class="btn sec sm" id="b-csv">명단 내려받기 (엑셀)</button>
+        <button class="btn sec sm" id="b-csv-end">명단 내려받기 (엑셀)</button>
 
         <h3 style="font-size:15px;margin:20px 0 3px">3. 증서</h3>
         <div class="meta">심사위원 <b>위촉장</b> · 문제를 낸 분께 <b>감사장</b> · 자리를 맡아 준 분께 <b>확인증</b>.
@@ -6227,7 +6226,6 @@ function wire() {
         hours: $('#e-hours') ? $('#e-hours').value : undefined,
         deposit: $('#e-deposit') ? $('#e-deposit').value : undefined,
         twist: $('#e-twist') ? $('#e-twist').value.trim() : undefined,
-        host: $('#e-host') ? $('#e-host').value.trim() : undefined,
         topic: $('#e-topic').value, due: $('#e-due').value, plan } });
       flash('채웠습니다');
     } catch (e) { flash(e.message, true); }
@@ -7332,6 +7330,9 @@ function wire() {
   if (jb) jb.onclick = () => window.open(
     `${shareBase()}/j/${cur}${jkeyOf(cur) ? '?k=' + jkeyOf(cur) : ''}`, '_blank');
 
+  /* 끝난 뒤 묶음의 «명단 내려받기» — 같은 id 를 둘 쓰면 둘째 단추는 아무 일도 안 했다. 위 단추를 그대로 누른다 */
+  const csvEnd = $('#b-csv-end');
+  if (csvEnd) csvEnd.onclick = () => { const b = $('#b-csv'); if (b) b.click(); else flash('위 «내보내기» 를 눌러 주세요', true); };
   const csv = $('#b-csv');
   if (csv) csv.onclick = async () => {
     if (!LIVE) return flash('데모에서는 못 내려받습니다', true);

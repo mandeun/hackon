@@ -2261,6 +2261,9 @@ with sync_playwright() as p:
     _, he = post("/api/events", {"title": "여는사람검사"}); HE, HK = he["id"], he["okey"]
     pg.evaluate(f"localStorage.setItem('hackon.okey.{HE}', '{HK}')"); visit(f"/app#{HE}")
     A(pg.query_selector("#e-host") is not None, "대회 정보에 «여는 사람» 칸이 없다")
+    # 운영 화면에 같은 id 가 둘이면 저장은 첫 칸만 읽는다 — «여는 사람» 칸이 둘이라 둘째에 적은 것이 사라졌다(10/02)
+    _dup = pg.evaluate("() => { const c = {}; document.querySelectorAll('[id]').forEach(e => c[e.id] = (c[e.id] || 0) + 1); return Object.keys(c).filter(k => c[k] > 1); }")
+    A(not _dup, f"운영 화면에 같은 id 가 둘 넘게 있다: {_dup}")
     pg.fill("#e-host", "동네 모임"); pg.click("#e-save"); pg.wait_for_timeout(800)
     A(api(f"/api/events/{HE}")["host"] == "동네 모임", "«여는 사람»이 저장되지 않는다")
     # ① 참가자는 공개 페이지에서 바로 결과물을 낸다 — «다음에 할 일»의 단추가 팀 화면(제출 칸)을 연다

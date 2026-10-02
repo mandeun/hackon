@@ -8327,11 +8327,31 @@ function routes(db) {
       /* e.code 가 숫자가 아닌 오류(ERR_SQLITE_ERROR·ERR_INVALID_ARG_TYPE)가 writeHead 로 가면 프로세스가 죽는다(감사 1·2·3·20) */
       const code = Number.isInteger(e.code) && e.code >= 400 && e.code < 600 ? e.code : 500;
       if (code === 500) console.error('[500]', p, e && e.message);
+      /* 로그인 돌아오는 길(/auth/<공급자>/done)은 사람이 보는 화면이다 — JSON 한 줄에서 멈추면 되돌아갈 길이 없다.
+         무엇이 틀렸는지(공급자 코드)는 그대로 보여 주고, 다시 하기·그냥 쓰기 두 길을 단다. */
+      if (req.method === 'GET' && /^\/auth\/[a-z]+\/done$/.test(p)) {
+        res.writeHead(code, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...SEC_HEADERS });
+        return res.end(loginFailHtml(code === 500 ? '서버 오류' : e.message));
+      }
       json(res, code, { error: code === 500 ? '서버 오류' : e.message });
     }
   };
 }
 /* #endregion reuse:router */
+
+/* 로그인 실패 화면 — 외부 스크립트 없이 한 장. 메시지는 글자로만 넣는다 */
+function loginFailHtml(msg) {
+  const e = String(msg || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>로그인을 못 했습니다 — HACK:ON</title><meta name="robots" content="noindex">
+<style>body{margin:0;background:#EEF1F4;color:#0B1020;font:16px/1.6 'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;word-break:keep-all}
+.c{max-width:420px;margin:12vh auto;padding:24px 20px;background:#fff;border-radius:20px}h1{font-size:21px;margin:0 0 8px}
+.m{color:#5B6470;font-size:14px}a.b{display:block;text-align:center;margin-top:12px;padding:13px;border-radius:14px;font-weight:800;text-decoration:none;background:#C8F53B;color:#0B1020}
+a.s{background:#fff;border:1px solid #DDE1E6}</style></head><body><div class="c">
+<h1>로그인을 못 했습니다</h1><p class="m">${e}</p>
+<p class="m">잠깐 뒤 다시 하면 대개 됩니다. 로그인 없이도 대회 열기·신청은 그대로 됩니다.</p>
+<a class="b" href="/app?login=1" id="again">다시 로그인하기</a><a class="b s" href="/app">로그인 없이 계속</a></div></body></html>`;
+}
 
 /* ───────────────────── 자체 점검 ───────────────────── */
 async function selftest() {
@@ -11630,6 +11650,8 @@ async function selftest() {
     const md = newsMd(hdb);
     ok(md.includes('## 이번 주 확 뜬 것') && md.includes('+300') && md.includes('쉽게:'), '확 뜬 것 — 마크다운에도 같은 판과 «쉽게» 가 실린다');
   }
+  ok(loginFailHtml('<b>x</b> 실패 (KOE320)').includes('&lt;b&gt;x&lt;/b&gt; 실패 (KOE320)') && loginFailHtml('x').includes('href="/app?login=1"'),
+     '로그인 실패 화면 — 공급자 메시지는 글자로만, 다시 하기 길이 있다');
   /* 5살 설명 — 출처 종류 한 문장 + 제목 속 어려운 말 둘까지. 모르는 말은 풀지 않는다 */
   ok(newsEasy({ src: 'hf', title: 'acme/tiny-7b' }).startsWith('누구나 받아 쓸 수 있게 공개된 AI 두뇌'), '쉽게 — 허깅페이스 모델은 «공개된 AI 두뇌»');
   ok(newsEasy({ src: 'paper', title: 'A RAG pipeline for reasoning' }).includes('«RAG» 는') && newsEasy({ src: 'paper', title: 'A RAG pipeline for reasoning' }).includes('«추론» 는'), '쉽게 — 제목 속 RAG·추론을 푼다');
