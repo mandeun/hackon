@@ -1,0 +1,10 @@
+{
+  "name": "HACKON-Hub",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "HackonHub": { "$path": "src/server" }
+    }
+  }
+}

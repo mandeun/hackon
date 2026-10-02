@@ -1,0 +1,40 @@
+# 이 파일은 틀이다. GitHub 웹에서 .github/workflows/deploy.yml 로 새 파일을 만들어 이 내용을 그대로 붙여 넣는다(에이전트 토큰은 workflow 권한이 없다).
+name: 배포
+# 사람이 누르는 단추다. 저장소 규칙(배포는 사람이)을 지키면서, 노트북 없이 폰에서도 배포한다.
+# GitHub → Actions → «배포» → Run workflow → 확인 칸에 «배포» 입력.
+# 처음 한 번: 저장소 Settings → Secrets and variables → Actions → New secret
+#   이름 FLY_API_TOKEN, 값은 노트북에서 `fly tokens create deploy -x 999999h` 로 만든 것.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "배포하려면 «배포» 라고 적습니다"
+        required: true
+
+permissions:
+  contents: read
+
+# 두 번 눌러도 하나씩만 — 겹쳐 배포하면 어느 판이 올라갔는지 모른다
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 검사 초록이면 fly 로
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event.inputs.confirm == '배포' }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      # 단위 검사가 빨가면 여기서 멈춘다 — 빨간 판은 올리지 않는다
+      - run: node server.js --test
+      # flyctl 은 공식 설치 스크립트로. 남의 액션을 들이지 않는다(zizmor 규칙)
+      - run: curl -fsSL https://fly.io/install.sh | sh
+      - run: ~/.fly/bin/flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - run: curl -fsS --retry 5 --retry-delay 6 https://hackon.kr/api/health

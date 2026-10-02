@@ -1,0 +1,83 @@
+<!doctype html>
+<!-- 계정 삭제 안내. 구글 플레이가 «앱 밖에서도 열리는 삭제 안내 주소» 를 요구한다.
+     실제 삭제는 앱·웹의 «대회» 탭 → «계정 삭제» (POST /api/account/delete) 가 한다.
+     여기 적은 «지워지는 것» 은 server.js 의 deleteAccount 와 /privacy 3절에 맞춘다 — 셋이 어긋나면 안 된다. -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#EEF1F4">
+<title>계정 삭제 — HACK:ON</title>
+<meta name="description" content="HACK:ON 계정을 지우는 방법과 지워지는 것.">
+<link rel="canonical" href="https://hackon.kr/delete-account">
+<link rel="icon" href="/icon.svg">
+<style>
+:root{--pg:#EEF1F4;--card:#fff;--soft:#F4F6F8;--acc:#0B1020;--on:#C8F53B;--ink:#191F28;--grey:#5B6470;--hair:#EAECEF;--mute:#646E7C;
+  --sans:'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.65;letter-spacing:-.01em;
+  -webkit-font-smoothing:antialiased;word-break:keep-all;overflow-wrap:break-word}
+a{color:inherit}
+.wrap{max-width:640px;margin:0 auto;padding:0 20px 64px}
+.top{display:flex;align-items:center;gap:12px;padding:18px 0}
+.top img{height:26px}
+.top a{text-decoration:none;font-weight:700;font-size:14.5px;opacity:.72;margin-left:auto}
+h1{font-size:clamp(26px,5vw,34px);font-weight:800;letter-spacing:-.03em;line-height:1.2;margin:18px 0 8px}
+.lead{color:var(--grey);margin:0 0 22px}
+.card{background:var(--card);border-radius:18px;padding:20px 22px;margin:12px 0;border:1px solid var(--hair)}
+.card h2{font-size:17px;font-weight:800;margin:0 0 10px;letter-spacing:-.02em}
+ol,ul{margin:0;padding-left:22px}li{margin:6px 0}
+.step b{background:var(--soft);border-radius:6px;padding:1px 7px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:52px;padding:14px 24px;border-radius:14px;
+  background:var(--acc);color:#fff;font:700 16px/1.2 var(--sans);text-decoration:none;margin-top:16px}
+.btn:hover{background:#1C2438}
+/* 라임은 «누를 것» 한 점 — 단추 안의 점으로만 쓴다 */
+.btn i{width:9px;height:9px;border-radius:50%;background:var(--on);margin-right:10px}
+.keep{color:var(--grey);font-size:14.5px}
+.foot{color:var(--mute);font-size:14px;margin-top:26px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><a href="/" style="margin:0;opacity:1"><img src="/logo.svg" alt="HACK:ON"></a><a href="/privacy">개인정보 처리방침</a></div>
+
+  <h1>계정 삭제</h1>
+  <p class="lead">HACK:ON 앱과 웹(hackon.kr)은 같은 계정을 씁니다. 어느 쪽에서 지워도 둘 다에서 지워집니다.</p>
+
+  <div class="card">
+    <h2>지우는 방법</h2>
+    <ol class="step">
+      <li>앱을 열거나 <a href="/app?login=1">hackon.kr/app</a> 에서 로그인합니다.</li>
+      <li>아래 <b>대회</b> 탭으로 갑니다.</li>
+      <li>맨 아래 <b>계정 삭제</b> 를 엽니다.</li>
+      <li>칸에 <b>탈퇴</b> 라고 적고 «계정 삭제» 를 누릅니다.</li>
+    </ol>
+    <a class="btn" href="/app?login=1"><i></i>로그인하고 지우기</a>
+  </div>
+
+  <div class="card">
+    <h2>지워지는 것</h2>
+    <ul>
+      <li>계정</li>
+      <li>로그인 정보 — 카카오·구글·네이버 회원번호, 별명, 같은 사람인지 알아보려고 둔 바꾼 이메일 값</li>
+      <li>그 계정으로 연 대회 전부 — 신청한 팀·제출작·연락처까지 함께. 신청한 팀에는 대회가 접혔다고 알립니다</li>
+    </ul>
+    <p class="keep" style="margin-top:12px">남는 것: 이 계정으로 보낸 <b>공개 소식 제보</b>는 이미 공개된 글이라 남기고, 계정과의 연결만 끊습니다.</p>
+    <p class="keep">지우면 되돌릴 수 없습니다. 바로 지워지며 따로 기다리는 기간은 없습니다.</p>
+  </div>
+
+  <div class="card">
+    <h2>두는 기간</h2>
+    <p style="margin:0">로그인 정보는 계정을 지울 때까지 둡니다. 다른 사람이 연 대회에 참가 신청한 기록은 그 대회 종료 후 6개월 뒤 지우며, 그 대회 운영자가 대회를 지우면 그때 함께 지워집니다.
+      자세한 것은 <a href="/privacy">개인정보 처리방침</a>에 있습니다.</p>
+  </div>
+
+  <div class="card">
+    <h2>앱에 들어갈 수 없을 때</h2>
+    <p style="margin:0">로그인한 서비스와 계정 이름을 적어 <a href="mailto:hi@mandeun.com?subject=HACK:ON%20계정%20삭제%20요청">hi@mandeun.com</a> 으로 보내 주세요. 본인인지 확인한 뒤 지우고 답장드립니다.</p>
+  </div>
+
+  <p class="foot">HACK:ON · hi@mandeun.com</p>
+</div>
+</body>
+</html>

@@ -26,7 +26,7 @@
   --paper:#FFFFFF;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;
+body{font-family:var(--kr);background:#E4E8F0;color:var(--ink);font-size:15px;word-break:keep-all;overflow-wrap:break-word;
      display:flex;justify-content:center;min-height:100dvh;
      -webkit-font-smoothing:antialiased}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;border:0;background:none}
@@ -305,6 +305,7 @@ nav .i{font-size:17px}
 .bar i{display:block;height:100%;background:var(--navy)}
 .rv{border-left:3px solid var(--rule);padding:2px 0 2px 10px;margin:8px 0}
 .shrow{display:flex;gap:6px;align-items:flex-start;margin-top:8px}
+.shrow .btn{flex:none;white-space:nowrap}   /* 옆 칸이 길어도 «묻기» 가 한 글자씩 꺾이지 않게 */
 /* 로그인 단추. 공급자가 셋(카카오·구글·네이버)이라 색을 각각 쓰면 화면이 알록달록해진다 —
    첫 화면과 같이 조용한 칩 하나로 통일하고, 이름만 바꿔 넣는다 */
 .kko{background:#fff;color:var(--ink);font-weight:800;border-radius:10px;padding:11px 16px;border:1px solid var(--rule);
@@ -320,6 +321,8 @@ nav .i{font-size:17px}
 .loginset .b-kakao {box-shadow:inset 3px 0 0 #FEE500}
 .loginset .b-google{box-shadow:inset 3px 0 0 #4285F4}
 .loginset .b-naver {box-shadow:inset 3px 0 0 #03C75A}
+/* Apple 은 단추 색을 정해 둔다(Human Interface Guidelines — 검정 바탕·흰 글자). 다른 셋과 크기는 같게 */
+.kko.b-apple{background:#000;color:#fff;border-color:#000}
 /* 열쇠는 가려 둔다. 어깨너머로 보이면 그걸로 끝이다 */
 .hid{filter:blur(5px);transition:filter .15s;cursor:pointer;user-select:none}
 .hid.on{filter:none;user-select:text}
@@ -536,6 +539,7 @@ nav button:active .i{transform:scale(.9)}
 a{color:var(--acc)}   /* 링크도 잉크. 파랑은 안 쓴다(BRAND) */
 .hero{background:var(--card);border-radius:24px;padding:24px 20px 20px;margin:4px 0 12px}
 .hero .top{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink3);font-weight:600}
+.hero .top .pill{flex:none;white-space:nowrap}   /* 주최 이름이 길어도 «모집중» 이 두 줄로 꺾이지 않게 */
 .hero h2{margin:10px 0 18px;font-size:24px}
 .facts{list-style:none;display:flex;flex-direction:column;gap:14px}
 .facts li{display:flex;gap:12px;align-items:flex-start;font-size:15px;color:var(--ink);line-height:1.5}
@@ -832,6 +836,11 @@ const TEMPLATES = [
   { chip: '우리 가게',      title: '우리 가게 문제 풀기 대회',       cap: 10, hours: '6시간', kind: '당일',    topic: '가게에서 사장님이 매일 손으로 하는 일', note: '10명 · 하루. 사장님이 문제를 올리고 결과물을 받는다' },
   { chip: '반나절 3시간',   title: '점심 뒤 세 시간 만들기',          cap: 10, hours: '3시간', kind: '당일',    topic: '', note: '10명 · 13~16시. 여섯 시간이 부담이면 이걸로. 발표 없이 주소 제출로 끝' },
   { chip: '온라인 1주',     title: '일주일 만들기 온라인 대회',      cap: 30, hours: '7일', kind: '온라인 1주', topic: '', note: '모이지 않는다. 각자 만들고 마지막 날 발표' },
+  /* 동아리 데모데이 — 10/31 선릉 바이브코딩 해커톤 꼴. 루키가 각자 하던 프로젝트를 MVP 까지 만들어 오고,
+     1분 시연 영상(유튜브)과 발표 자료를 낸 뒤 그날은 이그나이트 2분 발표만 한다 */
+  /* 직장인 모집 — 퇴근 뒤·주말에 직무별로 사람을 모아 몇 주 같이 만든다. 선발형이라 지원자 카드에 기록이 붙는다 */
+  { chip: '직장인 모집', title: '퇴근 뒤 같이 만들 사람 모집', cap: 6, hours: '6주', kind: '프로젝트', topic: '회사에서 매주 반복하는 일 하나를 자동화', note: '6명 · 6주 · 주 1회. 직무·보상은 만든 뒤 설정에서 — 목록에 올리면 /recruit 에 뜹니다', pick: true },
+  { chip: '동아리 데모데이', title: '바이브코딩 데모데이',            cap: 30, hours: '2시간', kind: '데모데이', topic: '각자 하던 프로젝트를 MVP 까지', note: '30명 · 2시간. 미리 만들어 오고 1분 시연 영상과 발표 자료를 냅니다. 그날은 2분 발표(제목 5초 + 8장 × 15초)만' },
 ];
 /* 참가자 폰은 localhost 로 못 온다. 서버가 알려 준 랜 주소로 공유 링크를 만든다. */
 let NET = null;
@@ -841,6 +850,39 @@ const view = $('#view');
 /* 구글 캘린더 종일 일정은 끝 날짜가 «다음 날»이다(배타). 하루 대회면 ends+1 */
 const gcalEnd = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10).replace(/-/g, ''); };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+/* 신고·차단 — 앱스토어 지침 1.2. 참가자에게는 계정이 없으니 차단은 «이 기기에서 그 팀 글을 안 본다» 이다.
+   «대회 id|팀 이름» 으로 적는다. 막을 때 신고도 같이 넣어 운영자가 본다(운영 화면 «신고» 카드). */
+const blockList = () => { try { return JSON.parse(localStorage.getItem('hackon.block') || '[]'); } catch (_) { return []; } };
+const isBlocked = (ev, team) => blockList().includes(ev + '|' + team);
+const repBtns = (ev, kind, ref, team) => LIVE
+  ? ` <button class="lnk" data-rep="${esc(kind)}" data-ev="${esc(ev)}" data-ref="${esc(String(ref))}" data-team="${esc(team)}">신고</button>`
+    + ` <button class="lnk" data-blk="${esc(team)}" data-ev="${esc(ev)}" data-kind="${esc(kind)}" data-ref="${esc(String(ref))}">차단</button>` : '';
+/* 운영 «오늘 할 일» 카드. 노션 «지금 할 일» 페이지를 대신한다.
+   늦음·오늘·이번 주만 펼치고 나머지는 접는다. 체크하면 서버가 «했음» 을 남긴다 */
+const TODO_SRC = { dday: '대회 날짜', lead: '연락', sponsor: '협찬 약속', manual: '직접' };
+const todoRow = (i, cls) => `<label class="ck" style="margin-top:6px"><input type="checkbox" data-todo="${esc(i.key)}">
+  <span>${esc(i.title)} <span class="meta"${cls ? ` style="color:var(--bad,#C2410C)"` : ''}>· ${i.due ? esc(i.due.slice(5).replace('-', '/')) : '날짜 모름'} · ${esc(TODO_SRC[i.src] || '')}</span></span></label>`;
+function todoCard(t) {
+  if (t === undefined) return '';
+  if (t === null) return `<div class="card" id="todo"><h3>오늘 할 일</h3><div class="meta">할 일을 못 읽었습니다. 새로고침해 보세요.</div></div>`;
+  const top = t.late.length + t.now.length + t.week.length + t.nodate.length;
+  return `<div class="card" id="todo"><h3>오늘 할 일${t.late.length ? ` <span class="pill warn">늦음 ${t.late.length}</span>` : ''}</h3>
+    ${top ? '' : '<div class="meta">이번 주에 할 일이 없습니다.</div>'}
+    ${t.late.length ? `<div class="meta" style="margin-top:6px"><b>늦음</b></div>${t.late.map(i => todoRow(i, 1)).join('')}` : ''}
+    ${t.now.length ? `<div class="meta" style="margin-top:8px"><b>오늘</b></div>${t.now.map(i => todoRow(i)).join('')}` : ''}
+    ${t.week.length ? `<div class="meta" style="margin-top:8px"><b>이번 주</b></div>${t.week.map(i => todoRow(i)).join('')}` : ''}
+    ${t.nodate.length ? `<div class="meta" style="margin-top:8px"><b>날짜 없음</b></div>${t.nodate.map(i => todoRow(i)).join('')}` : ''}
+    ${t.later.length ? `<details style="margin-top:8px"><summary class="meta" style="cursor:pointer">나중 ${t.later.length}</summary>
+      ${t.later.map(i => todoRow(i)).join('')}</details>` : ''}
+    <input id="td-title" maxlength="80" placeholder="할 일 한 줄 (예: 심사위원께 확인 전화)" style="margin-top:10px">
+    <div class="shrow" style="margin-top:6px"><input id="td-due" type="date" aria-label="기한 (비워도 됩니다)" style="flex:1"><button class="btn sm" id="td-add">더하기</button></div>
+    <div class="meta" style="margin-top:6px">대회 날짜·연락 대장·협찬 약속에서 앱이 채웁니다${t.done ? ` · 한 것 ${t.done}` : ''}.</div></div>`;
+}
+/* 데모데이 제출 둘. 영상은 서버가 유튜브 id 로만 남긴다 — 주소는 여기서 만든다 */
+const demoLinks = r => (r.video || r.deck) ? `<div class="shrow" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+  ${r.video ? `<a class="btn sec sm" target="_blank" rel="noopener noreferrer" href="https://youtu.be/${esc(r.video)}">▶ 1분 시연 영상</a>` : ''}
+  ${r.deck && /^https?:\/\//i.test(r.deck) ? `<a class="btn sec sm" target="_blank" rel="noopener noreferrer" href="${esc(r.deck)}">발표 자료</a>` : ''}</div>` : '';
+const blockedNote = (ev, n) => n ? `<div class="meta" style="margin-top:8px">차단한 팀의 글 ${n}개를 숨겼습니다. <button class="lnk" data-unblk="${esc(ev)}">차단 풀기</button></div>` : '';
 /* 장소 제보 칩. 그릴 때와 제보를 넣은 뒤에 같은 함수를 쓴다 — 두 곳에 적으면 한쪽만 고치게 된다.
    제보가 하나도 없으면 0 을 그리지 않는다. 없는 것과 «모르는 것» 은 다르다. */
 function vchip(t) {
@@ -860,12 +902,15 @@ const NEED_KIND = { venue:'장소', cash:'돈', credit:'크레딧', judge:'심�
    상태는 G 하나에 둔다 — flash() 가 성공하면 화면을 통째로 다시 그리는데,
    단계를 DOM 에만 두면 «보냈습니다» 대신 첫 화면이 돌아온다. */
 document.head.insertAdjacentHTML('beforeend', `<style>
+@media print{nav,#toast,.no-print,header{display:none!important}body{background:#fff}#term-sheet{box-shadow:none;border:0}}
 .htabs{position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0 10px;margin:0 0 6px;background:var(--bg,#F4F5F7);-webkit-overflow-scrolling:touch;scrollbar-width:none;
   scroll-snap-type:x proximity;overscroll-behavior-x:contain;
   /* 오른쪽 끝을 흐린다 — 잘린 자리가 보여야 «옆으로 더 있다»를 안다 */
   -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);
           mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent)}
 .htabs::-webkit-scrollbar{display:none}
+/* 고르는 칩 줄은 접어서 다 보인다. 옆으로 밀어야 보이는 칩은 폰에서 «잘린 것» 으로 읽힌다 */
+.htabs.wrap{flex-wrap:wrap;overflow:visible;position:static;row-gap:6px}
 .htabs button{flex:0 0 auto;scroll-snap-align:start;border:1px solid var(--rule,#DDE1E6);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink,#1A1E1D);cursor:pointer;touch-action:manipulation}
 .htabs button:active{background:#E9EEFF}
 .htabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
@@ -1088,7 +1133,7 @@ async function sponsorPage() {
     <p class="sub">아래 금액은 <b>주최자가 정한 희망가</b>입니다. 확정 금액이 아니고, 이야기해서 정합니다. 자리에서 모인 돈이 그대로 <b>상금과 간식</b>이 됩니다.
       이 앱은 돈을 받지 않습니다 — 주고받는 것은 주최자와 직접 하십니다.</p>
     ${rows.length ? rows.map(n => `<div class="card" data-need-card="${esc(String(n.id))}">
-      <h3>${esc(needKind(n.kind))} · ${esc(n.label)}
+      <h3>${/* «장소 · 장소» 처럼 종류와 이름이 같으면 한 번만 */''}${String(n.label || '').startsWith(needKind(n.kind)) ? esc(n.label) : `${esc(needKind(n.kind))} · ${esc(n.label)}`}
         <span class="pill ${left(n) ? 'warn' : 'ok'}">${left(n) ? left(n) + '자리 남음' : '다 찼습니다'}</span></h3>
       <div class="price" data-price="${esc(String(n.id))}">${esc(priceText(n))}<small>희망가</small></div>
       ${n.note ? `<div class="meta">${esc(n.note)}</div>` : ''}
@@ -1313,6 +1358,17 @@ function tickDue() {
   });
 }
 setInterval(tickDue, 1000);
+/* 이그나이트 장 넘김 — 제목 5초, 그다음 15초마다 한 장, 8장. 슬라이드는 발표자가 자동 넘김으로 틀고
+   큰 화면은 «지금 몇 번째 장인가» 만 보여 준다. 말하기(2분 5초)가 끝나면 «질문·바꾸기» 로 바뀐다 */
+function tickIgnite() {
+  const el = document.getElementById('tv-ign'); if (!el) return;
+  const s = Math.floor((Date.now() - +el.dataset.from) / 1000);
+  if (s < 0) { el.textContent = ''; return; }
+  if (s < 5) { el.innerHTML = `<em>제목</em> · ${5 - s}초`; return; }
+  const k = Math.floor((s - 5) / 15);
+  el.innerHTML = k < 8 ? `<em>${k + 1}</em> / 8장 · 다음 장까지 ${15 - (s - 5) % 15}초` : '말하기 끝 · 질문·바꾸기';
+}
+setInterval(tickIgnite, 1000);
 const dueBox = e => e.due ? `<div class="due" data-due="${esc(e.due)}"></div>` : '';
 
 /* 참가 신청 칸. 운영 화면과 공개 화면이 같은 것을 쓴다 — 두 벌로 두면 한쪽만 고치게 된다.
@@ -1396,6 +1452,15 @@ const cancelLine = e => `<div class="meta" id="cancel-rule" style="margin-top:6p
    목록에 없어서 전부 «기타» 로 뭉쳤다. 뭉친 칸은 2회차에 홍보를 어디다 쓸지 못 알려 준다. */
 const FOUND = ['당근', '오픈 대화방', '인스타', '캠퍼스픽', '위비티', '이벤터스',
                '학교 커뮤니티', '개발 커뮤니티', '아는 사람', '기타'];
+/* 운영 화면 «모집 늘리기» 에 꺼내 두는 길. 지금 사람이 실제로 오는 곳만 */
+const GROW_CH = ['당근', '오픈 대화방', '인스타', '학교 커뮤니티', '아는 사람'];
+/* 그 방에 그대로 붙이는 모집 문구. 방마다 말투만 조금 다르고 날짜·시간·장소·링크는 같다 */
+function growMsg(e, ch, url) {
+  const when = whenText(e), where = e.place || (e.mode === 'online' ? '온라인' : '장소는 신청하면 안내');
+  const head = ch === '아는 사람' ? `혹시 이거 같이 갈래? 🙌` : ch === '인스타' ? `📣 ${e.title}` : `[${e.title}] 같이 하실 분 모집합니다`;
+  return [head, '', `📅 ${when}`, `📍 ${where}`, e.topic ? `💡 ${e.topic}` : '', e.cap ? `👥 ${e.cap}명까지` : '',
+    '처음이어도, 혼자 와도 됩니다. 이름과 이메일만 있으면 신청 끝.', '', `신청 → ${url}`].filter((x, i, a) => x !== '' || (i > 0 && a[i - 1] !== '')).join('\n');
+}
 /* 초대 링크. /e/<id>?f=당근 으로 뿌리면 신청할 때 «어디서 보셨나요» 를 안 묻고 그대로 센다 —
    한 사람씩 데려오는 판에서는 누가 뿌린 링크가 먹혔는지가 유일한 단서다.
    목록에 있는 값만 받는다. 아무 문자열이나 받으면 지나가던 사람이 집계에 줄을 만들 수 있다.
@@ -1467,9 +1532,9 @@ let PUB_SPONSORS = [];   // 공개 페이지가 그릴 때 채운다 — 신청 
 function moreForm(t) {
   const L = lastApp();   // 지난 대회에서 남긴 역할·링크·가져올 것(TASK-26)
   const need = [];
-  if (!t.contact) need.push('연락처');
+  if (!t.contact && !t.hasContact) need.push('연락처');
   if (!t.role) need.push('역할');
-  if (!t.found) need.push('어디서 보셨는지');
+  if (!t.found && !t.hasFound) need.push('어디서 보셨는지');
   if (!need.length) return `<div class="card" id="apply" style="text-align:center;padding:28px 20px">
     ${/* 노랑이 두 손 자세. 규격서가 «채워졌습니다·고맙습니다» 자리로 정해 둔 것이다.
           파일 모드(file://)에서는 못 불러오니 그때는 전처럼 이모지를 쓴다. */''}
@@ -1488,7 +1553,7 @@ function moreForm(t) {
     <h3>신청됐습니다. 조금만 더</h3>
     <div class="meta">${esc(t.name)} 팀으로 접수됐습니다. 아래를 채우면 팀을 짜 드립니다. 안 채워도 신청은 유효합니다.</div>
     ${PUB_SPONSORS.length ? `<div class="meta" style="margin-top:10px">함께하는 곳</div>${logoBand(PUB_SPONSORS)}<div style="height:6px"></div>` : ''}
-    ${!t.contact ? `<label>연락처 <span class="pill warn">확정 안내를 여기로 보냅니다</span></label>
+    ${!t.contact && !t.hasContact ? `<label>연락처 <span class="pill warn">확정 안내를 여기로 보냅니다</span></label>
       <input id="m-contact" placeholder="이메일 또는 전화">` : ''}
     ${!t.role ? `<div class="row">
       <div><label>주로 하는 것</label>
@@ -1507,7 +1572,7 @@ function moreForm(t) {
     </div>
     ${!t.want ? `<label>어떤 분을 찾으시나요</label>
       <input id="m-want" placeholder="예) 화면 만드는 분 한 분">` : ''}
-    ${!t.found ? `<label>어디서 보셨나요</label>
+    ${!t.found && !t.hasFound ? `<label>어디서 보셨나요</label>
       <select id="m-found"><option value="">고르기</option>
         ${(() => { const pre = foundFromLink();
           return FOUND.map(f => `<option${f === pre ? ' selected' : ''}>${f}</option>`).join(''); })()}</select>` : ''}
@@ -1534,6 +1599,112 @@ function moreForm(t) {
   </div>`;
 }
 let msg = null;
+let ARD_KIND = '', ARD_Q = '';
+let SETP = 0, SETLATEST = null;
+let RCT_JOB = '', RCT_RW = '';
+let MDP = 0, MD_JOB = '', MD_NEED = false;
+let GIGP = 0, GIG_KIND = '의뢰', GIG_JOB = '';
+const REFGOT = {};   // 서비스별로 방금 받은 코드 { id, code }   // 외주 — 열어 본 글, 고른 방향·직무   // 만든 것 — 열어 본 작업물, 거르기   // 모집공고 — 고른 직무·보상
+/* AI 지갑. 서버에 안 보낸다 — 무엇을 구독하는지는 그 사람 일이다. 사생활 모드에서 localStorage 가 던지면 빈 지갑 */
+const WAL_KEY = 'hackon.wallet';
+const walLoad = () => { try { return JSON.parse(localStorage.getItem(WAL_KEY) || '[]'); } catch (_) { return []; } };
+const walSave = l => { try { localStorage.setItem(WAL_KEY, JSON.stringify(l)); return true; } catch (_) { return false; } };
+const WAL_KIND = { renew: '구독 갱신', expire: '크레딧 만료', reset: '사용 한도 리셋', trial: '무료 체험 끝', due: '마감·회신', event: '일정·출시' };
+/* 붙여 넣은 글(메일·공지·카톡)에서 날짜를 줄마다 하나씩 건진다. 서버로 안 보낸다 — 메일 본문은 그 사람 것이다.
+   해가 안 적힌 날짜는 올해로 보되, 한 달 넘게 지났으면 내년으로 넘긴다(12월에 받은 «1/5 마감»).
+   못 읽은 줄은 버리지 않고 «날짜 못 찾음» 으로 세어 보여 준다 — 조용히 빠지면 놓친 줄 모른다. */
+function pasteDates(text, now = ymdLocal()) {
+  const [ty] = now.split('-').map(Number);
+  const pad = n => String(n).padStart(2, '0');
+  const ok = (y, m, d) => m >= 1 && m <= 12 && d >= 1 && d <= 31 && !isNaN(new Date(`${y}-${pad(m)}-${pad(d)}T00:00:00`));
+  const roll = (m, d) => { let y = ty; if (`${y}-${pad(m)}-${pad(d)}` < walShift(now, -31)) y++; return y; };
+  const out = [], miss = [];
+  for (const raw of String(text || '').split(/\n+/)) {
+    const line = raw.trim(); if (!line) continue;
+    let y, m, d, hit = '', mm;
+    if ((mm = line.match(/(20\d{2})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})\s*일?/))) [hit, y, m, d] = [mm[0], +mm[1], +mm[2], +mm[3]];
+    else if ((mm = line.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/))) [hit, m, d] = [mm[0], +mm[1], +mm[2]];
+    /* 10/31 은 날짜다. 점은 «3.5 버전» 일 수 있어서 10.31(금)·10.31.·10.31까지 처럼 날짜 꼴이 붙을 때만 */
+    else if ((mm = line.match(/(?:^|[^\d.])(\d{1,2})\/(\d{1,2})(?![\d/])/) || line.match(/(?:^|[^\d.])(\d{1,2})\.(\d{1,2})(?=\.|\s*\([월화수목금토일]|\s*(?:까지|마감|일))/))) [hit, m, d] = [mm[0].replace(/^[^\d]/, ''), +mm[1], +mm[2]];
+    else if ((mm = line.match(/오늘|내일|모레/))) { const off = { 오늘: 0, 내일: 1, 모레: 2 }[mm[0]]; [hit] = mm; [y, m, d] = walShift(now, off).split('-').map(Number); }
+    if (!hit || !ok(y || ty, m, d)) { miss.push(line); continue; }
+    if (!y) y = roll(m, d);
+    const tm = line.match(/(\d{1,2}):(\d{2})/) || line.match(/(오전|오후)\s*(\d{1,2})\s*시/);
+    const time = !tm ? '' : tm[0].includes(':') ? `${pad(+tm[1])}:${tm[2]}` : `${pad((+tm[2] % 12) + (tm[1] === '오후' ? 12 : 0))}:00`;
+    const kind = /까지|마감|기한|회신|답장|제출|접수|신청|due|deadline/i.test(line) ? 'due' : 'event';
+    const name = line.replace(hit, ' ').replace(/\([월화수목금토일]\)/g, ' ').replace(tm ? tm[0] : '\u0000', ' ')
+      .replace(/(^|\s)(까지|부터|에|에서)(?=\s|$)/g, ' ').replace(/^[\s\-·•*>:|,~.]+|[\s\-·•*>:|,~.]+$/g, '').replace(/\s+/g, ' ').slice(0, 40) || (kind === 'due' ? '마감' : '일정');
+    out.push({ name, kind, date: `${y}-${pad(m)}-${pad(d)}`, memo: time });
+  }
+  return { found: out, miss };
+}
+const walShift = (day, n) => { const d = new Date(day + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+let WAL_FOUND = null;   // 붙여 넣기에서 건진 것 — 넣기 전에 사람이 본다
+let BRIEF_TEXT = '';   // 아침 브리핑 한 장(카톡에 붙일 글)
+let MATCH = null;      // 팀원 추천 — 공개 페이지가 그릴 때 받아 둔다
+/* 팀원 추천 한 장. 왜 맞는지(역할·실력·강점·방향)를 한 줄로 보이고, 연락처는 서로 좋아요일 때만.
+   강점·원하는 것을 안 골랐으면 고르라고 먼저 권한다 — 안 고르면 역할·실력만으로 맞춘다 */
+function matchCard(m) {
+  if (!m) return '';
+  const chips = (list, on, attr, multi) => `<div class="gchips">${list.map(x => `<button type="button" class="pick${(multi ? on.includes(x) : on === x) ? ' on' : ''}" data-${attr}="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+  return `<div class="card" id="match">
+    <h3>같이 할 사람 추천</h3>
+    <div class="meta">역할이 겹치지 않고, 실력이 비슷하고, 내게 없는 강점이 있고, 원하는 게 같은 사람. 마지막은 현장에서 얼굴 보고 정하세요.</div>
+    ${m.me.person ? `<div style="margin-top:10px"><b>내 소개 세 칸</b> <span class="meta">적을수록 발견되고 연결됩니다 · 공개되니 연락처는 빼고</span>
+      <input id="in-intro" maxlength="80" placeholder="한 줄 소개 — 예) 기획하는 직장인, 바이브코딩 2주차" value="${esc(m.me.intro || '')}">
+      <input id="in-doing" maxlength="80" placeholder="지금 하는 일 — 예) 동네 가게 예약 앱" value="${esc(m.me.doing || '')}">
+      <input id="in-seeking" maxlength="80" placeholder="찾는 사람 — 예) 화면 만들 줄 아는 분" value="${esc(m.me.seeking || '')}"></div>` : ''}
+    <label>내 강점 <span class="pill ok">셋까지</span></label>${chips(m.options.strengths, m.me.strengths, 'mst', true)}
+    <label>왜 하나요</label>${chips(m.options.aims, m.me.aim, 'maim', false)}
+    <button class="btn sec sm" id="m-strsave" style="margin-top:8px">저장하고 다시 찾기</button>
+    ${m.mutual.length ? `<div class="notice" style="margin-top:12px"><b>서로 좋아요</b> — 연락해 보세요<br>${m.mutual.map(x => `${esc(x.name)}${x.role ? ` (${esc(x.role)})` : ''} · <b>${esc(x.contact || '연락처 없음')}</b>`).join('<br>')}</div>` : ''}
+    ${!m.picks.length ? '<div class="meta" style="margin-top:12px">아직 권할 사람이 없습니다. 신청이 더 들어오면 여기 뜹니다.</div>'
+      : m.picks.map(x => `<div style="padding:10px 0;border-top:1px solid var(--rule);margin-top:8px;display:flex;gap:10px;align-items:flex-start">
+          <div style="flex:1;min-width:0"><b>${esc(x.name)}</b> ${x.role ? `<span class="pill">${esc(x.role)}</span>` : ''}${x.level ? ` <span class="pill">${esc(x.level)}</span>` : ''}
+            ${x.intro ? `<div>${esc(x.intro)}</div>` : ''}${x.seeking ? `<div class="meta">찾는 사람: ${esc(x.seeking)}</div>` : ''}
+            <div class="meta">${x.why.map(esc).join(' · ')}</div></div>
+          <button class="btn ${x.liked ? '' : 'sec '}sm" data-mlike="${x.id}" data-on="${x.liked ? 0 : 1}">${x.liked ? '좋아요 ✓' : '좋아요'}</button></div>`).join('')}
+    <div class="meta" style="margin-top:8px">좋아요는 상대에게 «누가» 눌렀는지만 보입니다. 둘 다 누르면 그 둘에게만 연락처가 열립니다.</div></div>`;
+}
+/* 직무별 추천. «무엇을 구독하나» 를 사람이 다 적게 하지 않고, 직무 하나 고르면 먼저 권한다.
+   값은 적지 않는다 — 가격은 달마다 바뀌어서 화면에 박으면 거짓말이 된다. 무료인 것만 «무료» 라고 붙인다 */
+const WAL_REC = {
+  '마케팅': [['ChatGPT Plus', '카피 10안을 한 번에 — 톤·금지어를 프로젝트에 고정'], ['Canva', '카드뉴스·썸네일'], ['n8n', '시트 → 인스타·블로그 예약 게시', 1], ['Higgsfield', '15초 숏폼 영상']],
+  '기획': [['Claude Pro', '회의록 → 결정·담당·기한 표'], ['Figma', 'Make 로 눌러 보는 화면을 하루 안에'], ['Notion AI', '문서·회의 정리']],
+  '디자인': [['Figma', '마감은 손으로'], ['Midjourney', '무드보드·시안'], ['ComfyUI', '로컬 생성, 무제한', 1]],
+  '개발': [['Claude Code', '저장소를 읽고 고치는 에이전트'], ['Cursor', '편집기 안 자동완성·수정'], ['Ollama', '로컬 모델', 1], ['GitHub Copilot', '학생·오픈소스는 무료일 때가 있음']],
+  '영업·CS': [['ChatGPT Plus', '문의 답변 초안 — «약속하지 말 것» 을 지시로'], ['Claude Pro', '긴 계약서·메일 요약']],
+  '데이터': [['Claude Pro', '표 붙여 넣고 분석·차트 코드'], ['Gemini', '구글 시트 안에서 바로'], ['ChatGPT Plus', '파일 올려 분석']],
+  '소상공인': [['ChatGPT Plus', '리뷰 답글·메뉴 설명·전단 문구'], ['Canva', '전단·메뉴판'], ['Gemini', '무료로 먼저 써 보기', 1]],
+};
+/* 같은 일을 하는 구독 — 둘 다 내고 있으면 하나는 끊어 볼 만하다 */
+const WAL_OVERLAP = [['Cursor', 'GitHub Copilot'], ['ChatGPT Plus', 'Claude Pro', 'Gemini']];
+let WAL_JOB = (() => { try { return localStorage.getItem('hackon.waljob') || ''; } catch (_) { return ''; } })();
+const WAL_TOOLS = ['Claude Pro', 'Claude Max', 'Claude Code 클라우드 크레딧', 'ChatGPT Plus', 'Gemini', 'Cursor', 'GitHub Copilot', 'Perplexity', 'Midjourney', 'Higgsfield', 'Canva', 'Notion AI', 'ElevenLabs'];
+/* 반복이 있으면 오늘 이후 첫 날로 굴린다. 날짜가 없으면 «모름» — 맨 뒤 */
+function walNext(it, now = ymdLocal()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(it.date || '')) return '';
+  let d = new Date(it.date + 'T00:00:00');
+  const step = () => it.every === 'week' ? d.setDate(d.getDate() + 7) : it.every === 'month' ? d.setMonth(d.getMonth() + 1) : null;
+  const iso = () => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  for (let i = 0; i < 400 && it.every && iso() < now; i++) step();
+  return iso();
+}
+const walDays = (day, now = ymdLocal()) => day ? Math.round((new Date(day + 'T00:00:00') - new Date(now + 'T00:00:00')) / 86400000) : null;
+/* 달력 파일 한 벌. 구글·애플·삼성 달력이 다 연다. 하루 전 알림을 붙인다 */
+function walIcs(list) {
+  const esc2 = t => String(t || '').replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
+  const ev = list.filter(it => walNext(it)).map((it, i) => {
+    const d = walNext(it).replace(/-/g, '');
+    return ['BEGIN:VEVENT', `UID:hackon-wallet-${i}-${d}@hackon.kr`, `DTSTAMP:${d}T000000Z`, `DTSTART;VALUE=DATE:${d}`,
+      `SUMMARY:${esc2(`${it.name} — ${WAL_KIND[it.kind] || ''}`)}`, it.memo ? `DESCRIPTION:${esc2(it.memo)}` : '',
+      it.every === 'week' ? 'RRULE:FREQ=WEEKLY' : it.every === 'month' ? 'RRULE:FREQ=MONTHLY' : '',
+      'BEGIN:VALARM', 'TRIGGER:-P1D', 'ACTION:DISPLAY', `DESCRIPTION:${esc2(it.name)} 내일`, 'END:VALARM', 'END:VEVENT'].filter(Boolean).join('\r\n');
+  });
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//HACK:ON//AI 지갑//KO', ...ev, 'END:VCALENDAR'].join('\r\n');
+}   // 세팅 모음 — 열어 본 모음, 받아 온 최신판
+const TERM = { from: '', to: '' };   // 학기 활동 보고서 기간
+const ymdLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };   // 모아 보기 — 고른 종류·찾는 말
 let TPL = null;   // 열기 탭에서 누른 유형
 let P_LOGO_DATA = '';   // 협찬사 로고 파일(줄인 data: 주소). 넣고 나면 비운다
 
@@ -1543,6 +1714,21 @@ let P_LOGO_DATA = '';   // 협찬사 로고 파일(줄인 data: 주소). 넣고 
    저장할 때마다 '안 본 팀 먼저' 로 순서가 다시 매겨지기 때문이다. */
 let jTeam = null, jAll = false;
 let curPerson = null;
+/* 이력서에 붙일 글. 끝난 대회에서 «왔거나 냈던» 줄만 쓴다 — 신청만 하고 안 온 대회는 이력이 아니다.
+   링크드인은 «프로젝트» 칸 한 덩이, 링커리어·이력서는 대외활동 칸(활동명·기관·기간·내용) 꼴 */
+function resumeText(d, kind, now = ymdLocal()) {
+  const rows = (d.history || []).filter(h => h.ends && h.ends < now && (h.came || h.made));
+  const link = `${location.origin}/p/${d.id}`;
+  const ym = x => String(x || '').slice(0, 7).replace('-', '.');
+  const did = h => [h.made ? '결과물 제출(완주)' : '참가', h.role ? `역할 ${h.role}` : '', h.mate ? `${h.mate} 와 함께` : ''].filter(Boolean).join(' · ');
+  if (!rows.length) return '';
+  if (kind === 'linkedin') return [
+    `HACK:ON 해커톤·프로젝트 기록 — 완주 ${d.finished}회 · 수상 ${d.wins || 0}회${d.finishRate !== null && d.finishRate !== undefined ? ` · 완주율 ${d.finishRate}%` : ''}${d.cert && d.cert.level ? ` · 실무 기록 ${d.cert.level}단계(${d.cert.name})` : ''}`,
+    ...rows.map(h => `• ${ym(h.ends)} ${h.title} — ${did(h)}${h.url ? ` · ${h.url}` : ''}`),
+    `검증된 기록: ${link}`].join('\n');
+  return rows.map(h => [`활동명: ${h.title}`, `기관: HACK:ON (hackon.kr)`, `기간: ${ym(h.ends)}`,
+    `내용: ${did(h)}${h.url ? ` · 결과물 ${h.url}` : ''}`].join('\n')).join('\n\n') + `\n\n기록 확인: ${link}`;
+}
 let OWN_TK = '';   // 프로필 화면에서 «이 사람 본인» 으로 확인된 팀 열쇠. 밖에서 만든 것을 올리고 지울 때 쓴다
 let TVWALL = false;   // 큰 화면 로고 벽 고정(L 키)
 document.addEventListener('keydown', e => { if (TVM && (e.key === 'l' || e.key === 'L')) { TVWALL = !TVWALL; render(); } });
@@ -2109,6 +2295,11 @@ const SCREEN = {
     const mrep = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/manner').then(r => r.rows).catch(() => null) : [];
     const opend = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/outside').then(r => r.rows).catch(() => null) : [];
     const mkadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/market').then(r => r.rows).catch(() => null) : [];
+    const spadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/spots').then(r => r.rows).catch(() => null) : [];
+    const wkadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/works').then(r => r.rows).catch(() => null) : [];
+    const rfadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/ref').then(r => r.rows).catch(() => null) : [];
+    const cladm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/cleanup').catch(() => null) : null;
+    const thadm = (LIVE && AUTH && AUTH.siteAdmin) ? await api('/admin/thanks').catch(() => null) : null;
     const claimBox = (AUTH && AUTH.claimable) ? `
       <div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
         <h3 style="color:var(--warn)">첫 사이트 운영자 앉히기</h3>
@@ -2134,6 +2325,59 @@ const SCREEN = {
             ${e.listed ? '' : ' <span class="pill warn">초안</span>'}
             · <span style="color:var(--acc);font-weight:700">눌러서 운영 화면 열기</span></div></div>
         </div>`).join('')}` : ''}
+      ${AUTH && AUTH.siteAdmin ? `<div class="card" id="thanks-admin"><h3>기여자 장부</h3>
+        <div class="meta">점수는 «무엇을 했나» 한 줄과 같이 공개됩니다. 수익 약정은 서명을 받은 뒤에만 켭니다. <a href="/thanks">공개 화면</a></div>
+        ${thadm === null ? '<div class="meta">불러오지 못했습니다.</div>' : thadm.rows.map(c => `<div style="margin-top:8px"><b>${esc(c.name)}</b> <span class="meta">${esc(c.role || '기여자')} · ${c.points}점${c.share ? ' · 수익 약정' : ''}${c.hidden ? ' · 내림' : ''}</span>
+            <div class="shrow" style="flex-wrap:wrap;gap:6px"><select data-tkind="${c.id}">${thadm.kinds.map(k => `<option>${esc(k)}</option>`).join('')}</select>
+              <input data-tpts="${c.id}" type="number" min="1" max="100" placeholder="점수" style="width:80px">
+              <input data-twhy="${c.id}" maxlength="120" placeholder="무엇을 했나 한 줄">
+              <button class="btn sec sm" data-tgive="${c.id}">점수 주기</button></div></div>`).join('')}
+        <div class="row" style="margin-top:12px"><div><label>이름</label><input id="th-name" maxlength="40"></div>
+          <div><label>역할</label><select id="th-role"><option value="">기여자</option><option>매니저</option><option>리뷰어</option><option>크루</option></select></div></div>
+        <div class="row"><div><label>맡은 곳(매니저)</label><input id="th-area" maxlength="40" placeholder="예) 해커온뉴스"></div>
+          <div><label>주소(선택)</label><input id="th-link" placeholder="https://github.com/…"></div></div>
+        <label class="ck"><input type="checkbox" id="th-share"><span>수익 나눔 약정 서명 받음</span></label>
+        <button class="btn sm" id="th-add" style="margin-top:8px">기여자 올리기</button></div>` : ''}
+      ${AUTH && AUTH.siteAdmin ? `<div class="card" id="clean-admin"><h3>한꺼번에 치우기 — 남길 것만 고르기</h3>
+        <div class="meta"><b>체크한 것만 남고 나머지는 치웁니다.</b> 대회는 휴지통으로(30일 안에 연 사람이 되살림), 만든 것·외주는 내립니다(지우지 않음). 신청한 사람에게 메일은 안 갑니다.</div>
+        ${cladm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>' : `
+          ${[['대회', 'events', 'ce', r => `${esc(r.starts)} · ${esc(r.host)} · 신청 ${r.teams}팀${r.listed ? ' · 목록' : ''}${r.sample ? ' · <span class="pill warn">연습용</span>' : ''}`],
+             ['만든 것', 'works', 'cw', r => esc(String(r.at).slice(0, 10))],
+             ['외주', 'gigs', 'cg', r => `${esc(r.kind)} · ${esc(String(r.at).slice(0, 10))}`]].map(([nm, k, pre, sub]) => `
+            <div style="margin-top:10px"><b>${nm}</b> <span class="meta">${cladm[k].length}개</span></div>
+            ${cladm[k].length ? cladm[k].map(r => `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:6px;font-weight:400">
+              <input type="checkbox" data-ckeep="${pre}" value="${esc(String(r.id))}" style="width:auto;margin-top:3px">
+              <span style="min-width:0;overflow-wrap:anywhere"><b>${esc(r.title)}</b><br><span class="meta">${sub(r)}</span></span></label>`).join('')
+              : '<div class="meta">없습니다.</div>'}`).join('')}
+          <div style="height:10px"></div>
+          <div class="meta" id="clean-count"></div>
+          <input id="clean-confirm" placeholder="«N개 지우기» 라고 그대로 적기" autocomplete="off">
+          <div style="height:8px"></div>
+          <button class="btn sec sm" id="clean-go">체크 안 한 것 치우기</button>`}
+      </div>` : ''}
+      <div class="card" id="ref-admin"><h3>추천 코드 — 서비스 열기 ${rfadm && rfadm.length ? `<span class="pill warn">${rfadm.length}</span>` : ''}</h3>
+        <div class="meta">그 서비스 약관에서 추천 코드를 공개된 곳에 올려도 되는지 본 뒤에만 엽니다. 금지면 열지 않습니다.</div>
+        ${rfadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !rfadm.length ? '<div class="meta" style="margin-top:8px">기다리는 것이 없습니다.</div>'
+          : rfadm.map(r => `<div style="margin-top:10px"><b>${esc(r.name)}</b> <span class="meta">${esc(r.host || '')} · ${esc(r.note || '')}</span> <button class="btn sm" data-rsok="${r.id}">열기</button></div>`).join('')}
+      </div>
+      <div class="card" id="works-admin"><h3>만든 것 — 시연 열어 보기 ${wkadm && wkadm.length ? `<span class="pill warn">${wkadm.length}</span>` : ''}</h3>
+        <div class="meta">새 창으로 열어 보고 멀쩡하면 «열기» — 그때부터 페이지 안에서 눌러 볼 수 있습니다. 피싱·성인물이면 «내리기».</div>
+        ${wkadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !wkadm.length ? '<div class="meta" style="margin-top:8px">기다리는 것이 없습니다.</div>'
+          : wkadm.map(w => `<div style="margin-top:10px"><b>${esc(w.title)}</b> <span class="meta">${esc(w.by || '')}</span>
+              <div><a href="${esc(w.demo)}" target="_blank" rel="noopener noreferrer">${esc(w.demo)}</a></div>
+              <button class="btn sm" data-wka="${w.id}" data-act="ok">열기</button> <button class="btn sec sm" data-wka="${w.id}" data-act="hide">내리기</button></div>`).join('')}
+      </div>
+      <div class="card" id="spots-admin"><h3>모아 보기 — 주최자 확인 요청 ${spadm && spadm.filter(r => r.state === 'pending').length ? `<span class="pill warn">${spadm.filter(r => r.state === 'pending').length}</span>` : ''}</h3>
+        <div class="meta">청한 사람이 적은 방법(공식 메일·계정)으로 진짜 주최자인지 본 뒤 넘깁니다. 넘기면 그 계정으로 대회가 생깁니다.</div>
+        ${spadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !spadm.length ? '<div class="meta" style="margin-top:8px">올라온 것이 없습니다.</div>'
+          : spadm.map(r => `<div style="margin-top:10px"><b>${esc(r.name)}</b> <span class="meta">${esc(r.kind)} · ${esc(r.org || '')}${r.state === 'pending' ? ` · <b>확인 요청</b> ${esc(r.claim_name || '')}: ${esc(r.claim_note)}` : ''}</span>
+              <div><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.url)}</a></div>
+              ${r.state === 'pending' ? `<button class="btn sm" data-spa="${r.id}" data-act="ok">넘기기</button> <button class="btn sec sm" data-spa="${r.id}" data-act="reject">거절</button>` : ''}
+              <button class="btn sec sm" data-spa="${r.id}" data-act="hide">내리기</button></div>`).join('')}
+      </div>
       <div class="card" id="market-admin"><h3>마켓 — 확인·신고 ${mkadm && mkadm.length ? `<span class="pill warn">${mkadm.length}</span>` : ''}</h3>
         <div class="meta">공개 전에 시연을 열어 보고, 판매 주소가 그 사람 판매처인지 봅니다. 저장소가 있으면 먼저 «검사».</div>
         ${mkadm === null ? '<div class="meta" style="margin-top:8px">불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
@@ -2181,6 +2425,7 @@ const SCREEN = {
         <div><b>${my.total.promised ? my.total.keptRate + '%' : '—'}</b><span>약속 이행</span></div>
       </div>` : ''}
       ${my.events.map(ownedCard).join('')}
+      <button class="btn sec sm" id="b-term" style="margin:4px 0 10px">학기 활동 보고서 — 학교 제출용</button>
       ${AUTH && AUTH.links && AUTH.links.length ? `<div class="card" style="padding:11px 13px"><div class="meta">
         <b>${AUTH.links.map(l => esc(l.label)).join('·')}로 로그인돼 있습니다.</b> 다른 기기에서도 그대로 보입니다.
         ${loginRest().length ? `<br>다른 것으로도 들어오시려면 지금 붙여 두세요 — 안 붙이면 계정이 둘로 갈립니다.<br>
@@ -2195,6 +2440,19 @@ const SCREEN = {
           ${loginBtns('', 'margin-top:8px')}` : ''}
       </div></div>`}
       <div style="height:22px"></div>` : '';
+
+    /* 계정 지우기 — 앱스토어 지침 5.1.1(v). 로그인했거나 주최자 열쇠가 있으면 늘 보인다.
+       대회가 없는 계정도 지울 수 있어야 해서 «내가 연 대회» 상자와 따로 둔다.
+       prompt() 를 쓰지 않는다 — 앱(WKWebView)에서는 창이 안 뜨고 조용히 null 이 될 수 있다. */
+    const acctBox = LIVE && ((AUTH && AUTH.loggedIn) || myKey()) ? `
+      <details class="card" id="acct-del" style="padding:11px 13px">
+        <summary style="cursor:pointer;font-weight:700">계정 삭제</summary>
+        <div class="meta" style="margin-top:8px">계정과 로그인 정보, 이 계정으로 연 대회${my && my.events.length ? ` <b>${my.events.length}개</b>` : ''}가 지워집니다.
+          신청한 팀에는 대회가 접혔다고 알립니다. 되돌릴 수 없습니다.</div>
+        <label for="acct-del-in">지우려면 <b>탈퇴</b> 라고 적어 주세요</label>
+        <input id="acct-del-in" autocomplete="off" placeholder="탈퇴">
+        <button class="btn sec sm" id="b-acct-del" style="margin-top:8px">계정 삭제</button>
+      </details>` : '';
 
     /* 열쇠를 잃은 운영자의 문. 전에는 열린 대회가 0건일 때만 그려져서, 대회가 하나라도 있으면 돌아올 길이 없었다(대역 ②) */
     /* 위에 로그인 카드를 세웠으면 여기서 또 세우지 않는다 — 같은 화면에 같은 단추가 두 벌
@@ -2224,14 +2482,14 @@ const SCREEN = {
       </details>` : ''}`;
     /* 방금 대회를 만든 사람에게 '없습니다' 라고 하면 안 된다.
        그 사람에게 필요한 것은 목록이 아니라 '다음에 뭘 하지' 다. */
-    if (!list.length && my && my.events.length) return loginBox + claimBox + adminBox + mineBox + `
+    if (!list.length && my && my.events.length) return loginBox + claimBox + adminBox + mineBox + acctBox + `
       <div class="card">
         <h3>다음에 할 일</h3>
         <ol class="steps"><li>날짜와 제출 마감 정하기</li><li><b>예산 넣기</b> — 넣으면 자리가 저절로 깔립니다. 0원이면 온라인판(관객 평가)으로 바뀝니다</li><li>진행표 채우기</li><li>주소(QR) 보내기</li></ol>
       </div>` + findBox;
-    if (!list.length) return loginBox + claimBox + adminBox + mineBox + `<h2>아직 열린 대회가 없습니다</h2>
+    if (!list.length) return loginBox + claimBox + adminBox + mineBox + acctBox + `<h2>아직 열린 대회가 없습니다</h2>
       <p class="sub">아래 <b>＋ 열기</b>에서 5분이면 하나 만들 수 있습니다.</p>` + findBox;
-    return loginBox + claimBox + adminBox + mineBox + `<h2>열린 대회</h2>` +
+    return loginBox + claimBox + adminBox + mineBox + acctBox + `<h2>열린 대회</h2>` +
       list.map(e => `<div class="card ev" role="button" tabindex="0" data-open="${esc(e.id)}">
         ${dateTile(e.starts)}
         <div class="body"><h3>${esc(e.title)}</h3>
@@ -2400,7 +2658,7 @@ const SCREEN = {
       <div class="meta" id="f-tplnote" style="margin:-2px 0 8px"></div>
       <label>1. 대회 이름</label><input id="f-title" placeholder="예) 우리 동네 불편 하나 없애기"${rq ? ` value="${esc((rq.topic || rq.pain || '').slice(0, 30))} 해커톤"` : ''}>
       ${rq ? `<label>어떻게 받을까요</label>
-      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button><button type="button" class="pick" data-how="프로젝트">프로젝트 · 몇 주 동안</button></div>
+      <div class="gchips" id="f-how"><button type="button" class="pick on" data-how="당일">하루 모여서</button><button type="button" class="pick" data-how="온라인 1주">대회 없이 · 온라인으로 결과물만</button><button type="button" class="pick" data-how="모임·수업">모임·수업 · 제출·심사 없음</button><button type="button" class="pick" data-how="프로젝트">프로젝트 · 몇 주 동안</button><button type="button" class="pick" data-how="데모데이">데모데이 · 미리 만들어 와서 발표</button></div>
       <div class="meta" style="margin:-2px 0 8px">«온라인으로 결과물만»은 모이지 않습니다. 일주일 동안 각자 만들어 내고, 올린 분이 받아서 «됐다»를 답합니다.</div>` : ''}
       ${(() => { const ids = Object.keys(localStorage).filter(k => k.startsWith('hackon.okey.')).map(k => k.slice(12)); if (!ids.length || !LIVE) return '';
         return `<details class="more" id="f-fromwrap" style="margin-top:8px"><summary>지난 대회에서 가져오기 <span class="when">기준표·주제·진행 순서·자리</span></summary>
@@ -2415,6 +2673,9 @@ const SCREEN = {
       ${/* 만들기 전에 무엇이 나오는지 보여 준다. Luma 의 «만들기» 화면은 설명이 한 줄도 없다 —
              폼이 곧 결과 페이지라서, 채우는 동안 결과가 보이기 때문이다. */''}
       <div id="f-pv" style="margin-top:12px"></div>
+      <label class="chk" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-weight:400">
+        <input type="checkbox" id="f-sample" style="width:auto;margin-top:3px">
+        <span>연습으로 열기 — 목록에 안 오르고 3일 뒤 저절로 지워집니다. 이름 앞에 [테스트] 를 달아도 같습니다.</span></label>
       <div style="height:12px"></div>
       <button class="btn" id="f-save">1단계 · 대회 만들기</button>
       <div class="meta" style="margin-top:8px">만들면 운영 화면으로 갑니다. 날짜·상금·마감은 나중에 고쳐도 됩니다.${myKey() ? '<br>전에 연 대회와 같은 주최자로 묶입니다.' : ''}</div>
@@ -2633,15 +2894,16 @@ const SCREEN = {
 
     const leadsHtml = () => lead ? `<h3 id="sec-leads" style="margin-top:18px">연락한 곳</h3>
         <p class="sub">혼자 열면 어디에 보냈는지를 잊습니다.</p>
-        ${lead.rows.length ? `<table><tr><th>무엇</th><th>어디</th><th>상태</th><th></th></tr>
+        ${lead.rows.length ? `<table><tr><th>무엇</th><th>어디</th><th>상태</th><th>다음 연락</th><th></th></tr>
           ${lead.rows.map(r => `<tr>
             <td>${esc(r.kind)}</td>
             <td>${esc(r.name)}${r.how ? `<br><span class="meta">${esc(r.how)}</span>` : ''}</td>
             <td><button class="btn sec sm" data-state="${r.id}" data-now="${esc(r.state)}"
                   style="padding:4px 9px">${esc(r.state)}</button></td>
+            <td>${r.state === '보냄' || r.state === '답장' ? `<input type="date" data-next="${r.id}" value="${esc(r.next_at || '')}" aria-label="다음 연락일" style="max-width:140px;padding:4px 6px">` : ''}</td>
             <td><button class="btn sec sm" data-drop="${r.id}" style="padding:4px 9px">지움</button></td>
           </tr>`).join('')}</table>
-          <p class="sub">상태를 누르면 보냄 → 답장 → 확정 → 거절 순으로 바뀝니다.</p>`
+          <p class="sub">상태를 누르면 보냄 → 답장 → 확정 → 거절 순으로 바뀝니다. 다음 연락일을 비우면 보낸 날 +3일에 «오늘 할 일»로 올라옵니다.</p>`
         : ''}
         <div class="card">
           <div class="row">
@@ -2679,6 +2941,10 @@ const SCREEN = {
     const d = LIVE ? await api(`/events/${cur}/board`) : { event: DEMO.event, rows: DEMO.board };
     const qas = LIVE ? await api(`/events/${cur}/questions`).catch(() => []) : [];
     const e = d.event;
+    /* 들어온 신고. 못 읽었으면 null — «신고 0건» 과 «모름» 을 같은 화면으로 그리지 않는다 */
+    const reps = (LIVE && e.admin) ? await api(`/events/${cur}/reports`).catch(() => null) : [];
+    /* 오늘 할 일. 못 읽었으면 null — «할 일 없음» 과 «모름» 을 같은 화면으로 그리지 않는다 */
+    const opTodo = (LIVE && e.admin) ? await api(`/events/${cur}/todo`).catch(() => null) : undefined;
     /* 선발형 프로젝트 — 지원자 카드. 연락처 없이 기록만(수락하면 명단에 연락처가 붙는다) */
     const apps = (LIVE && e.pick) ? await api(`/events/${cur}/applicants`).then(r => r.rows).catch(() => null) : [];
     /* 운영자 board 에는 심사·투표 열쇠가 딸려 온다. 적어 두면 링크·창 열기가 늘 된다. */
@@ -2705,7 +2971,8 @@ const SCREEN = {
                      : e.pmode ? (r.pscore === null ? '—' : r.pscore + ' (' + r.pairs + '번)')
                      : (r.score === null ? '—' : String(r.score));
       /* 만든 것. 마감 전에는 서버가 주소를 안 내려보내므로 이 목록은 저절로 빈다. */
-      const made = d.rows.filter(r => r.url);
+      const madeAll = d.rows.filter(r => r.url);
+      const made = madeAll.filter(r => !isBlocked(e.id, r.name));
       return `<h2>${esc(e.title)} ${badge(e)}</h2>
       <p class="sub">${esc(e.starts)}~${esc(e.ends)} · 참가 ${e.teams}팀</p>
       ${dueBox(e)}
@@ -2716,14 +2983,16 @@ const SCREEN = {
           <table><tr><th>순위</th><th>팀</th><th class="n">${sHead}</th></tr>
           ${d.rows.map(r => `<tr><td>${r.rank ?? '—'}</td><td>${esc(r.name)}</td>
             <td class="n">${esc(sOf(r))}</td></tr>`).join('')}</table>
-          ${made.length ? `<h3 style="margin-top:18px">무엇을 만들었나</h3>
+          ${madeAll.length ? `<h3 style="margin-top:18px">무엇을 만들었나</h3>
             ${made.map(r => `<div class="card">
               <h3>${r.rank ? r.rank + '위 · ' : ''}${esc(r.name)}</h3>
+              <div class="meta">${repBtns(e.id, 'submission', r.id, r.name).trim()}</div>
               ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
               <div style="height:9px"></div>
               <a class="btn sec sm" target="_blank" rel="noopener noreferrer"
                 href="${/^https?:\/\//i.test(r.url) ? esc(r.url) : '#'}">만든 것 열기</a>
-            </div>`).join('')}` : ''}`
+              ${demoLinks(r)}
+            </div>`).join('')}${blockedNote(e.id, madeAll.length - made.length)}` : ''}`
         : `<h3>나온 팀</h3>
           <table><tr><th>자리</th><th>팀</th><th class="n">제출</th></tr>
           ${d.rows.map(r => `<tr><td>${r.no}</td><td>${esc(r.name)}</td>
@@ -2817,6 +3086,8 @@ const SCREEN = {
         <div class="meta" style="margin-top:6px">참가자에게 QR 을 보여 줄 곳은 <b>큰 화면</b>입니다. 심사·투표 QR 은 아래 «보낼 주소»에 있습니다.</div>` : '<button class="btn sec sm" id="b-pub" style="margin-top:14px">공개 페이지 미리보기</button>'}
       </section>
 
+      ${todoCard(opTodo)}
+
       ${(() => {
         /* 심사 넛지. 앱은 심사위원이 있는지 모른다 — 점수가 들어와야 센다. 그래서 상태는 셋이다:
            구함(확인된 심사 자리가 있거나 운영자가 «네») · 못 구함(«아직») · 모름(답 없음).
@@ -2858,6 +3129,13 @@ const SCREEN = {
                아무나 들어와서 이 대회를 찾을 수 있습니다.</div>
              <div style="height:10px"></div>
              <button class="btn sec sm" id="b-unlist">목록에서 내리기</button>
+           </div>`
+        : e.sample ? `<div class="card" id="sample-card" style="border-color:#EBD3AE;background:var(--warn-l)">
+             <h3 style="color:var(--warn)">연습용 대회입니다</h3>
+             <div class="meta">목록에 안 오르고, 만든 지 3일이 지나면 <b>휴지통으로 저절로</b> 갑니다(30일 안엔 «지운 대회» 에서 되살립니다).
+               진짜로 열 대회면 연습용을 푸세요.</div>
+             <div style="height:10px"></div>
+             <button class="btn sm" id="b-unsample">연습용 풀기</button>
            </div>`
         : `<div class="card" style="border-color:#EBD3AE;background:var(--warn-l)">
              <h3 style="color:var(--warn)">아직 첫 화면 목록에 안 보입니다</h3>
@@ -2944,7 +3222,12 @@ const SCREEN = {
           <div><label>주 수</label><input id="e-weeks" type="number" min="1" max="16" value="${+e.weeks || 4}"></div>
           <div><label>정기 모임</label><input id="e-meet" maxlength="40" value="${esc(e.meet || '')}" placeholder="예) 매주 화 20시 · 디스코드"></div>
         </div>
-        <label class="ck"><input type="checkbox" id="e-pick"${e.pick ? ' checked' : ''}><span>선발형 — 신청을 «지원» 으로 받고 리더가 수락합니다</span></label>` : ''}
+        <label class="ck"><input type="checkbox" id="e-pick"${e.pick ? ' checked' : ''}><span>선발형 — 신청을 «지원» 으로 받고 리더가 수락합니다</span></label>
+        <div class="meta" style="margin-top:8px"><b>모집공고</b> — 선발형이고 «목록에 올리기» 를 하면 /recruit 에 뜹니다.</div>
+        <label>필요한 직무</label><div class="gchips" id="e-roles">${['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'].map(j => `<button type="button" class="pick${String(e.roles || '').split(',').includes(j) ? ' on' : ''}" data-erole="${j}">${j}</button>`).join('')}</div>
+        <div class="row"><div><label>보상</label><select id="e-reward"><option value="">안 정함</option>${['무급', '수익 나눔', '유급'].map(r => `<option${e.reward === r ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
+          <div><label>유급이면 월(원)</label><input id="e-salary" type="number" min="0" step="10000" value="${+e.salary || 0}"></div>
+          <div><label>주당 시간</label><input id="e-hours" type="number" min="0" max="60" value="${+e.hours || 0}"></div></div>` : ''}
         <div class="meta">노쇼를 줄이려고 받는 돈입니다. <b>HACK:ON 은 돈을 받지 않습니다</b> — 주최자가 따로 받고,
           등록 데스크에서 팀마다 «받음·돌려줌·안 돌려줌» 만 표시합니다. 상태는 그 팀과 운영자만 봅니다.</div>
         <label>제출 마감</label><input id="e-due" type="datetime-local" value="${esc(e.due)}">
@@ -3059,6 +3342,17 @@ const SCREEN = {
         </div>` : ''}
       </div>`; })()}
 
+      ${(() => {
+        if (reps === null) return `<div class="card" id="rep-op"><h3>신고</h3><div class="meta">신고 목록을 못 읽었습니다. 새로고침해 보세요.</div></div>`;
+        if (!reps.length) return '';
+        const KIND = { question: '질문', team: '팀', submission: '제출작', sponsor: '후원', other: '기타' };
+        const open = reps.filter(r => !r.done).length;
+        return `<div class="card" id="rep-op"><h3>신고 <span class="pill${open ? ' warn' : ''}">${open} 대기</span></h3>
+        <div class="meta">참가자·관객이 넣은 신고입니다. <b>24시간 안에</b> 보고, 질문이면 아래 «내리기»로 내린 뒤 «처리함»을 누르세요.</div>
+        ${reps.map(r => `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)">
+          <div><b>${esc(KIND[r.kind] || r.kind)}</b>${r.ref ? ' #' + esc(r.ref) : ''} · ${esc(r.reason)}${r.note ? ' · ' + esc(r.note) : ''}</div>
+          <div class="meta" style="margin-top:4px">${esc(r.at)} ${r.done ? '<span class="pill ok">처리함</span>' : `<button class="lnk" data-repdone="${r.id}">처리함</button>`}</div>
+        </div>`).join('')}</div>`; })()}
       ${(() => { const qs = qas || []; if (!qs.length) return '';
         return `<div class="card" id="qa-op"><h3>질문 <span class="pill">${qs.filter(q => !q.answer).length} 대기</span></h3>
         <div class="meta">참가팀이 팀 열쇠로 물은 것입니다. 답하면 소식에 «답변»으로 올라갑니다.</div>
@@ -3185,6 +3479,18 @@ const SCREEN = {
             : ''}</div>
         ${linkBox(`${shareBase()}/e/${e.id}`, '', 'b-copy',
           '<b>참가자용.</b> 찍으면 바로 열립니다.')}
+        ${/* 모집 늘리기 — 길마다 다른 초대 링크(?f=)와 그 길로 몇 명이 왔는지. 한 사람씩 데려오는 판에서
+              «어느 방에 다시 올릴지» 는 이 숫자만 보고 정한다. 문구는 그 방에 그대로 붙일 수 있게 날짜·시간·장소를 넣어 만든다 */''}
+        ${(() => { const by = {}; for (const r of d.rows) if (r.found) by[r.found] = (by[r.found] || 0) + 1;
+           const none = d.rows.filter(r => !r.found).length;
+           return `<div class="card" id="grow" style="margin:10px 0;padding:14px 16px;background:var(--fill)">
+             <b>모집 늘리기</b> <span class="meta">신청 ${d.rows.length}팀${e.cap ? ` / 정원 ${e.cap}` : ''}</span>
+             <div class="meta" style="margin-top:4px">방마다 다른 링크를 뿌리면 어디서 왔는지 저절로 셉니다. 많이 온 방에 한 번 더 올리세요.</div>
+             ${GROW_CH.map(ch => `<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+               <b style="min-width:84px">${esc(ch)}</b><span class="pill${by[ch] ? ' ok' : ''}">${by[ch] || 0}명</span>
+               <button class="btn sec sm" data-flink="${esc(ch)}">링크</button>
+               <button class="btn sec sm" data-fmsg="${esc(ch)}">문구 복사</button></div>`).join('')}
+             ${none ? `<div class="meta" style="margin-top:6px">어디서 왔는지 아직 모름 ${none}명</div>` : ''}</div>`; })()}
         ${/* 협찬 안내는 «보내는» 주소다 — 인스타 프로필·메일에 이 한 줄만 붙인다. 참가자용 바로 밑에 둔다 */''}
         ${linkBox(`${shareBase()}/give/${e.id}`, 'givelink', 'b-copyg',
           '<b>협찬사용.</b> 자리별 희망가와 이름이 어디 붙는지가 한 장에 있습니다.')}
@@ -3344,6 +3650,8 @@ const SCREEN = {
     const hrep = LIVE ? await api(`/events/${cur}/rep`).catch(() => null) : null;
     /* 같이 있었던 사람 — 매너 평가 칸. 신청한 브라우저(팀 열쇠)에서만 온다. 못 받으면 칸을 안 그린다 */
     const peers = (LIVE && myId && tkeyOf(myId)) ? await api(`/events/${cur}/peers`, { tkey: tkeyOf(myId) }).catch(() => null) : null;
+    /* 팀원 추천 — 신청한 브라우저(팀 열쇠)에만. 끝난 대회·선발형 지원 대기 중엔 안 띄운다 */
+    MATCH = (LIVE && mine && myId && tkeyOf(myId) && statusOf(e).k !== '끝남') ? await api(`/events/${cur}/match`, { tkey: tkeyOf(myId) }).catch(() => null) : null;
     const needs = LIVE ? await api(`/events/${cur}/needs`).catch(() => []) : (DEMO.needs || []);
     const ledger = LIVE ? await api(`/events/${cur}/ledger`).catch(() => []) : (DEMO.ledger || []);
     const notes = LIVE ? await api(`/events/${cur}/notices`).catch(() => []) : [];
@@ -3366,7 +3674,9 @@ const SCREEN = {
     /* «줄 수 있는 것» 은 이 대회로 정해져 있다. 다른 대회에서 오던 단계는 버린다. */
     if (G.event !== cur) giveReset(false);
     G.event = cur; G.fixed = true; G.events = [e];
-    return `<section class="hero pub">
+    /* 해외에서 온 사람 — 브라우저 언어가 한국어가 아니면 영어 한 줄. 신청은 이름·이메일뿐이라 번역 없이도 된다 */
+    const foreign = !/^ko/i.test(navigator.language || 'ko');
+    return `${foreign ? `<div class="notice" id="en-note" lang="en" style="margin-bottom:10px">🌏 This page is in Korean. To join: <b>name + email</b> in the sign-up box below, then «참가 신청하기». Questions in English are welcome in «질문». <a href="/en">About HACK:ON in English</a></div>` : ''}<section class="hero pub">
         <div class="top">${badge(e)}<span>${esc(e.host)} 주최</span></div>
         <h2>${esc(e.title)}</h2>
         <ul class="facts">
@@ -3400,17 +3710,19 @@ const SCREEN = {
         <ul class="news" id="news-list">${notes.map(newsRow).join('')}</ul></div>` : ''}
       ${(() => {
         /* 묻고 답하기 — 커뮤니티가 아니다. 팀 열쇠로 묻고 운영자만 답한다. 급한 것은 대화방으로 */
-        const qs = qas || [];
+        const qsAll = qas || [];
+        const myName = mine ? mine.name : null;
+        const qs = qsAll.filter(q => q.team === myName || !isBlocked(e.id, q.team));
         const canAsk = mine && !ended && tkeyOf(mine.id);
-        if (!qs.length && !canAsk) return '';
+        if (!qsAll.length && !canAsk) return '';
         return `<div class="card" id="qa"><h3>질문 <span class="pill">${qs.length}</span></h3>
           <div class="meta">참가팀이 묻고 운영자가 답합니다. 답은 소식에도 올라갑니다.${e.chat ? ' 지금 급한 것은 <b>대화방</b>으로.' : ''}</div>
           ${canAsk ? `<div class="shrow" style="margin-top:8px"><input id="q-in" maxlength="200" placeholder="한 줄로 (200자)"><button class="btn sm" id="q-go">묻기</button></div>` : ''}
           ${canAsk ? '<div class="meta" style="margin-top:4px">연락처는 적지 마세요 — 모두가 봅니다. 답 없는 질문은 셋까지.</div>' : ''}
           ${qs.map(q => `<div class="qrow" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)">
-            <div><b>${esc(q.team)}</b> · ${esc(q.text)}</div>
+            <div><b>${esc(q.team)}</b> · ${esc(q.text)}${q.team === myName ? '' : repBtns(e.id, 'question', q.id, q.team)}</div>
             ${q.answer ? `<div class="meta" style="margin-top:4px">↳ ${esc(q.answer)}</div>` : `<div class="meta" style="margin-top:4px">${q.waiting ? '답을 기다리는 중 (하루 넘음)' : '답을 기다리는 중'}${canAsk && q.team === mine.name ? ` <button class="lnk" data-qclose="${q.id}">내 질문 닫기</button>` : ''}</div>`}
-          </div>`).join('')}</div>`; })()}
+          </div>`).join('')}${blockedNote(e.id, qsAll.length - qs.length)}</div>`; })()}
       ${(reqs.length || !ended) ? `<div class="card" id="reqs"><h3>이 대회의 주제 · 요청 <span class="pill">${reqs.length}</span></h3>
         <div class="meta">후원자가 낸 관심 주제와 의뢰자가 낸 번거로운 일입니다.</div>
         ${reqs.map(r => `<div class="card" style="margin-top:9px">
@@ -3423,7 +3735,7 @@ const SCREEN = {
            스크롤 끝에 있으면 4050 은 못 찾는다. 나머지는 «읽을거리»라 아래로 간다. */
         !ended
           ? (mine
-              ? moreForm(mine)
+              ? moreForm(mine) + matchCard(MATCH)
               : `<div class="card" id="apply"><h3>${e.pick ? '지원하기' : '참가 신청'}</h3>
                    ${cancelLine(e)}
                    ${applyForm()}</div>`)
@@ -3523,16 +3835,20 @@ const SCREEN = {
       ${(() => {
         /* 마감 전에는 무엇을 만들고 있는지만 보이고 링크는 안 보인다.
            서버가 아예 안 내려보낸다 - 화면에서만 감추면 소용이 없다. */
-        const made = d.rows.filter(r => r.done || r.hidden || r.note);
-        if (meet || !made.length) return '';
+        const madeAll = d.rows.filter(r => r.done || r.hidden || r.note);
+        const made = madeAll.filter(r => String(r.id) === String(myId) || !isBlocked(e.id, r.name));
+        if (meet || !madeAll.length) return '';
         return `<h3>${d.closed ? '제출작' : '무엇을 만들고 있나'}</h3>
           ${d.closed ? '' : `<p class="sub">링크는 <b>마감 뒤</b>에 한꺼번에 열립니다.
             먼저 낸 팀이 손해를 보지 않게 하기 위해서입니다.</p>`}
           ${made.map(r => `<div class="card"${r.featured ? ' style="border-left:3px solid var(--acc)"' : ''}>
             <h3>${r.featured ? '⭐ ' : ''}${esc(r.name)}${r.featured ? ' <span class="pill">추천작</span>' : ''}</h3>
+            ${String(r.id) === String(myId) ? '' : `<div class="meta">${repBtns(e.id, 'submission', r.id, r.name).trim()}</div>`}
             ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
             ${r.url ? `<div class="share" style="margin-top:10px">${esc(r.url)}</div>` : ''}
-            ${(r.words_public || []).length ? `<div class="meta" style="margin-top:8px"><b>사람들이 남긴 말</b><br>${r.words_public.map(w => '“' + esc(w) + '”').join('<br>')}</div>` : ''}</div>`).join('')}`;
+            ${demoLinks(r)}
+            ${(r.words_public || []).length ? `<div class="meta" style="margin-top:8px"><b>사람들이 남긴 말</b><br>${r.words_public.map(w => '“' + esc(w) + '”').join('<br>')}</div>` : ''}</div>`).join('')}
+          ${blockedNote(e.id, madeAll.length - made.length)}`;
       })()}
 
       ${sup.rows.length ? `<h3>끝난 뒤에도 봐 드립니다</h3>
@@ -3815,6 +4131,602 @@ const SCREEN = {
   },
 
   /* 마켓 목록 — 해커톤에서 실제로 돌아간 것, 운영진이 확인한 것만. 돈은 판매자 계정으로 간다 */
+  /* 모아 보기 — 네이버 지도처럼 주인이 안 올려도 보인다. 주최자가 «내 것» 이라고 확인을 청하면
+     사이트 운영자가 보고 넘기고, 그 순간 HACK:ON 대회가 생겨 바로 신청·심사를 받을 수 있다 */
+  async around() {
+    let d = null;
+    if (LIVE) { try { d = await api(`/spots?kind=${encodeURIComponent(ARD_KIND)}&q=${encodeURIComponent(ARD_Q)}`); } catch { d = null; } }
+    const kinds = (d && d.kinds) || ['해커톤', '동아리', '스터디', '공공 과제'];
+    const when = r => r.starts ? `${r.starts.slice(5).replace('-', '/')}${r.ends && r.ends !== r.starts ? '~' + r.ends.slice(5).replace('-', '/') : ''}` : '날짜 모름';
+    const card = r => `<div class="card"${r.over ? ' style="opacity:.6"' : ''}>
+      <div class="top"><span class="pill">${esc(r.kind)}</span>${r.claimed ? '<span class="pill ok">주최자 확인</span>' : '<span class="pill">제보로 올라옴</span>'}${r.over ? '<span class="pill">끝남</span>' : ''}</div>
+      <h3 style="margin:6px 0 2px">${esc(r.name)}</h3>
+      <div class="meta">${[r.org, r.school, r.place, when(r)].filter(Boolean).map(esc).join(' · ')}</div>
+      ${r.note ? `<div class="meta" style="margin-top:4px">${esc(r.note)}</div>` : ''}
+      <div class="shrow" style="margin-top:10px;gap:6px;flex-wrap:wrap">
+        ${/^https?:\/\//i.test(r.url) ? `<a class="btn sec sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">공식 안내</a>` : ''}
+        ${r.claimed && r.event ? `<a class="btn sm" href="/e/${esc(r.event)}">HACK:ON 에서 신청</a>`
+          : `<button class="btn sec sm" data-claim="${r.id}">내가 주최자예요</button>`}
+      </div>
+      <div id="claim-${r.id}"></div></div>`;
+    return `<section class="hero"><div class="top"><span class="pill">모아 보기</span></div>
+        <h2>근처에서 열리는 것, 한눈에</h2>
+        <p class="sub" style="margin-bottom:0">해커톤·동아리·스터디·공공 과제를 모았습니다. <b>주최자가 올리지 않아도</b> 보입니다.
+          주최자라면 «내가 주최자예요» 를 누르세요 — 확인되면 신청·심사·결과 보고서를 HACK:ON 이 맡습니다.</p>
+      </section>
+      <div class="htabs wrap" id="ard-kinds">${['', ...kinds].map(k => `<button type="button" data-ardk="${esc(k)}"${ARD_KIND === k ? ' class="on"' : ''}>${k ? esc(k) : '전체'}</button>`).join('')}</div>
+      <div class="shrow"><input id="ard-q" value="${esc(ARD_Q)}" placeholder="학교·동아리·지역으로 찾기" style="flex:1"><button class="btn sec sm" id="ard-go">찾기</button></div>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다. 잠시 뒤에 다시 열어 주세요.</div></div>'
+        : !d.rows.length ? `<div class="card"><h3>${ARD_Q || ARD_KIND ? '찾는 것이 아직 없습니다' : '아직 올라온 것이 없습니다'}</h3><div class="meta">아는 곳이 있으면 아래에서 알려 주세요.</div></div>`
+        : d.rows.map(card).join('')}
+      <details class="card" id="ard-tip"><summary style="cursor:pointer;font-weight:700">아는 곳 알려 주기</summary>
+        ${d && !d.loggedIn ? `<div class="meta" style="margin-top:8px">누가 올렸는지 알아야 잘못된 것을 내릴 수 있어서, 제보는 로그인한 뒤에 받습니다.</div>${loginBtns('', 'margin-top:8px')}`
+        : `<label>무엇</label><select id="tp-kind">${kinds.map(k => `<option>${esc(k)}</option>`).join('')}</select>
+        <label>이름</label><input id="tp-name" maxlength="80" placeholder="예) 2026 겨울 교내 해커톤">
+        <label>공식 안내 주소</label><input id="tp-url" placeholder="https://… (공지·인스타·홈페이지)">
+        <div class="row"><div><label>여는 곳</label><input id="tp-org" maxlength="60" placeholder="학교·동아리·기관"></div>
+          <div><label>학교</label><input id="tp-school" maxlength="40" placeholder="있으면"></div></div>
+        <div class="row"><div><label>시작</label><input id="tp-starts" type="date"></div><div><label>끝</label><input id="tp-ends" type="date"></div></div>
+        <label>지역·장소</label><input id="tp-place" maxlength="60" placeholder="예) 선릉 · 온라인">
+        <button class="btn sm" id="tp-go" style="margin-top:10px">올리기</button>`}
+      </details>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/app">대회 열기</a> · <a href="/learn">강의</a> · <a href="/market">마켓</a></p>`;
+  },
+
+  /* 학기 활동 보고서. 동아리 회장이 학교에 내는 «활동 실적» 한 장 — 인쇄하거나 PDF 로 저장한다.
+     모르는 칸(체크인을 안 받은 행사의 «온 사람»)은 0 이 아니라 «—» 로 둔다 */
+  async term() {
+    const y = new Date().getFullYear(), mo = new Date().getMonth() + 1;
+    if (!TERM.from) { TERM.from = mo >= 3 && mo <= 8 ? `${y}-03-01` : mo >= 9 ? `${y}-09-01` : `${y - 1}-09-01`;
+                      TERM.to = mo >= 3 && mo <= 8 ? `${y}-08-31` : mo >= 9 ? `${y + 1}-02-28` : `${y}-02-28`; }
+    let d; try { d = await api(`/mine/report?from=${TERM.from}&to=${TERM.to}`); }
+    catch (e) { return `<div class="card"><h3>보고서를 만들지 못했습니다</h3><div class="meta">${esc(e.message)}</div></div>`; }
+    const n = v => v === null || v === undefined ? '—' : String(v);
+    return `<section class="hero no-print"><div class="top"><span class="pill">활동 보고서</span></div>
+        <h2>학기 활동 보고서</h2>
+        <p class="sub" style="margin-bottom:0">이 계정으로 연 대회·모임·프로젝트를 기간으로 묶습니다. 동아리 재등록·지원금 신청에 그대로 붙이세요.</p>
+        <div class="shrow" style="margin-top:10px"><input id="tm-from" type="date" value="${esc(TERM.from)}" style="flex:1"><input id="tm-to" type="date" value="${esc(TERM.to)}" style="flex:1"><button class="btn sec sm" id="tm-go">다시 보기</button></div>
+      </section>
+      <div class="card" id="term-sheet">
+        <h3>${esc(d.name || '우리 동아리')} 활동 실적 <span class="meta">${esc(d.from)} ~ ${esc(d.to)}</span></h3>
+        <div class="stat"><div><b>${d.total.events}</b><span>행사</span></div><div><b>${d.total.applied}</b><span>신청</span></div>
+          <div><b>${n(d.total.came)}</b><span>참석</span></div><div><b>${n(d.total.finished)}</b><span>완주(제출)</span></div><div><b>${d.total.certs}</b><span>수료증</span></div></div>
+        ${d.rows.length ? `<table style="margin-top:10px"><tr><th>날짜</th><th>행사</th><th class="n">신청</th><th class="n">참석</th><th class="n">완주</th><th>협찬</th></tr>
+          ${d.rows.map(r => `<tr><td>${esc(r.starts.slice(5).replace('-', '/'))}</td><td>${esc(r.title)} <span class="meta">${esc(r.kind)}</span></td>
+            <td class="n">${r.applied}</td><td class="n">${n(r.came)}</td><td class="n">${n(r.finished)}</td>
+            <td>${r.sponsors.length ? esc(r.sponsors.join(', ')) + (r.promised ? ` <span class="meta">약속 ${r.kept}/${r.promised}</span>` : '') : '—'}</td></tr>`).join('')}</table>`
+          : '<div class="meta" style="margin-top:8px">이 기간에 연 행사가 없습니다.</div>'}
+        <div class="meta" style="margin-top:10px">«—» 는 기록이 없어 모르는 칸입니다(체크인을 받지 않은 행사 등). HACK:ON 기록 기준 · 만든 날 ${esc(ymdLocal())}</div>
+      </div>
+      <div class="no-print" style="display:flex;gap:8px;margin:10px 0"><button class="btn" id="tm-print">인쇄 · PDF 저장</button><button class="btn sec" id="tm-back">돌아가기</button></div>`;
+  },
+
+  /* 세팅 모음. 잘 쓰는 사람의 AI 도구 세팅을 모아 관리자가 고른 것을 «최신판» 으로 묶는다.
+     최신판은 세팅을 낸 사람만 받는다(90일). 모음은 누구나 열고, 연 사람이 초대 코드로 공동 관리자를 부른다 */
+  async setups() {
+    const acct = (AUTH && AUTH.loggedIn) || !!myKey();
+    const loginBox = `<div class="meta" style="margin-top:8px">누가 냈는지 알아야 최신판을 돌려드릴 수 있어서 로그인한 뒤에 받습니다.</div>${loginBtns('', 'margin-top:8px')}`;
+    if (!SETP) {
+      let d = null; try { d = await api('/packs'); } catch { d = null; }
+      return `<section class="hero"><div class="top"><span class="pill">세팅 모음</span></div>
+          <h2>잘 쓰는 사람의 세팅, 계속 최신으로</h2>
+          <p class="sub" style="margin-bottom:0">Claude Code·Codex·Cursor 를 잘 쓰는 사람들의 규칙·설정·프롬프트를 모읍니다.
+            관리자가 좋은 것을 골라 <b>최신판</b>으로 묶어 냅니다. <b>세팅을 하나 내면</b> ${d ? d.window : 90}일 동안 최신판을 받습니다.</p></section>
+        ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+          : !d.rows.length ? '<div class="card"><h3>아직 열린 모음이 없습니다</h3><div class="meta">첫 모음을 열어 보세요. 연 사람이 관리자가 됩니다.</div></div>'
+          : d.rows.map(r => `<a class="card" href="#" data-pack="${r.id}" style="display:block;text-decoration:none;color:inherit">
+              <div class="top">${r.topic ? `<span class="pill">${esc(r.topic)}</span>` : ''}${r.ver ? `<span class="pill ok">${r.ver}판</span>` : '<span class="pill">아직 판 없음</span>'}</div>
+              <h3 style="margin:6px 0 2px">${esc(r.title)}</h3>
+              <div class="meta">낸 사람 ${r.givers} · 관리자 ${r.curators}${r.released ? ` · 최근 ${esc(String(r.released).slice(0, 10))}` : ''}</div></a>`).join('')}
+        <details class="card" id="pk-new"><summary style="cursor:pointer;font-weight:700">모음 열기 — 내가 관리자</summary>
+          ${!acct ? loginBox : `<label>이름</label><input id="pk-title" maxlength="60" placeholder="예) Claude Code 로 앱 처음 만드는 사람">
+          <label>도구·분야</label><input id="pk-topic" maxlength="60" placeholder="예) Claude Code · 프런트엔드">
+          <label>무엇을 모으나</label><textarea id="pk-about" rows="3" maxlength="400" placeholder="어떤 세팅을 받고, 어떤 기준으로 고르는지"></textarea>
+          <button class="btn sm" id="pk-go" style="margin-top:10px">열기</button>
+          <div class="meta" style="margin-top:6px">연 뒤 초대 코드를 주면 공동 관리자가 함께 고릅니다.</div>`}</details>
+        <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/around">모아 보기</a> · <a href="/learn">강의</a></p>`;
+    }
+    let p; try { p = await api(`/packs/${SETP}`); }
+    catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없는 모음입니다' : '불러오지 못했습니다'}</h3><button class="btn sec sm" id="pk-back">목록으로</button></div>`; }
+    const can = p.curator || p.giver;
+    return `<section class="hero"><div class="top"><span class="pill">세팅 모음</span>${p.topic ? `<span class="pill">${esc(p.topic)}</span>` : ''}${p.curator ? '<span class="pill ok">내가 관리자</span>' : ''}</div>
+        <h2>${esc(p.title)}</h2>${p.about ? `<p class="sub" style="margin-bottom:0">${esc(p.about)}</p>` : ''}
+        <div class="meta" style="margin-top:6px">낸 사람 ${p.givers} · 판 ${p.releases.length}</div></section>
+      <div class="card" id="pk-latest"><h3>최신판${p.releases[0] ? ` <span class="pill ok">${p.releases[0].ver}판 · ${esc(String(p.releases[0].at).slice(0, 10))}</span>` : ''}</h3>
+        ${!p.releases.length ? '<div class="meta">아직 낸 판이 없습니다. 세팅이 모이면 관리자가 묶어 냅니다.</div>'
+          : can ? `${SETLATEST && SETLATEST.pack === p.id ? `<pre style="white-space:pre-wrap;max-height:420px;overflow:auto;background:var(--soft,#F4F6F8);padding:12px;border-radius:10px;font-size:13px">${esc(SETLATEST.body)}</pre>
+              <button class="btn sm" id="pk-dl">.md 로 내려받기</button>` : '<button class="btn sm" id="pk-get">최신판 받기</button>'}`
+          : `<div class="meta">세팅을 하나 내면 ${p.window}일 동안 최신판을 받습니다. 판마다 무엇이 바뀌었는지는 아래에 공개돼 있습니다.</div>`}
+        ${p.releases.length ? `<div style="margin-top:10px">${p.releases.map(r => `<div class="meta">· ${r.ver}판 ${esc(String(r.at).slice(0, 10))}${r.notes ? ' — ' + esc(r.notes) : ''}</div>`).join('')}</div>` : ''}
+      </div>
+      <div class="card" id="pk-give"><h3>내 세팅 내기</h3>
+        ${!acct ? loginBox : `<label>제목</label><input id="st-title" maxlength="80" placeholder="예) 화면부터 그리게 하는 CLAUDE.md">
+        <label>도구와 판</label><input id="st-tool" maxlength="40" placeholder="예) Claude Code 2.3">
+        <label>세팅</label><textarea id="st-body" rows="8" maxlength="8000" placeholder="규칙·설정 파일·프롬프트·쓰는 순서. API 키는 지우고 넣으세요"></textarea>
+        <button class="btn sm" id="st-go" style="margin-top:10px">내기</button>
+        <div class="meta" style="margin-top:6px">본문은 관리자만 봅니다. 최신판에 들어가도 이름은 안 실립니다.</div>`}
+        ${p.setups.length && !p.curator ? `<div class="meta" style="margin-top:10px"><b>내가 낸 것</b> ${p.setups.map(x => esc(x.title) + (x.picked ? ' ✓' : '')).join(' · ')}</div>` : ''}
+      </div>
+      ${p.curator ? `<div class="card" id="pk-cur"><h3>관리 — 최신판 묶기</h3>
+        <div class="meta">공동 관리자 초대 코드 <code>${esc(p.code)}</code> — 이 코드를 받은 사람이 이 화면에서 «관리자 되기» 를 누릅니다.</div>
+        ${p.setups.length ? p.setups.map(x => `<label class="ck" style="margin-top:8px"><input type="checkbox" data-spick="${x.id}"${x.picked ? '' : ' checked'}>
+            <span><b>${esc(x.title)}</b> <span class="meta">${esc(x.tool || '')}${x.picked ? ' · 지난 판에 들어감' : ''}</span>
+            <details><summary class="meta" style="cursor:pointer">본문</summary><pre style="white-space:pre-wrap;font-size:12.5px">${esc(x.body)}</pre></details></span></label>`).join('')
+          : '<div class="meta" style="margin-top:8px">아직 들어온 세팅이 없습니다.</div>'}
+        <label>이번 판 메모</label><input id="rl-notes" maxlength="300" placeholder="예) Claude Code 2.3 에 맞춰 권한 설정을 바꿈">
+        <button class="btn sm" id="rl-go" style="margin-top:10px">최신판 내기</button></div>`
+      : acct ? `<details class="card"><summary style="cursor:pointer;font-weight:700">초대 코드를 받았어요 — 관리자 되기</summary>
+          <div class="shrow" style="margin-top:8px"><input id="jn-code" maxlength="20" placeholder="초대 코드" style="flex:1"><button class="btn sec sm" id="jn-pack">관리자 되기</button></div></details>` : ''}
+      <button class="btn sec sm" id="pk-back" style="margin:10px 0">모음 목록</button>`;
+  },
+
+  /* AI 지갑 — 구독 갱신·크레딧 만료·한도 리셋을 날짜순 한 장으로. 글씨를 크게, 단추는 셋만(넣기·달력·공유).
+     40·50대가 «원클릭» 으로 쓰게: 자주 쓰는 도구는 고르기만, 날짜는 달력 칸, 알림은 달력 앱이 한다 */
+  async wallet() {
+    const list = walLoad().map((it, i) => ({ ...it, i, next: walNext(it) }))
+      .sort((a, b) => (a.next || '9') < (b.next || '9') ? -1 : 1);
+    /* 내 도구에 붙는 혜택 — 할인 소식(해커온뉴스 «무료·할인·리셋»)과 추천 코드(/ref).
+       목록 전체를 받아 이 기기에서 맞춰 본다. 무엇을 구독하는지는 서버로 안 간다.
+       못 받으면 null — «혜택 없음» 이 아니라 «모름» 으로 그린다 */
+    const [wNews, wRef] = list.length && LIVE ? await Promise.all([
+      api('/news').then(d => d.rows.filter(r => r.kind === 'deal')).catch(() => null),
+      api('/ref').then(d => d.rows).catch(() => null)]) : [[], []];
+    const toolKey = n => String(n || '').toLowerCase().replace(/\s*(pro|plus|max|team|teams|premium|구독|요금제)\b.*$/i, '').trim();
+    const perks = list.map(it => {
+      const k = toolKey(it.name); if (k.length < 2) return null;
+      return { name: it.name,
+        deals: wNews === null ? null : wNews.filter(r => (r.title || '').toLowerCase().includes(k)).slice(0, 2),
+        ref: wRef === null ? null : wRef.find(r => toolKey(r.name).includes(k) || k.includes(toolKey(r.name))) || false };
+    }).filter(p => p && (p.deals === null || p.deals.length || p.ref === null || p.ref));
+    const perMonth = it => it.kind === 'renew' && +it.won ? (it.every === 'week' ? it.won * 4 : +it.won) : 0;
+    const monthly = list.reduce((n, it) => n + perMonth(it), 0);
+    /* 해지 후보 — «안 씀» 인 구독. «가끔» 은 다음 갱신 전에 한 번 더 보자고만 한다. 고르지 않은 것은 모름이라 안 센다 */
+    const cut = list.filter(it => it.use === 'none' && perMonth(it)), maybe = list.filter(it => it.use === 'some' && perMonth(it));
+    const save = cut.reduce((n, it) => n + perMonth(it), 0);
+    const badge = n => n === null ? '<span class="pill">날짜 모름</span>' : n < 0 ? '<span class="pill">지남</span>'
+      : n === 0 ? '<span class="pill warn">오늘</span>' : n <= 7 ? `<span class="pill warn">D-${n}</span>` : `<span class="pill">D-${n}</span>`;
+    return `<section class="hero"><div class="top"><span class="pill">AI 지갑</span></div>
+        <h2>구독·크레딧·마감, 한 장에</h2>
+        <p class="sub" style="margin-bottom:0">언제 갱신되고, 언제 사라지고, 언제까지 답해야 하는지. <b>이 기기에만</b> 저장합니다 — 서버로 안 보냅니다.</p></section>
+      ${list.length ? `<div class="card" id="wal-list">
+          ${monthly ? `<div class="meta" style="margin-bottom:6px">한 달 구독료 어림 <b>${won(monthly)}</b>${save ? ` · 안 쓰는 것 끊으면 <b style="color:var(--bad,#C2410C)">${won(save)}</b> 아낌` : ''}</div>` : ''}
+          ${cut.length || maybe.length ? `<div class="notice" style="margin:4px 0 8px">${cut.length ? `<b>해지 후보</b> ${cut.map(it => esc(it.name)).join(' · ')} — 갱신일 전에 끊으세요. ` : ''}${maybe.length ? `<b>갱신 전에 다시 보기</b> ${maybe.map(it => esc(it.name)).join(' · ')}` : ''}</div>` : ''}
+          ${list.map(it => `<div style="padding:10px 0;border-top:1px solid var(--rule);display:flex;gap:10px;align-items:flex-start">
+            <div style="flex:1"><div style="font-size:17px;font-weight:800">${esc(it.name)} ${badge(walDays(it.next))}</div>
+              <div class="meta">${esc(WAL_KIND[it.kind] || '')} · ${it.next ? esc(it.next.slice(5).replace('-', '/')) : '날짜 모름'}${it.every ? (it.every === 'week' ? ' · 매주' : ' · 매월') : ''}${+it.won ? ' · ' + won(it.won) : ''}${it.memo ? ' · ' + esc(it.memo) : ''}</div></div>
+            <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+              ${it.kind === 'renew' ? `<select data-wuse="${it.i}" aria-label="${esc(it.name)} 얼마나 쓰나" style="font-size:12.5px;padding:3px 6px">${[['', '얼마나 쓰나?'], ['much', '자주 씀'], ['some', '가끔'], ['none', '안 씀']].map(([v, t]) => `<option value="${v}"${(it.use || '') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>` : ''}
+              <button class="lnk" data-wdel="${it.i}" aria-label="${esc(it.name)} 지우기">지움</button></div></div>`).join('')}
+          <div class="shrow" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn" id="wal-ics">달력에 한 번에 넣기</button><button class="btn sec" id="wal-share">친구에게 알려 주기</button></div>
+          <div class="meta" style="margin-top:6px">달력 파일을 열면 날짜마다 <b>하루 전 알림</b>이 붙습니다.</div></div>`
+        : '<div class="card"><h3>아직 비어 있습니다</h3><div class="meta">아래에서 쓰는 것을 하나 넣어 보세요. 30초면 됩니다.</div></div>'}
+      <div class="card" id="wal-rec"><h3>내 직무에 맞는 도구</h3>
+        <div class="gchips">${Object.keys(WAL_REC).map(j => `<button type="button" class="pick${WAL_JOB === j ? ' on' : ''}" data-wjob="${esc(j)}">${esc(j)}</button>`).join('')}</div>
+        ${WAL_JOB ? WAL_REC[WAL_JOB].map(([t, why, free]) => { const has = list.some(it => it.name.toLowerCase().includes(t.toLowerCase()));
+            return `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--rule);margin-top:6px">
+              <div style="flex:1;min-width:0"><b>${esc(t)}</b>${free ? ' <span class="pill ok">무료</span>' : ''}<div class="meta">${esc(why)}</div></div>
+              ${has ? '<span class="pill">쓰는 중</span>' : `<button class="btn sec sm" data-wrecadd="${esc(t)}">넣기</button>`}</div>`; }).join('')
+          : '<div class="meta" style="margin-top:8px">직무를 고르면 먼저 써 볼 것을 권합니다. 값은 자주 바뀌어서 적지 않습니다.</div>'}
+        ${(() => { const dup = WAL_OVERLAP.map(g => g.filter(t => list.some(it => it.kind === 'renew' && it.name.toLowerCase().includes(t.toLowerCase())))).filter(g => g.length > 1);
+            return dup.length ? `<div class="notice" style="margin-top:10px">${dup.map(g => `<b>${g.map(esc).join(' · ')}</b> — 같은 일을 하는 구독입니다. 하나로 줄여 볼 만합니다.`).join('<br>')}</div>` : ''; })()}</div>
+      ${list.length ? `<div class="card" id="wal-perks"><h3>내 도구에 붙는 혜택</h3>
+        ${wNews === null && wRef === null ? '<div class="meta">혜택 소식을 불러오지 못했습니다 — 있는지 없는지 모릅니다.</div>'
+          : !perks.length ? '<div class="meta">지금 넣은 도구에 맞는 할인 소식·추천 코드가 없습니다.</div>'
+          : perks.map(p => `<div style="padding:8px 0;border-top:1px solid var(--rule)"><b>${esc(p.name)}</b>
+              ${p.deals === null ? '<div class="meta">할인 소식 — 모름(못 불러옴)</div>' : p.deals.map(r => `<div class="meta">🏷️ <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></div>`).join('')}
+              ${p.ref ? `<div class="meta">🤝 추천 코드 ${p.ref.codes}개 돌고 있음 — <a href="/ref">써 주고 내 차례 받기</a></div>` : ''}</div>`).join('')}
+        <div class="meta" style="margin-top:6px">맞춰 보기는 이 기기에서 합니다. 무엇을 쓰는지는 서버로 안 갑니다.</div></div>` : ''}
+      <div class="card" id="wal-paste"><h3>붙여 넣어 한 번에</h3>
+        <div class="meta">메일·공지·카톡을 통째로 붙이세요. 줄마다 날짜를 찾아 <b>마감·회신</b>과 <b>일정·출시</b>로 나눕니다. 글은 이 기기 밖으로 안 나갑니다.</div>
+        <textarea id="wl-paste" rows="4" placeholder="예)&#10;서류 제출 10월 20일까지&#10;데모데이 10/31(금) 오후 1시&#10;회신 부탁드립니다 — 내일까지"></textarea>
+        <button class="btn sec" id="wl-parse" style="margin-top:8px;width:100%">날짜 찾기</button>
+        ${WAL_FOUND ? `<div id="wl-found" style="margin-top:10px">
+          ${WAL_FOUND.found.length ? WAL_FOUND.found.map((f, i) => `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:6px;font-weight:400">
+              <input type="checkbox" data-wfound="${i}" checked style="width:auto;margin-top:3px">
+              <span style="min-width:0;overflow-wrap:anywhere"><b>${esc(f.name)}</b><br><span class="meta">${esc(WAL_KIND[f.kind])} · ${esc(f.date)}${f.memo ? ' ' + esc(f.memo) : ''}</span></span></label>`).join('')
+            : '<div class="meta">날짜를 하나도 못 찾았습니다.</div>'}
+          ${WAL_FOUND.miss.length ? `<div class="meta" style="margin-top:6px">날짜 못 찾은 줄 ${WAL_FOUND.miss.length}개 — 필요하면 아래 «넣기» 로 직접.</div>` : ''}
+          ${WAL_FOUND.found.length ? '<button class="btn" id="wl-addall" style="margin-top:10px;width:100%">고른 것 넣기</button>' : ''}</div>` : ''}</div>
+      <div class="card" id="wal-add"><h3>넣기</h3>
+        <label>무엇</label><input id="wl-name" list="wl-tools" maxlength="40" placeholder="예) Claude Pro" style="font-size:17px">
+        <datalist id="wl-tools">${WAL_TOOLS.map(t => `<option value="${esc(t)}">`).join('')}</datalist>
+        <label>무슨 날</label><div class="gchips">${Object.entries(WAL_KIND).map(([k, t], i) => `<button type="button" class="pick${i ? '' : ' on'}" data-wkind="${k}">${t}</button>`).join('')}</div>
+        <div class="row"><div><label>날짜</label><input id="wl-date" type="date" style="font-size:17px"></div>
+          <div><label>반복</label><select id="wl-every"><option value="">없음</option><option value="month">매월</option><option value="week">매주</option></select></div></div>
+        <div class="row"><div><label>금액(원, 선택)</label><input id="wl-won" type="number" min="0" placeholder="예) 29000"></div>
+          <div><label>메모(선택)</label><input id="wl-memo" maxlength="60" placeholder="예) 남은 크레딧 226달러"></div></div>
+        <button class="btn" id="wl-go" style="margin-top:12px;width:100%">넣기</button></div>
+      <div class="card"><h3>지금 받을 수 있는 혜택</h3><div class="meta">무료 크레딧·할인·한도 리셋 소식은 해커온뉴스 «무료·할인·리셋» 에 모입니다.</div>
+        <a class="btn sec sm" href="/news" style="margin-top:8px;text-decoration:none">혜택 소식 보기</a></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/setups">세팅 모음</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
+  /* 기업·기관·전통 산업·스타트업. «AI 를 도입하라» 는 말은 많고 «첫날 무엇을 하나» 는 없다 — 그 첫날을 해커톤 하루로 판다.
+     결과물·사람·보고서가 남고, 업종별 «문제와 풀이» 는 해커온의 도메인 지식으로 쌓인다(회사 이름·내부 자료는 빼고, 동의한 것만) */
+  async biz() {
+    const offers = [
+      ['사내 해커톤 하루', '우리 회사 문제 셋 → 직원 팀이 하루 만에 눌러 보는 시제품', ['문제 고르기 30분 통화', '진행표·큰 화면·심사·결과 보고서 그대로', '처음 해 보는 직원도 직무 레시피로 시작'], '200만 원~ (30명 기준)'],
+      ['문제 출제형 공개 해커톤', '회사 문제를 공개 대회 주제로 — 밖의 바이브코더가 풉니다', ['결과물 마감 직후 먼저 보기', '채용·협업 제안에 동의한 참가자에게 연락할 길', '협찬 «발전소» 와 같은 자리'], '300만 원~'],
+      ['직무별 AI 도입 워크숍', '마케팅·기획·영업·CS·데이터 — 각자 자기 업무 하나를 그 자리에서 자동화', ['2시간 실습, 해커온 직무 레시피로', '끝나면 «누가 무엇을 줄였나» 표', '사내 해커톤의 예선으로 써도 됩니다'], '50만 원~'],
+      ['스타트업', '해커온에서 켜고, 대회로 첫 사용자를', ['/launch — 노출·팀원·피드백 무료', '대회 협찬으로 참가자에게 크레딧·사용 후기', '결과물·참가자 중 첫 팀원 찾기'], '무료부터'],
+    ];
+    const inds = ['제조', '유통·물류', '외식·소상공인', '교육', '공공·지자체', '금융', '부동산·건설', '미디어·콘텐츠'];
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">기업·기관</span></div>
+        <h2>AI 도입, 해커톤 하루로 시작</h2>
+        <p class="sub" style="margin-bottom:0">«AI 를 써야 한다» 는 다 압니다. 첫날 무엇을 하는지가 없을 뿐. 우리 문제를 들고 오시면 하루 뒤엔 눌러 보는 것이 있습니다.</p></section>
+      ${offers.map(([name, sub, gets, price]) => `<div class="card" data-offer="${esc(name)}"><h3>${esc(name)}</h3><div class="meta">${esc(sub)}</div>
+          <ul class="checks" style="margin-top:8px">${gets.map(g => `<li><span>${esc(g)}</span></li>`).join('')}</ul>
+          <div class="price">${esc(price)}<small>제안가</small></div></div>`).join('')}
+      <div class="card" id="biz-ind"><h3>업종별로 쌓습니다</h3>
+        <div class="gchips">${inds.map(x => `<span class="pick" style="cursor:default">${esc(x)}</span>`).join('')}</div>
+        <div class="meta" style="margin-top:8px">대회마다 «어떤 문제를 어떻게 풀었나» 가 업종별 사례로 남습니다. 회사 이름·내부 자료는 빼고, 동의한 것만. 다음 회사는 그 사례에서 시작합니다.</div></div>
+      <div class="card"><h3>순서</h3><ol class="steps">
+        <li>30분 통화 — 문제 셋과 사람 수</li><li>날짜·장소 — 사내든 밖이든</li><li>당일 — 진행표대로, 결과물은 그날 제출</li><li>보고서 — 참가·완주·결과물·다음 할 일</li></ol></div>
+      <div class="card"><a class="btn" style="display:block;text-align:center;text-decoration:none" href="mailto:hi@mandeun.com?subject=${encodeURIComponent('[기업·기관] AI 도입 해커톤 문의')}">30분 통화 잡기 — hi@mandeun.com</a>
+        <div class="meta" style="margin-top:8px">금액은 제안가이고 규모·장소에 따라 정합니다. 해커온은 돈을 받아 두지 않습니다 — 계약은 운영 주체와 직접 합니다.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/partner">협찬·협업</a> · <a href="/launch">시작하면 받는 것</a></p>`;
+  },
+
+  /* 실무 기록 단계 — 시험지가 아니라 대회 기록. «자격» 이라 부르지 않는다(등록 전에는 법이 막는다).
+     이름이 levels 인 까닭: cert() 는 수료 확인(/c/<번호>) 화면이 이미 쓴다 */
+  async levels() {
+    const steps = [['1', '켠 사람', '대회 1번 완주(결과물 제출)'], ['2', '만든 사람', '3번 완주 + 수상 1번 또는 30일 넘게 살아 있는 결과물'],
+                   ['3', '켜 주는 사람', '2단계 + 동료 실력 평가 4.0 이상(3건 넘게) + 강의 1개 이상']];
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">실무 기록 단계</span></div>
+        <h2>시험 말고, 만든 기록으로</h2>
+        <p class="sub" style="margin-bottom:0">바이브코딩 실력은 문제지로 안 보입니다. 대회에서 끝까지 낸 것, 지금도 열리는 것, 같이 한 사람의 평가로 단계를 매깁니다.</p></section>
+      <div class="card" id="cert-steps">${steps.map(([n, name, rule]) => `<div style="padding:10px 0;border-top:1px solid var(--rule)"><b>${n}단계 · ${esc(name)}</b><div class="meta">${esc(rule)}</div></div>`).join('')}</div>
+      <div class="card"><h3>어떻게 확인하나</h3><ul class="checks">
+        <li><span>각자 프로필(<code>hackon.kr/p/…</code>)에 단계가 뜹니다. 그 주소가 곧 확인서입니다 — 누구나 열어 봅니다.</span></li>
+        <li><span>사람이 손으로 올려 줄 칸은 없습니다. 기록이 바뀌면 단계도 바뀝니다.</span></li>
+        <li><span>링크드인·링커리어로 복사할 때 단계가 같이 붙습니다.</span></li></ul></div>
+      <div class="card"><h3>자격증인가요?</h3><div class="meta">아직 아닙니다. 민간자격으로 등록하기 전에는 «자격» 이라고 부를 수 없습니다(자격기본법).
+        등록을 준비하고 있고, 등록하면 이 기준이 그대로 검정 기준이 됩니다. 기업 교육·채용에서 쓰시려면 <a href="/biz">기업·기관</a>으로 이야기해 주세요.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/launch">시작하면 받는 것</a></p>`;
+  },
+
+  /* 해커온 크루 — 대외활동. 학생에게는 «스펙», 해커온에게는 손. 받는 것을 기록으로 준다(기여자 장부·명찰·추천서) */
+  async crew() {
+    const tracks = [['홍보', '인스타·숏폼·커뮤니티 방장 협조', '방마다 초대 링크로 몇 명 데려왔는지가 성과로 남습니다'],
+                    ['운영', '대회 하나를 매니저로 끝까지', '진행표·심사·결과 보고서 — 운영 회고가 포트폴리오'],
+                    ['개발', '해커온 코드·새 서비스', '풀 리퀘스트가 합쳐지면 기여자 장부 점수, 약정 시 분기 수익 나눔']];
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">해커온 크루 1기</span></div>
+        <h2>같이 켜는 사람 모집</h2>
+        <p class="sub" style="margin-bottom:0">8주. 대학생·직장인 누구나. 경력보다 «끝까지 해 본 것» 하나를 봅니다.</p></section>
+      ${tracks.map(([t, what, gets]) => `<div class="card" data-track="${esc(t)}"><h3>${esc(t)}</h3><div>${esc(what)}</div><div class="meta" style="margin-top:4px">${esc(gets)}</div></div>`).join('')}
+      <div class="card"><h3>받는 것</h3><ul class="checks">
+        <li><span><a href="/thanks">기여자 장부</a>에 이름과 «무엇을 했나» — 링크드인·링커리어로 복사됩니다</span></li>
+        <li><span>크루 명찰·티셔츠(«끄지 말고, 너랑 켜자»)</span></li>
+        <li><span>8주를 마치면 운영진 추천서, 협찬사·기관 미팅에 같이</span></li>
+        <li><span>잘한 분은 매니저 — 한 곳을 맡아 결정을 먼저 내립니다</span></li></ul></div>
+      <div class="card"><a class="btn" style="display:block;text-align:center;text-decoration:none" href="mailto:hi@mandeun.com?subject=${encodeURIComponent('[크루 1기 지원] 이름 · 갈래')}&body=${encodeURIComponent('갈래(홍보/운영/개발):\n끝까지 해 본 것 하나(링크):\n일주일에 쓸 수 있는 시간:\n')}">지원하기 — 메일 한 통</a>
+        <div class="meta" style="margin-top:8px">세 줄이면 됩니다. 10/31 데모데이에 와 보시면 더 좋습니다.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/launch">시작하면 받는 것</a></p>`;
+  },
+
+  /* 해커온에서 시작하면 받는 것. 금 캐러 온 사람에게 삽을 판다 — 우리는 금광이 아니라 삽·지도·동료를 낸다.
+     약속은 «지금 되는 것» 과 «기록이 쌓이면 되는 것» 을 갈라 적는다. 안 되는 것을 된다고 적으면 그게 가장 큰 거짓 광고다 */
+  async launch() {
+    const now = [
+      ['노출', '아침 브리핑 «새로 켜진 것»·해커온뉴스·첫 화면에 내 서비스', '/made 에 올리고 운영진이 열어 보면'],
+      ['사람', '역할·강점·이유가 맞는 팀원 추천, 서로 좋아요면 연락처', '대회·프로젝트에 신청하면'],
+      ['피드백', '심사위원 점수·심사평, 동료 평가, «지금 열리나» 자동 확인', '대회에 내면'],
+      ['기록', '완주·수상·만든 것이 프로필에 — 링크드인·링커리어로 복사', '끝난 대회에서 냈으면'],
+      ['도구', '대회 열기·모집 링크·진행표·큰 화면·결과 보고서·AI 지갑·직무 레시피', '처음부터 무료'],
+    ];
+    const later = [
+      ['크레딧', '협찬사 AI·클라우드 크레딧 — 결과물을 낸 팀에게만', '협찬이 붙은 대회'],
+      ['상금 풀', '«첫 사용자 100명» 을 먼저 넘긴 서비스에 협찬 풀에서 상금', '협찬 풀이 모이면 공지'],
+      ['돈 일부', '해커온을 같이 키운 기여(코드·새 서비스·운영)는 분기 수익을 점수 비율로 — 약정한 분만', 'CONTRIBUTING 9절'],
+      ['연결', '협찬사·기관·VC 데모데이에 우선 소개', '완주·사용자 기록이 쌓이면'],
+    ];
+    const row = ([k, v, when]) => `<div style="padding:10px 0;border-top:1px solid var(--rule)"><b>${esc(k)}</b> <span class="meta">— ${esc(when)}</span><div>${esc(v)}</div></div>`;
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">시작하기</span></div>
+        <h2>해커온에서 켜면 받는 것</h2>
+        <p class="sub" style="margin-bottom:0">바이브코딩으로 금을 캐러 오셨다면, 삽·지도·동료는 여기 있습니다. 만드는 건 여러분, 사람과 노출과 기록은 우리가.</p></section>
+      <div class="card" id="launch-now"><h3>지금 바로</h3>${now.map(row).join('')}</div>
+      <div class="card" id="launch-later"><h3>기록이 쌓이면 <span class="meta">약속이 아니라 조건입니다</span></h3>${later.map(row).join('')}</div>
+      <div class="card"><h3>순서</h3><ol class="steps">
+          <li>아이디어 하나 — <a href="/problems">문제 은행</a>에서 골라도 됩니다</li>
+          <li>대회나 프로젝트에 들어가 만들기 — <a href="/">열린 대회</a></li>
+          <li>만든 것 올리기 — <a href="/made">만든 것</a> (시연·영상·같이 할 사람)</li>
+          <li>첫 사용자 100명 — 브리핑·뉴스 노출, 방마다 초대 링크</li>
+          <li>사업으로 — 협찬·지원사업 연결, 같이 만든 사람은 <a href="/thanks">기여자 장부</a>에</li></ol></div>
+      <div class="card"><div class="meta">해커온은 돈을 받아 두지 않습니다. 판매·결제는 각자의 판매처에서, 수익 나눔은 서면 약정한 경우만. 코인·토큰은 쓰지 않습니다.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/partner">협찬·협업</a> · <a href="/thanks">기여자</a></p>`;
+  },
+
+  /* 협찬·협업 안내 — 대회 하나가 아니라 해커온 전체에 주는 것. 대회별 자리·희망가는 /give/<id> 가 맡는다.
+     금액은 «제안가» 다 — 이야기해서 정한다. 개인정보는 동의한 참가자 것만, 동의 범위 안에서만 넘긴다.
+     이 앱은 돈을 받지 않는다 — 주고받는 것은 주최자와 직접 */
+  async partner() {
+    const tiers = [
+      ['현물', '간식·음료 · 장소 · 상품 · 도구 크레딧', '돈 대신 물건으로', ['대회 페이지·현장 큰 화면·결과 보고서에 이름', '크레딧은 결과물을 낸 팀에게만 — 실제로 쓰인 숫자를 보고서로', '현장 사진(촬영 동의한 사람만)']],
+      ['스위치', '10만~30만 원', '간식·상금 한 몫', ['위 셋 + 로고', '결과 보고서에 «함께한 곳» 한 줄과 감사 글', '해커온뉴스에 «이번 대회를 켠 곳» 한 줄']],
+      ['콘센트', '50만~100만 원', '상 하나를 맡기', ['위 전부 + «○○상» 이름으로 시상', '현장에서 2분 소개', '채용·협업 제안에 동의한 참가자에게 연락할 길(동의 범위 안에서만)']],
+      ['발전소', '300만 원~', '주제를 내고 결과를 먼저', ['위 전부 + 대회 주제(풀 문제) 내기', '심사위원 한 자리', '결과물 마감 직후 먼저 보기·우선 협업 제안', '분기 리포트(참가·완주·결과물·후기)']],
+      ['정기 후원', '월 10만 원~', '아침 브리핑·해커온뉴스', ['«오늘 켤 것»·뉴스에 «후원» 표시 한 줄(광고로 숨기지 않는다)', '분기 리포트', '그 분기 대회 전체에 이름']],
+      ['공동 주최', '돈 대신 사람·장소·홍보', '커뮤니티·학교·기관', ['공동 주최 표기, 운영 도구 무료', '심사·멘토 자리', '결과 보고서를 그대로 기관 실적에']],
+    ];
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">협찬·협업</span></div>
+        <h2>같이 켜기</h2>
+        <p class="sub" style="margin-bottom:0">주시는 것마다 받는 것을 한 장에. 금액은 <b>제안가</b>이고 이야기해서 정합니다. 해커온은 돈을 받아 두지 않습니다 — 주최자와 직접 주고받습니다.</p></section>
+      ${tiers.map(([name, price, sub, gets]) => `<div class="card" data-tier="${esc(name)}">
+          <div class="top" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h3 style="margin:0">${esc(name)}</h3><span class="pill">${esc(sub)}</span></div>
+          <div class="price">${esc(price)}<small>제안가</small></div>
+          <ul class="checks">${gets.map(g => `<li><span>${esc(g)}</span></li>`).join('')}</ul></div>`).join('')}
+      <div class="card"><h3>지키는 것</h3><ul class="checks">
+        <li><span>참가자 연락처는 <b>그 사람이 동의한 것만</b>, 동의한 목적으로만 넘깁니다. 언제든 끌 수 있습니다.</span></li>
+        <li><span>숫자는 행사 기록에서만 나옵니다. 못 센 것은 «모름» 으로 적습니다 — 부풀리지 않습니다.</span></li>
+        <li><span>후원 표시는 숨기지 않습니다. 소식·브리핑 속 후원은 «후원» 이라고 붙습니다.</span></li></ul></div>
+      <div class="card"><h3>이야기하기</h3><div class="meta">한 줄이면 됩니다 — 어떤 걸 주실 수 있는지, 언제쯤.</div>
+        <a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:10px" href="mailto:hi@mandeun.com?subject=${encodeURIComponent('[협찬·협업] ')}">hi@mandeun.com 으로 보내기</a>
+        <div class="meta" style="margin-top:8px">특정 대회의 자리별 희망가는 그 대회의 «협찬 안내» 에 있습니다. <a href="/give">줄 수 있는 것 고르기</a></div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/thanks">기여자</a></p>`;
+  },
+
+  /* 기여자 — 코드·새 서비스·운영·콘텐츠로 해커온을 같이 켠 사람. 점수마다 «무엇을 했나» 한 줄이 같이 보인다 */
+  async thanks() {
+    let d = null; try { d = await api('/thanks'); } catch { d = null; }
+    const mark = { '꽂음': '🔌', '켬': '💡', '발전소': '⚡' };
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">기여자</span></div>
+        <h2>해커온을 같이 켠 사람들</h2>
+        <p class="sub" style="margin-bottom:0">코드·새 서비스·운영·콘텐츠로 기여한 분. 점수마다 무엇을 했는지 한 줄이 붙습니다 — 이유 없는 점수는 없습니다.</p></section>
+      <div class="card"><div class="meta">🔌 꽂음 — 첫 기여 · 💡 켬 — 10점 · ⚡ 발전소 — 50점. 매니저는 한 곳을 맡아 굴리는 사람입니다.
+        수익 나눔에 약정한 분은 분기마다 점수 비율로 나눕니다(<a href="https://github.com/mandeun/hackon/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">규칙</a>).</div></div>
+      ${d === null ? '<div class="card"><h3>불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? '<div class="card"><h3>첫 기여자를 기다립니다</h3><div class="meta">고칠 곳을 찾았거나 붙이고 싶은 서비스가 있으면 hi@mandeun.com 으로 알려 주세요.</div></div>'
+        : `<div class="card" id="thanks-list">${d.rows.map(c => `<div style="padding:10px 0;border-top:1px solid var(--rule)">
+            <div><b>${c.link ? `<a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.name)}</a>` : esc(c.name)}</b>
+              ${c.role ? `<span class="pill ok">${esc(c.role)}${c.area ? ' · ' + esc(c.area) : ''}</span>` : ''}
+              ${c.tier ? `<span class="pill">${mark[c.tier] || ''} ${esc(c.tier)} · ${c.points}점</span>` : ''}</div>
+            ${c.recent.map(r => `<div class="meta">${esc(r.at)} · ${esc(r.kind)} — ${esc(r.why)}</div>`).join('')}</div>`).join('')}</div>`}
+      <div class="card"><h3>기여하는 길</h3><div class="meta">코드: 깃허브에 풀 리퀘스트 · 새 서비스: 해커온에 붙일 것을 만들어 연결 · 운영: 대회 하나를 맡는 매니저 · 콘텐츠: 직무 레시피·뉴스 고르기.
+        <br>먼저 <a href="mailto:hi@mandeun.com?subject=${encodeURIComponent('[기여] ')}">hi@mandeun.com</a> 으로 한 줄 보내 주세요.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="https://github.com/mandeun/hackon" target="_blank" rel="noopener">소스 보기</a></p>`;
+  },
+
+  /* 아침 브리핑 — «오늘 켤 것». 노랑이(콘센트)가 하루를 켜는 한 장.
+     내 일(연 대회의 할 일·D-day) · 내 일정(지갑의 마감 7일 안) · 새로 켜진 것(새 모델·도구) · 꺼지기 전에(할인·무료 기한)
+     · 오늘의 스위치(내 직무 레시피 한 줄). 서버에 새로 적는 것은 없다 — 읽어 와서 이 기기에서 묶는다.
+     못 읽은 칸은 «모름» 으로 그린다. 비어 있는 것과 못 읽은 것은 다른 말이다 */
+  async brief() {
+    const now = ymdLocal(), wk = walShift(now, 7);
+    const dd = d => { const n = walDays(d, now); return n === null ? '' : n < 0 ? '지남' : n === 0 ? '오늘' : `D-${n}`; };
+    let my = null, mineErr = false;
+    if (LIVE && myKey()) { try { my = await api('/mine'); } catch { mineErr = true; } }
+    const evs = my ? (my.events || []).filter(e => String(e.ends || e.starts).slice(0, 10) >= now).slice(0, 3) : [];
+    const work = await Promise.all(evs.map(async e => {
+      let todo = null, pub = null;
+      try { todo = (await api(`/events/${e.id}/todo`)).items || []; } catch { todo = null; }
+      try { pub = await api(`/events/${e.id}`); } catch { pub = null; }
+      return { e, pub, todo: todo === null ? null : todo.filter(t => !t.done && (!t.due || t.due <= wk)).slice(0, 3) };
+    }));
+    const wal = walLoad().map(it => ({ ...it, next: walNext(it) })).filter(it => it.next && it.next >= now && it.next <= wk)
+      .sort((a, b) => a.next < b.next ? -1 : 1).slice(0, 5);
+    const tools = walLoad().map(it => String(it.name).toLowerCase().split(/\s+/)[0]).filter(k => k.length > 1);
+    /* 소식은 직무로 거르지 않고 다 받는다(직무로 거르면 일반 소식이 빠진다). 직무는 «오늘의 스위치» 레시피만 따로 */
+    const [news, recipe] = await Promise.all([api('/news').catch(() => null),
+      WAL_JOB ? api(`/news?job=${encodeURIComponent(WAL_JOB)}`).then(d => d.setup || '').catch(() => '') : Promise.resolve('')]);
+    const rows = news ? news.rows : [];
+    const mineFirst = l => l.slice().sort((a, b) => (tools.some(k => (b.title || '').toLowerCase().includes(k)) ? 1 : 0) - (tools.some(k => (a.title || '').toLowerCase().includes(k)) ? 1 : 0));
+    const deals = mineFirst(rows.filter(r => r.kind === 'deal')).slice(0, 3);
+    /* 새 모델·도구 — 소식 종류가 «새 도구» 이거나, 제목이 출시·공개를 말하는 것(새 모델 소식은 읽을거리 출처에서도 온다) */
+    const LAUNCH = /출시|공개|새 모델|업데이트|launch|release|introduc|now available|\bGA\b/i;
+    /* 한자가 넷 넘게 이어지는 제목(중국어 저장소 소개 등)은 빼고, 출시·공개를 말하는 줄을 먼저 */
+    const readable = r => !/[\u4e00-\u9fff]{4,}/.test(r.title || '');
+    const fresh = rows.filter(r => r.kind !== 'deal' && readable(r) && (r.kind === 'tool' || r.kind === 'pick' || LAUNCH.test(r.title || '')))
+      .sort((a, b) => (LAUNCH.test(b.title || '') ? 1 : 0) - (LAUNCH.test(a.title || '') ? 1 : 0)).slice(0, 3);
+    const tip = recipe ? String(recipe).split('\n').find(l => /^첫 작업/.test(l)) || String(recipe).split('\n')[0] : '';
+    const day = new Date(now + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+    BRIEF_TEXT = ['☀️ HACK:ON 오늘 켤 것 — ' + day,
+      ...(work.length ? ['', '[켜 둔 일]', ...work.map(w => `· ${w.e.title} ${dd(String(w.e.starts).slice(0, 10))}${w.pub ? ` · 신청 ${w.pub.teams}팀` : ''}${w.todo && w.todo.length ? ` · 할 일: ${w.todo[0].title}` : ''}`)] : []),
+      ...(wal.length ? ['', '[꺼지기 전에]', ...wal.map(it => `· ${it.name} ${WAL_KIND[it.kind] || ''} ${dd(it.next)}`)] : []),
+      ...(fresh.length ? ['', '[새로 켜진 것]', ...fresh.map(r => `· ${r.title}`)] : []),
+      ...(deals.length ? ['', '[할인·무료]', ...deals.map(r => `· ${r.title}`)] : []),
+      ...(tip ? ['', '[오늘의 스위치] ' + tip.replace(/^첫 작업:\s*/, '')] : []),
+      '', `${location.origin}/brief`].join('\n');
+    const item = (t, sub, href) => `<div style="padding:9px 0;border-top:1px solid var(--rule)">${href ? `<a href="${esc(href)}" target="_blank" rel="noopener" style="font-weight:700">${esc(t)}</a>` : `<b>${esc(t)}</b>`}${sub ? `<div class="meta">${sub}</div>` : ''}</div>`;
+    const unk = '<div class="meta">못 읽었습니다 — 있는지 없는지 모릅니다.</div>';
+    return `<section class="hero"><div class="top"><img src="/norangi.svg" alt="" width="28" height="28" style="flex:none"><span class="pill">아침 브리핑</span><span>${esc(day)}</span></div>
+        <h2>오늘 켤 것</h2>
+        <p class="sub" style="margin-bottom:0">내 대회·마감·새 모델·할인을 한 장에. 아침에 한 번 열고 닫으면 됩니다.</p></section>
+      <div class="card" id="br-work"><h3>켜 둔 일</h3>
+        ${!myKey() ? '<div class="meta">연 대회가 없거나 이 기기에 열쇠가 없습니다. <a href="/app">대회 열기</a> · <a href="/app?login=1">로그인</a></div>'
+          : mineErr ? unk
+          : !work.length ? '<div class="meta">다가오는 대회가 없습니다.</div>'
+          : work.map(w => item(`${w.e.title} · ${dd(String(w.e.starts).slice(0, 10))}`,
+              `${w.pub ? `신청 ${w.pub.teams}팀${w.pub.cap ? ` / 정원 ${w.pub.cap}` : ''}` : '신청 수 모름'}${
+                w.todo === null ? ' · 할 일 모름' : w.todo.length ? ' · ' + w.todo.map(t => `${esc(t.title)}${t.due ? ` (${esc(dd(t.due))})` : ''}`).join(' · ') : ' · 이번 주 할 일 없음'}
+               · <a href="/app#${esc(w.e.id)}">운영 화면</a>`)).join('')}</div>
+      <div class="card" id="br-cal"><h3>꺼지기 전에 <span class="meta">7일 안</span></h3>
+        ${wal.length ? wal.map(it => item(`${it.name} — ${WAL_KIND[it.kind] || ''}`, `${esc(dd(it.next))} · ${esc(it.next.slice(5).replace('-', '/'))}${it.memo ? ' · ' + esc(it.memo) : ''}`)).join('')
+          : '<div class="meta">7일 안에 다가오는 마감이 없습니다. 메일·공지를 <a href="/wallet">AI 지갑</a>에 붙여 넣으면 여기 뜹니다.</div>'}</div>
+      <div class="card" id="br-new"><h3>새로 켜진 것 <span class="meta">새 모델·도구</span></h3>
+        ${news === null ? unk : fresh.length ? fresh.map(r => item(r.title, r.note ? esc(r.note) : '', r.url)).join('') : '<div class="meta">오늘은 새 소식이 없습니다.</div>'}</div>
+      <div class="card" id="br-deal"><h3>할인·무료</h3>
+        ${news === null ? unk : deals.length ? deals.map(r => item(r.title, r.note ? esc(r.note) : '', r.url)).join('') : '<div class="meta">지금 모인 할인 소식이 없습니다.</div>'}</div>
+      <div class="card" id="br-tip"><h3>오늘의 스위치 <span class="meta">${WAL_JOB ? esc(WAL_JOB) : '직무를 고르면 맞춰 드립니다'}</span></h3>
+        <div class="gchips">${Object.keys(WAL_REC).map(j => `<button type="button" class="pick${WAL_JOB === j ? ' on' : ''}" data-wjob="${esc(j)}">${esc(j)}</button>`).join('')}</div>
+        ${tip ? `<div style="margin-top:10px;font-weight:700">${esc(tip.replace(/^첫 작업:\s*/, ''))}</div><div class="meta" style="margin-top:4px"><a href="/news">레시피 전체</a></div>` : ''}</div>
+      <div class="card"><div class="shrow" style="flex-wrap:wrap;gap:8px"><button class="btn" id="br-copy">한 장 복사(카톡용)</button><button class="btn sec" id="br-ics">매일 아침 8:30 알림 받기</button></div>
+        <pre id="br-out" hidden style="white-space:pre-wrap;user-select:all;font-size:13px;margin-top:10px"></pre>
+        <div class="meta" style="margin-top:6px">알림은 달력 앱이 겁니다. 이 주소를 매일 아침 열어 주는 반복 일정이라 서버에 아무것도 안 남습니다.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/wallet">AI 지갑</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
+  /* 모집공고. 지원은 그 프로젝트의 공개 페이지에서 — 지원자 카드에 HACK:ON 기록(완주율·매너·수료)이 붙는다.
+     HACK:ON 은 돈·계약에 끼지 않는다. «유급» 은 모집자가 적은 조건을 그대로 보여 줄 뿐이다 */
+  async recruit() {
+    let d = null; try { d = await api(`/recruits?job=${encodeURIComponent(RCT_JOB)}&reward=${encodeURIComponent(RCT_RW)}`); } catch { d = null; }
+    const jobs = (d && d.jobs) || [], rws = (d && d.rewards) || ['무급', '수익 나눔', '유급'];
+    const pay = r => r.reward === '유급' ? `<span class="pill ok">유급${r.salary ? ' · 월 ' + won(r.salary) : ''}</span>` : r.reward ? `<span class="pill">${esc(r.reward)}</span>` : '';
+    return `<section class="hero"><div class="top"><span class="pill">모집공고</span></div>
+        <h2>같이 만들 사람, 직무로 찾기</h2>
+        <p class="sub" style="margin-bottom:0">직장인이 퇴근 뒤·주말에 같이 만들 사람을 모읍니다. 지원하면 <b>지난 대회·프로젝트 기록</b>(완주율·동료 평가)이 이력서 대신 붙습니다.</p></section>
+      <div class="htabs wrap" id="rc-jobs">${['', ...jobs].map(j => `<button type="button" data-rcj="${esc(j)}"${RCT_JOB === j ? ' class="on"' : ''}>${j ? esc(j) : '모든 직무'}</button>`).join('')}</div>
+      <div class="gchips" style="margin-bottom:10px">${['', ...rws].map(r => `<button type="button" class="pick${RCT_RW === r ? ' on' : ''}" data-rcr="${esc(r)}">${r ? esc(r) : '보상 전부'}</button>`).join('')}</div>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? `<div class="card"><h3>${RCT_JOB || RCT_RW ? '맞는 모집이 아직 없습니다' : '아직 열린 모집이 없습니다'}</h3><div class="meta">첫 모집을 내 보세요.</div></div>`
+        : d.rows.map(r => `<a class="card" href="/e/${esc(r.id)}" style="display:block;text-decoration:none;color:inherit">
+            <div class="top">${r.roles.map(j => `<span class="pill">${esc(j)}</span>`).join('')}${pay(r)}</div>
+            <h3 style="margin:6px 0 2px">${esc(r.title)}</h3>
+            <div class="meta">${[r.host, r.weeks ? r.weeks + '주' : '', r.hours ? '주 ' + r.hours + '시간' : '', r.meet].filter(Boolean).map(esc).join(' · ')}</div>
+            <div class="meta" style="margin-top:4px">지원 ${r.applied} · 함께하는 사람 ${r.accepted}${r.host_record ? ` · 모집자 지난 행사 ${r.host_record.events}번, 완주율 ${r.host_record.finishRate}%` : ' · 처음 여는 모집자'}</div></a>`).join('')}
+      <div class="card"><h3>모집공고 내기</h3><div class="meta">«열기» 에서 <b>직장인 모집</b> 을 고르고, 운영 화면 설정에서 직무·보상·주당 시간을 적은 뒤 «목록에 올리기» 를 누르세요.</div>
+        <a class="btn sm" href="/app" style="margin-top:8px;text-decoration:none">모집 열기</a>
+        <div class="meta" style="margin-top:8px">유급이어도 HACK:ON 은 돈과 계약에 끼지 않습니다. 근로 조건은 모집자와 직접 정하세요.</div></div>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/around">모아 보기</a> · <a href="/setups">세팅 모음</a></p>`;
+  },
+
+  /* 만든 것 — 깃허브와 다른 점 셋: 화면을 바로 눌러 본다, 1분 영상으로 본다, 그 자리에서 함께할 사람을 모은다.
+     시연 화면은 운영진이 한 번 열어 본 뒤에만 이 안에 띄운다(그 전엔 새 창). 바깥 주소라 sandbox 를 씌운다 */
+  async made() {
+    const acct = (AUTH && AUTH.loggedIn) || !!myKey();
+    const jobs = ['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'];
+    const loginBox = `<div class="meta" style="margin-top:8px">누가 올렸는지 알아야 함께할 사람을 이어 드릴 수 있어서 로그인한 뒤에 받습니다.</div>${loginBtns('', 'margin-top:8px')}`;
+    if (MDP) {
+      let w; try { w = await api(`/works/${MDP}`); }
+      catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없거나 내려간 작업물입니다' : '불러오지 못했습니다'}</h3><button class="btn sec sm" id="md-back">목록으로</button></div>`; }
+      const ext = (() => { try { return new URL(w.demo).host !== location.host; } catch (_) { return false; } })();
+      return `<section class="hero"><div class="top">${w.job ? `<span class="pill">${esc(w.job)}</span>` : ''}${w.needs.length ? '<span class="pill warn">함께할 사람 구함</span>' : ''}</div>
+          <h2>${esc(w.title)}</h2>${w.line ? `<p class="sub" style="margin-bottom:0">${esc(w.line)}</p>` : ''}
+          <div class="meta" style="margin-top:6px">${w.by ? esc(w.by) + ' · ' : ''}★ ${w.stars} · 함께하기 ${w.joins}</div></section>
+        ${w.video ? `<div class="card" style="padding:0;overflow:hidden"><iframe src="https://www.youtube-nocookie.com/embed/${esc(w.video)}" title="1분 소개 영상" loading="lazy" referrerpolicy="no-referrer"
+            allow="encrypted-media; picture-in-picture" allowfullscreen style="width:100%;aspect-ratio:16/9;border:0;display:block"></iframe></div>` : ''}
+        ${w.demo ? (w.live && ext ? `<div class="card"><h3>바로 눌러 보기</h3>
+            <iframe src="${esc(w.demo)}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups" style="width:100%;height:min(62vh,520px);border:1px solid var(--rule);border-radius:12px;background:#fff"></iframe>
+            <a class="meta" href="${esc(w.demo)}" target="_blank" rel="noopener noreferrer">새 창에서 열기</a></div>`
+          : `<div class="card"><h3>눌러 보기</h3><a class="btn sm" href="${esc(w.demo)}" target="_blank" rel="noopener noreferrer">새 창에서 열기</a>
+            <div class="meta" style="margin-top:6px">${w.live ? '' : '운영진이 한 번 열어 본 뒤부터 이 화면 안에서 바로 눌러 볼 수 있습니다.'}</div></div>`) : ''}
+        <div class="shrow" style="gap:8px;margin:4px 0 10px;flex-wrap:wrap">
+          <button class="btn${w.starred ? '' : ' sec'} sm" id="md-star">${w.starred ? '★ 별 줌' : '☆ 별 주기'}</button>
+          ${w.repo ? `<a class="btn sec sm" href="${esc(w.repo)}" target="_blank" rel="noopener noreferrer">저장소</a>` : ''}
+          <button class="btn sec sm" id="md-share">보내기</button>
+          <button class="lnk" data-rep="other" data-ev="" data-ref="work:${w.id}" data-team="${esc(w.title)}">신고</button></div>
+        ${w.needs.length ? `<div class="card" id="md-join"><h3>함께할 사람 — ${w.needs.map(esc).join(' · ')}</h3>
+          ${w.mine ? (w.requests.length ? w.requests.map(r => `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)"><b>${esc(r.name || '이름 없음')}</b> <span class="pill">${esc(r.role || '직무 안 적음')}</span>
+              <div class="meta">${esc(r.note)}</div></div>`).join('') : '<div class="meta">아직 신청이 없습니다. «보내기» 로 필요한 사람에게 알려 보세요.</div>')
+            : !acct ? loginBox
+            : `${w.asked ? '<div class="meta">신청했습니다. 고쳐서 다시 낼 수 있습니다.</div>' : ''}
+              <label>내 직무</label><select id="mj-role">${w.needs.map(j => `<option>${esc(j)}</option>`).join('')}</select>
+              <label>무엇을 할 수 있나 · 어떻게 연락하나</label><textarea id="mj-note" rows="3" maxlength="300" placeholder="예) 피그마로 화면을 잡을 수 있어요. 인스타 @… 로 연락 주세요"></textarea>
+              <button class="btn sm" id="mj-go" style="margin-top:8px">함께하기 신청</button>
+              <div class="meta" style="margin-top:4px">이 메모는 만든 사람만 봅니다.</div>`}</div>` : ''}
+        <button class="btn sec sm" id="md-back" style="margin:10px 0">목록으로</button>`;
+    }
+    let d = null; try { d = await api(`/works?job=${encodeURIComponent(MD_JOB)}&need=${MD_NEED ? 1 : ''}`); } catch { d = null; }
+    return `<section class="hero"><div class="top"><span class="pill">만든 것</span></div>
+        <h2>눌러 보고, 같이 만들기</h2>
+        <p class="sub" style="margin-bottom:0">바이브코딩으로 만든 것을 올리면 <b>화면을 바로 눌러 보고 1분 영상으로</b> 봅니다. 혼자 다 하기 힘들면 «이 직무 사람이 필요해요» 를 걸어 함께할 사람을 모으세요.</p></section>
+      <div class="htabs wrap">${['', ...jobs].map(j => `<button type="button" data-mdj="${esc(j)}"${MD_JOB === j ? ' class="on"' : ''}>${j ? esc(j) : '전체'}</button>`).join('')}</div>
+      <label class="ck" style="margin:0 0 10px"><input type="checkbox" id="md-need"${MD_NEED ? ' checked' : ''}><span>함께할 사람을 구하는 것만</span></label>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? '<div class="card"><h3>아직 올라온 것이 없습니다</h3><div class="meta">첫 작업물을 올려 보세요.</div></div>'
+        : d.rows.map(w => `<a class="card" href="#" data-work="${w.id}" style="display:block;text-decoration:none;color:inherit">
+            <div class="top">${w.job ? `<span class="pill">${esc(w.job)}</span>` : ''}${w.video ? '<span class="pill">▶ 영상</span>' : ''}${w.demo ? '<span class="pill ok">눌러 보기</span>' : ''}${w.needs.length ? `<span class="pill warn">${w.needs.map(esc).join('·')} 구함</span>` : ''}</div>
+            <h3 style="margin:6px 0 2px">${esc(w.title)}</h3><div class="meta">${w.line ? esc(w.line) + ' · ' : ''}★ ${w.stars}</div></a>`).join('')}
+      <details class="card" id="md-new"><summary style="cursor:pointer;font-weight:700">내 작업물 올리기</summary>
+        ${!acct ? loginBox : `<label>이름</label><input id="mw-title" maxlength="60" placeholder="예) 회의록 정리기">
+        <label>한 줄 소개</label><input id="mw-line" maxlength="120" placeholder="예) 녹음 올리면 결정·담당·기한 표로">
+        <label>눌러 볼 주소</label><input id="mw-demo" placeholder="https://… (배포한 주소)">
+        <label>1분 영상(유튜브)</label><input id="mw-video" placeholder="https://youtu.be/…">
+        <label>저장소(선택)</label><input id="mw-repo" placeholder="https://github.com/…">
+        <label>어느 직무의 일을 푸나</label><select id="mw-job"><option value="">안 정함</option>${jobs.map(j => `<option>${j}</option>`).join('')}</select>
+        <label>함께할 사람 — 필요한 직무</label><div class="gchips">${jobs.map(j => `<button type="button" class="pick" data-mwn="${j}">${j}</button>`).join('')}</div>
+        <button class="btn sm" id="mw-go" style="margin-top:10px">올리기</button>`}</details>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/recruit">모집공고</a> · <a href="/market">마켓</a></p>`;
+  },
+
+  /* 외주 — 프리랜서 개발·마케팅. 맡기기(의뢰)와 받기(서비스) 두 방향. 제안·문의 메모는 올린 사람만 본다.
+     제안한 사람의 «만든 것» 수가 같이 보인다 — 말이 아니라 눌러 볼 수 있는 결과물이 근거다 */
+  async gigs() {
+    const acct = (AUTH && AUTH.loggedIn) || !!myKey();
+    const jobs = ['마케팅', '기획', '디자인', '개발', '영업·CS', '데이터', '소상공인'];
+    const money = g => g.lo || g.hi ? `${g.lo ? won(g.lo) : ''}${g.hi && g.hi !== g.lo ? ' ~ ' + won(g.hi) : ''}` : '금액 협의';
+    const loginBox = `<div class="meta" style="margin-top:8px">누가 보냈는지 알아야 이어 드릴 수 있어서 로그인한 뒤에 받습니다.</div>${loginBtns('', 'margin-top:8px')}`;
+    if (GIGP) {
+      let g; try { g = await api(`/gigs/${GIGP}`); }
+      catch (e) { return `<div class="card"><h3>${e.status === 404 ? '없거나 내려간 글입니다' : '불러오지 못했습니다'}</h3><button class="btn sec sm" id="gg-back">목록으로</button></div>`; }
+      const verb = g.kind === '의뢰' ? '제안' : '문의';
+      return `<section class="hero"><div class="top"><span class="pill">${g.kind === '의뢰' ? '외주 맡김' : '외주 받음'}</span>${g.job ? `<span class="pill">${esc(g.job)}</span>` : ''}${g.closed ? '<span class="pill">마감</span>' : ''}</div>
+          <h2>${esc(g.title)}</h2>
+          <div class="meta">${money(g)}${g.due ? ' · 마감 ' + esc(g.due) : ''} · ${esc(g.by || '이름 없음')}${g.works ? ` · 만든 것 ${g.works}개` : ''} · ${verb} ${g.offers}</div></section>
+        <div class="card"><h3>무엇을 하나</h3><div style="white-space:pre-wrap">${esc(g.scope)}</div></div>
+        <div class="card" id="gg-offers"><h3>${verb}</h3>
+          ${g.mine ? (g.list.length ? g.list.map(f => `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)"><b>${esc(f.name || '이름 없음')}</b>${f.price ? ` <span class="pill">${won(f.price)}</span>` : ''}${f.works ? ` <span class="pill ok">만든 것 ${f.works}</span>` : ''}
+                <div class="meta" style="white-space:pre-wrap">${esc(f.note)}</div></div>`).join('') : `<div class="meta">아직 ${verb}이 없습니다. «보내기» 로 알려 보세요.</div>`)
+              + (g.closed ? '' : '<button class="btn sec sm" id="gg-close" style="margin-top:10px">마감하기</button>')
+            : g.closed ? '<div class="meta">마감된 글입니다.</div>'
+            : !acct ? loginBox
+            : `${g.sent ? `<div class="meta">${verb}했습니다. 고쳐서 다시 보낼 수 있습니다.</div>` : ''}
+              <label>${g.kind === '의뢰' ? '제안 금액(원, 선택)' : '생각하는 예산(원, 선택)'}</label><input id="go-price" type="number" min="0" step="10000">
+              <label>${g.kind === '의뢰' ? '어떻게 할지 · 연락 방법' : '맡기고 싶은 일 · 연락 방법'}</label><textarea id="go-note" rows="4" maxlength="400" placeholder="예) 비슷한 걸 만들어 봤어요(«만든 것» 에 올림). 카톡 오픈채팅 …"></textarea>
+              <button class="btn sm" id="go-send" style="margin-top:8px">${verb} 보내기</button>
+              <div class="meta" style="margin-top:4px">이 메모는 올린 사람만 봅니다. 돈·계약·세금은 당사자끼리 정합니다.</div>`}</div>
+        <div class="shrow" style="gap:8px;margin:4px 0 10px"><button class="btn sec sm" id="gg-share">보내기</button><button class="lnk" data-rep="other" data-ev="" data-ref="gig:${g.id}" data-team="${esc(g.title)}">신고</button></div>
+        <button class="btn sec sm" id="gg-back" style="margin:10px 0">목록으로</button>`;
+    }
+    let d = null; try { d = await api(`/gigs?kind=${encodeURIComponent(GIG_KIND)}&job=${encodeURIComponent(GIG_JOB)}`); } catch { d = null; }
+    return `<section class="hero"><div class="top"><span class="pill">외주</span></div>
+        <h2>맡기고, 받고, 바로 잇기</h2>
+        <p class="sub" style="margin-bottom:0">프리랜서 개발·마케팅·디자인. 맡길 일을 올리면 제안이 오고, 내 서비스를 올리면 문의가 옵니다.
+          제안한 사람의 <b>«만든 것»</b>(바로 눌러 보는 결과물)이 같이 보입니다.</p></section>
+      <div class="htabs">${['의뢰', '서비스'].map(k => `<button type="button" data-ggk="${k}"${GIG_KIND === k ? ' class="on"' : ''}>${k === '의뢰' ? '외주 맡김(일 찾기)' : '외주 받음(사람 찾기)'}</button>`).join('')}</div>
+      <div class="gchips" style="margin-bottom:10px">${['', ...jobs].map(j => `<button type="button" class="pick${GIG_JOB === j ? ' on' : ''}" data-ggj="${esc(j)}">${j ? esc(j) : '모든 직무'}</button>`).join('')}</div>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? '<div class="card"><h3>아직 올라온 것이 없습니다</h3><div class="meta">첫 글을 올려 보세요.</div></div>'
+        : d.rows.map(g => `<a class="card" href="#" data-gig="${g.id}" style="display:block;text-decoration:none;color:inherit">
+            <div class="top">${g.job ? `<span class="pill">${esc(g.job)}</span>` : ''}<span class="pill ok">${money(g)}</span>${g.due ? `<span class="pill">마감 ${esc(g.due.slice(5).replace('-', '/'))}</span>` : ''}</div>
+            <h3 style="margin:6px 0 2px">${esc(g.title)}</h3><div class="meta">${esc(g.by || '이름 없음')}${g.works ? ` · 만든 것 ${g.works}개` : ''} · ${g.kind === '의뢰' ? '제안' : '문의'} ${g.offers}</div></a>`).join('')}
+      <details class="card" id="gg-new"><summary style="cursor:pointer;font-weight:700">올리기</summary>
+        ${!acct ? loginBox : `<div class="gchips" style="margin-top:8px">${['의뢰', '서비스'].map((k, i) => `<button type="button" class="pick${i ? '' : ' on'}" data-ngk="${k}">${k === '의뢰' ? '외주 맡기기' : '내 서비스 올리기'}</button>`).join('')}</div>
+        <label>제목</label><input id="ng-title" maxlength="70" placeholder="예) 쇼핑몰 상세페이지 자동화 / 랜딩페이지 하루 만에 만들어 드립니다">
+        <label>직무</label><select id="ng-job"><option value="">안 정함</option>${jobs.map(j => `<option>${j}</option>`).join('')}</select>
+        <div class="row"><div><label>금액 하한(원)</label><input id="ng-lo" type="number" min="0" step="10000"></div><div><label>상한(원)</label><input id="ng-hi" type="number" min="0" step="10000"></div></div>
+        <label>마감(맡길 때만)</label><input id="ng-due" type="date">
+        <label>무엇을 하나</label><textarea id="ng-scope" rows="5" maxlength="1000" placeholder="결과물·범위·쓰는 도구·참고 링크"></textarea>
+        <button class="btn sm" id="ng-go" style="margin-top:10px">올리기</button>
+        <div class="meta" style="margin-top:6px">HACK:ON 은 잇기만 합니다. 돈·계약·세금은 당사자끼리 — 큰 금액은 계약서를 쓰세요.</div>`}</details>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/made">만든 것</a> · <a href="/recruit">모집공고</a> · <a href="/wallet">AI 지갑</a></p>`;
+  },
+
+  /* 추천인 코드 품앗이. 코드를 목록으로 안 보여 주고 «다음 코드» 하나씩. 남의 코드를 써 준 사람 코드가 먼저 나온다 */
+  async ref() {
+    const acct = (AUTH && AUTH.loggedIn) || !!myKey();
+    let d = null; try { d = await api('/ref'); } catch { d = null; }
+    const loginBox = `<div class="meta" style="margin-top:6px">누가 써 줬는지 세야 차례가 돌아서 로그인한 뒤에 씁니다.</div>${loginBtns('', 'margin-top:6px')}`;
+    const isUrl = c => /^https:\/\//i.test(c || '');
+    return `<section class="hero"><div class="top"><span class="pill">추천인 코드 품앗이</span></div>
+        <h2>써 주면, 내 차례가 온다</h2>
+        <p class="sub" style="margin-bottom:0">남의 추천 코드를 하나 써 주면 내 코드가 다음 사람에게 먼저 나옵니다. 코드는 목록으로 안 보이고 한 번에 하나씩 차례로 나옵니다.</p></section>
+      <div class="card"><h3>규칙</h3><ul class="meta" style="margin:4px 0 0;padding-left:18px">
+        <li>서비스당 한 사람 한 코드. 30일마다 «아직 돼요» 를 눌러야 차례에 남습니다</li>
+        <li>남의 코드를 한 번도 안 써 준 코드는 차례에 들지 않습니다(그 서비스의 첫 코드만 예외)</li>
+        <li>«안 돼요» 신고 셋이면 내려갑니다. «썼어요» 는 하루 10번까지</li>
+        <li>운영진이 약관에서 코드 공유가 허용되는지 본 서비스만 엽니다</li></ul></div>
+      ${d === null ? '<div class="card"><h3>목록을 불러오지 못했습니다</h3><div class="meta">있는지 없는지 지금은 모릅니다.</div></div>'
+        : !d.rows.length ? '<div class="card"><h3>아직 열린 서비스가 없습니다</h3><div class="meta">아래에서 서비스를 제안해 주세요. 운영진이 약관을 본 뒤 엽니다.</div></div>'
+        : d.rows.map(r => { const got = REFGOT[r.id]; return `<div class="card" id="ref-${r.id}">
+            <div class="top"><span class="pill">살아 있는 코드 ${r.codes}</span><span class="pill">이번 주 품앗이 ${r.week}</span>${r.gave ? `<span class="pill ok">내가 써 준 것 ${r.gave}</span>` : ''}</div>
+            <h3 style="margin:6px 0 2px">${esc(r.name)}</h3>${r.note ? `<div class="meta">${esc(r.note)}</div>` : ''}
+            ${!acct ? loginBox : `
+              ${got ? (got.code ? `<div class="share" style="margin-top:10px;word-break:break-all">${esc(got.code)}</div>
+                  <div class="shrow" style="gap:6px;margin-top:6px;flex-wrap:wrap">${isUrl(got.code) ? `<a class="btn sm" href="${esc(got.code)}" target="_blank" rel="noopener noreferrer">열어서 가입</a>` : `<button class="btn sm" data-refcopy="${r.id}">코드 복사</button>`}
+                  <button class="btn sec sm" data-refused="${r.id}">썼어요</button><button class="lnk" data-refdead="${r.id}">안 돼요</button></div>`
+                : '<div class="meta" style="margin-top:10px">지금 받을 수 있는 코드가 없습니다. 내 코드를 올려 첫 차례를 열어 보세요.</div>')
+              : `<button class="btn sm" data-refnext="${r.id}" style="margin-top:10px">다음 코드 받기</button>`}
+              <details style="margin-top:10px"${r.mine ? '' : ' open'}><summary class="meta" style="cursor:pointer">내 코드${r.mine ? ` — ${r.mine.got}명이 썼다고 함${r.mine.dead ? ` · 안 돼요 ${r.mine.dead}` : ''}` : ' 올리기'}</summary>
+                <div class="shrow" style="margin-top:6px"><input id="refc-${r.id}" value="${esc(r.mine ? r.mine.code : '')}" placeholder="코드 또는 추천 주소" style="flex:1"><button class="btn sec sm" data-refpost="${r.id}">${r.mine ? '아직 돼요' : '올리기'}</button></div>
+              </details>`}</div>`; }).join('')}
+      <details class="card"><summary style="cursor:pointer;font-weight:700">서비스 제안하기</summary>
+        ${!acct ? loginBox : `<label>서비스 이름</label><input id="rs-name" maxlength="40" placeholder="예) Muse">
+        <label>추천 안내 주소</label><input id="rs-url" placeholder="https://… (추천 프로그램 설명 페이지)">
+        <label>둘 다 받는 것</label><input id="rs-note" maxlength="120" placeholder="예) 가입한 사람·추천한 사람 모두 크레딧 10">
+        <button class="btn sm" id="rs-go" style="margin-top:10px">제안</button>`}</details>
+      <p class="meta" style="margin:14px 4px"><a href="/">처음으로</a> · <a href="/wallet">AI 지갑</a> · <a href="/news">해커온뉴스</a></p>`;
+  },
+
   async market() {
     let rows = null;
     if (LIVE) { try { rows = (await api('/market')).rows; } catch { rows = null; } } else rows = [];
@@ -4096,8 +5008,11 @@ const SCREEN = {
               const idx = Math.max(0, Math.min(d.order.length - 1, Math.floor((now - start) / 60000 / per)));
               const end = new Date(start.getTime() + (idx + 1) * per * 60000);
               const due = `${ymd()}T${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+              /* 이그나이트면 팀 시작 시각을 남겨 두고 «몇 번째 장 · 다음 장까지» 를 1초마다 고친다(tickIgnite) */
+              const ign = /이그나이트/.test(cur1.what) ? start.getTime() + idx * per * 60000 : 0;
               return `<div class="tvlabel">지금 발표 · ${per}분</div>
                <div class="tvclock" id="tv-pitch" data-due="${due}"></div>
+               ${ign ? `<div class="tvsub" id="tv-ign" data-from="${ign}" style="margin-top:.8vh"></div>` : ''}
                <div class="tvsub" style="margin-top:1.2vh"><em>${d.order[idx].no}</em> ${esc(d.order[idx].name)}${d.order[idx + 1] ? ` <span style="color:#AEB6C8">· 다음 ${d.order[idx + 1].no} ${esc(d.order[idx + 1].name)}</span>` : ' <span style="color:#AEB6C8">· 마지막</span>'}</div>
                <div class="tvsub" style="font-size:2.1vh;color:#AEB6C8;margin-top:.6vh">${d.order.map((o, i) => `${i === idx ? '<b style="color:#fff">' : ''}${o.no} ${esc(o.name)}${i === idx ? '</b>' : ''}`).join(' → ')}</div>`;
             }
@@ -4330,9 +5245,17 @@ const SCREEN = {
         <div class="meta">HACK:ON 티어</div>
         <div style="font-size:34px;font-weight:900;color:${TC};letter-spacing:-.02em;line-height:1.1;margin:4px 0">${esc(T.name)}</div>
         <div class="meta">완주 ${d.finished} · 수상 ${d.wins || 0}${d.skill && d.skill.show ? ' · 동료 실력 ' + d.skill.score : ''}</div>
+        ${d.cert ? `<div id="p-cert" style="margin-top:10px">${d.cert.level ? `<span class="pill ok">실무 기록 ${d.cert.level}단계 · ${esc(d.cert.name)}</span>` : '<span class="pill">실무 기록 단계 없음</span>'}
+          ${d.cert.next ? `<div class="meta" style="margin-top:4px">다음: ${esc(d.cert.next)} · <a href="/cert">기준</a></div>` : ''}</div>` : ''}
+        ${d.intro || d.doing || d.seeking ? `<div id="p-intro" style="margin-top:10px;text-align:left">${d.intro ? `<div style="font-weight:700">${esc(d.intro)}</div>` : ''}${d.doing ? `<div class="meta">지금 하는 일 · ${esc(d.doing)}</div>` : ''}${d.seeking ? `<div class="meta">찾는 사람 · ${esc(d.seeking)}</div>` : ''}</div>` : ''}
         ${T.next ? `<div class="meta" style="margin-top:6px">${esc(T.next)}</div>` : ''}
         <div class="meta" style="margin-top:10px;font-family:var(--mono,monospace)">${esc(location.host)}/p/${esc(d.id)}</div>
         <div class="meta">이 주소를 이력서·프로필에 붙이세요. 숫자는 대회 기록에서만 나옵니다.</div>
+        ${/* 링크드인·링커리어에 그대로 붙이는 글. 대회가 찍어 준 기록(끝난 대회에서 왔거나 낸 것)만 — 본인이 늘려 적을 칸이 없다 */''}
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px">
+          <button class="btn sec sm" data-resume="linkedin">링크드인용 복사</button>
+          <button class="btn sec sm" data-resume="linkareer">링커리어·이력서용 복사</button></div>
+        <pre id="resume-out" hidden style="white-space:pre-wrap;user-select:all;text-align:left;font-size:13px;margin-top:10px"></pre>
       </div>
       ${made.length ? `<div class="card" id="made">
         <h3>만든 것 <span class="pill">${made.length}</span></h3>
@@ -4691,6 +5614,11 @@ const SCREEN = {
         <div class="shrow"><input id="s-url" value="${esc(t.url || '')}" placeholder="https://… (누르면 바로 열리는 주소)" style="flex:1"><button type="button" class="btn sec sm" id="s-try" title="내기 전에 새 창에서 열어 봅니다">새 창에서 확인</button></div>
         <div class="meta" id="s-url-hint"></div>
         <div class="meta">제출해야 후원 크레딧과 프로필 «완주»가 남습니다. 미완이어도 주소는 내세요.</div>
+        <label>1분 시연 영상 <span class="pill">유튜브 주소</span></label>
+        <input id="s-video" value="${t.video ? 'https://youtu.be/' + esc(t.video) : ''}" placeholder="https://youtu.be/… (일부 공개로 올려도 됩니다)">
+        <label>발표 자료 <span class="pill">구글 슬라이드·PDF 주소</span></label>
+        <input id="s-deck" value="${esc(t.deck || '')}" placeholder="https://… 제목 1장 + 8장, 장당 15초 자동 넘김">
+        <div class="meta">데모데이 대회면 둘 다 냅니다. 마감 전에는 운영자와 우리 팀만 봅니다.</div>
         ${t.seats ? `<label>팀 자리 <span class="pill">밖에서 구한 분은 게스트로</span></label>
           <div class="seats">
             ${t.seats.mem.map((m, i) => `<span class="seat${m.g ? ' g' : ''}">${esc(m.n)}
@@ -5200,6 +6128,10 @@ function wire() {
         weeks: $('#e-weeks') ? $('#e-weeks').value : undefined,
         meet: $('#e-meet') ? $('#e-meet').value.trim() : undefined,
         pick: $('#e-pick') ? $('#e-pick').checked : undefined,
+        roles: $('#e-roles') ? [...document.querySelectorAll('[data-erole].on')].map(b => b.dataset.erole).join(',') : undefined,
+        reward: $('#e-reward') ? $('#e-reward').value : undefined,
+        salary: $('#e-salary') ? $('#e-salary').value : undefined,
+        hours: $('#e-hours') ? $('#e-hours').value : undefined,
         deposit: $('#e-deposit') ? $('#e-deposit').value : undefined,
         twist: $('#e-twist') ? $('#e-twist').value.trim() : undefined,
         host: $('#e-host') ? $('#e-host').value.trim() : undefined,
@@ -5244,8 +6176,11 @@ function wire() {
     const fromSel = $('#f-from');
     if (fromSel && fromSel.value) { b.from = fromSel.value; b.fromKey = okeyOf(fromSel.value); }   // 지난 대회에서 가져오기
     if (MAKE_REQ) b.req = MAKE_REQ;   // 의뢰에서 들어왔으면 첫 주제로 붙인다
+    if ($('#f-sample') && $('#f-sample').checked) b.sample = 1;   // 해 보려고 여는 것 — 3일 뒤 저절로 휴지통
     if ($('#f-kind') && $('#f-kind').value === '모임·수업') b.kind = '모임';   // 제출·심사·순위를 끈 모임
     if ($('#f-kind') && $('#f-kind').value === '프로젝트') { b.kind = '프로젝트'; b.weeks = 4; }   // 주 수·선발형은 만든 뒤 설정에서
+    /* «직장인 모집» 칩은 처음부터 선발형·6주로 — 지원자 카드가 이 유형의 값이다 */
+    if (TPL && TPL.pick && b.kind === '프로젝트') { b.pick = 1; b.weeks = parseInt(TPL.hours, 10) || 6; }
     /* 유형과 심사 기준은 고르는 것이라 손이 안 간다. 그래서 첫 화면에 같이 둔다. */
     if (!b.title) return flash('대회 이름을 넣어 주세요', true);
     if (!LIVE) return flash('데모에서는 저장되지 않습니다. 서버를 켜고 다시 해 보세요', true);
@@ -5263,6 +6198,8 @@ function wire() {
       try {
         const dr = kind === '모임·수업'
           ? await api(`/draft?start=19:00&end=21:00&teams=0&kind=${encodeURIComponent(kind)}`)
+          : kind === '데모데이'
+          ? await api(`/draft?start=13:00&end=15:00&teams=20&kind=${encodeURIComponent(kind)}`)
           : await api(`/draft?start=10:00&end=19:30&teams=6&kind=${encodeURIComponent(kind)}`);
         await api(`/events/${cur}`, { method: 'PATCH', body: { plan: dr.rows } });
       } catch {}
@@ -5296,6 +6233,7 @@ function wire() {
                   '무박2일': '야식과 잘 자리를 미리 정해 두세요.',
                   '온라인 1주': '각자 만들고 마지막 날에만 모입니다.',
                   '모임·수업': '당근 모임·교육 봉사처럼 짧게 모입니다. 참석 확인·체크인·서로 평가만 씁니다.',
+                  '데모데이': '만들기는 각자 미리 합니다. 그날은 2분 발표(제목 5초 + 8장 × 15초 자동 넘김)·심사·시상만 — 2시간이면 20팀이 듭니다.',
                   '프로젝트': '4주가 기본입니다. 매주 체크인하고 주차마다 결과물을 냅니다 — 마지막 주 제출이 완주입니다.' };
       fkindnote.textContent = K[fkind.value] || '';
     };
@@ -5330,6 +6268,9 @@ function wire() {
         agree: true } });
       if (r.waiting) { flash(`정원이 찼습니다. 대기 ${r.waiting}번째 — 자리가 나면 이메일로 팀 링크를 보냅니다`); return; }
       localStorage.setItem('hackon.team.' + cur, r.id);   // 두 번째 칸을 보여 주려고 기억한다
+      /* 신청 때 받은 이메일을 이 기기에 둔다. 전에는 두 번째 칸의 «연락처» 를 채울 때 저장됐는데,
+         이제 그 칸을 다시 안 물으니 여기서 둔다 — 다음 대회 신청 칸이 이걸로 채워진다 */
+      if (email) try { localStorage.setItem('hackon.contact', email); } catch (_) {}
       /* 팀 열쇠. 이 브라우저가 그 팀 사람이라는 증거다 - 서버가 여기서 한 번만 준다.
          대회 열쇠(hackon.okey.*)와 같은 방식이다. */
       if (r.tkey) localStorage.setItem('hackon.tkey.' + r.id, r.tkey);
@@ -5352,6 +6293,8 @@ function wire() {
                 aiuse: $('#s-aiuse').value.trim(), aidrop: $('#s-aidrop').value.trim(),
                 show: $('#s-show') ? $('#s-show').checked : undefined,
                 sale: $('#s-sale') ? $('#s-sale').value.trim() : undefined,
+                video: $('#s-video') ? $('#s-video').value.trim() : undefined,
+                deck: $('#s-deck') ? $('#s-deck').value.trim() : undefined,
                 request: $('#s-request') ? $('#s-request').value : undefined } });
       flash('제출했습니다');
     } catch (e) { flash(e.message, true); }
@@ -5904,6 +6847,287 @@ function wire() {
       setTimeout(() => location.reload(), 700);
     } catch (e) { flash(e.message, true); }
   };
+  document.querySelectorAll('[data-rep]').forEach(b => b.onclick = async () => {
+    try {
+      await api('/reports', { method: 'POST', body: { event: b.dataset.ev, kind: b.dataset.rep, ref: b.dataset.ref, reason: '불쾌하거나 부적절함', note: b.dataset.team } });
+      flash('신고했습니다. 운영자가 확인합니다');
+    } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-blk]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.ev + '|' + b.dataset.blk, l = blockList();
+    if (!l.includes(k)) l.push(k);
+    try { localStorage.setItem('hackon.block', JSON.stringify(l)); } catch (_) { return flash('이 브라우저는 차단 목록을 저장하지 못합니다', true); }
+    /* 차단도 신고로 남긴다 — 운영자가 «누가 막혔나» 를 본다. 신고가 실패해도 차단은 된다 */
+    try { await api('/reports', { method: 'POST', body: { event: b.dataset.ev, kind: b.dataset.kind, ref: b.dataset.ref, reason: '차단함', note: b.dataset.blk } }); } catch (_) {}
+    flash('차단했습니다. 이 기기에서 그 팀 글이 안 보입니다');
+    render();
+  });
+  document.querySelectorAll('[data-unblk]').forEach(b => b.onclick = () => {
+    try { localStorage.setItem('hackon.block', JSON.stringify(blockList().filter(k => !k.startsWith(b.dataset.unblk + '|')))); } catch (_) {}
+    render();
+  });
+  document.querySelectorAll('[data-repdone]').forEach(b => b.onclick = async () => {
+    try { await api(`/reports/${b.dataset.repdone}/done`, { method: 'POST', body: {} }); render(); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-todo]').forEach(c => c.onchange = async () => {
+    try { await api(`/events/${cur}/todo/done`, { method: 'POST', body: { key: c.dataset.todo, on: c.checked } }); flash(c.checked ? '했음으로 표시했습니다' : '되돌렸습니다'); }
+    catch (e) { c.checked = !c.checked; flash(e.message, true); }
+  });
+  const tdAdd = $('#td-add');
+  if (tdAdd) tdAdd.onclick = async () => {
+    try { await api(`/events/${cur}/todo`, { method: 'POST', body: { title: $('#td-title').value.trim(), due: $('#td-due').value } }); flash('할 일을 더했습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-next]').forEach(inp => inp.onchange = async () => {
+    try { await api(`/leads/${inp.dataset.next}`, { method: 'POST', body: { next: inp.value } }); flash('다음 연락일을 적었습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-ardk]').forEach(b => b.onclick = () => { ARD_KIND = b.dataset.ardk; render(); });
+  const ardGo = $('#ard-go');
+  if (ardGo) { const go = () => { ARD_Q = $('#ard-q').value.trim(); render(); }; ardGo.onclick = go; $('#ard-q').onkeydown = e => { if (e.key === 'Enter') go(); }; }
+  const tpGo = $('#tp-go');
+  if (tpGo) tpGo.onclick = async () => {
+    const v = id => ($('#' + id) || {}).value || '';
+    try { await api('/spots', { method: 'POST', body: { kind: v('tp-kind'), name: v('tp-name').trim(), url: v('tp-url').trim(), org: v('tp-org').trim(),
+            school: v('tp-school').trim(), starts: v('tp-starts'), ends: v('tp-ends'), place: v('tp-place').trim() } });
+          flash('올렸습니다. 고맙습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  /* «내가 주최자예요» — 누르면 그 카드 아래에 한 칸이 열린다. prompt() 는 앱에서 안 뜰 수 있다 */
+  document.querySelectorAll('[data-claim]').forEach(b => b.onclick = () => {
+    const box = $('#claim-' + b.dataset.claim); if (!box) return;
+    if (AUTH && !AUTH.loggedIn) { box.innerHTML = `<div class="meta" style="margin-top:8px">로그인한 계정이 이 대회의 운영자가 됩니다.</div>${loginBtns('', 'margin-top:6px')}`; return; }
+    box.innerHTML = `<label>주최자임을 어떻게 보이실 건가요</label><input id="cl-how-${b.dataset.claim}" maxlength="200" placeholder="예) 공식 메일 club@school.ac.kr 로 회신 · 공식 인스타 DM">
+      <button class="btn sm" data-claimgo="${b.dataset.claim}" style="margin-top:8px">확인 요청</button>
+      <div class="meta" style="margin-top:4px">운영진이 확인하면 이 계정으로 HACK:ON 대회가 만들어집니다. 보통 하루 안에.</div>`;
+    const go = box.querySelector('[data-claimgo]');
+    go.onclick = async () => {
+      try { await api(`/spots/${b.dataset.claim}/claim`, { method: 'POST', body: { how: $('#cl-how-' + b.dataset.claim).value.trim() } }); flash('확인 요청을 보냈습니다. 운영진이 보고 연락드립니다'); }
+      catch (e) { flash(e.message, true); }
+    };
+  });
+  document.querySelectorAll('[data-spa]').forEach(b => b.onclick = async () => {
+    try { const r = await api(`/admin/spots/${b.dataset.spa}`, { method: 'POST', body: { act: b.dataset.act } });
+          flash(r.state === 'claimed' ? '넘겼습니다 — 대회가 만들어졌습니다' : r.state === 'hidden' ? '내렸습니다' : '거절했습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  const bTerm = $('#b-term');
+  if (bTerm) bTerm.onclick = () => { tab = 'term'; render(); };
+  const tmGo = $('#tm-go');
+  if (tmGo) tmGo.onclick = () => { TERM.from = $('#tm-from').value; TERM.to = $('#tm-to').value; render(); };
+  if ($('#tm-print')) $('#tm-print').onclick = () => window.print();
+  if ($('#tm-back')) $('#tm-back').onclick = () => { tab = 'home'; render(); };
+  document.querySelectorAll('[data-pack]').forEach(a => a.onclick = (ev) => { ev.preventDefault(); SETP = +a.dataset.pack; SETLATEST = null; render(); });
+  if ($('#pk-back')) $('#pk-back').onclick = () => { SETP = 0; SETLATEST = null; render(); };
+  if ($('#pk-go')) $('#pk-go').onclick = async () => {
+    try { const r = await api('/packs', { method: 'POST', body: { title: $('#pk-title').value.trim(), topic: $('#pk-topic').value.trim(), about: $('#pk-about').value.trim() } });
+          SETP = r.id; flash('모음을 열었습니다. 초대 코드는 관리 칸에 있습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#st-go')) $('#st-go').onclick = async () => {
+    try { await api(`/packs/${SETP}/setups`, { method: 'POST', body: { title: $('#st-title').value.trim(), tool: $('#st-tool').value.trim(), body: $('#st-body').value } });
+          flash('냈습니다. 이제 최신판을 받을 수 있습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#pk-get')) $('#pk-get').onclick = async () => {
+    try { SETLATEST = { pack: SETP, ...(await api(`/packs/${SETP}/latest`)) }; render(); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#pk-dl')) $('#pk-dl').onclick = () => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([SETLATEST.body], { type: 'text/markdown' }));
+    a.download = `hackon-setup-${SETP}-v${SETLATEST.ver}.md`; a.click(); URL.revokeObjectURL(a.href);
+  };
+  if ($('#rl-go')) $('#rl-go').onclick = async () => {
+    const picks = [...document.querySelectorAll('[data-spick]')].filter(c => c.checked).map(c => +c.dataset.spick);
+    try { const r = await api(`/packs/${SETP}/release`, { method: 'POST', body: { picks, notes: $('#rl-notes').value.trim() } }); SETLATEST = null; flash(`${r.ver}판을 냈습니다 (${r.count}개)`); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#jn-pack')) $('#jn-pack').onclick = async () => {
+    try { await api(`/packs/${SETP}/join`, { method: 'POST', body: { code: $('#jn-code').value.trim() } }); flash('공동 관리자가 됐습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  let walKind = 'renew';
+  document.querySelectorAll('[data-wkind]').forEach(b => b.onclick = () => { walKind = b.dataset.wkind; document.querySelectorAll('[data-wkind]').forEach(x => x.classList.toggle('on', x === b)); });
+  if ($('#wl-go')) $('#wl-go').onclick = () => {
+    const name = $('#wl-name').value.trim();
+    if (!name) return flash('무엇인지 적어 주세요', true);
+    const l = walLoad();
+    l.push({ name: name.slice(0, 40), kind: walKind, date: $('#wl-date').value, every: $('#wl-every').value, won: Math.max(0, +$('#wl-won').value || 0), memo: $('#wl-memo').value.trim().slice(0, 60) });
+    if (!walSave(l)) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
+    flash('넣었습니다');
+  };
+  document.querySelectorAll('[data-wjob]').forEach(b => b.onclick = () => { WAL_JOB = WAL_JOB === b.dataset.wjob ? '' : b.dataset.wjob; try { localStorage.setItem('hackon.waljob', WAL_JOB); } catch (_) {} render(); });
+  document.querySelectorAll('[data-wrecadd]').forEach(b => b.onclick = () => {
+    const l = walLoad(); l.push({ name: b.dataset.wrecadd, kind: 'renew', date: '', every: 'month', won: 0, memo: '' });
+    if (!walSave(l)) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
+    flash(`${b.dataset.wrecadd} 를 넣었습니다. 갱신일을 알면 아래에서 고치세요`);
+  });
+  document.querySelectorAll('[data-mst]').forEach(b => b.onclick = () => {
+    if (!b.classList.contains('on') && document.querySelectorAll('[data-mst].on').length >= 3) return flash('강점은 셋까지 고릅니다', true);
+    b.classList.toggle('on'); });
+  document.querySelectorAll('[data-maim]').forEach(b => b.onclick = () => document.querySelectorAll('[data-maim]').forEach(x => x.classList.toggle('on', x === b && !b.classList.contains('on'))));
+  if ($('#m-strsave')) $('#m-strsave').onclick = async () => {
+    const myId = localStorage.getItem('hackon.team.' + cur);
+    if ($('#in-intro') && MATCH && MATCH.me.person) {
+      try { await api(`/people/${MATCH.me.person}/intro`, { method: 'POST', tkey: tkeyOf(myId), body: { intro: $('#in-intro').value.trim(), doing: $('#in-doing').value.trim(), seeking: $('#in-seeking').value.trim() } }); }
+      catch (e) { return flash(e.message, true); }
+    }
+    try { await api(`/teams/${myId}/more`, { method: 'POST', tkey: tkeyOf(myId), body: {
+            strengths: [...document.querySelectorAll('[data-mst].on')].map(x => x.dataset.mst).join(','),
+            aim: (document.querySelector('[data-maim].on') || {}).dataset?.maim || '' } });
+          flash('저장했습니다. 추천을 다시 찾았습니다'); } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-mlike]').forEach(b => b.onclick = async () => {
+    const myId = localStorage.getItem('hackon.team.' + cur);
+    try { const r = await api(`/events/${cur}/match/${b.dataset.mlike}`, { method: 'POST', tkey: tkeyOf(myId), body: { on: b.dataset.on === '1' } });
+          flash(r.mutual.some(x => String(x.id) === b.dataset.mlike) ? '서로 좋아요! 연락처가 열렸습니다' : (b.dataset.on === '1' ? '좋아요를 보냈습니다' : '좋아요를 거뒀습니다')); }
+    catch (e) { flash(e.message, true); }
+  });
+  if ($('#br-copy')) $('#br-copy').onclick = async () => {
+    const out = $('#br-out'); out.textContent = BRIEF_TEXT; out.hidden = false;
+    try { await navigator.clipboard.writeText(BRIEF_TEXT); $('#br-copy').textContent = '복사했습니다 ✓'; } catch (_) {}
+  };
+  /* 매일 아침 반복 일정 하나. 열면 /brief 가 뜬다 — 푸시 서버 없이 달력 앱이 알림을 건다 */
+  if ($('#br-ics')) $('#br-ics').onclick = () => {
+    const d = ymdLocal().replace(/-/g, '');
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//HACK:ON//아침 브리핑//KO', 'BEGIN:VEVENT', `UID:hackon-brief-${d}@hackon.kr`,
+      `DTSTAMP:${d}T000000Z`, `DTSTART:${d}T083000`, `DTEND:${d}T084000`, 'RRULE:FREQ=DAILY', 'SUMMARY:☀️ HACK:ON 오늘 켤 것',
+      `URL:${location.origin}/brief`, `DESCRIPTION:${location.origin}/brief`, 'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:오늘 켤 것', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+    a.download = 'HACKON-아침브리핑.ics'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  if ($('#wl-parse')) $('#wl-parse').onclick = () => { WAL_FOUND = pasteDates($('#wl-paste').value); render(); };
+  if ($('#wl-addall')) $('#wl-addall').onclick = () => {
+    const pick = [...document.querySelectorAll('[data-wfound]:checked')].map(c => WAL_FOUND.found[+c.dataset.wfound]);
+    if (!pick.length) return flash('고른 것이 없습니다', true);
+    if (!walSave(walLoad().concat(pick.map(f => ({ ...f, every: '', won: 0 }))))) return flash('이 브라우저는 저장을 막고 있습니다(사생활 모드?)', true);
+    WAL_FOUND = null; flash(`${pick.length}개 넣었습니다`);
+  };
+  document.querySelectorAll('[data-wdel]').forEach(b => b.onclick = () => { const l = walLoad(); l.splice(+b.dataset.wdel, 1); walSave(l); render(); });
+  document.querySelectorAll('[data-wuse]').forEach(sel => sel.onchange = () => { const l = walLoad(); if (l[+sel.dataset.wuse]) { l[+sel.dataset.wuse].use = sel.value; walSave(l); } render(); });
+  if ($('#wal-ics')) $('#wal-ics').onclick = () => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([walIcs(walLoad())], { type: 'text/calendar' }));
+    a.download = 'AI지갑.ics'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  /* 공유는 금액·메모를 빼고 «무엇이 언제» 만. 남의 지갑 사정을 대신 퍼뜨리지 않는다 */
+  if ($('#wal-share')) $('#wal-share').onclick = async () => {
+    const lines = walLoad().map(it => ({ ...it, next: walNext(it) })).filter(it => it.next).slice(0, 5)
+      .map(it => `· ${it.name} ${WAL_KIND[it.kind]} ${it.next.slice(5).replace('-', '/')}`).join('\n');
+    const text = `AI 구독·크레딧 만료일 정리해 봤어요\n${lines}\n\n나도 정리하기 → ${location.origin}/wallet`;
+    try { if (navigator.share) await navigator.share({ title: 'AI 지갑', text }); else { await navigator.clipboard.writeText(text); flash('복사했습니다. 붙여 넣어 보내세요'); } }
+    catch (_) {}
+  };
+  document.querySelectorAll('[data-rcj]').forEach(b => b.onclick = () => { RCT_JOB = b.dataset.rcj; render(); });
+  document.querySelectorAll('[data-rcr]').forEach(b => b.onclick = () => { RCT_RW = b.dataset.rcr; render(); });
+  document.querySelectorAll('[data-erole]').forEach(b => b.onclick = () => b.classList.toggle('on'));
+  document.querySelectorAll('[data-work]').forEach(a => a.onclick = (ev) => { ev.preventDefault(); MDP = +a.dataset.work; render(); });
+  document.querySelectorAll('[data-mdj]').forEach(b => b.onclick = () => { MD_JOB = b.dataset.mdj; render(); });
+  if ($('#md-need')) $('#md-need').onchange = () => { MD_NEED = $('#md-need').checked; render(); };
+  if ($('#md-back')) $('#md-back').onclick = () => { MDP = 0; render(); };
+  document.querySelectorAll('[data-mwn]').forEach(b => b.onclick = () => b.classList.toggle('on'));
+  if ($('#mw-go')) $('#mw-go').onclick = async () => {
+    const v = id => ($('#' + id) || {}).value || '';
+    try { const r = await api('/works', { method: 'POST', body: { title: v('mw-title').trim(), line: v('mw-line').trim(), demo: v('mw-demo').trim(), video: v('mw-video').trim(),
+            repo: v('mw-repo').trim(), job: v('mw-job'), needs: [...document.querySelectorAll('[data-mwn].on')].map(b => b.dataset.mwn).join(',') } });
+          MDP = r.id; flash('올렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#md-star')) $('#md-star').onclick = async () => { try { await api(`/works/${MDP}/star`, { method: 'POST', body: {} }); render(); } catch (e) { flash(e.message, true); } };
+  if ($('#mj-go')) $('#mj-go').onclick = async () => {
+    try { await api(`/works/${MDP}/join`, { method: 'POST', body: { role: $('#mj-role').value, note: $('#mj-note').value.trim() } }); flash('신청했습니다. 만든 분이 연락드립니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#md-share')) $('#md-share').onclick = async () => {
+    const url = `${location.origin}/made?w=${MDP}`, title = ($('h2') || {}).textContent || 'HACK:ON 만든 것';
+    try { if (navigator.share) await navigator.share({ title, text: `${title} — 바로 눌러 볼 수 있어요`, url }); else { await navigator.clipboard.writeText(url); flash('주소를 복사했습니다'); } } catch (_) {}
+  };
+  document.querySelectorAll('[data-wka]').forEach(b => b.onclick = async () => {
+    try { await api(`/admin/works/${b.dataset.wka}`, { method: 'POST', body: { act: b.dataset.act } }); flash(b.dataset.act === 'ok' ? '열었습니다 — 이제 안에서 눌러 볼 수 있습니다' : '내렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-gig]').forEach(a => a.onclick = (ev) => { ev.preventDefault(); GIGP = +a.dataset.gig; render(); });
+  document.querySelectorAll('[data-ggk]').forEach(b => b.onclick = () => { GIG_KIND = b.dataset.ggk; render(); });
+  document.querySelectorAll('[data-ggj]').forEach(b => b.onclick = () => { GIG_JOB = b.dataset.ggj; render(); });
+  if ($('#gg-back')) $('#gg-back').onclick = () => { GIGP = 0; render(); };
+  let newGigKind = '의뢰';
+  document.querySelectorAll('[data-ngk]').forEach(b => b.onclick = () => { newGigKind = b.dataset.ngk; document.querySelectorAll('[data-ngk]').forEach(x => x.classList.toggle('on', x === b)); });
+  if ($('#ng-go')) $('#ng-go').onclick = async () => {
+    const v = id => ($('#' + id) || {}).value || '';
+    try { const r = await api('/gigs', { method: 'POST', body: { kind: newGigKind, title: v('ng-title').trim(), job: v('ng-job'), lo: v('ng-lo'), hi: v('ng-hi'), due: v('ng-due'), scope: v('ng-scope').trim() } });
+          GIGP = r.id; flash('올렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#go-send')) $('#go-send').onclick = async () => {
+    try { await api(`/gigs/${GIGP}/offer`, { method: 'POST', body: { price: $('#go-price').value, note: $('#go-note').value.trim() } }); flash('보냈습니다. 올린 분이 연락드립니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  if ($('#gg-close')) $('#gg-close').onclick = async () => { try { await api(`/gigs/${GIGP}/close`, { method: 'POST', body: {} }); flash('마감했습니다'); } catch (e) { flash(e.message, true); } };
+  if ($('#gg-share')) $('#gg-share').onclick = async () => {
+    const url = `${location.origin}/gigs?g=${GIGP}`, title = ($('h2') || {}).textContent || 'HACK:ON 외주';
+    try { if (navigator.share) await navigator.share({ title, url }); else { await navigator.clipboard.writeText(url); flash('주소를 복사했습니다'); } } catch (_) {}
+  };
+  document.querySelectorAll('[data-refnext]').forEach(b => b.onclick = async () => {
+    try { REFGOT[b.dataset.refnext] = await api(`/ref/${b.dataset.refnext}/next`, { method: 'POST', body: {} }); render(); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-refcopy]').forEach(b => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(REFGOT[b.dataset.refcopy].code); flash('복사했습니다'); } catch (_) { flash('길게 눌러 복사하세요', true); }
+  });
+  document.querySelectorAll('[data-refused]').forEach(b => b.onclick = async () => {
+    const g = REFGOT[b.dataset.refused];
+    try { await api(`/ref/code/${g.id}/used`, { method: 'POST', body: {} }); delete REFGOT[b.dataset.refused]; flash('고맙습니다 — 내 코드 차례가 앞당겨졌습니다'); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-refdead]').forEach(b => b.onclick = async () => {
+    const g = REFGOT[b.dataset.refdead];
+    try { await api(`/ref/code/${g.id}/dead`, { method: 'POST', body: {} }); delete REFGOT[b.dataset.refdead]; flash('알려 주셔서 고맙습니다. 다음 코드를 받아 보세요'); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-refpost]').forEach(b => b.onclick = async () => {
+    try { await api(`/ref/${b.dataset.refpost}/code`, { method: 'POST', body: { code: $('#refc-' + b.dataset.refpost).value.trim() } }); flash('올렸습니다. 남의 코드를 하나 써 주면 차례에 듭니다'); } catch (e) { flash(e.message, true); }
+  });
+  if ($('#rs-go')) $('#rs-go').onclick = async () => {
+    try { await api('/ref', { method: 'POST', body: { name: $('#rs-name').value.trim(), url: $('#rs-url').value.trim(), note: $('#rs-note').value.trim() } }); flash('제안했습니다. 운영진이 약관을 본 뒤 엽니다'); } catch (e) { flash(e.message, true); }
+  };
+  if ($('#th-add')) $('#th-add').onclick = async () => {
+    try { await api('/admin/thanks', { method: 'POST', body: { name: $('#th-name').value.trim(), role: $('#th-role').value, area: $('#th-area').value.trim(), link: $('#th-link').value.trim(), share: $('#th-share').checked } }); flash('올렸습니다'); }
+    catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-tgive]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.tgive, v = sel => (document.querySelector(`[${sel}="${id}"]`) || {}).value;
+    try { await api(`/admin/thanks/${id}/points`, { method: 'POST', body: { kind: v('data-tkind'), points: +v('data-tpts'), why: (v('data-twhy') || '').trim() } }); flash('점수를 줬습니다'); }
+    catch (e) { flash(e.message, true); }
+  });
+  /* 한꺼번에 치우기 — 사라질 개수를 늘 보여 주고, 그 숫자를 그대로 적어야 서버가 받는다 */
+  const cleanCount = () => {
+    const all = document.querySelectorAll('[data-ckeep]').length, kept = document.querySelectorAll('[data-ckeep]:checked').length;
+    if ($('#clean-count')) $('#clean-count').innerHTML = `남김 <b>${kept}</b> · 치움 <b>${all - kept}</b> — 맞으면 «${all - kept}개 지우기» 라고 적으세요`;
+  };
+  document.querySelectorAll('[data-ckeep]').forEach(c => c.onchange = cleanCount); cleanCount();
+  if ($('#clean-go')) $('#clean-go').onclick = async () => {
+    const keep = (p) => [...document.querySelectorAll(`[data-ckeep="${p}"]:checked`)].map(c => c.value);
+    try {
+      const r = await api('/admin/cleanup', { method: 'POST', body: { keepEvents: keep('ce'), keepWorks: keep('cw'), keepGigs: keep('cg'), confirm: $('#clean-confirm').value.trim() } });
+      flash(`치웠습니다 — 대회 ${r.events} · 만든 것 ${r.works} · 외주 ${r.gigs}`);
+    } catch (e) { flash(e.message, true); }
+  };
+  document.querySelectorAll('[data-rsok]').forEach(b => b.onclick = async () => {
+    try { await api(`/admin/ref/${b.dataset.rsok}`, { method: 'POST', body: {} }); flash('열었습니다'); } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-resume]').forEach(b => b.onclick = async () => {
+    const t = PROF ? resumeText(PROF, b.dataset.resume) : '';
+    if (!t) return flash('아직 끝난 대회 기록이 없습니다 — 대회에 나오면 여기 쌓입니다', true);
+    const out = $('#resume-out'); out.textContent = t; out.hidden = false;   // 복사가 막혀도 눈으로 보고 고를 수 있게
+    try { await navigator.clipboard.writeText(t); flash(b.dataset.resume === 'linkedin' ? '링크드인 «프로젝트» 칸에 붙여 넣으세요' : '대외활동 칸에 붙여 넣으세요'); } catch (_) {}
+  });
+  const acctDel = $('#b-acct-del');
+  if (acctDel) acctDel.onclick = async () => {
+    const v = ($('#acct-del-in') || {}).value || '';
+    if (v.trim() !== '탈퇴') return flash('지우려면 «탈퇴» 라고 적어 주세요', true);
+    try {
+      const r = await api('/account/delete', { method: 'POST', body: { confirm: v.trim() } });
+      try { localStorage.removeItem('hackon.owner'); localStorage.removeItem('hackon.event'); } catch (_) {}
+      flash(r.events ? `계정과 대회 ${r.events}개를 지웠습니다` : '계정을 지웠습니다');
+      setTimeout(() => location.assign('/'), 900);
+    } catch (e) { flash(e.message, true); }
+  };
   const adopt = $('#b-adopt');
   if (adopt) adopt.onclick = async () => {
     try {
@@ -5921,6 +7145,19 @@ function wire() {
     } catch (e) { flash(e.message, true); }
   };
   if (lst) lst.onclick = () => setList(true);
+  const growUrl = ch => `${shareBase()}/e/${cur}?f=${encodeURIComponent(ch)}`;
+  /* 복사가 막히면(앱 안·http) prompt 대신 화면에 그대로 띄운다 — 앱(WKWebView)에선 prompt 가 안 뜬다 */
+  const growCopy = async (text, ok) => { try { await navigator.clipboard.writeText(text); flash(ok); }
+    catch (_) { const g = $('#grow'); if (g) { let pre = $('#grow-out'); if (!pre) { pre = document.createElement('pre'); pre.id = 'grow-out'; pre.style.cssText = 'white-space:pre-wrap;user-select:all;margin-top:8px;font-size:13px'; g.appendChild(pre); } pre.textContent = text; } } };
+  document.querySelectorAll('[data-flink]').forEach(b => b.onclick = () => growCopy(growUrl(b.dataset.flink), `${b.dataset.flink} 링크를 복사했습니다`));
+  document.querySelectorAll('[data-fmsg]').forEach(b => b.onclick = async () => {
+    let ev = null; try { ev = await api(`/events/${cur}`); } catch (_) { return flash('대회 정보를 못 읽었습니다', true); }
+    growCopy(growMsg(ev, b.dataset.fmsg, growUrl(b.dataset.fmsg)), `${b.dataset.fmsg} 문구를 복사했습니다. 그 방에 붙여 넣으세요`);
+  });
+  const unsmp = $('#b-unsample');
+  if (unsmp) unsmp.onclick = async () => {
+    try { await api(`/events/${cur}/sample`, { method: 'POST', body: { sample: false } }); flash('연습용을 풀었습니다. 이제 목록에 올릴 수 있습니다'); } catch (e) { flash(e.message, true); }
+  };
   if (unlst) unlst.onclick = () => setList(false);
 
   const op = $('#b-open');
@@ -6687,13 +7924,10 @@ function wire() {
 
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.t; render(); });
 
-/* 로고를 누르면 처음으로. 공개·심사·보고서 화면에서는 그 대회 안에 머문다 —
-   손님을 남의 운영 화면으로 떨어뜨리지 않는다. */
+/* 로고를 누르면 hackon.kr 첫 화면으로. 어느 화면에서든 같은 곳 — 전에는 /app 안의 «처음» 탭으로 가서
+   «로고 = 사이트 처음» 이라는 약속이 /app 에서만 깨졌다. 내 대회는 첫 화면 «내 대회» 와 아래 탭에서 다시 연다 */
 const home = document.getElementById('b-home');
-if (home) home.onclick = () => {
-  if (location.pathname !== '/app') { location.href = '/app'; return; }
-  tab = 'home'; curTeam = ''; render();
-};
+if (home) home.onclick = () => { location.href = '/'; };
 
 /* 주소가 /e/<대회id> 면 읽기 전용 공개 화면으로 연다. 아래 탭과 편집 칸을 감춘다. */
 const PRO = location.pathname.match(/^\/p\/([0-9a-f]{12})$/);
@@ -6709,6 +7943,20 @@ const JDGP = location.pathname === '/judge';   // 심사위원 공개 입구 —
 const PRB = location.pathname === '/problems';   // 문제 은행 — 올라온 문제를 대회 없이도 푼다
 const LRN = location.pathname === '/learn';      // 강의 — 유튜브 일부공개 영상을 묶어 보여 준다
 const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파는 것 목록
+const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
+const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
+const THX = location.pathname === '/thanks';     // 기여자 — 해커온을 같이 켠 사람들
+const PTN = location.pathname === '/partner';    // 협찬·협업 안내 — 주시는 것별로 받는 것 한 장
+const LCH = location.pathname === '/launch';     // 해커온에서 시작하면 받는 것 — 바이브코딩 금광의 삽
+const BIZ = location.pathname === '/biz';        // 기업·기관·전통 산업·스타트업 — AI 도입을 해커톤 하루로
+const CRW = location.pathname === '/crew';       // 해커온 크루 모집 — 홍보·운영·개발
+const LVL = location.pathname === '/cert';       // 실무 기록 단계 — 자격증 아님, 대회 기록에서만(수료 확인 /c/ 와 다른 것)
+const GIG = location.pathname === '/gigs';       // 외주 — 맡기기(의뢰)·받기(서비스)
+const MDE = location.pathname === '/made';       // 만든 것 — 눌러 보고, 1분 영상으로 보고, 함께할 사람을 모은다
+const RCT = location.pathname === '/recruit';    // 모집공고 — 직장인이 직무별로 사람을 모으는 선발형 프로젝트
+const WAL = location.pathname === '/wallet';     // AI 지갑 — 구독 갱신·크레딧 만료·한도 리셋을 한 장에. 이 기기에만 저장
+const SET = location.pathname === '/setups';     // 세팅 모음 — 잘 쓰는 사람의 세팅을 모아 최신판으로 돌려준다
+const ARD = location.pathname === '/around';     // 모아 보기 — 주최자가 안 올려도 보이는 대회·동아리·스터디·공공 과제
 const MIT = location.pathname.match(/^\/m\/(\d+)$/);   // 마켓 상세 /m/<번호>
 const CRT = location.pathname.match(/^\/c\/([0-9a-f]{12})$/);   // 수료 확인 /c/<번호>
 const CND = location.pathname === '/conditions';  // 그날의 조건 아카이브
@@ -6745,7 +7993,21 @@ if (TVM) {
 }
 else if (PRB) { tab = 'problems'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (LRN) { tab = 'learn'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (THX) { tab = 'thanks'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (PTN) { tab = 'partner'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (LCH) { tab = 'launch'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (BIZ) { tab = 'biz'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (CRW) { tab = 'crew'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CRT) { tab = 'cert'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (GIG) { GIGP = +(new URLSearchParams(location.search).get('g') || 0); tab = 'gigs'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (MDE) { MDP = +(new URLSearchParams(location.search).get('w') || 0); tab = 'made'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (RCT) { tab = 'recruit'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (WAL) { tab = 'wallet'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (SET) { tab = 'setups'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (ARD) { tab = 'around'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MKT || MIT) { tab = MIT ? 'mitem' : 'market'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (RNK) { tab = 'rank'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CND) { tab = 'conds'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

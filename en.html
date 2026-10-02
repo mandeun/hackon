@@ -1,0 +1,130 @@
+<!doctype html>
+<!-- HACK:ON in English — the door for people outside Korea.
+     «가장 한국적인 것이 해외에서 먹힌다». So the Korean words are not hidden behind translations:
+     each principle is written in Hangul first, then romanized, then explained. They are how the product works,
+     not decoration — 빨리빨리 is the five-minute setup, 품앗이 is the referral exchange, 정 is teammate matching.
+     No external scripts. Events come from the same public list as the Korean home (/api/events). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0B1020">
+<title>HACK:ON — Korean hackathons you can join from anywhere</title>
+<meta name="description" content="HACK:ON (해커온) runs vibe-coding hackathons and demo days in Korea. Join a Korean team, build with AI, ship in a day. Open an event with just a name.">
+<link rel="icon" href="/icon.svg">
+<link rel="canonical" href="https://hackon.kr/en">
+<link rel="alternate" hreflang="ko" href="https://hackon.kr/">
+<link rel="alternate" hreflang="en" href="https://hackon.kr/en">
+<link rel="alternate" hreflang="x-default" href="https://hackon.kr/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HACK:ON">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ko_KR">
+<meta property="og:url" content="https://hackon.kr/en">
+<meta property="og:title" content="HACK:ON — Korean hackathons you can join from anywhere">
+<meta property="og:description" content="Vibe-coding hackathons from Seoul. Join a Korean team, build with AI, ship in a day.">
+<meta property="og:image" content="https://hackon.kr/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+:root{--ink:#0B1020;--lime:#C8F53B;--amber:#FFB020;--pg:#EEF1F4;--card:#fff;--grey:#5B6470;--hair:#EAECEF;
+  --sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,'Segoe UI',sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--ink);font:16px/1.6 var(--sans);word-break:keep-all;overflow-wrap:break-word;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px}
+.top{display:flex;align-items:center;gap:12px;min-height:60px}
+.top .logo{font-weight:800;font-size:19px;text-decoration:none;margin-right:auto;display:inline-flex;align-items:center;gap:6px}
+.top .logo b{color:#8BB51A}
+.top a.ko{font-size:14px;font-weight:700;text-decoration:none;padding:8px 12px;border:1px solid var(--hair);border-radius:999px;background:#fff}
+.hero{background:var(--ink);color:#fff;border-radius:24px;padding:28px 22px;margin:8px 0 16px}
+.hero h1{font-size:34px;line-height:1.15;margin:12px 0 10px;letter-spacing:-.02em}
+.hero h1 em{font-style:normal;color:var(--lime)}
+.hero p{color:#C9CFDA;margin:0}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 18px;border-radius:14px;font-weight:800;text-decoration:none;background:var(--lime);color:var(--ink)}
+.btn.sec{background:transparent;color:#fff;border:1px solid #2A3350}
+.card{background:var(--card);border-radius:20px;padding:18px;margin:0 0 12px}
+.card h2{font-size:20px;margin:0 0 6px}
+.meta{color:var(--grey);font-size:14px}
+.ko-word{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--hair)}
+.ko-word:first-of-type{border-top:0}
+.ko-word .h{flex:none;width:92px}
+.ko-word .h b{display:block;font-size:24px;line-height:1.1}
+.ko-word .h span{font-size:12px;color:var(--grey);font-style:italic}
+.ev{padding:12px 0;border-top:1px solid var(--hair);display:block;text-decoration:none}
+.ev:first-child{border-top:0}
+.ev b{display:block}
+footer{padding:24px 0 40px;color:var(--grey);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="/en"><img src="/norangi.svg" alt="" width="24" height="24">HACK<b>:</b>ON</a>
+    <a class="ko" href="/" hreflang="ko" lang="ko">한국어</a>
+  </header>
+
+  <section class="hero">
+    <div class="meta" style="color:var(--lime);font-weight:700">해커온 · from Seoul</div>
+    <h1>Build with AI in a day,<br><em>with a Korean team.</em></h1>
+    <p>HACK:ON runs vibe-coding hackathons and demo days in Korea. Join from anywhere, team up with Korean builders, and ship something people can click by the end of the day.</p>
+    <div class="btns"><a class="btn" href="#events">See open events</a><a class="btn sec" href="/app">Open your own event</a></div>
+  </section>
+
+  <section class="card" id="words">
+    <h2>Five Korean words that run this place</h2>
+    <div class="meta">We don't translate them away. They are how the product works.</div>
+    <div class="ko-word"><div class="h"><b lang="ko">빨리빨리</b><span>ppalli-ppalli</span></div>
+      <div><b>Hurry-hurry.</b> Open an event with just its name — five minutes, no account. Join with a name and an email.</div></div>
+    <div class="ko-word"><div class="h"><b lang="ko">품앗이</b><span>pumasi</span></div>
+      <div><b>Village work-swap.</b> Use someone's referral code and yours moves up the queue (<a href="/ref">referral exchange</a>). Help is paid back in help.</div></div>
+    <div class="ko-word"><div class="h"><b lang="ko">정</b><span>jeong</span></div>
+      <div><b>The bond that stays.</b> Teammate suggestions match roles, strengths and why you're here. Contacts open only when both press «Like».</div></div>
+    <div class="ko-word"><div class="h"><b lang="ko">켜다</b><span>kyeoda</span></div>
+      <div><b>To switch on.</b> Our mascot <span lang="ko">노랑이</span> (Norangi) is a power plug. "HACK:ON" is where things get switched on — your first app, your first users.</div></div>
+    <div class="ko-word"><div class="h"><b lang="ko">너랑</b><span>neorang</span></div>
+      <div><b>"With you."</b> Say it fast and it sounds like <span lang="ko">노랑</span>. What you thought was a «NO» becomes «with you».</div></div>
+  </section>
+
+  <section class="card" id="events">
+    <h2>Open events</h2>
+    <div class="meta">Titles are in Korean. Many organizers are glad to help in English — ask in the event's Q&amp;A, or use your browser's translate.</div>
+    <div id="ev-list" style="margin-top:8px"><div class="meta">Loading…</div></div>
+  </section>
+
+  <section class="card" id="why">
+    <h2>Why join a Korean hackathon</h2>
+    <div class="ko-word"><div class="h"><b>Speed</b></div><div>Korean teams ship fast. One day, one demo, two minutes on stage.</div></div>
+    <div class="ko-word"><div class="h"><b>Market</b></div><div>Test your idea on Korean users — one of the most mobile-first markets in the world.</div></div>
+    <div class="ko-word"><div class="h"><b>Record</b></div><div>Every finished event goes on your public profile. Copy it to LinkedIn in one tap.</div></div>
+    <div class="ko-word"><div class="h"><b>People</b></div><div>Add «language» as a strength. Korean teams looking for global reach will find you.</div></div>
+  </section>
+
+  <section class="card" id="partners">
+    <h2>Companies, communities, correspondents</h2>
+    <div class="meta">Sponsor a Korean hackathon, bring your community, or be our correspondent from your city — a monthly three-line note on what's hot in AI where you live.</div>
+    <div class="btns"><a class="btn" style="background:var(--ink);color:#fff" href="mailto:hi@mandeun.com?subject=%5BHACK%3AON%20global%5D%20">Write to hi@mandeun.com</a></div>
+  </section>
+
+  <footer><span lang="ko">해커온</span> HACK:ON · Seoul · <a href="/" hreflang="ko">한국어</a> · <a href="/privacy">Privacy</a> · <a href="/llms.txt">llms.txt</a></footer>
+</div>
+<script>
+/* 열린 대회 — 한국어 첫 화면과 같은 공개 목록. 못 읽으면 «모름», 없으면 «없음» — 둘을 섞지 않는다 */
+(function () {
+  var box = document.getElementById('ev-list');
+  var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  fetch('/api/events').then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (d) {
+    var rows = Array.isArray(d) ? d : (d.rows || []);
+    var today = new Date().toISOString().slice(0, 10);
+    rows = rows.filter(function (e) { return !e.ends || String(e.ends).slice(0, 10) >= today; }).slice(0, 8);
+    if (!rows.length) { box.innerHTML = '<div class="meta">No open events right now. <a href="/app">Open one</a> — it takes a name.</div>'; return; }
+    box.innerHTML = rows.map(function (e) {
+      var when = e.starts ? new Date(e.starts + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' }) : 'Date TBA';
+      return '<a class="ev" href="/e/' + esc(e.id) + '"><b lang="ko">' + esc(e.title) + '</b><span class="meta">' + esc(when) +
+        (e.place ? ' · ' + esc(e.place) : '') + (e.teams ? ' · ' + e.teams + ' signed up' : '') + '</span></a>';
+    }).join('');
+  }).catch(function () { box.innerHTML = '<div class="meta">Couldn\'t load events — we don\'t know right now. Try again in a moment.</div>'; });
+})();
+</script>
+</body>
+</html>

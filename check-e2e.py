@@ -391,9 +391,9 @@ with sync_playwright() as p:
     # 첫 화면이 그 파일을 실제로 부르는가 — 목록에만 있고 안 쓰면 아무 데도 안 보인다
     pg.goto(BASE + "/")
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
-    A(pg.is_visible(".brandline img"), "첫 화면에 노랑이가 안 보인다")
-    A("너랑" in pg.inner_text(".brandline"), "브랜드 줄에 이름의 뜻이 없다")
-    ok("노랑이 — 셋 다 200, 앰버·먹, 첫 화면 브랜드 줄에 실제로 그려진다")
+    A(pg.is_visible(".foot-mark img"), "첫 화면 맨 아래 상표 옆에 노랑이가 안 보인다")
+    A(pg.query_selector(".brandline") is None, "첫 화면에 따로 선 브랜드 소개 줄이 아직 있다")
+    ok("노랑이 — 셋 다 200, 앰버·먹, 첫 화면 상표 옆에 설명 없이 그려진다")
 
     # ── 소개 페이지 /brand ──
     A(code_of("/brand") == 200, "/brand 가 안 열린다")
@@ -409,7 +409,7 @@ with sync_playwright() as p:
     # 첫 화면에서 갈 길이 있는가 — 아무도 안 들어오는 페이지는 없는 것과 같다
     pg.goto(BASE + "/")
     pg.wait_for_function("document.getElementById('count').textContent !== ''", timeout=10000)
-    A(pg.get_attribute(".brandline .more", "href") == "/brand", "첫 화면에서 소개 페이지로 가는 길이 없다")
+    A(pg.query_selector('footer a[href="/brand"]') is not None, "첫 화면 맨 아래에서 소개 페이지로 가는 길이 없다")
     ok("노랑이 소개 /brand — 이름·생김새·색 셋·규칙 넷, 그림 안 깨짐, 첫 화면에서 연결")
 
     # 순위 화면이 상태와 심사 진행을 보여주는가 — 심사 중에 제일 자주 나오는 질문이다
@@ -541,10 +541,11 @@ with sync_playwright() as p:
     pg.click('#host-tabs [data-sec="spon"]')
     pg.wait_for_timeout(500)
     pg.click("#b-home")
-    pg.wait_for_timeout(600)
-    A(pg.evaluate("tab") == "home", f"로고를 눌렀는데 처음으로 안 간다: {pg.evaluate('tab')}")
-    A("열린 대회" in pg.inner_text("#view"), "처음 화면이 아니다")
-    ok("로고를 누르면 처음 화면으로")
+    pg.wait_for_load_state("networkidle")
+    A(urllib.parse.urlparse(pg.url).path == "/", f"로고를 눌렀는데 hackon.kr 첫 화면으로 안 간다: {pg.url}")
+    A(pg.query_selector("#count") is not None, "첫 화면(home.html)이 아니다")
+    A(pg.is_visible("#nav-mine") and pg.get_attribute("#nav-mine", "href") == "/app", "열쇠로 대회를 연 기기인데 첫 화면에 «내 대회» 로 돌아갈 길이 없다")
+    ok("로고를 누르면 /app 이 아니라 사이트 첫 화면으로")
 
     # ── 운영 매뉴얼 — 사이트 안에서 바로 읽힌다 ──────────────
     # 전에는 깃허브로 내보냈다. 읽을 것을 읽으러 밖으로 내보내면 대부분 안 돌아온다.
@@ -2604,9 +2605,10 @@ with sync_playwright() as p:
         A(pub.query_selector(bad_id) is None, f"공개 화면에 {bad_id} 가 있다")
     # 공개 화면 칸은 참가 신청(t-)과 «줄 수 있는 것»(g- 칸, data-give-* 단추) 둘뿐. 운영 칸은 위 bad_id 로 이미 막았다.
     ids = pub.evaluate("""[...document.querySelectorAll('#view input, #view textarea, #view select, #view button')]
-        .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-')) || '?')""")
-    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i == "nt-bell" or i.startswith("fb-") for i in ids),
-      f"공개 화면에 신청·줄 수 있는 것·소식 알림·피드백 말고 다른 칸이 있다: {ids}")
+        .map(el => el.id || [...el.attributes].map(a => a.name).find(n => n.startsWith('data-give-') || ['data-rep', 'data-blk', 'data-unblk'].includes(n)) || '?')""")
+    # 신고·차단(data-rep·data-blk·data-unblk)은 앱스토어 지침 1.2 로 공개 화면에 일부러 둔다 — 고치는 칸이 아니다
+    A(all(i.startswith("t-") or i.startswith("g-") or i.startswith("data-give-") or i in ("data-rep", "data-blk", "data-unblk") or i == "nt-bell" or i.startswith("fb-") for i in ids),
+      f"공개 화면에 신청·줄 수 있는 것·소식 알림·피드백·신고·차단 말고 다른 칸이 있다: {ids}")
     # 「언제」 옆에 「어디」. 대역 B·C 가 페이지 전체에서 갈 곳을 못 찾았다.
     A(pub.is_visible("#place-line"), "공개 페이지에 «어디» 줄이 없다")
     A("다산관 101호" in pub.inner_text("#place-line"),
@@ -3174,10 +3176,9 @@ with sync_playwright() as pw:
     pg.wait_for_selector("#m-save", timeout=8000)
     rows = api(f"/api/events/{ivid}/board", ivkey)["rows"]
     A(rows[0]["found"] == "당근", f"초대 링크의 유입 경로가 안 저장됐다: {rows[0]}")
-    # 두 번째 칸은 그래도 한 번 더 묻는다 — 참가자 본인에게는 found 를 안 내려주기 때문이다(운영자 것).
-    # 다시 답해도 덮이지 않으니(«이미 적힌 것은 안 건드린다») 집계는 안 흔들린다. 고르기만 미리 맞춰 둔다.
-    A(pg.eval_on_selector("#m-found", "el => el.value") == "당근",
-      "초대 링크로 왔는데 «어디서 보셨나요» 가 미리 골라져 있지 않다")
+    # 초대 링크로 이미 받았으니 두 번째 칸이 «어디서 보셨나요» 를 또 묻지 않는다.
+    # 값은 운영자 것이라 참가자에게는 «받았다(hasFound)» 만 간다 — 같은 것을 두 번 묻는 화면이 사용자 지적이었다.
+    A(pg.query_selector("#m-found") is None, "초대 링크로 유입 경로를 받고도 «어디서 보셨나요» 를 또 묻는다")
 
     # 목록에 없는 값은 버린다 — 지나가던 사람이 집계에 줄을 만들면 그 표를 못 믿는다.
     # 이 브라우저는 위 대회에 이미 신청했으니(내 팀 화면이 뜬다) 대회를 하나 더 연다.
@@ -3979,6 +3980,15 @@ _pb = lpostj(f"/api/events/{PJ}/teams", {"name": "떨어질팀", "email": "pjb@e
 A(json.loads(urllib.request.urlopen(LEARN_BASE + f"/api/events/{PJ}/board").read())["rows"] == [], "선발 전 지원자가 공개 명단에 보인다")
 A(lpost(f"/api/teams/{_pa['id']}/attend", {"week": 1}) == 403 and lpost(f"/api/teams/{_pa['id']}/pick", {"state": "accepted"}) == 403,
   "운영자 열쇠 없이 주차 체크인·선발을 한다")
+# 프로젝트는 주차 제출로만 낸다 — 일반 제출 길로 submissions 를 채우면 마지막 주 없이 수료 확인이 나왔다
+_rq = urllib.request.Request(LEARN_BASE + f"/api/teams/{_pa['id']}/submit", method="POST",
+                             data=json.dumps({"url": "https://skip.example"}).encode(),
+                             headers={"content-type": "application/json", "x-tkey": _pa["tkey"]})
+try:
+    urllib.request.urlopen(_rq); _sc = 200
+except urllib.error.HTTPError as _e:
+    _sc = _e.code
+A(_sc == 409, f"프로젝트 팀이 일반 제출 길로 낸다({_sc}) — 마지막 주 없이 완주가 된다")
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     ctx = b.new_context(viewport={"width": 1200, "height": 900})
@@ -4081,5 +4091,245 @@ with sync_playwright() as pw:
       "강의 판매처 단추가 틀리다")
     b.close()
 ok("교육 — 수료 확인은 체크인한 사람만·금지어 없음·연락처 없음, 수업 실적(모름 구분), 강의 판매처 링크")
+
+# ── AI 지갑 (/wallet) — 이 기기에만 저장, 날짜순, 달력 파일에 하루 전 알림 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 390, "height": 844}, accept_downloads=True)
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("wallet: " + str(e)))
+    pg.goto(f"{LEARN_BASE}/wallet", wait_until="networkidle"); pg.wait_for_selector("#wl-go", timeout=10000)
+    for _n, _k, _d, _e in [("늦게 오는 것", "expire", "2099-12-31", ""), ("먼저 오는 것", "reset", "2099-01-01", ""), ("날짜 없는 것", "trial", "", "")]:
+        pg.fill("#wl-name", _n); pg.click(f'[data-wkind="{_k}"]'); pg.fill("#wl-date", _d); pg.select_option("#wl-every", _e)
+        pg.click("#wl-go"); pg.wait_for_timeout(500)
+    _wl = pg.inner_text("#wal-list")
+    A(_wl.index("먼저 오는 것") < _wl.index("늦게 오는 것") < _wl.index("날짜 없는 것"), f"AI 지갑이 날짜순(날짜 모름은 맨 뒤)이 아니다: {_wl[:200]}")
+    with pg.expect_download() as _dl:
+        pg.click("#wal-ics")
+    _ics = open(_dl.value.path(), encoding="utf-8").read()
+    A(_ics.count("BEGIN:VEVENT") == 2 and "TRIGGER:-P1D" in _ics, "AI 지갑 달력 파일에 날짜 있는 것 둘·하루 전 알림이 없다")
+    _reqs = []
+    pg.on("request", lambda r: _reqs.append(r.url) if "/api/" in r.url and r.method != "GET" else None)
+    pg.fill("#wl-name", "서버로 가면 안 됨"); pg.click("#wl-go"); pg.wait_for_timeout(500)
+    A(not _reqs, f"AI 지갑이 서버로 보낸다: {_reqs}")
+    # 해지 후보 — 구독에 «안 씀» 을 고르면 끊을 것과 아낄 금액이 뜬다
+    pg.fill("#wl-name", "안 쓰는 구독"); pg.click('[data-wkind="renew"]'); pg.fill("#wl-date", "2099-06-01"); pg.select_option("#wl-every", "month")
+    pg.fill("#wl-won", "14000"); pg.click("#wl-go"); pg.wait_for_timeout(500)
+    _sel = pg.locator("#wal-list > div", has_text="안 쓰는 구독").locator("[data-wuse]"); _sel.select_option("none"); pg.wait_for_timeout(500)
+    _wl = pg.inner_text("#wal-list")
+    A("해지 후보" in _wl and "14,000원 아낌" in _wl, f"«안 씀» 구독이 해지 후보·아낄 금액으로 안 뜬다: {_wl[:200]}")
+    # 붙여 넣기 — 메일 한 덩이에서 줄마다 날짜를 건지고, 마감과 일정을 나누고, 못 찾은 줄은 센다
+    pg.fill("#wl-paste", "서류 제출 2099년 3월 20일까지\n데모데이 2099-03-31(금) 오후 1시\n안녕하세요 회광입니다\n버전 3.5 출시")
+    pg.click("#wl-parse"); pg.wait_for_selector("#wl-found")
+    _f = pg.inner_text("#wl-found")
+    A("서류 제출" in _f and "마감·회신 · 2099-03-20" in _f, f"«까지» 줄이 마감으로 안 잡힌다: {_f}")
+    A("데모데이" in _f and "일정·출시 · 2099-03-31 13:00" in _f, f"«오후 1시» 일정이 안 잡힌다: {_f}")
+    A("날짜 못 찾은 줄 2개" in _f, f"날짜 없는 줄(인사·3.5 버전)을 못 센다: {_f}")
+    _reqs.clear()
+    pg.click("#wl-addall"); pg.wait_for_timeout(500)
+    _wl = pg.inner_text("#wal-list")
+    A("서류 제출" in _wl and "데모데이" in _wl, f"붙여 넣기로 건진 것이 지갑에 안 들어간다: {_wl[:300]}")
+    A(not _reqs, f"붙여 넣은 글이 서버로 간다: {_reqs}")
+    # 직무 추천 — 고르면 먼저 써 볼 것, 이미 쓰는 것은 «쓰는 중», 같은 일 하는 구독 둘은 «줄여 볼 만»
+    pg.fill("#wl-name", "Cursor"); pg.click('[data-wkind="renew"]'); pg.fill("#wl-date", "2099-02-01"); pg.click("#wl-go"); pg.wait_for_timeout(400)
+    pg.fill("#wl-name", "GitHub Copilot"); pg.click('[data-wkind="renew"]'); pg.fill("#wl-date", "2099-03-01"); pg.click("#wl-go"); pg.wait_for_timeout(400)
+    pg.click('[data-wjob="개발"]'); pg.wait_for_timeout(400)
+    _rc = pg.inner_text("#wal-rec")
+    A("Claude Code" in _rc and "쓰는 중" in _rc and "하나로 줄여 볼 만" in _rc, f"직무 추천·쓰는 중·겹침 안내가 안 뜬다: {_rc}")
+    pg.click('[data-wrecadd="Claude Code"]'); pg.wait_for_timeout(400)
+    A("Claude Code" in pg.inner_text("#wal-list"), "추천에서 «넣기» 를 눌렀는데 지갑에 안 들어간다")
+    A(not _reqs, f"직무 추천이 서버로 간다: {_reqs}")
+    b.close()
+ok("AI 지갑 — 날짜순·날짜 모름은 맨 뒤·달력 파일(하루 전 알림)·서버로 안 보냄·안 쓰는 구독은 해지 후보·붙여 넣은 글에서 마감·일정 건지기")
+# ── 검색·AI 답변 — 대회 공개 화면 머리 딱지, Event 한 장, /llms.txt ──
+_h = urllib.request.urlopen(BASE + f"/e/{ev}").read().decode()
+A(f'og:url" content="' in _h and f'/e/{ev}"' in _h and 'og:type" content="website"' in _h, "대회 공개 화면에 og 딱지가 없다")
+_t = re.search(r'og:title" content="([^"]*)"', _h).group(1)
+if "application/ld+json" in _h:
+    _ld = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>', _h).group(1))
+    import html as _html
+    A(_ld["@type"] == "Event" and _html.unescape(_t).startswith(_ld["name"]), f"Event 이름과 딱지 제목이 다르다: {_ld}")
+_lt = urllib.request.urlopen(BASE + "/llms.txt").read().decode()
+A(_lt.startswith("# HACK:ON") and "/news.md" in _lt, f"/llms.txt 가 안내문이 아니다: {_lt[:80]}")
+A(urllib.request.urlopen(BASE + "/e/zzzzzz9").status == 200, "없는 대회 주소가 화면을 못 낸다")
+try:
+    urllib.request.urlopen(urllib.request.Request(BASE + "/", headers={"user-agent": "Mozilla/5.0 (compatible; GPTBot/1.2)"})); A(False, "학습용 수집기(GPTBot)가 첫 화면을 받아 간다")
+except urllib.error.HTTPError as _e:
+    A(_e.code == 403, f"학습용 수집기 응답이 403 이 아니다: {_e.code}")
+A(urllib.request.urlopen(urllib.request.Request(BASE + "/", headers={"user-agent": "Mozilla/5.0 (compatible; Yeti/1.1; +https://naver.me/spd)"})).status == 200, "네이버 검색 봇이 막힌다")
+ok("검색·AI — 대회 화면 og 딱지(website), 목록 대회는 Event, /llms.txt, 학습용 수집기 403·네이버 봇 200")
+
+# ── 운영자 열쇠 없는 참가자 폰 — 신청 때 적은 이메일을 또 묻지 않는다, 첫 화면이 옆으로 안 밀린다 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.on("pageerror", lambda e: errs.append("guest-apply: " + str(e)))
+    pg.goto(BASE + "/", wait_until="networkidle"); pg.wait_for_timeout(600)
+    _sw = pg.evaluate("document.documentElement.scrollWidth")
+    A(_sw <= 391, f"첫 화면이 폰 폭에서 옆으로 밀린다: {_sw}px")
+    _ng = post("/api/events", {"title": "손님 신청 검사"})[1]
+    pg.goto(BASE + f"/e/{_ng['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-name")
+    pg.fill("#t-name", "손님팀"); pg.fill("#t-email", "guest@example.com"); pg.check("#t-agree"); pg.click("#t-join")
+    pg.wait_for_selector("#m-save", timeout=8000)
+    A(pg.query_selector("#m-contact") is None, "참가자 폰에서 신청 때 적은 이메일을 «조금만 더» 가 또 묻는다")
+    b.close()
+ok("참가자 폰 — 신청 때 받은 이메일을 다시 안 묻고, 첫 화면이 옆으로 안 밀린다")
+
+# ── 모집 늘리기 — 방마다 다른 초대 링크, 그 길로 온 수, 그 방에 붙일 문구 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    ctx = b.new_context(viewport={"width": 390, "height": 844}); ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+    _gr = post("/api/events", {"title": "모집 늘리기 검사"})[1]
+    post(f"/api/events/{_gr['id']}", {"starts": "2099-10-31", "ends": "2099-10-31", "place": "선릉", "cap": 40}, _gr["okey"], method="PATCH")
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("grow: " + str(e)))
+    pg.goto(BASE + f"/e/{_gr['id']}?f=당근", wait_until="networkidle"); pg.wait_for_selector("#t-name")
+    pg.fill("#t-name", "당근에서온팀"); pg.fill("#t-email", "dg@example.com"); pg.check("#t-agree"); pg.click("#t-join"); pg.wait_for_selector("#m-save")
+    op = ctx.new_page(); op.on("pageerror", lambda e: errs.append("grow-op: " + str(e)))
+    op.add_init_script(f"localStorage.setItem('hackon.okey.{_gr['id']}','{_gr['okey']}')")
+    op.goto(BASE + f"/app#{_gr['id']}", wait_until="networkidle"); op.wait_for_selector("#grow", state="attached", timeout=10000)
+    _gt = op.eval_on_selector("#grow", "el => el.textContent")
+    A("당근" in _gt and "1명" in _gt and "정원 40" in _gt, f"모집 늘리기에 당근 1명·정원이 안 보인다: {_gt[:200]}")
+    op.click('#host-tabs [data-sec="sec-links"]'); op.wait_for_timeout(300)
+    op.click('[data-fmsg="오픈 대화방"]'); op.wait_for_timeout(600)
+    _clip = op.evaluate("navigator.clipboard.readText()")
+    A("모집 늘리기 검사" in _clip and "선릉" in _clip and f"/e/{_gr['id']}?f=" in _clip and urllib.parse.quote("오픈 대화방") in _clip,
+      f"대화방에 붙일 문구에 제목·장소·그 방 링크가 없다: {_clip}")
+    b.close()
+ok("모집 늘리기 — 방마다 초대 링크·온 수·붙일 문구(날짜·장소·그 방 링크)")
+
+# ── 이력서에 붙일 글 — 끝난 대회에서 왔거나 낸 것만, 신청만 한 것·안 끝난 것은 뺀다 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(); pg.goto(BASE + "/app", wait_until="networkidle")
+    _d = "{id:'abc123abc123',finished:1,wins:0,finishRate:50,history:[{title:'낸 대회',ends:'2026-10-31',came:true,made:true,url:'https://x.example'},{title:'신청만 한 대회',ends:'2026-08-01',came:false,made:false},{title:'안 끝난 대회',ends:'2099-01-01',came:true,made:true}]}"
+    _li = pg.evaluate(f"resumeText({_d}, 'linkedin', '2026-11-05')"); _lk = pg.evaluate(f"resumeText({_d}, 'linkareer', '2026-11-05')")
+    A("낸 대회" in _li and "결과물 제출(완주)" in _li and "/p/abc123abc123" in _li, f"링크드인용 글이 기록을 안 싣는다: {_li}")
+    A("신청만 한 대회" not in _li + _lk and "안 끝난 대회" not in _li + _lk, f"신청만 한 대회·안 끝난 대회가 이력에 들어간다: {_li}")
+    A("활동명: 낸 대회" in _lk and "기관: HACK:ON" in _lk, f"링커리어용 칸 꼴이 아니다: {_lk}")
+    b.close()
+ok("이력서에 붙일 글 — 링크드인·링커리어 꼴, 끝난 대회에서 왔거나 낸 것만")
+
+# ── 실무 기록 단계 /cert — «자격» 이라 부르지 않는다, 기준 셋, 링크드인 복사에 단계가 붙는다 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("cert: " + str(e)))
+    pg.goto(BASE + "/cert", wait_until="networkidle"); pg.wait_for_selector("#cert-steps")
+    _ct = pg.inner_text("#view")
+    A(_ct.count("단계 ·") >= 3 and "아직 아닙니다" in _ct and "자격기본법" in _ct, f"실무 기록 단계 안내가 이상하다: {_ct[:200]}")
+    _li = pg.evaluate("resumeText({id:'abc123abc123',finished:1,wins:0,finishRate:100,cert:{level:1,name:'켠 사람'},history:[{title:'낸 대회',ends:'2026-10-01',came:true,made:true}]}, 'linkedin', '2026-11-05')")
+    A("실무 기록 1단계(켠 사람)" in _li, f"링크드인 복사에 실무 기록 단계가 안 붙는다: {_li}")
+    b.close()
+ok("실무 기록 단계 — 기준 셋, «자격» 아님을 밝힘, 링크드인 복사에 단계")
+
+# ── 아침 브리핑 /brief — 내 대회 D-day·신청 수, 7일 안 마감, 오늘의 스위치, 카톡용 한 장, 서버에 안 씀 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+    _bv = post("/api/events", {"title": "브리핑 검사 대회", "starts": (datetime.now() + timedelta(days=10)).strftime("%Y-%m-%d")})[1]
+    _soon3 = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("brief: " + str(e)))
+    pg.add_init_script(f"localStorage.setItem('hackon.owner','{_bv['owner']}');localStorage.setItem('hackon.waljob','개발');"
+                       f"localStorage.setItem('hackon.wallet', JSON.stringify([{{name:'브리핑 마감',kind:'due',date:'{_soon3}'}},{{name:'먼 마감',kind:'due',date:'2099-01-01'}}]))")
+    _w = []; pg.on("request", lambda r: _w.append(r.url) if "/api/" in r.url and r.method != "GET" else None)
+    pg.goto(BASE + "/brief", wait_until="networkidle"); pg.wait_for_selector("#br-work")
+    A("브리핑 검사 대회" in pg.inner_text("#br-work") and "D-10" in pg.inner_text("#br-work"), f"켜 둔 일에 내 대회 D-day 가 없다: {pg.inner_text('#br-work')}")
+    _bc = pg.inner_text("#br-cal")
+    A("브리핑 마감" in _bc and "D-3" in _bc and "먼 마감" not in _bc, f"7일 안 마감만 떠야 한다: {_bc}")
+    A("재현" in pg.inner_text("#br-tip"), "고른 직무(개발)의 오늘의 스위치가 없다")
+    pg.click("#br-copy"); pg.wait_for_timeout(300)
+    _bt = pg.evaluate("navigator.clipboard.readText()")
+    A(_bt.startswith("☀️ HACK:ON 오늘 켤 것") and "[켜 둔 일]" in _bt and "[꺼지기 전에]" in _bt and "/brief" in _bt, f"카톡용 한 장이 이상하다: {_bt}")
+    A(not _w, f"브리핑이 서버에 쓴다: {_w}")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "브리핑이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("아침 브리핑 — 내 대회 D-day·7일 안 마감·직무 레시피 한 줄·카톡용 한 장, 서버에 안 씀")
+
+# ── 팀원 추천 — 역할이 다른 사람 추천, 좋아요 받은 쪽에 표시, 서로 좋아요면 그 둘에게만 연락처 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    _mv = post("/api/events", {"title": "추천 검사 대회", "starts": "2099-10-31"})[1]
+    def _sign(name, email, role):
+        ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("match: " + str(e)))
+        pg.goto(BASE + f"/e/{_mv['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-name")
+        pg.fill("#t-name", name); pg.fill("#t-email", email); pg.check("#t-agree"); pg.click("#t-join"); pg.wait_for_selector("#m-save")
+        pg.select_option("#m-role", role); pg.select_option("#m-solo", "1"); pg.click("#m-save"); pg.wait_for_timeout(900)
+        return pg
+    _pa = _sign("추천A", "ma@example.com", "만들기"); _pb = _sign("추천B", "mb@example.com", "기획"); _pc = _sign("추천C", "mc@example.com", "디자인")
+    _pa.reload(wait_until="networkidle"); _pa.wait_for_selector("#match")
+    _mt = _pa.inner_text("#match")
+    A("추천B" in _mt and "역할이 달라요" in _mt and "mb@example.com" not in _mt, f"추천에 역할이 다른 사람·이유가 없거나 연락처가 샌다: {_mt[:200]}")
+    _pa.locator("#match > div", has_text="추천B").locator("[data-mlike]").click(); _pa.wait_for_timeout(900)
+    _pb.reload(wait_until="networkidle"); _pb.wait_for_selector("#match")
+    A("나를 좋아요 했어요" in _pb.inner_text("#match") and "ma@example.com" not in _pb.inner_text("#match"), "좋아요 받은 쪽에 표시가 없거나, 한쪽 좋아요로 연락처가 열린다")
+    _pb.locator("#match > div", has_text="추천A").locator("[data-mlike]").click(); _pb.wait_for_timeout(900)
+    A("ma@example.com" in _pb.inner_text("#match"), "서로 좋아요인데 연락처가 안 열린다")
+    # 첫 입장 세 칸 — 적으면 상대의 추천에 보이고, 공개 칸이라 연락처는 막힌다
+    _pb.fill("#in-intro", "기획하는 직장인"); _pb.fill("#in-seeking", "화면 만들 개발자"); _pb.click("#m-strsave"); _pb.wait_for_timeout(900)
+    _pa.reload(wait_until="networkidle"); _pa.wait_for_selector("#match")
+    A("기획하는 직장인" in _pa.inner_text("#match") and "화면 만들 개발자" in _pa.inner_text("#match"), "소개 세 칸이 팀원 추천에 안 보인다")
+    _pb.fill("#in-seeking", "연락 010-1234-5678"); _pb.click("#m-strsave"); _pb.wait_for_timeout(700)
+    A("연락처는 적지" in _pb.inner_text("body"), "공개 소개 칸에 전화번호가 들어간다")
+    _pc.reload(wait_until="networkidle"); _pc.wait_for_selector("#match")
+    A("ma@example.com" not in _pc.inner_text("#match") and "mb@example.com" not in _pc.inner_text("#match"), "셋째 사람에게 둘의 연락처가 보인다")
+    b.close()
+ok("팀원 추천 — 역할 보완 추천·좋아요 표시·서로 좋아요일 때만 그 둘에게 연락처·소개 세 칸(연락처 막힘)")
+
+# ── 기여자 장부 /thanks — 공개 화면, 운영자 아니면 못 적음, 수익 나눔 계산은 운영자만 ──
+A(code_of("/thanks") == 200, "/thanks 가 안 열린다")
+A(post("/api/admin/thanks", {"name": "남이 적음"})[0] == 403, "운영자가 아닌데 기여자를 적을 수 있다")
+A(code_of("/api/admin/share?pool=100&from=2026-01-01&to=2026-12-31") == 403, "운영자가 아닌데 수익 나눔 계산을 본다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("thanks: " + str(e)))
+    pg.goto(BASE + "/thanks", wait_until="networkidle"); pg.wait_for_timeout(500)
+    _tt = pg.inner_text("#view")
+    A("해커온을 같이 켠 사람들" in _tt and "기여하는 길" in _tt, f"기여자 화면이 아니다: {_tt[:120]}")
+    b.close()
+ok("기여자 장부 — 공개 화면, 운영자만 적고, 수익 나눔 계산도 운영자만")
+
+# ── 협찬·협업 안내 /partner — 주시는 것별 받는 것, 제안가, 지키는 것 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("partner: " + str(e)))
+    pg.goto(BASE + "/partner", wait_until="networkidle"); pg.wait_for_selector("[data-tier]")
+    _pt = pg.inner_text("#view")
+    A(pg.locator("[data-tier]").count() == 6 and "제안가" in _pt and "동의한 것만" in _pt and "공동 주최" in _pt, f"협찬·협업 안내가 덜 그려진다: {_pt[:200]}")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "협찬·협업 안내가 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("협찬·협업 안내 — 현물·금액·정기·공동 주최 여섯 갈래, 제안가, 개인정보는 동의한 것만")
+
+# ── 시작하면 받는 것 /launch — 지금 되는 것과 조건부를 갈라 적는다 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("launch: " + str(e)))
+    pg.goto(BASE + "/launch", wait_until="networkidle"); pg.wait_for_selector("#launch-now")
+    A("팀원 추천" in pg.inner_text("#launch-now") and "약속이 아니라 조건" in pg.inner_text("#launch-later"), "시작 인센티브가 «지금» 과 «조건부» 로 안 갈린다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "시작 인센티브가 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("시작하면 받는 것 — 지금 되는 것·조건부 갈라 적기")
+
+# ── 기업·기관 /biz, 크루 모집 /crew ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("biz/crew: " + str(e)))
+    pg.goto(BASE + "/biz", wait_until="networkidle"); pg.wait_for_selector("[data-offer]")
+    A(pg.locator("[data-offer]").count() == 4 and "업종별로 쌓습니다" in pg.inner_text("#view") and "제안가" in pg.inner_text("#view"), "기업·기관 안내가 덜 그려진다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "기업·기관 안내가 옆으로 밀린다")
+    pg.goto(BASE + "/crew", wait_until="networkidle"); pg.wait_for_selector("[data-track]")
+    A(pg.locator("[data-track]").count() == 3 and "지원하기" in pg.inner_text("#view"), "크루 모집이 덜 그려진다")
+    b.close()
+ok("기업·기관 안내(사내 해커톤·출제형·워크숍·스타트업, 업종별 사례)와 크루 모집(홍보·운영·개발)")
+
+# ── 해외 — /en(한국 말 다섯 개를 원리로), hreflang, 한국어 아닌 브라우저엔 대회 페이지에 영어 한 줄 ──
+A(code_of("/en") == 200, "/en 이 안 열린다")
+_enh = urllib.request.urlopen(BASE + "/en").read().decode()
+A('hreflang="ko"' in _enh and "빨리빨리" in _enh and "품앗이" in _enh, "/en 에 hreflang·한국 말 원리가 없다")
+A('hreflang="en"' in urllib.request.urlopen(BASE + "/").read().decode(), "첫 화면이 영어판을 hreflang 으로 안 가리킨다")
+A("/en</loc>" in urllib.request.urlopen(BASE + "/sitemap.xml").read().decode(), "sitemap 에 /en 이 없다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    _ev = post("/api/events", {"title": "해외 검사 대회"})[1]
+    for _loc, _want in (("en-US", True), ("ko-KR", False)):
+        ctx = b.new_context(locale=_loc, viewport={"width": 390, "height": 844}); pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append("en: " + str(e)))
+        pg.goto(BASE + f"/e/{_ev['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-name")
+        A((pg.query_selector("#en-note") is not None) == _want, f"{_loc} 브라우저에서 영어 안내 한 줄이 {'안 ' if _want else ''}뜬다")
+        ctx.close()
+    pg = b.new_page(viewport={"width": 390, "height": 844}); pg.goto(BASE + "/en", wait_until="networkidle"); pg.wait_for_timeout(500)
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/en 이 폰 폭에서 옆으로 밀린다")
+    b.close()
+ok("해외 — /en(빨리빨리·품앗이·정·켜다·너랑), hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
 A(not errs, "JS 에러: " + "; ".join(errs))
 print(f"\n완주 테스트 통과 — {step}단계, JS 에러 없음")

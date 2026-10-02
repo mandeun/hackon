@@ -15,25 +15,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#EEF1F4">
-<title>HACK:ON — 하루에 하나 만드는 동네 대회</title>
-<meta name="description" content="동네에서 하루에 하나 만드는 대회(해커톤). 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다. 장소·심사·간식은 한 자리씩 맡아 함께 엽니다.">
+<title>HACK:ON 해커온 — 해커톤·바이브코딩 대회를 열고 참가하는 곳</title>
+<meta name="description" content="해커온(HACK:ON) — 해커톤·바이브코딩 대회·공모전을 이름 하나로 열고, 이름과 이메일로 참가합니다. 지금 열린 해커톤 일정, 모집·제출·심사·시상까지 한 곳에서. 초보·동아리·회사 사내 해커톤.">
 <link rel="icon" href="/icon.svg">
 <!-- 검색·링크 미리보기. 대표 주소는 hackon.kr 하나 — mandeun 으로 들어와도 구글은 이쪽으로 모은다 -->
 <meta name="google-site-verification" content="wW1h6XCm05tNbZBJHKrLQFsb963fGp0JThpfigIlhVc">
 <link rel="canonical" href="https://hackon.kr/">
+<link rel="alternate" hreflang="ko" href="https://hackon.kr/">
+<link rel="alternate" hreflang="en" href="https://hackon.kr/en">
+<link rel="alternate" hreflang="x-default" href="https://hackon.kr/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HACK:ON">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:url" content="https://hackon.kr/">
-<meta property="og:title" content="HACK:ON — 하루에 하나 만드는 동네 대회">
+<meta property="og:title" content="HACK:ON 해커온 — 해커톤·바이브코딩 대회를 열고 참가하는 곳">
 <meta property="og:description" content="동네에서 하루에 하나 만드는 대회. 여는 데는 이름 하나, 참가하는 데는 이름과 이메일이면 됩니다.">
 <meta property="og:image" content="https://hackon.kr/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebSite","name":"HACK:ON","alternateName":["핵온","해크온","hackon"],"url":"https://hackon.kr/","inLanguage":"ko",
- "description":"동네에서 하루에 하나 만드는 대회(해커톤) 플랫폼. 대회 열기·모집·제출·심사·시상까지 한 곳에서."}
+{"@context":"https://schema.org","@type":"WebSite","name":"HACK:ON","alternateName":["해커온","핵온","해크온","hackon","HACKON"],"url":"https://hackon.kr/","inLanguage":"ko",
+ "description":"해커톤·바이브코딩 대회·공모전을 열고 참가하는 한국어 플랫폼. 대회 열기·모집·제출·심사·시상까지 한 곳에서.",
+ "publisher":{"@type":"Organization","name":"HACK:ON","alternateName":"해커온","url":"https://hackon.kr/","logo":"https://hackon.kr/icon.svg","email":"hi@mandeun.com"}}
 </script>
 
 <style>
@@ -82,10 +86,16 @@ input::placeholder{color:var(--mute)}
 .top .wrap{display:flex;align-items:center;gap:14px;min-height:60px;font-size:14px;font-weight:600;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 .top a{text-decoration:none;white-space:nowrap}
 .top .logo{font-size:19px;font-weight:800;letter-spacing:-.02em;margin-right:auto;display:inline-flex;align-items:center;min-height:44px}
-.top nav.sec{display:flex;gap:16px;align-items:center;width:100%;order:9;color:var(--grey);font-size:13.5px}
+.top nav.sec{display:flex;flex-wrap:wrap;column-gap:16px;row-gap:0;align-items:center;width:100%;order:9;color:var(--grey);font-size:13.5px}   /* 고리가 늘면 접는다 — 옆으로 넘치면 첫 화면 전체가 가로로 밀렸다 */
 /* 손가락 자리. 22px 짜리 글줄은 폰에서 옆 것이 눌린다 */
 .top nav.sec a,.top nav.tools a{display:inline-flex;align-items:center;min-height:44px}
 .top nav.sec a:hover{color:var(--ink)}
+.top nav.sec details.navmore{display:contents}
+.top nav.sec details.navmore summary{display:inline-flex;align-items:center;min-height:44px;cursor:pointer;list-style:none;font-weight:700;color:var(--ink)}
+.top nav.sec details.navmore summary::-webkit-details-marker{display:none}
+.top nav.sec details.navmore summary::after{content:" ▾";font-size:11px;margin-left:3px}
+.top nav.sec details.navmore[open] summary::after{content:" ▴"}
+.top nav.sec .more-in{display:flex;flex-wrap:wrap;column-gap:16px;width:100%}
 .top nav.tools{display:flex;gap:12px;align-items:center}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
 
@@ -220,12 +230,9 @@ details.more li a{display:inline-flex;align-items:center;min-height:44px}
 .sheet .x:hover{background:var(--soft)}
 .btn[disabled]{opacity:.55;cursor:default}
 
-/* 브랜드 한 줄. 앰버는 «누를 것» 이 아니라 그림 색이라, 단추처럼 보이는 바탕을 깔지 않는다 */
-.brandline{border-top:1px solid var(--hair)}
-.brandline .wrap{display:flex;align-items:center;gap:14px;padding:20px}
-.brandline img{flex:none}
-.brandline p{margin:0;font-size:14.5px;line-height:1.6}
-.brandline .more{display:inline-block;margin-top:2px;color:var(--ink);font-weight:700;font-size:13.5px}
+/* 노랑이는 설명 없이 맨 아래 상표 옆에만 선다. 따로 소개 줄을 두니 «이게 왜 여기» 로 읽혔다 */
+.foot-mark{display:inline-flex;align-items:center;gap:6px;font-weight:700;color:var(--ink)}
+.foot-mark img{flex:none}
 footer{padding:26px 0 40px;font-size:13px;color:var(--grey)}
 footer .wrap{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
 footer a{color:inherit;display:inline-flex;align-items:center;min-height:44px}
@@ -252,18 +259,36 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   <div class="wrap">
     <a href="/" class="logo" aria-label="HACK:ON 처음으로" translate="no">HACK<span class="stamp">:</span>ON</a>
     <nav class="sec" aria-label="절">
+      <!-- 폰에서 열두 고리가 세 줄을 먹었다. 자주 가는 다섯과 «있을 때만 뜨는 것» 만 꺼내 두고 나머지는 «더 보기» 에 -->
+      <a href="/brief">오늘 브리핑</a>
+      <a href="/launch">시작하면 받는 것</a>
       <a href="#list">대회 찾기</a>
-      <a href="#give">협찬·돕기</a>
-      <a href="/problems">문제 은행</a>
+      <a href="/news">해커온뉴스</a>
+      <a href="/wallet">AI 지갑</a>
+      <a href="/made">만든 것</a>
+      <a href="/recruit">모집공고</a>
       <a id="nav-learn" href="/learn" hidden>강의</a>
       <a id="nav-market" href="/market" hidden>마켓</a>
       <a id="nav-rank" href="/rank" hidden>순위</a>
       <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
-      <a href="/news">해커온뉴스</a>
-      <a id="nav-manual" href="#">운영 매뉴얼</a>
+      <details class="navmore"><summary>더 보기</summary><span class="more-in">
+        <a href="/gigs">외주</a>
+        <a href="/ref">추천 코드</a>
+        <a href="/setups">세팅 모음</a>
+        <a href="/around">모아 보기</a>
+        <a href="/problems">문제 은행</a>
+        <a href="/biz">기업·기관</a>
+        <a href="/crew">크루 모집</a>
+        <a href="/cert">실무 기록 단계</a>
+        <a href="/partner">협찬·협업 안내</a>
+        <a href="#give">협찬·돕기</a>
+        <a href="/thanks">기여자</a>
+        <a id="nav-manual" href="#">운영 매뉴얼</a>
+        <a href="/en" hreflang="en" lang="en">English</a></span></details>
     </nav>
     <nav class="tools" aria-label="도구">
       <a id="nav-login" href="/app?login=1" style="display:none">로그인</a>
+      <a id="nav-mine" href="/app" style="display:none;font-weight:800">내 대회</a>
       <a id="nav-open" href="/app?make=1" class="btn s">대회 열기</a>
     </nav>
   </div>
@@ -374,22 +399,13 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
   </div>
 </div>
 
-<!-- 브랜드 한 줄. 노랑이를 눈에 보이는 자리에 한 번 세운다 — 이름의 뜻이 여기서 시작한다 -->
-<div class="brandline">
-  <div class="wrap">
-    <img src="/norangi.svg" alt="노랑이" width="56" height="56">
-    <p><b>노랑이</b> — 「NO」라고 생각했던 걸 「너<b>랑</b>」 해서 이룹니다.<br>
-      <span class="grey">콘센트가 머리, 사람과 사람을 잇던 선이 팔다리입니다.</span>
-      <a href="/brand" class="more">이름과 색의 뜻 →</a></p>
-  </div>
-</div>
-
 <footer>
   <div class="wrap">
-    <span translate="no" style="font-weight:700;color:var(--ink)">HACK<span class="stamp">:</span>ON</span>
+    <span class="foot-mark" translate="no"><img src="/norangi.svg" alt="" width="22" height="22">HACK<span class="stamp">:</span>ON</span>
     <span>코드와 운영 방법이 전부 공개입니다.</span>
     <a id="foot-manual" href="#">운영 매뉴얼</a>
     <a href="https://github.com/mandeun/hackon" rel="noopener">소스 보기</a>
+    <a href="/brand">브랜드</a>
     <span id="foot-mail"></span>
     <span class="mono" id="foot-note" style="margin-left:auto"></span>
   </div>
@@ -645,6 +661,9 @@ document.getElementById('open-go').addEventListener('click', function(){
     .then(function(){ go.disabled = false; go.textContent = '대회 열기'; });
 });
 
+/* 로고가 이제 늘 이 첫 화면으로 온다. 로그인 없이 열쇠로만 대회를 연 사람도 돌아갈 길이 있어야 해서,
+   이 기기에 주최자 열쇠나 연 대회가 남아 있으면 «내 대회» 를 띄운다(값은 안 읽어 보내고 있다는 것만 본다) */
+try { if (localStorage.getItem('hackon.owner') || localStorage.getItem('hackon.event')) document.getElementById('nav-mine').style.display = ''; } catch (e) {}
 /* 로그인이 켜져 있을 때만 단추를 보여 준다. 머리띠는 좁아서 첫 공급자 하나만 —
    나머지는 /app 안의 카드에서 고른다. 목록은 서버가 준 것만 쓴다(여기 적으면 죽은 단추가 남는다). */
 fetch('/api/auth').then(function(r){ return r.json(); }).then(function(a){
