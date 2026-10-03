@@ -4366,6 +4366,80 @@ with sync_playwright() as pw:
         A("Loading" not in _evt and "加载中" not in _evt and len(_evt) > 5, f"{_p} 대회 목록이 «불러오는 중» 에 멈춰 있다: {_evt[:80]}")
     b.close()
 ok("해외 — /en·/zh(세 걸음·대회 목록), 과한 한국 말 풀이 뺌, hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
+# ── 법·약관 — 처리방침(hackon.kr·위탁·보호책임자), 이용 규칙 /terms, 앱 링크 assetlinks ──
+import http.client as _hc
+_lr = urllib.request.urlopen(BASE + "/privacy")
+_pv = _lr.read().decode("utf-8")
+A(_lr.status == 200 and _lr.headers.get("x-content-type-options") == "nosniff"
+  and "frame-ancestors 'none'" in (_lr.headers.get("content-security-policy") or ""), "/privacy 에 보안 헤더(SEC_HEADERS)가 없다")
+A("hackon.kr" in _pv and "hackon.mandeun.com" not in _pv and "위탁" in _pv and "보호책임자" in _pv and "만 14세" in _pv,
+  "처리방침에 hackon.kr·위탁·보호책임자·만 14세가 없거나 옛 주소가 남았다")
+A('href="/terms"' in _pv and 'href="/delete-account"' in _pv, "처리방침에서 이용 규칙·계정 삭제로 가는 길이 없다")
+_lr = urllib.request.urlopen(BASE + "/terms")
+_tv = _lr.read().decode("utf-8")
+A(_lr.status == 200 and _lr.headers.get("x-content-type-options") == "nosniff", "/terms 가 안 열리거나 보안 헤더가 없다")
+A("신고하면 저절로 내려갑니다" in _tv and "만 14세" in _tv and 'href="/privacy"' in _tv, "이용 규칙에 신고·만 14세·처리방침 길이 없다")
+A("/terms</loc>" in urllib.request.urlopen(BASE + "/sitemap.xml").read().decode(), "sitemap 에 /terms 가 없다")
+A(code_of("/.well-known/assetlinks.json") == 404, "TWA_PACKAGE·TWA_SHA256 이 없는 서버가 앱 링크 파일을 낸다")
+# 열쇠를 넣은 서버 — 200·JSON·한 시간 캐시, www 로 와도 넘기지 않는다(구글 검증기는 리다이렉트를 안 따라간다)
+_fp = ":".join(f"{i * 5:02X}" for i in range(32))
+TWA_BASE = checklib.start(extra_env={"TWA_PACKAGE": "kr.hackon.twa", "TWA_SHA256": _fp.lower(), "SITES": "https://hackon.kr"})
+_tw = urllib.parse.urlparse(TWA_BASE)
+
+
+def _raw(path, host):
+    c = _hc.HTTPConnection(_tw.hostname, _tw.port, timeout=10)
+    c.request("GET", path, headers={"Host": host})
+    r = c.getresponse()
+    out = (r.status, r.getheader("content-type") or "", r.getheader("cache-control") or "", r.getheader("location") or "", r.read())
+    c.close()
+    return out
+
+
+_st, _ct, _cc, _loc, _bd = _raw("/.well-known/assetlinks.json", "hackon.kr")
+_al = json.loads(_bd) if _st == 200 else None
+A(_st == 200 and _ct.startswith("application/json") and "max-age=3600" in _cc, f"앱 링크 파일이 200·JSON·한 시간 캐시가 아니다: {_st} {_ct} {_cc}")
+A(_al and _al[0]["relation"] == ["delegate_permission/common.handle_all_urls"] and _al[0]["target"]["namespace"] == "android_app"
+  and _al[0]["target"]["package_name"] == "kr.hackon.twa" and _al[0]["target"]["sha256_cert_fingerprints"] == [_fp],
+  f"앱 링크 파일 모양이 다르다: {_al}")
+A(_raw("/terms", "www.hackon.kr")[0] == 301, "www 넘기기가 안 켜져 있다 — 아래 단언이 공회전한다")
+A(_raw("/.well-known/assetlinks.json", "www.hackon.kr")[0] == 200, "www 로 온 앱 링크 확인을 301 로 넘긴다")
+checklib.stop(TWA_BASE)
+# 계정 삭제 안내 = deleteAccount 가 실제로 지우는 표. 함수 본문을 읽어 맞춘다
+_src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.js"), encoding="utf-8").read()
+_fn = _src[_src.index("async function deleteAccount("):]
+_fn = _fn[:_fn.index("\n}\n")]
+_del = set(re.findall(r"DELETE FROM (\w+) WHERE", _fn)) | ({"events"} if "deleteEvent(" in _fn else set())
+_keep = set(re.findall(r"UPDATE (\w+) SET", _fn))
+_dh = urllib.request.urlopen(BASE + "/delete-account").read().decode("utf-8")
+_pdel = set(" ".join(re.findall(r'data-del="([^"]+)"', _dh)).split())
+_pkeep = set(" ".join(re.findall(r'data-keep="([^"]+)"', _dh)).split())
+A(len(_del) >= 10 and _pdel == _del, f"계정 삭제 안내의 «지워지는 것» 이 코드와 다르다 — 코드에만: {sorted(_del - _pdel)}, 안내에만: {sorted(_pdel - _del)}")
+A(_keep and _pkeep == _keep, f"계정 삭제 안내의 «남는 것» 이 코드와 다르다 — 코드에만: {sorted(_keep - _pkeep)}, 안내에만: {sorted(_pkeep - _keep)}")
+A("위쪽(«내가 연 대회» 아래)" in _dh and "href=\"/terms\"" in _dh, "계정 삭제 안내가 단추 자리를 화면과 다르게 적는다")
+# 화면 — 안내가 말한 자리(«대회» 탭, «내가 연 대회» 아래, 열린 대회 목록 위)에 «계정 삭제» 가 있다. 신청 동의 칸엔 만 14세
+_, _lev = post("/api/events", {"title": "약관 검사 대회", "starts": (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d")})
+A(post(f"/api/events/{_lev['id']}/list", {"on": True}, key=_lev["okey"])[0] == 200, "약관 검사 대회를 목록에 못 올렸다 — «열린 대회» 위치 단언이 공회전한다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_context(viewport={"width": 390, "height": 844}).new_page()
+    pg.on("pageerror", lambda e: errs.append("legal: " + str(e)))
+    pg.add_init_script(f"localStorage.setItem('hackon.owner','{_lev['owner']}')")
+    pg.goto(BASE + "/app", wait_until="networkidle"); pg.wait_for_selector("body[data-ready='1']")
+    A(pg.locator("nav button[data-t='home'].on").count() == 1 and "대회" in pg.inner_text("nav button[data-t='home']"), "첫 탭이 «대회» 가 아니다")
+    _order = pg.evaluate("""() => { const a = document.querySelector('#acct-del'); if (!a) return 'none';
+      const hs = [...document.querySelectorAll('#view h2')]; const mine = hs.find(h => h.textContent.includes('내가 연 대회')),
+            open = hs.find(h => h.textContent.includes('열린 대회'));
+      if (!mine || !open) return 'h2 없음';
+      const F = Node.DOCUMENT_POSITION_FOLLOWING;
+      return (mine.compareDocumentPosition(a) & F) && (a.compareDocumentPosition(open) & F) ? 'ok' : 'order'; }""")
+    A(_order == "ok", f"«계정 삭제» 가 «내가 연 대회» 아래·열린 대회 위에 없다: {_order}")
+    A(pg.inner_text("#acct-del summary").strip() == "계정 삭제", "«계정 삭제» 이름이 안내와 다르다")
+    A(pg.evaluate("RULES_TEXT").endswith("자세한 규칙: hackon.kr/terms"), "첫 글 전 이용 규칙 창이 /terms 를 안 가리킨다")
+    pg.goto(BASE + f"/e/{_lev['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-agree")
+    A("만 14세 이상입니다" in pg.inner_text("label:has(#t-agree)"), "참가 신청 동의 칸에 만 14세 확인이 없다")
+    b.close()
+ok("법·약관 — 처리방침·이용 규칙 200·보안 헤더·서로 잇는 길·sitemap, 앱 링크(열쇠 없으면 404·있으면 JSON·www 안 넘김), 삭제 안내 = deleteAccount, 삭제 자리·만 14세")
 # ── 대회 혜택 탭 — 열린 대회에서 받는 것(확정된 것만). 장학금 목록은 이 탭에서 뺐다 ──
 _, _bev = post("/api/events", {"title": "혜택 화면 검사", "starts": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")})
 post(f"/api/events/{_bev['id']}", {"prize": 500000, "topic": "생활 불편", "place": "온라인"}, key=_bev["okey"], method="PATCH")

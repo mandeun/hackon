@@ -1663,7 +1663,7 @@ function applyForm() {
         보유 기간 · 대회 종료 후 <b>6개월</b>. 그 뒤 지웁니다<br>
         동의하지 않으시면 참가 신청을 받을 수 없습니다.</div>
       <label class="ck"><input type="checkbox" id="t-agree">
-        <span>개인정보 수집·이용에 동의합니다 <span class="pill">필수</span></span></label>
+        <span>개인정보 수집·이용에 동의합니다 · 만 14세 이상입니다 <span class="pill">필수</span></span></label>
       <div class="meta" style="margin-top:8px"><b>후원사 제공 안내</b><br>
         받는 곳 · 이 대회 페이지에 표시된 협찬사<br>
         제공 항목 · 이메일<br>
@@ -1931,7 +1931,7 @@ function lineDiff(a, b) {
 const bdPostId = () => { const m = /^\/board\/(\d+)$/.exec(location.pathname); return m ? +m[1] : 0; };
 const voterTok = () => { try { let v = localStorage.getItem('hackon.voter'); if (!v || !/^[0-9a-z]{12,40}$/i.test(v)) { v = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('hackon.voter', v); } return v; } catch { return ''; } };
 /* App Store 1.2 — 첫 글 전에 이용 규칙 한 번, 차단한 글쓴이(이 기기에만) */
-const RULES_TEXT = '이용 규칙\n· 욕설·비방·차별·성적인 글 금지(올리기 전에 막힙니다)\n· 연락처·광고 금지\n· 신고 셋이면 저절로 내려가고, 운영자가 24시간 안에 확인합니다\n· 어기면 글이 지워지고 쓰기가 막힐 수 있습니다\n\n동의하고 올릴까요?';
+const RULES_TEXT = '이용 규칙\n· 욕설·비방·차별·성적인 글 금지(올리기 전에 막힙니다)\n· 연락처·광고 금지\n· 신고 셋이면 저절로 내려가고, 운영자가 24시간 안에 확인합니다\n· 어기면 글이 지워지고 쓰기가 막힐 수 있습니다\n\n동의하고 올릴까요?\n\n자세한 규칙: hackon.kr/terms';
 const needRules = () => { try { if (localStorage.getItem('hackon.rules') === '1') return true; } catch {} if (!confirm(RULES_TEXT)) return false; try { localStorage.setItem('hackon.rules', '1'); } catch {} return true; };
 const blockedSet = () => { try { return new Set(JSON.parse(localStorage.getItem('hackon.blocked') || '[]')); } catch { return new Set(); } };
 const setBlocked = set => { try { localStorage.setItem('hackon.blocked', JSON.stringify([...set].slice(-500))); } catch {} };
