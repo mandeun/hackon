@@ -4810,8 +4810,12 @@ with sync_playwright() as pw:
     pg.on("pageerror", lambda e: errs.append("club: " + str(e)))
     pg.goto(BASE + "/club", wait_until="networkidle"); pg.wait_for_timeout(400)
     for _img in pg.eval_on_selector_all("img", "els => els.map(e => e.getAttribute('src'))"):
+        if _img.startswith("/art/"):   # 힉스필드 그림 — art/ 에 파일이 없으면 원본으로 302(이 검사 환경은 그 CDN 을 못 연다)
+            try: _ac = _noredir.open(BASE + _img, timeout=10).status
+            except urllib.error.HTTPError as _e: _ac = _e.code
+            A(_ac in (200, 302), f"ON 클럽 그림 {_img} 이 200·302 가 아니다: {_ac}"); continue
         A(urllib.request.urlopen(BASE + _img, timeout=10).status == 200, f"ON 클럽 그림 {_img} 이 안 열린다")
-    A(pg.evaluate("[...document.images].every(i => i.complete && i.naturalWidth > 0)"), "ON 클럽 그림이 깨진다")
+    A(pg.evaluate("[...document.images].filter(i => !i.getAttribute('src').startsWith('/art/')).every(i => i.complete && i.naturalWidth > 0)"), "ON 클럽 그림이 깨진다")
     A("불러오는 중" not in pg.inner_text("#club-ev"), "다가오는 밤이 «불러오는 중» 에서 멈췄다")
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "ON 클럽이 폰 폭에서 옆으로 밀린다")
     b.close()
