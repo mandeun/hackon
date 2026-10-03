@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- 인터넷이 끊겼고, 가려던 화면이 이 기기에 저장돼 있지 않을 때 서비스워커(sw.js)가 대신 보여 주는 한 장.
+     꺼진 상태에서 열리므로 밖의 글꼴·스크립트를 쓰지 않는다. 그림은 sw.js 가 미리 받아 둔 /norangi.svg 하나. -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0B1020">
+<title>인터넷이 끊겼어요 · HACK:ON</title>
+<link rel="icon" href="/icon.svg">
+<style>
+:root{--ink:#0B1020;--lime:#C8F53B;--mist:#AEB6C8}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--ink);color:#fff}
+body{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;
+  padding:max(24px,env(safe-area-inset-top)) 20px max(24px,env(safe-area-inset-bottom));
+  font-family:-apple-system,'Pretendard','Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR','Noto Sans SC',sans-serif;
+  line-height:1.6;word-break:keep-all;overflow-wrap:break-word;text-align:center}
+main{width:100%;max-width:26rem}
+img{width:132px;height:132px;display:block;margin:0 auto 18px}
+h1{font-size:clamp(26px,7vw,32px);letter-spacing:-.03em;line-height:1.25;margin:0 0 10px}
+p{font-size:18px;color:var(--mist);margin:0 0 26px}
+/* 누를 것은 하나 — 라임. 손가락이 굵어도, 돋보기를 안 써도 누를 수 있게 크게 */
+button{display:block;width:100%;min-height:56px;border:0;border-radius:16px;background:var(--lime);color:var(--ink);
+  font:inherit;font-size:19px;font-weight:800;cursor:pointer}
+button:focus-visible,a:focus-visible{outline:3px solid #fff;outline-offset:3px}
+a{display:inline-block;margin-top:18px;padding:12px 8px;min-height:48px;color:#fff;font-size:17px;font-weight:600;
+  text-decoration:underline;text-underline-offset:4px}
+small{display:block;margin-top:22px;font-size:15px;color:var(--mist)}
+@media (prefers-reduced-motion:no-preference){img{animation:bob 2.4s ease-in-out infinite}
+  @keyframes bob{50%{transform:translateY(-6px)}}}
+</style>
+</head>
+<body>
+<main>
+  <img src="/norangi.svg" alt="노랑이" width="132" height="132">
+  <h1 id="t">인터넷이 끊겼어요</h1>
+  <p id="d">와이파이나 데이터가 켜져 있는지 봐 주세요. 다시 이어지면 저절로 넘어가요.</p>
+  <button id="again" type="button">다시 시도</button>
+  <a id="home" href="/">첫 화면으로</a>
+  <small id="s">한 번 열어 본 화면은 끊겨도 볼 수 있어요.</small>
+</main>
+<script>
+(function () {
+  /* /en·/zh 에서 끊겼으면 그 말로. 나머지는 한국어 그대로 */
+  var p = location.pathname, L = /^\/en(\/|$)/.test(p) ? 'en' : /^\/zh(\/|$)/.test(p) ? 'zh' : '';
+  var T = {
+    en: ['You are offline', 'Check that Wi-Fi or mobile data is on. This page moves on by itself once you are back online.', 'Try again', 'Go to home', 'Pages you opened before still work offline.', '/en'],
+    zh: ['网络已断开', '请检查 Wi-Fi 或移动数据是否已打开。恢复连接后，此页面会自动跳转。', '重试', '返回首页', '之前打开过的页面在离线时也能查看。', '/zh']
+  }[L];
+  if (T) {
+    document.documentElement.lang = L === 'zh' ? 'zh-CN' : 'en';
+    document.title = T[0] + ' · HACK:ON';
+    ['t', 'd', 'again', 'home', 's'].forEach(function (id, i) { document.getElementById(id).textContent = T[i]; });
+    document.getElementById('home').setAttribute('href', T[5]);
+  }
+  function retry() { location.reload(); }
+  document.getElementById('again').addEventListener('click', retry);
+  addEventListener('online', retry);   // 다시 이어지면 누르지 않아도 넘어간다
+})();
+</script>
+</body>
+</html>

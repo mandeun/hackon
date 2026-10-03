@@ -7487,7 +7487,9 @@ const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 
   'tools.html',
   'brand.html',
   /* 계정 삭제 안내 — 구글 플레이가 앱 밖 주소를 요구한다(/delete-account) */
-  'delete-account.html']);
+  'delete-account.html',
+  /* 안드로이드 앱(TWA)·설치형 웹앱 — PNG 아이콘(일반·maskable)과 끊겼을 때 화면. store/icons.py 가 아이콘을 만든다 */
+  'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'offline.html']);
 /* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
 /* ── 토스 미니앱에서 오는 요청만 교차 출처를 허용한다.
    앱인토스 문서: «실제 서비스 환경 https://<appName>.apps.tossmini.com ·

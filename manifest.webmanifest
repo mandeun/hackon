@@ -1,17 +1,44 @@
 {
+  "id": "/app",
   "name": "HACK:ON — 누구나 여는 해커톤",
   "short_name": "HACK:ON",
+  "description": "이름 하나로 해커톤을 열고, 모집·진행표·심사·결과까지 한 곳에서 굴립니다.",
   "start_url": "/app",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#0B1020",
   "lang": "ko",
+  "dir": "ltr",
+  "categories": ["productivity", "business", "education"],
   "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "name": "오늘 — 내 달력",
+      "short_name": "오늘",
+      "description": "다가오는 대회와 할 일을 봅니다",
+      "url": "/cal",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "대회 열기",
+      "short_name": "대회 열기",
+      "description": "이름 하나로 새 대회를 엽니다",
+      "url": "/app?make=1",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "나 — 배지와 레벨",
+      "short_name": "나",
+      "description": "내 배지·레벨·다음 목표를 봅니다",
+      "url": "/me",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }

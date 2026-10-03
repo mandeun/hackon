@@ -3380,7 +3380,8 @@ with sync_playwright() as pw:
     A(r["len"] > 1000, f"화면이 너무 짧다: {r['len']}")
     A(r["same"], "서비스워커가 서버 것과 다른(오래된) 화면을 돌려준다")
     keys = pg.evaluate("async () => await caches.keys()")
-    A(all(k == "hackon-v2" for k in keys), f"옛 캐시가 남아 있다: {keys}")
+    _cv = re.search(r"const CACHE = '([^']+)'", open("sw.js", encoding="utf-8").read()).group(1)   # 판을 올릴 때마다 여기를 안 고치게
+    A(all(k == _cv for k in keys), f"옛 캐시가 남아 있다: {keys}")
     ok(f"배포한 것이 사용자에게 간다 — 서버를 먼저 본다 (캐시 {keys})")
     ctx.close()
     b.close()
@@ -4610,6 +4611,112 @@ with sync_playwright() as pw:
     pg.screenshot(path=os.path.join(_tf.gettempdir(), "hackon-cal.png"), full_page=True)
     b.close()
 ok("오늘 · 내 달력 — 비면 «없음», 신청한 대회·답하기가 달력에, 사람별 한 걸음, 구독 주소(열쇠 없음)")
+
+# ── PWA·안드로이드 — 아이콘 PNG·maskable, 매니페스트 id·scope·바로가기, 오프라인 화면 ──
+# 플레이(TWA)는 매니페스트의 PNG 아이콘·maskable 로 런처 아이콘을 만들고, 끊겼을 때 공룡 화면이 뜨면 «앱이 깨졌다» 로 본다.
+import struct as _st, zlib as _zl
+
+
+def _png_info(b):
+    """PNG 머리에서 폭·높이·색 형식, 그리고 왼쪽 위 첫 점(RGBA)을 읽는다. 첫 줄 첫 점은 필터 종류와 상관없이 원래 값 그대로다."""
+    A(b[:8] == b"\x89PNG\r\n\x1a\n" and b[12:16] == b"IHDR", "PNG 가 아니다")
+    w, h, depth, ctype = _st.unpack(">IIBB", b[16:26])
+    i, idat = 8, b""
+    while i < len(b):
+        n, t = _st.unpack(">I4s", b[i:i + 8])
+        if t == b"IDAT": idat += b[i + 8:i + 8 + n]
+        i += 12 + n
+    raw = _zl.decompress(idat)
+    return w, h, ctype, (tuple(raw[1:5]) if ctype == 6 and depth == 8 else None)
+
+
+_mf = json.loads(urllib.request.urlopen(BASE + "/manifest.webmanifest", timeout=10).read().decode())
+A(_mf.get("id") == "/app" and _mf.get("scope") == "/" and _mf.get("start_url") == "/app",
+  f"매니페스트 id·scope·start_url 이 이상하다: {_mf.get('id')} {_mf.get('scope')} {_mf.get('start_url')}")
+_sc = _mf.get("shortcuts") or []
+A(len(_sc) >= 2 and all(s.get("name") and s.get("url", "").startswith("/") and s.get("icons") for s in _sc),
+  f"매니페스트 바로가기가 없거나 이름·주소·아이콘이 빠졌다: {_sc}")
+_png = [i for i in _mf.get("icons", []) if i.get("type") == "image/png"]
+_mask = [i for i in _png if i.get("purpose") == "maskable" and i.get("sizes") == "512x512"]
+A(_mask, "maskable 512 PNG 가 매니페스트에 없다 — 안드로이드 런처가 아이콘을 흰 동그라미 안에 작게 가둔다")
+for _sz in ("192x192", "512x512"):
+    A(any(i.get("purpose", "any") == "any" and i.get("sizes") == _sz for i in _png), f"일반(any) {_sz} PNG 아이콘이 없다")
+for _ic in _png + [ic for s in _sc for ic in s["icons"]]:
+    try:
+        with urllib.request.urlopen(BASE + _ic["src"], timeout=10) as _r:
+            _st_code, _ct, _b = _r.status, _r.headers.get("content-type", ""), _r.read()
+    except urllib.error.HTTPError as _e:
+        _st_code, _ct, _b = _e.code, "", b""
+    A(_st_code == 200 and _ct.startswith("image/png"),
+      f"{_ic['src']} 가 PNG 로 안 나온다: {_st_code} {_ct} — 404 면 server.js STATIC_OK·Dockerfile COPY 에 적는다")
+    _w, _h, _ctype, _px = _png_info(_b)
+    A(f"{_w}x{_h}" == _ic["sizes"], f"{_ic['src']} 실제 크기 {_w}x{_h} 가 매니페스트({_ic['sizes']})와 다르다")
+    if _ic in _mask:   # 런처가 원·물방울로 깎으므로 모서리까지 먹이 차 있어야 한다. 투명하면 깎인 자리에 구멍이 보인다
+        A(_px and _px[3] == 255, f"maskable 아이콘 모서리가 비어 있다(꽉 찬 바탕이 아니다): {_px}")
+with urllib.request.urlopen(BASE + "/offline.html", timeout=10) as _r:
+    A(_r.status == 200 and "인터넷이 끊겼어요" in _r.read().decode(), "/offline.html 이 안 열리거나 «인터넷이 끊겼어요» 가 없다")
+
+# 진짜로 끊는다 — 이 블록만 쓰는 서버를 하나 더 띄웠다가 끈다. playwright 의 set_offline 은 서비스워커 안의
+# fetch 를 안 끊거나(기본) 첫 이동만 끊어서(실험 깃발) 믿을 수 없었다. 서버가 죽으면 SW 의 fetch 는 실제 오프라인과
+# 똑같이 실패한다.
+_OFF = checklib.start()
+with urllib.request.urlopen(urllib.request.Request(_OFF + "/api/events", method="POST", headers={"content-type": "application/json"},
+                                                   data=json.dumps({"title": "오프라인 검사"}).encode()), timeout=10) as _r:
+    _pev = json.load(_r)   # 달력 파일이 200 으로 나와야 «캐시에 안 남는다» 가 의미가 있다(404 는 원래 안 남는다)
+_cache = re.search(r"const CACHE = '([^']+)'", open("sw.js", encoding="utf-8").read()).group(1)
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("offline: " + str(e)))
+    pg.goto(_OFF + "/app", wait_until="networkidle"); pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    pg.evaluate("async () => { await navigator.serviceWorker.ready; }")
+    pg.wait_for_function("!!navigator.serviceWorker.controller", timeout=10000)
+    # 달력 파일·데이터는 캐시에 안 남는다 — 옛 일정·옛 순위가 나오면 안 된다
+    _keys = pg.evaluate(f"""async () => {{
+        const ics = await fetch('/api/events/{_pev['id']}/ics');
+        if (!ics.ok || !(await ics.text()).includes('BEGIN:VCALENDAR')) return ['ics 를 못 받음 ' + ics.status];
+        await (await fetch('/api/health')).text();
+        await new Promise(r => setTimeout(r, 400));
+        return (await (await caches.open('{_cache}')).keys()).map(r => new URL(r.url).pathname);
+    }}""")
+    A("/offline.html" in _keys and "/norangi.svg" in _keys, f"오프라인 화면이나 그 그림이 미리 저장되지 않았다: {_keys}")
+    A("/app" in _keys, f"서비스워커가 아예 캐시를 안 쓴다(검사가 헛돈다): {_keys}")
+    A(not [k for k in _keys if k.startswith("/api/") or k.endswith(".ics")], f"데이터·달력 파일이 캐시에 남았다: {_keys}")
+    # 새 소식 알림 — 안드로이드 크롬·앱처럼 new Notification 이 던져도 서비스워커로 뜬다
+    _shown = pg.evaluate("""async () => {
+        const got = [];
+        ServiceWorkerRegistration.prototype.showNotification = function (t, o) { got.push(t + '|' + (o && o.body)); return Promise.resolve(); };
+        window.Notification = function () { throw new TypeError('Illegal constructor'); };
+        window.Notification.permission = 'granted';
+        document.body.insertAdjacentHTML('beforeend', '<ol id="news-list" hidden><li data-nid="1"></li></ol>');
+        NEWS.top = 1;
+        window.api = async () => [{ id: 2, text: '알림 검사 소식', at: new Date().toISOString() }];
+        await pollNews();
+        await new Promise(r => setTimeout(r, 400));
+        document.getElementById('news-list').remove();
+        return got;
+    }""")
+    A(_shown == ["새 소식|알림 검사 소식"], f"안드로이드에서 새 소식 알림이 안 뜬다(서비스워커로 안 띄움): {_shown}")
+    # 끊긴 채 처음 가는 화면 — 브라우저 오류(공룡) 대신 오프라인 화면
+    checklib.stop(_OFF)
+    for _path in ("/board", "/cal?x=1", "/me"):
+        try:
+            pg.goto(_OFF + _path, wait_until="load")
+        except Exception as _e:
+            A(False, f"끊긴 채 {_path} 로 가면 브라우저 오류가 난다: {_e}")
+        A("인터넷이 끊겼어요" in pg.inner_text("body"), f"끊긴 채 {_path} 로 가도 오프라인 화면이 안 나온다")
+        A(pg.evaluate("[...document.images].every(i => i.complete && i.naturalWidth > 0)"), "오프라인 화면의 노랑이 그림이 깨진다")
+        A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "오프라인 화면이 폰 폭에서 옆으로 밀린다")
+    # 다시 이어지면(online) 누르지 않아도 다시 시도한다 — 화면이 새로 열리면 표시가 사라진다
+    pg.evaluate("window.__still = 1")
+    ctx.set_offline(True)
+    try:
+        with pg.expect_navigation(timeout=5000):
+            ctx.set_offline(False)
+    except Exception:
+        A(False, "인터넷이 다시 이어져도 오프라인 화면이 다시 시도하지 않는다(online 을 안 듣는다)")
+    A(pg.evaluate("window.__still") is None, "인터넷이 다시 이어져도 오프라인 화면이 다시 시도하지 않는다")
+    b.close()
+ok("PWA·안드로이드 — PNG 아이콘·maskable(꽉 찬 바탕) 실제 크기, id·scope·바로가기, 데이터·달력 캐시 안 함, SW 알림, 끊기면 오프라인 화면 → 이어지면 저절로 다시 시도")
 
 # ── ON 클럽 /club — 바이브코더 문화 한 장. 노랑이 새 자세 둘, 다가오는 밤(없음·모름 가르기), 폰 폭 ──
 with sync_playwright() as pw:

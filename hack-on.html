@@ -1409,7 +1409,13 @@ async function pollNews() {
   NEWS.top = +fresh[0].id;
   const nn = $('#news-n'); if (nn) nn.textContent = list.children.length;
   if ('Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('새 소식', { body: fresh[0].text }); } catch (_) {}
+    /* 안드로이드 크롬·앱(TWA)은 new Notification 을 막는다(«Illegal constructor» 를 던진다).
+       서비스워커가 붙어 있으면 그쪽으로 띄우고, 없을 때만 옛 방식. ready 는 등록이 없으면 끝나지 않아 먼저 확인한다 */
+    const opts = { body: fresh[0].text, icon: '/icon-192.png', tag: 'hackon-news-' + cur };
+    const sw = 'serviceWorker' in navigator ? navigator.serviceWorker : null;
+    (sw ? sw.getRegistration().then(r => r ? sw.ready : null) : Promise.resolve(null))
+      .then(r => r ? r.showNotification('새 소식', opts) : new Notification('새 소식', opts))
+      .catch(() => {});
   }
 }
 /* 자리마다 카톡에 붙일 부탁 글. 서버 없이 화면이 만든다. */
