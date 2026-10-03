@@ -2498,7 +2498,7 @@ const ownedCard = e => `<div class="card ev" role="button" tabindex="0" data-ope
 /* 이 브라우저가 든 열쇠를 접두사별로 모은다. localStorage 를 못 읽는 브라우저(사생활 모드)면 빈 목록 */
 const keyIds = pre => { try { return Object.keys(localStorage).filter(k => k.startsWith(pre)).map(k => k.slice(pre.length)).filter(Boolean); } catch (_) { return []; } };
 /* 노랑이 한마디 — 듀오링고 부엉이처럼 성격이 있되, 죄책감은 안 준다(쉬었다 와도 반긴다) */
-let ME_LAST = null;
+let ME_LAST = null, ADM_FILTER = '';
 function norangiSays(m) {
   const c = m.counts, n = m.next[0];
   if (!c.acts) return '아직 플러그만 꽂혀 있어요. 아무거나 하나 눌러 주면 제가 켜져요.';
@@ -5021,6 +5021,34 @@ const SCREEN = {
 
   /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
      열쇠는 이 기기에 있으니 화면이 모아 보내고, 서버는 맞는 것만 내 일정으로 돌려준다(/api/cal). */
+  async adminsite() {
+    if (LIVE && !AUTH) { try { AUTH = await api('/auth'); } catch { AUTH = { providers: [], links: [] }; } }
+    if (!AUTH || !AUTH.siteAdmin) return `<section class="mhero" id="adm-hero"><h2>사이트 운영</h2><p>운영자만 볼 수 있어요.</p>
+      <div class="shrow" style="margin-top:10px"><a class="btn sm" href="/app?login=1">로그인</a></div></section>`;
+    const ST = { open: '열림', doing: '진행 중', solved: '풀림', closed: '닫힘', hidden: '내림' };
+    const f = ADM_FILTER || '';
+    const [rq, rp, bn] = await Promise.all([api('/admin/requests' + (f ? '?status=' + f : '')).catch(() => null), api('/admin/reports').catch(() => null), api('/admin/bans').catch(() => null)]);
+    const banBtns = from => `<button type="button" class="bdmini" data-adban="${esc(from)}" data-days="7">7일 쓰기 막기</button><button type="button" class="bdmini" data-adban="${esc(from)}" data-days="30">30일</button>`;
+    const reqCard = r => `<div class="card adm-rq" data-rq="${esc(r.id)}"><div class="bdmeta"><span class="bdtopic">${esc(ST[r.status] || r.status)}</span>${r.pinned ? '<span class="bdbest">📌 고정</span>' : ''}${r.hide ? '<span class="gstate wait">자동 가림</span>' : ''}<span>${esc(ago(r.created))}</span><span>풀이 ${r.solutions}/${r.solutionsAll}</span></div>
+        <h3 style="margin:6px 0">${esc(r.topic || r.pain || '(제목 없음)')}</h3><div class="meta">${esc(r.pain || '')}</div>${r.contact ? `<div class="meta">연락처(운영자만): ${esc(r.contact)}</div>` : ''}
+        <div class="shrow" style="margin-top:8px;flex-wrap:wrap">${Object.keys(ST).map(s => `<button type="button" class="btn ${s === r.status ? '' : 'sec '}sm" data-adst="${s}">${ST[s]}</button>`).join('')}
+          <button type="button" class="btn sec sm" data-adpin="${r.pinned ? 0 : 1}">${r.pinned ? '고정 풀기' : '📌 고정'}</button></div>
+        <div class="shrow" style="margin-top:8px"><input data-adreply maxlength="300" placeholder="운영자 답(공개)" value="${esc(r.reply)}"><button type="button" class="btn sm" data-adreplysave>답 저장</button></div>
+        ${r.sols.length ? `<details class="more"><summary>풀이 ${r.sols.length}</summary><div class="in">${r.sols.map(x => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${esc(x.name)}</b><span>${esc(x.note || x.url || '')}</span>${x.hidden ? '<span class="gstate wait">숨김</span>' : ''}<button type="button" class="bdmini" data-adsol="${x.id}" data-on="${x.hidden ? 0 : 1}">${x.hidden ? '되살리기' : '숨기기'}</button>${x.canBan ? banBtns('sol:' + x.id) : ''}</div>`).join('')}</div></details>` : ''}
+        ${r.canBan ? `<div style="margin-top:6px">${banBtns('rq:' + r.id)}</div>` : ''}</div>`;
+    const repCard = t => `<div class="card adm-rp" data-key="${esc(t.key)}"><div class="bdmeta"><span class="bdtopic">${esc(t.label)}</span>${t.pending ? '<span class="gstate wait">안 봄</span>' : '<span>봤음</span>'}${t.hidden ? '<span>숨김</span>' : ''}<span>신고 ${t.count}</span><span>${esc(ago(t.at))}</span></div>
+        <div style="margin:6px 0">${esc(t.text || '')}</div>${t.reasons && t.reasons.length ? `<div class="meta">${t.reasons.map(esc).join(' · ')}</div>` : ''}
+        <div class="shrow" style="margin-top:6px;flex-wrap:wrap">${t.hidden === null ? '' : `<button type="button" class="btn sm" data-adrep="${t.hidden ? 'restore' : 'hide'}">${t.hidden ? '되살리기' : '숨기기'}</button>`}<button type="button" class="btn sec sm" data-adrep="done">봤음</button>${t.link ? `<a class="btn sec sm" href="${esc(t.link)}">가 보기</a>` : ''}${t.canBan && /^(bp|bc|be):/.test(t.key) ? banBtns(t.key) : ''}</div></div>`;
+    return `<section class="mhero" id="adm-hero"><h2>사이트 운영</h2><p>문제 손질 · 신고함 · 쓰기 막기. 신고는 24시간 안에 봅니다.</p></section>
+      <h3 class="calsec">풀어 달라는 문제</h3>
+      <div class="mechips" id="adm-filter" style="margin:0 0 10px">${[['', '전체'], ...Object.entries(ST)].map(([k, n]) => `<button type="button" data-adf="${k}"${k === f ? ' class="on"' : ''} style="color:var(--ink);background:var(--paper)">${n}</button>`).join('')}</div>
+      <div id="adm-rqs">${rq === null ? '<div class="card"><div class="meta">지금 못 읽었습니다 — 있는지 없는지 모릅니다.</div></div>' : rq.length ? rq.map(reqCard).join('') : '<div class="card"><div class="meta">이 상태의 문제가 없습니다.</div></div>'}</div>
+      <h3 class="calsec">신고함</h3>
+      <div id="adm-reps">${rp === null ? '<div class="card"><div class="meta">지금 못 읽었습니다.</div></div>' : rp.length ? rp.map(repCard).join('') : '<div class="card"><div class="meta">신고가 없습니다.</div></div>'}</div>
+      <h3 class="calsec">쓰기 막힌 사람</h3>
+      <div class="card" id="adm-bans">${bn === null ? '<div class="meta">지금 못 읽었습니다.</div>' : bn.rows.length ? bn.rows.map(b => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${esc(b.src || b.kind)}</b><span>${esc(b.reason || '')}</span><span>${b.active ? '~' + esc(String(b.until).slice(0, 10)) : '끝남'}</span>${b.active ? `<button type="button" class="bdmini" data-adlift="${esc(b.tag)}">풀기</button>` : ''}</div>`).join('') : '<div class="meta">막힌 사람이 없습니다.</div>'}</div>`;
+  },
+
   async mypage() {
     let m = null, unknown = false;
     if (LIVE) { try { m = await api('/me', { method: 'POST', body: meBody(), voter: voterTok() }); meSave(m); ME_LAST = m; } catch { unknown = true; } }
@@ -7941,6 +7969,24 @@ function wire() {
     } catch (e) { flash('카드를 못 그렸습니다', true); }
     meShare.disabled = false;
   });
+  /* 사이트 운영 단추 — 한 곳에서 위임 */
+  const admView = $('#adm-hero') && $('#view');
+  if (admView && !admView.dataset.admWired) {
+    admView.dataset.admWired = '1';
+    admView.addEventListener('click', async e => {
+      const b = e.target.closest('button'); if (!b) return;
+      const rq = b.closest('[data-rq]'), id = rq && rq.dataset.rq, rk = b.closest('[data-key]');
+      const go = async (path, body, msg) => { try { await api(path, { method: 'POST', body }); flash(msg); render(); } catch (err) { flash(err.message, true); } };
+      if (b.dataset.adf !== undefined) { ADM_FILTER = b.dataset.adf; render(); }
+      else if (b.dataset.adst && id) go(`/requests/${id}/status`, { status: b.dataset.adst }, '상태를 바꿨습니다');
+      else if (b.dataset.adpin && id) go(`/requests/${id}/pin`, { on: b.dataset.adpin === '1' }, b.dataset.adpin === '1' ? '고정했습니다' : '고정을 풀었습니다');
+      else if (b.hasAttribute('data-adreplysave') && id) go(`/requests/${id}/reply`, { text: rq.querySelector('[data-adreply]').value.trim() }, '답을 저장했습니다');
+      else if (b.dataset.adsol) go(`/solutions/${b.dataset.adsol}/hide`, { on: b.dataset.on === '1' }, '바꿨습니다');
+      else if (b.dataset.adrep && rk) go('/admin/reports/act', { key: rk.dataset.key, act: b.dataset.adrep }, '처리했습니다');
+      else if (b.dataset.adban) { if (confirm(`${b.dataset.days}일 동안 이 사람의 쓰기를 막을까요?`)) go('/admin/bans', { from: b.dataset.adban, days: +b.dataset.days, ip: true, reason: '운영 규칙 위반' }, '쓰기를 막았습니다'); }
+      else if (b.dataset.adlift) go('/admin/bans/lift', { tag: b.dataset.adlift }, '풀었습니다');
+    });
+  }
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -8785,6 +8831,7 @@ if (location.pathname === '/card') {
 }
 const WRT = location.pathname === '/write' || /^\/w\/[0-9a-f]{8}(\/\d+)?$/.test(location.pathname);   // 공동 집필
 const BRD = location.pathname === '/board' || /^\/board\/\d+$/.test(location.pathname);   // 게시판 — 주제별 글·댓글·추천
+const ADM = location.pathname === '/admin';   // 사이트 운영 — 문제 손질·신고함·쓰기 막기(운영자 쿠키가 있을 때만 내용)
 const MYP = location.pathname === '/me';   // 나 — 배지·레벨·다음 목표·켜진 날(열쇠로 서버가 센다)
 const CAL = location.pathname === '/cal' || location.pathname === '/brief';   /* 브리핑은 «오늘» 에 합쳤다(10/02) — /brief 주소는 살려 같은 화면으로 */        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
@@ -8840,6 +8887,7 @@ else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'n
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (WRT) { tab = 'write'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRD) { tab = 'forum'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (ADM) { tab = 'adminsite'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MYP) { tab = 'mypage'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

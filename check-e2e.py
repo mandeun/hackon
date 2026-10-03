@@ -4588,6 +4588,18 @@ with sync_playwright() as pw:
     b.close()
 ok("첫 화면 고리 — 늘 보이는 것 셋 + 공통 메뉴 판(묶음 셋·이름 붙은 줄 넷·Esc·포커스·«나» 카드·최근 간 곳·글자 크게, 다른 화면도 같은 메뉴), 고리마다 200")
 
+# ── 사이트 운영 /admin — 운영자가 아니면 «운영자만», 관리 API 는 403 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.on("pageerror", lambda e: errs.append("admin: " + str(e)))
+    pg.goto(BASE + "/admin", wait_until="networkidle"); pg.wait_for_selector("#adm-hero")
+    A("운영자만" in pg.inner_text("#adm-hero") and pg.query_selector("#adm-rqs") is None, "운영자가 아닌데 사이트 운영 화면 내용이 보인다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/admin 이 폰 폭에서 옆으로 밀린다")
+    b.close()
+for _ap in ("/api/admin/requests", "/api/admin/reports", "/api/admin/bans", "/api/admin/summary"):
+    A(code_of(_ap) == 403, f"운영자가 아닌데 {_ap} 가 열린다")
+ok("사이트 운영 — 운영자 아니면 «운영자만»·관리 API 403")
+
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
 post(f"/api/events/{_kev['id']}", {"due": "2099-01-01T00:00"}, key=_kev["okey"], method="PATCH")
