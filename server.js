@@ -1802,6 +1802,7 @@ function llmsTxt(db) {
     `- [추천인 코드](${base}/ref): 남의 코드를 써 준 만큼 내 코드가 앞에 선다`,
     `- [운영 매뉴얼](${base}/manual): 대회를 여는 방법`,
     `- [English](${base}/en): Korean vibe-coding hackathons you can join from anywhere`,
+    `- [中文](${base}/zh): 在韩国参加 Vibe Coding 黑客松（简体中文）`,
     `- [기업·기관](${base}/biz): 사내 해커톤·AI 도입 워크숍`,
     '',
     '## 기계가 읽는 주소',
@@ -2992,13 +2993,13 @@ function mcpCall(db, msg, ip = '') {
       }
       if (name === 'list_problems') {
         const rows = openRequests(db);
-        return text(rows.length ? rows.map(r => `- [${r.id}] ${r.name}: ${r.topic || r.pain}${r.done ? ' (됐다의 기준: ' + r.done + ')' : ''} · 풀이 ${r.solutions}`).join('\n') + `\n\n풀이는 ${mailSite()}/problems 에서` : '올라온 문제가 없습니다.');
+        return text(rows.length ? rows.map(r => `- [${r.id}] ${r.name}: ${r.topic || r.pain}${r.status === 'solved' ? ' [풀림]' : r.status === 'doing' ? ' [진행 중]' : ''}${r.done ? ' (됐다의 기준: ' + r.done + ')' : ''} · 풀이 ${r.solutions}`).join('\n') + `\n\n풀이는 ${mailSite()}/problems 에서` : '올라온 문제가 없습니다.');
       }
       if (name === 'post_problem') {
         /* 열쇠 없는 쓰기 길이다. /api/ 쪽 쓰기에 걸린 것과 같은 상한을 IP 로 건다(감사 d).
            /mcp 는 /api/ 밖이라 위쪽 WRITE_LIMIT 문을 안 지나간다. */
         if (tooMany('w:' + ip + ':/mcp/post_problem', WRITE_LIMIT)) return text('요청이 너무 많습니다. 잠시 뒤에 다시 해 주세요');
-        const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact });
+        const r = addRequest(db, { kind: 'requester', name: a.name, pain: a.pain, done: a.done || '', contact: a.contact }, { ip: ipTag(ip) });
         return text(`올렸습니다. 받는 링크(열쇠 포함, 본인만): ${mailSite()}/r/${r.id}?k=${r.rkey}`);
       }
       if (name === 'news') return text(newsMd(db, JOBS.includes(a.job) ? a.job : ''));
@@ -3104,7 +3105,7 @@ function visitsOf(db, days) {
 
 function sitemap(db) {
   const base = CANON();
-  const urls = ['/', '/en', '/club', '/tools', '/manual', '/launch', '/biz', '/partner', '/crew'].concat(
+  const urls = ['/', '/en', '/zh', '/club', '/tools', '/manual', '/launch', '/biz', '/partner', '/crew', '/terms'].concat(
     db.prepare('SELECT 1 FROM lectures LIMIT 1').get() ? ['/learn'] : [],
     db.prepare("SELECT 1 FROM listings WHERE ok=1 AND off='' LIMIT 1").get() ? ['/market'] : [],
     db.prepare("SELECT 1 FROM spots WHERE state<>'hidden' LIMIT 1").get() ? ['/around'] : [],
@@ -3507,6 +3508,8 @@ function open(file) {
        편집자 열쇠(ekey)는 만든 브라우저에만 — 헤더 x-ekey 로만 받는다. */
     CREATE TABLE IF NOT EXISTS books(id TEXT PRIMARY KEY, title TEXT NOT NULL, about TEXT NOT NULL DEFAULT '', editor TEXT NOT NULL DEFAULT '', ekey TEXT NOT NULL, created TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS chapters(id INTEGER PRIMARY KEY, book TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, ord INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', ver INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL DEFAULT (datetime('now')));
+    /* 공동 편집자 — 처음 편집자(books.ekey)가 이름 붙여 초대한다. 처음 편집자만 더하고 뺀다. 빼면 그 열쇠는 바로 못 쓴다 */
+    CREATE TABLE IF NOT EXISTS book_editors(id INTEGER PRIMARY KEY, book TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, name TEXT NOT NULL, ekey TEXT NOT NULL UNIQUE, created TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS chapter_vers(chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, ver INTEGER NOT NULL, body TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(chapter, ver));
     CREATE TABLE IF NOT EXISTS edits(id INTEGER PRIMARY KEY, chapter INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE, base INTEGER NOT NULL, body TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '익명', status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL DEFAULT (datetime('now')), decided TEXT NOT NULL DEFAULT '');
 
@@ -3992,6 +3995,23 @@ function open(file) {
   db.exec(`CREATE TABLE IF NOT EXISTS solutions(
     id INTEGER PRIMARY KEY, request TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', contact TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  /* 사이트 운영(/admin) — 문제 고정·운영자 답, 풀이 숨김, 쓰기 막기.
+     atag·iptag 는 게시판과 같은 소금 친 표시다(날 IP·표는 안 남긴다). «누가 썼나» 를 알아야 쓰기를 막는다 */
+  try { db.exec('ALTER TABLE requests ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE requests ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec('ALTER TABLE solutions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0'); } catch {}
+  for (const t of ['requests', 'solutions', 'board_posts', 'board_comments'])
+    for (const c of ['atag', 'iptag']) try { db.exec(`ALTER TABLE ${t} ADD COLUMN ${c} TEXT NOT NULL DEFAULT ''`); } catch {}
+  /* tag 는 «a:» + 글쓴이 표시 또는 «i:» + IP 표시. 둘을 한 칸에 섞지 않으려고 머리를 붙인다 */
+  db.exec(`CREATE TABLE IF NOT EXISTS write_bans(
+    tag     TEXT PRIMARY KEY,
+    kind    TEXT NOT NULL DEFAULT '',            -- author | ip
+    src     TEXT NOT NULL DEFAULT '',            -- 어디서 막았나(신고함 항목 이름)
+    reason  TEXT NOT NULL DEFAULT '',
+    until   TEXT NOT NULL,                        -- 이 시각까지(UTC, datetime 꼴)
+    created TEXT NOT NULL DEFAULT (datetime('now')))`);
+  /* 신고함에서 «봤음» 을 적어 두는 곳. n 은 그때 신고 수 — 그 뒤 새 신고가 오면 다시 «기다림» 으로 뜬다 */
+  db.exec(`CREATE TABLE IF NOT EXISTS mod_done(key TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL DEFAULT (datetime('now')))`);
   /* 해커온뉴스 — 6시간마다 밖에서 제목·주소만 모은다(본문은 안 가져온다). key 가 주소라 같은 글은 한 번만. */
   db.exec(`CREATE TABLE IF NOT EXISTS news(
     id INTEGER PRIMARY KEY, src TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL,
@@ -4142,35 +4162,190 @@ function mdToHtml(md) {
 /* 제목을 주소로 쓴다. 한글이 그대로 들어가도 되지만 공백과 기호는 뺀다. */
 const slug = s => String(s).trim().toLowerCase().replace(/[^\w가-힣]+/g, '-').replace(/^-|-$/g, '');
 
+/* ── 법·약관 화면 — 처리방침(/privacy)·이용 규칙(/terms) ─────────────────────
+   앱스토어·플레이 심사와 개인정보보호법이 «주소 하나로 열리는 글» 을 요구한다. 웹·아이폰 앱·안드로이드 앱이 같은 글을 본다.
+   적힌 것과 실제가 다르면 그게 곧 반려 사유다 — 아래 «받는 것» 은 open() 의 표와 purgeOld()·deleteAccount() 를 읽고 적었다.
+   표·기간이 바뀌면 여기도 같이 바꾼다. 화면 틀(legalHtml)은 둘이 같이 쓴다 — 글씨 17px, 링크는 손가락 크기. */
+const LEGAL_SINCE = '2026-10-05';
+function legalHtml({ title, path: at, desc, body, links }) {
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title} — HACK:ON</title><meta name="description" content="${desc}">
+<link rel="canonical" href="https://hackon.kr${at}"><link rel="icon" href="/icon.svg"><meta name="theme-color" content="#EEF1F4">
+<style>:root{--pg:#EEF1F4;--card:#fff;--ink:#191F28;--grey:#4E5968;--hair:#E1E5EA;--on:#C8F53B}
+@media (prefers-color-scheme:dark){:root{--pg:#0E1117;--card:#161B22;--ink:#E8ECF1;--grey:#AEB8C4;--hair:#2A313B}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--ink);font:17px/1.75 'Pretendard','Apple SD Gothic Neo','맑은 고딕','Malgun Gothic',system-ui,sans-serif;
+  letter-spacing:-.01em;word-break:keep-all;overflow-wrap:break-word;-webkit-text-size-adjust:100%}
+a{color:inherit;text-underline-offset:3px}
+.wrap{max-width:720px;margin:0 auto;padding:0 18px 56px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 0}
+.top a{text-decoration:none;font-weight:800;letter-spacing:-.02em;padding:8px 0}
+h1{font-size:clamp(26px,6vw,32px);line-height:1.25;letter-spacing:-.03em;margin:10px 0 6px}
+.lead{color:var(--grey);margin:0 0 16px}
+section,.sum{background:var(--card);border:1px solid var(--hair);border-radius:16px;padding:18px 20px;margin:12px 0}
+.sum{border-left:6px solid var(--on)}
+h2{font-size:19px;line-height:1.4;margin:0 0 8px;letter-spacing:-.02em}
+ul{margin:6px 0;padding-left:22px}li{margin:7px 0}p{margin:6px 0}
+.toc{display:flex;flex-wrap:wrap;gap:2px 16px;font-size:15.5px;color:var(--grey)}
+.toc a{padding:6px 0}
+.note{color:var(--grey);font-size:15.5px}
+.foot{display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:22px;border-top:1px solid var(--hair);padding-top:10px}
+.foot a{display:inline-block;padding:12px 0;font-weight:700}
+</style></head><body><div class="wrap">
+<div class="top"><a href="/">HACK:ON</a><span class="note">시행 ${LEGAL_SINCE}</span></div>
+${body}
+<nav class="foot" aria-label="함께 보는 글">${links.map(([h, t]) => `<a href="${h}">${t}</a>`).join('')}</nav>
+</div></body></html>`;
+}
+
 function privacyPage() {
-  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HACK:ON 개인정보 처리방침</title>
-<style>body{font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;max-width:680px;margin:0 auto;padding:24px 20px;line-height:1.7;color:#191F28}h1{font-size:24px}h2{font-size:17px;margin-top:26px}li{margin:4px 0}</style></head><body>
-<h1>HACK:ON 개인정보 처리방침</h1>
-<p>HACK:ON(hackon.mandeun.com 과 같은 이름의 아이폰 앱)은 로그인을 안 해도 씁니다 — 열쇠 하나가 곧 계정입니다. 로그인은 여러 기기에서 같은 대회를 열기 위한 선택입니다. 아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
-<h2>1. 받는 것과 이유</h2>
-<ul>
-<li><b>참가 신청</b> — 이름(팀 이름), 이메일. 대회 운영·참가 확인·결과 안내·상금 지급. 협찬사 제공은 따로 동의한 사람만.</li>
-<li><b>자리 맡기·제안</b> — 이름, 소속(선택), 연락처. 운영자가 확인할 때만 씁니다. 공개 장부에는 이름·소속만 나갑니다.</li>
-<li><b>주제·문제 올리기(받는 사람)</b> — 공개될 이름, 연락처. 결과 안내에만 씁니다.</li>
-<li><b>앱 피드백</b> — 적은 글, 연락처(선택).</li>
+  const toc = ['받는 것', '보는 사람', '두는 기간', '맡기는 곳', '나라 밖', '내 권리', '쿠키·기기', '지키는 법', '14세', '책임자']
+    .map((t, i) => `<a href="#p${i + 1}">${i + 1}. ${t}</a>`).join('');
+  return legalHtml({ title: '개인정보 처리방침', path: '/privacy',
+    desc: 'HACK:ON 이 받는 정보, 두는 기간, 맡기는 곳, 내 권리.',
+    links: [['/terms', '이용 규칙'], ['/delete-account', '계정 삭제'], ['/', '첫 화면']],
+    body: `<h1>HACK:ON 개인정보 처리방침</h1>
+<p class="lead">HACK:ON(웹사이트 hackon.kr, 아이폰 앱, 안드로이드 앱)이 받는 정보와 쓰는 곳입니다. 웹과 앱은 같은 서버·같은 계정을 씁니다.
+아래에 적은 것만 받고, 적은 기간만 두며, 적은 사람에게만 보입니다.</p>
+<div class="sum"><b>한눈에</b><ul>
+<li>로그인 없이도 씁니다. 로그인은 여러 기기에서 같은 대회를 열기 위한 선택입니다.</li>
+<li>연락처는 그 대회 운영자만 봅니다. 공개 화면에는 나가지 않습니다.</li>
+<li>참가 신청 연락처는 대회가 끝나고 6개월 뒤 지웁니다.</li>
+<li>광고 추적, 제3자 분석 도구, 위치 수집을 하지 않습니다.</li>
+<li>만 14세 이상이 쓰는 서비스입니다.</li></ul>
+<div class="toc">${toc}</div></div>
+
+<section id="p1"><h2>1. 받는 것과 쓰는 곳</h2>
+<p>그 기능을 쓸 때만 받습니다. «선택» 은 안 적어도 그 기능을 쓸 수 있습니다.</p><ul>
+<li><b>참가 신청</b> — 팀 이름(혼자면 본인 이름), 이메일. 고르면 역할·인원·어디서 봤는지·메모·만든 것 링크, 짝 신청이면 짝의 이름·이메일. 정원이 차면 대기 명단에 이름·이메일.
+  대회 운영·참가 확인·결과 안내·상금 지급에 씁니다.</li>
+<li><b>결과물과 평가</b> — 결과물 주소·설명·AI 를 쓴 방법·시연 영상(유튜브 번호)·발표 자료 주소, 심사 점수·심사평, 관객 점수, 참가자끼리 준 점수(준 사람은 안 보입니다), 불편했던 일 알림(사이트 운영자만 봅니다), 대회 평가·설문.</li>
+<li><b>기록(프로필)</b> — 이메일을 되돌릴 수 없게 바꾼 값으로 사람 번호를 만들어 대회 기록을 잇습니다. 이메일 원문은 이 번호에 담기지 않습니다. 보여 줄 이름, 실력 단계, 만든 기록증 카드.</li>
+<li><b>소개 세 칸(선택)</b> — 한 줄 소개·지금 하는 일·찾는 사람. 프로필과 팀원 추천에 <b>공개</b>됩니다. 연락처는 적을 수 없게 막았습니다.</li>
 <li><b>팀원 추천(선택)</b> — 고른 강점·하려는 이유, 누구에게 «좋아요» 를 눌렀는지. 같은 대회 안에서 맞을 사람을 권하는 데만 씁니다.</li>
-<li><b>소개 세 칸(선택)</b> — 한 줄 소개·지금 하는 일·찾는 사람. 프로필과 팀원 추천에 <b>공개</b>됩니다. 연락처는 적을 수 없게 막아 두었습니다.</li>
-<li><b>AI 지갑·아침 브리핑</b> — 구독·마감·붙여 넣은 글은 <b>그 기기에만</b> 저장되고 서버로 오지 않습니다.</li>
-<li><b>푸시 알림</b> — 기기 토큰. 사람 정보가 아니며 «따라가기»를 끄면 지웁니다.</li>
-<li><b>로그인(선택)</b> — 카카오·구글·네이버 중 고른 곳에서 <b>회원번호와 별명</b>. 어느 기기에서든 내 대회를 열기 위해서. 회원번호는 HACK:ON 에만 발급되는 번호라 그 서비스의 아이디가 아니며, 비밀번호는 받지 않습니다.</li>
-<li><b>이메일(그 서비스가 주는 경우)</b> — <b>같은 사람인지 알아보는 데만</b> 씁니다. 구글로 들어온 분이 지난번 카카오로 들어온 분과 같은 사람이면 대회가 흩어지지 않아야 하기 때문입니다. 주소는 저장하지 않고 되돌릴 수 없게 바꾼 값만 둡니다. 이 주소로 메일을 보내지 않고, 광고에 쓰지 않습니다.</li>
-</ul>
-<h2>2. 보는 사람</h2>
-<p>연락처는 그 대회의 운영자만 봅니다. 공개 페이지·큰 화면·결과 보고서에는 연락처가 나가지 않습니다. 협찬사에는 «협찬사 제공 동의»를 한 참가자의 이메일만, 그 대회의 협찬사에만 갑니다. 팀원 추천에서 <b>서로 «좋아요»를 누른 두 참가자</b>에게는 서로의 연락처가 보입니다 — 한쪽만 누르면 아무에게도 안 보이고, 좋아요를 거두면 다시 닫힙니다.</p>
-<h2>3. 두는 기간</h2>
-<p>대회 종료 후 6개월. 그 뒤 지웁니다. 운영자가 대회를 지우면 그 자리에서 함께 지워집니다(운영자가 사본 파일을 보관할 수 있습니다). 로그인 정보(회원번호·별명·바꾼 이메일 값)는 계정을 지울 때까지 둡니다. 계정은 앱·웹의 «대회» 탭 아래 «계정 삭제»에서 직접 지웁니다 — 계정·로그인 정보·그 계정으로 연 대회가 함께 지워집니다. 거기까지 못 오시면 hi@mandeun.com 으로 말씀하세요.</p>
-<h2>4. 앱이 쓰는 기기 기능</h2>
-<ul><li>카메라 — 심사·투표 링크의 QR 을 찍을 때만. 사진은 저장하지 않습니다.</li><li>알림 — 대회 전날·마감 30분 전·새 소식. 켜고 끄는 것은 본인이 정합니다.</li><li>저장 공간 — 마지막으로 받은 대회 정보를 기기에 두어 인터넷이 끊겨도 진행표를 보여 줍니다.</li></ul>
-<h2>5. 하지 않는 것</h2>
-<p>광고 추적, 제3자 분석 도구, 위치 수집, 연락처 접근, 앱 안 결제를 하지 않습니다.</p>
-<h2>6. 묻는 곳</h2>
-<p>hi@mandeun.com · 개정 2026-09-26</p>
-</body></html>`;
+<li><b>자리 맡기·제안</b> — 이름, 소속(선택), 연락처, 메모, 이해관계 없음 표시. 공개 장부에는 확인된 이름·소속만 나갑니다.</li>
+<li><b>줄 사람 카드</b> — 이름·소속·지역·되는 요일·소개(공개), 연락처. 주최자가 요청을 보낼 때는 주최자 이름·연락처를 받습니다.</li>
+<li><b>풀어 달라는 문제</b> — 공개될 이름, 번거로운 일 세 줄, 연락처(운영자만). «풀었습니다» 를 보낼 때는 이름·주소·메모·연락처(문제를 낸 분만 봅니다).</li>
+<li><b>만든 것·외주·마켓</b> — 작업물 제목·소개·주소·영상·저장소, 외주 의뢰·서비스 글, 함께하기 신청·제안의 메모와 금액(올린 사람만 봅니다), 판매 주소·가격.</li>
+<li><b>게시판</b> — 닉네임, 제목·본문·댓글. 추천·신고를 한 번만 세려고 이 기기가 만든 무작위 표를 받고, 차단에 쓰는 «글쓴이 표» 는 그 표를 되돌릴 수 없게 바꾼 값으로 둡니다. 신고할 때는 IP 를 소금 친 해시로 바꿔 둡니다 — IP 원문은 저장하지 않습니다.</li>
+<li><b>공동 집필</b> — 책 제목·소개·편집자 이름, 장 본문과 고친 기록, 고쳐 쓰기 제안(이름·글·메모), 제안한 사람의 IP 해시와 글쓴이 표(도배를 막는 데만).</li>
+<li><b>내 달력 구독</b> — 구독 주소 번호와 «어느 대회에 무슨 역할» 목록만. 이름·열쇠는 담지 않습니다.</li>
+<li><b>로그인(선택)</b> — 카카오·구글·네이버·Apple 중 고른 곳에서 <b>회원번호와 별명</b>. 회원번호는 HACK:ON 에만 발급되는 번호라 그 서비스의 아이디가 아니며, 비밀번호는 받지 않습니다.</li>
+<li><b>로그인 이메일(그 서비스가 주는 경우)</b> — <b>같은 사람인지 알아보는 데만</b> 씁니다. 주소는 저장하지 않고 되돌릴 수 없게 바꾼 값만 둡니다. 이 주소로 메일을 보내지 않고, 광고에 쓰지 않습니다.</li>
+<li><b>앱 알림</b> — 기기 토큰과 따라가는 대회. 사람 정보와 묶지 않습니다.</li>
+<li><b>피드백·신고·제보</b> — 적은 글, 연락처(선택), 신고 사유. 소식 제보에는 로그인 별명, 모아 보기 제보에는 계정(공개 안 함). 장소 제보는 누가 썼는지 담지 않습니다. 세팅 모음에 낸 세팅, 추천인 코드.</li>
+<li><b>저절로 남는 것</b> — 화면 방문 수(날짜·화면·보낸 사이트·횟수만, 사람·IP 없음), 메일 발송 기록(받는 주소·제목), 남용을 막는 IP(메모리에만 10분, 저장 안 함).</li></ul></section>
+
+<section id="p2"><h2>2. 보는 사람과 남에게 주는 것</h2>
+<p>연락처는 그 대회의 운영자만 봅니다. 공개 페이지·큰 화면·결과 보고서에는 연락처가 나가지 않습니다. 남에게 가는 것은 아래뿐입니다.</p><ul>
+<li><b>협찬사</b> — «협찬사 제공 동의» 를 따로 켠 참가자의 이메일만, 그 대회의 협찬사에만 갑니다. 참가자용 크레딧·쿠폰 발급과 사용 안내에 쓰며, 두는 기간은 협찬사 정책을 따릅니다.</li>
+<li><b>팀원 추천</b> — <b>서로 «좋아요»를 누른 두 참가자</b>에게는 서로의 연락처가 보입니다. 한쪽만 누르면 아무에게도 안 보이고, 좋아요를 거두면 다시 닫힙니다.</li>
+<li><b>줄 사람 카드</b> — 카드 주인이 요청을 수락하면 그 주최자와 카드 주인에게만 서로의 연락처가 보입니다.</li></ul>
+<p>법이 정한 경우 말고는 이 밖에 주지 않습니다.</p></section>
+
+<section id="p3"><h2>3. 두는 기간과 지우는 법</h2><ul>
+<li><b>대회 연락처</b>(참가 신청·대기·짝·자리 맡기·제안·대회에 붙은 문제·멘토) — 대회 종료 후 <b>6개월</b> 뒤 지웁니다.</li>
+<li><b>피드백 연락처, 메일 발송 기록의 받는 주소, «풀었습니다» 연락처</b> — 6개월 뒤 지웁니다.</li>
+<li><b>지운 팀·지운 대회</b> — 휴지통에 30일 둔 뒤 지웁니다. 그동안 운영자가 되살릴 수 있습니다. 연습용 대회는 3일 뒤 휴지통으로 갑니다.</li>
+<li><b>계정에 묶인 것</b>(로그인 정보·만든 것·외주·카드·세팅·추천인 코드) — 계정을 지울 때까지. 계정은 앱이나 hackon.kr/app 에서 로그인 → 아래 «대회» 탭 → 위쪽 «계정 삭제» 에서 직접 지웁니다. 지워지는 것은 <a href="/delete-account">계정 삭제 안내</a>에 적었습니다.</li>
+<li><b>따로 기간이 없는 것</b> — 게시판·공동 집필 글, 프로필 기록, 대회에 안 붙은 문제, 로그인 없이 만든 카드. 쓴 기기에서 직접 내릴 수 있고, 서버에서도 지우길 원하시면 메일로 말씀해 주세요.</li>
+<li><b>앱 알림 토큰</b> — «따라가기» 를 끄거나 그 대회가 지워지면 지웁니다.</li>
+<li><b>서버 백업</b> — 10분마다 한 벌씩, 최근 12벌(약 2시간 치)만 둡니다. 지운 대회의 사본 파일은 30일 뒤 지웁니다. 지운 정보도 백업에서 빠지기까지 이만큼 걸릴 수 있습니다.</li></ul>
+<p>지울 때는 데이터베이스에서 되살릴 수 없게 지웁니다. 종이로 뽑아 두지 않습니다.</p></section>
+
+<section id="p4"><h2>4. 처리를 맡기는 곳(위탁)</h2><ul>
+<li><b>Fly.io, Inc.</b> — 서버·데이터베이스와 그 백업 보관(일본 도쿄 지역).</li>
+<li><b>Resend, Inc.</b> — 신청 확인·참석 확인·결과 안내 메일 보내기. 보낼 때만 받는 주소와 메일 내용을 넘깁니다.</li></ul>
+<p>로그인은 고른 곳(카카오·구글·네이버·Apple)이 본인 확인을 하고, 그 결과(회원번호·별명·이메일 확인 여부)만 받습니다. 그 화면에는 그 회사의 처리방침이 따릅니다.
+앱 알림은 아직 보내지 않고 토큰만 둡니다. 보내기 시작하면 보내는 회사를 여기에 더하고 알립니다.</p></section>
+
+<section id="p5"><h2>5. 나라 밖으로 옮기는 것(국외 이전)</h2>
+<p>서비스를 쓰는 동안 네트워크로 그때그때 옮겨 저장합니다.</p><ul>
+<li><b>Fly.io, Inc.(미국 회사)</b> — 서버가 <b>일본(도쿄)</b>에 있습니다. 이 방침에 적은 정보 전부. 서버 운영에 쓰고, 이 방침의 기간까지 둡니다.</li>
+<li><b>Resend, Inc.(미국)</b> — 받는 이메일 주소와 메일 내용. 메일을 보낼 때 옮기고, Resend 의 보관 정책을 따릅니다.</li></ul>
+<p>옮기기를 원하지 않으시면 서비스를 쓰지 않으시거나(서버가 나라 밖에 있습니다), 이메일을 적지 않아 메일을 받지 않을 수 있습니다. 문의는 각 회사 누리집의 개인정보 창구나 hi@mandeun.com 으로 해 주세요.</p></section>
+
+<section id="p6"><h2>6. 내 권리와 요청하는 법</h2>
+<p>내 정보를 보고, 고치고, 지우고, 처리를 멈추라고 요청할 수 있습니다. 동의는 언제든 거둘 수 있습니다.</p><ul>
+<li><b>직접</b> — 팀 화면에서 팀 이름 고치기·신청 취소(제출 마감 전), 쓴 글 내리기, 카드 숨기기, <a href="/delete-account">계정 삭제</a>.</li>
+<li><b>메일</b> — hi@mandeun.com 으로 원하는 것과 그 정보가 있는 대회·글을 알려 주세요. 본인인지 확인한 뒤 10일 안에 답합니다. 법정대리인이나 위임받은 분도 요청할 수 있습니다.</li></ul></section>
+
+<section id="p7"><h2>7. 쿠키·기기 저장·앱 기능</h2><ul>
+<li><b>쿠키</b> — 로그인을 이어 주는 쿠키 하나(30일)와 로그인하는 동안만 쓰는 쿠키(10분). 광고·추적 쿠키는 없습니다.</li>
+<li><b>기기 저장</b> — 대회·팀 열쇠, 지난 신청 내용, 추천·신고용 무작위 표, 차단 목록, 최근 간 곳. AI 지갑·아침 브리핑의 구독·마감·붙여 넣은 글은 <b>그 기기에만</b> 저장되고 서버로 오지 않습니다.</li>
+<li>브라우저 설정에서 사이트 데이터를 지우면 함께 지워집니다. 로그인하지 않은 채 열쇠를 지우면 내 대회를 다시 못 열 수 있습니다.</li>
+<li>강의·시연 영상은 유튜브(youtube-nocookie) 화면을 불러옵니다. 영상을 틀면 유튜브 정책이 따릅니다.</li>
+<li><b>앱 기능</b> — 알림(대회 전날·마감·새 소식, 켜고 끄는 것은 본인이), 저장 공간(인터넷이 끊겨도 진행표를 보여 주려고), 카메라(앱에서 QR 을 찍을 때만, 사진은 저장하지 않음).</li></ul>
+<p>광고 추적, 제3자 분석 도구, 위치 수집, 주소록 접근, 앱 안 결제를 하지 않습니다.</p></section>
+
+<section id="p8"><h2>8. 지키는 법</h2><ul>
+<li>모든 연결을 https 로 암호화합니다.</li>
+<li>운영 화면과 내 신청은 열쇠를 가진 사람만 엽니다. 백업 사본에는 열쇠를 담지 않습니다.</li>
+<li>로그인 이메일과 게시판 IP 는 원문 대신 되돌릴 수 없는 값만 둡니다.</li></ul></section>
+
+<section id="p9"><h2>9. 만 14세 미만</h2>
+<p>HACK:ON 은 <b>만 14세 이상</b>이 쓰는 서비스입니다. 참가 신청 때 «만 14세 이상입니다» 에 동의를 받습니다. 만 14세 미만의 정보가 들어온 것을 알게 되면 바로 지웁니다.</p></section>
+
+<section id="p10"><h2>10. 개인정보 보호책임자와 도움받을 곳</h2>
+<p><b>개인정보 보호책임자</b> — HACK:ON 운영자 · <a href="mailto:hi@mandeun.com">hi@mandeun.com</a></p>
+<p class="note">침해 신고·상담: 개인정보침해신고센터(privacy.kisa.or.kr · 국번 없이 118), 개인정보분쟁조정위원회(kopico.go.kr · 1833-6972), 대검찰청(spo.go.kr · 국번 없이 1301), 경찰청(ecrm.police.go.kr · 국번 없이 182).</p>
+<p class="note">이 방침을 바꾸면 이 페이지에 먼저 알립니다. 시행일 ${LEGAL_SINCE}.</p></section>` });
+}
+
+/* 이용 규칙 — 누구나 볼 수 있는 글(게시판·집필·질문·카드)에 대한 약속. 짧게 둔다 — 길면 아무도 안 읽는다.
+   앱 안 «첫 글 전 동의»(hack-on.html RULES_TEXT)가 이 주소를 가리킨다. 숫자(신고 셋·24시간)는 BOARD_HIDE_AT·SAFETY_LINE 과 같다. */
+function termsPage() {
+  return legalHtml({ title: '이용 규칙', path: '/terms',
+    desc: 'HACK:ON 이용 규칙 — 공개 글에 쓰지 않는 것, 신고, 쓴 글의 권리.',
+    links: [['/privacy', '개인정보 처리방침'], ['/delete-account', '계정 삭제'], ['/', '첫 화면']],
+    body: `<h1>HACK:ON 이용 규칙</h1>
+<p class="lead">함께 쓰는 곳이라 몇 가지만 지켜 주세요. 웹(hackon.kr)과 앱이 같은 규칙을 씁니다.</p>
+<section><h2>1. 누구나 보는 글에 쓰지 않는 것</h2><ul>
+<li>전화번호·이메일·오픈채팅 같은 <b>연락처</b> — 연락은 서로 «좋아요» 나 요청 수락으로 열립니다.</li>
+<li>욕설·비방·차별·혐오, 성적인 글</li>
+<li>광고·도배(스팸), 운영자 사칭</li>
+<li>불법인 것, 남의 개인정보나 저작물을 허락 없이 올리는 것</li></ul></section>
+<section><h2>2. 신고와 차단</h2><ul>
+<li>글마다 «신고» 가 있습니다. 게시판·공동 집필에서는 서로 다른 세 사람이 신고하면 저절로 내려갑니다.</li>
+<li>운영자가 <b>24시간 안에</b> 확인하고, 규칙을 어긴 글은 지웁니다.</li>
+<li>«차단» 을 누르면 그 사람의 글이 내 화면에서 안 보입니다.</li></ul></section>
+<section><h2>3. 어기면</h2>
+<p>글을 지우고, 되풀이하면 쓰기를 막습니다.</p></section>
+<section><h2>4. 쓴 글의 권리</h2><ul>
+<li>내가 쓴 글과 올린 결과물은 <b>내 것</b>입니다.</li>
+<li>공동 집필 글은 <b>함께 쓴 사람들의 것</b>입니다.</li>
+<li>HACK:ON 은 그 글을 이 사이트와 앱에 <b>보여 줄 권한만</b> 갖습니다. 글을 내리면 보여 주기를 멈춥니다.</li></ul></section>
+<section><h2>5. 나이</h2>
+<p><b>만 14세 이상</b>이 쓸 수 있습니다.</p></section>
+<section><h2>6. 책임</h2>
+<p>HACK:ON 은 사람과 대회를 잇는 도구라 있는 그대로 제공하며, 사용자끼리 정한 약속·돈·계약은 당사자 사이의 일입니다.</p></section>
+<section><h2>7. 문의</h2>
+<p><a href="mailto:hi@mandeun.com">hi@mandeun.com</a> · 개인정보는 <a href="/privacy">처리방침</a>을 봐 주세요.</p></section>` });
+}
+
+/* 안드로이드 앱 링크(Digital Asset Links). 앱(TWA)이 «이 주소는 내 것» 이라고 증명하는 파일이다 — 없으면 앱 안에 브라우저 주소창이 뜬다.
+   패키지 이름과 서명 지문은 코드에 안 적는다(TWA_PACKAGE·TWA_SHA256, 지문은 쉼표로 여럿). 모양이 틀리면 내지 않는다(404) —
+   틀린 파일을 내면 구글이 «검증 실패» 로 캐시해 고친 뒤에도 한동안 주소창이 남는다. */
+function assetLinks(pkg, sha) {
+  const p = String(pkg || '').trim();
+  if (p.length > 200 || !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(p)) return null;
+  const fps = [...new Set(String(sha || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean))];
+  if (!fps.length || fps.length > 10 || !fps.every(f => /^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/.test(f))) return null;
+  return [{ relation: ['delegate_permission/common.handle_all_urls'],
+            target: { namespace: 'android_app', package_name: p, sha256_cert_fingerprints: fps } }];
+}
+/* 지운 대회의 사본 파일(backup/hackon-<대회>-<시각>.json). 휴지통 줄과 같은 30일 — 팀 연락처가 통째로 들어 있다.
+   DB 통째 백업(.db)은 backup() 이 12벌로 돌린다. 이건 그 목록에 안 걸려 끝없이 쌓였다 */
+function sweepDumps(dir, days = 30, now = Date.now()) {
+  let n = 0;
+  let files = [];
+  try { files = fs.readdirSync(dir); } catch { return 0; }
+  for (const f of files) {
+    if (!/^hackon-.+\.json$/.test(f)) continue;
+    const fp = path.join(dir, f);
+    try { if (now - fs.statSync(fp).mtimeMs > days * 864e5) { fs.rmSync(fp, { force: true }); n++; } } catch {}
+  }
+  return n;
 }
 
 function manualPage(md) {
@@ -5925,7 +6100,9 @@ async function deleteEvent(db, event, b, notify = notifyDeleted) {
    다른 것은 돈이 앞에 오나(후원자) 안 오나(의뢰자)뿐이라 표 하나로 그린다.
    열쇠 패턴은 okey·jkey 와 같다: 공개 응답에서 rkey·contact 를 지운다. 순위·인기순은 두지 않는다(올라온 순). */
 const REQUEST_KINDS = ['sponsor', 'requester'];
-function addRequest(db, b) {
+/* who — 부르는 쪽의 표(voter)와 IP 표시. 쓰기 막기를 보고, 운영자가 이 글에서 막을 수 있게 적어 둔다. 안 넘기면 빈 값(예전과 같다) */
+function addRequest(db, b, who = {}) {
+  banGuard(db, who.voter, who.ip);
   const kind = REQUEST_KINDS.includes(b.kind) ? b.kind : 'requester';
   const name = plain(b.name, 40);
   const topic = plain(b.topic, 120), pain = plain(b.pain, 300), now = plain(b.now, 300), done = plain(b.done, 300);
@@ -5934,18 +6111,20 @@ function addRequest(db, b) {
   let event = String(b.event || '');
   if (event && !db.prepare('SELECT 1 FROM events WHERE id=?').get(event)) throw new HttpError(404, '없는 대회입니다');
   const id = nid(), rkey = crypto.randomBytes(5).toString('hex');   // events 와 같은 모양: 공개 id 8자 + 열쇠 10자
-  db.prepare('INSERT INTO requests(id,rkey,kind,name,topic,pain,now,done,contact,event) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .run(id, rkey, kind, name, topic || pain.slice(0, 60), pain, now, done, plain(b.contact, 100), event);
+  db.prepare('INSERT INTO requests(id,rkey,kind,name,topic,pain,now,done,contact,event,atag,iptag) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(id, rkey, kind, name, topic || pain.slice(0, 60), pain, now, done, plain(b.contact, 100), event, authorTag(who.voter), String(who.ip || ''));
   return { id, rkey };
 }
 /* 공개가 봐도 되는 것만. rkey·contact 는 이 함수를 거쳐서는 한 번도 나가지 않는다 */
 function publicRequest(r) {
   return { id: r.id, kind: r.kind, name: r.name, topic: r.topic, pain: r.pain, now: r.now, done: r.done,
            event: r.event, status: r.status, created: r.created,
+           pinned: !!r.pinned, reply: r.admin_note || '',          // 운영자가 맨 위에 둔 것 · 운영자 답 한 줄(공개)
            teams: r.teams === undefined ? undefined : r.teams };
 }
+/* 대회 페이지에 실리는 것. 운영자가 내린 것(hidden)·닫은 것(closed)은 손님에게 안 보인다 — 그 대회 운영자에게만 */
 function requestsOf(db, event, admin = false) {
-  const rows = db.prepare('SELECT * FROM requests WHERE event=? ORDER BY created, id').all(event);
+  const rows = db.prepare(`SELECT * FROM requests WHERE event=? ${admin ? '' : `AND status IN (${REQ_PUBLIC_SQL})`} ORDER BY created, id`).all(event);
   const cnt = db.prepare("SELECT request, COUNT(*) c FROM teams WHERE event=? AND request<>'' GROUP BY request").all(event);
   const by = {}; for (const c of cnt) by[c.request] = c.c;
   return rows.map(r => { const o = publicRequest({ ...r, teams: by[r.id] || 0 }); if (admin) o.contact = r.contact; return o; });
@@ -6082,7 +6261,9 @@ async function benefits() {
    «올린 것을 먼저 검사하고 통과해야 보인다» 로 바꾸지는 않았다. 그러면 사람이 붙어서 승인할
    때까지 문제 은행이 빈 채로 있는다 — 지금 그걸 시간마다 볼 사람이 없다.
    대신 «올라오되, 운영자가 내릴 수 있다» 로 둔다. 내린 것은 지운 것이 아니라 hidden 이다. */
-const REQ_STATUS = ['open', 'closed', 'hidden'];
+/* open 열림 · doing 진행 중(누가 풀고 있다) · solved 풀림 · closed 닫힘 · hidden 내림.
+   앞의 셋만 공개 목록·대회 페이지에 실린다. 풀린 것은 지우지 않고 뱃지를 달아 맨 뒤로 — «풀리는 곳» 이라는 것이 보여야 한다 */
+const REQ_STATUS = ['open', 'doing', 'solved', 'closed', 'hidden'];
 const REQ_FIELDS = { name: 40, topic: 120, pain: 300, now: 300, done: 300, contact: 80 };
 
 function adminEditRequest(db, id, b) {
@@ -6125,22 +6306,225 @@ function deleteRequest(db, id, confirm) {
   return { deleted: id, solutions: sol };
 }
 
+/* ── 사이트 운영(/admin) — «풀어 달라는 문제» 손질 · 신고함 · 쓰기 막기 ──────────────────────────
+   전부 사이트 운영자(쿠키로 로그인한 계정)만. 라우터가 siteAdmin 을 넘기고, 안 넘기면 닫힌 쪽(403)이 기본값이다 */
+const REQ_PUBLIC_SQL = "'open','doing','solved'";
+function needSite(as) { if (!(as && as.siteAdmin)) throw new HttpError(403, '사이트 운영자만 할 수 있습니다'); }
+
+/* 운영자 목록 — 상태로 거르고(?status=), 풀이 수와 풀이 줄까지. 글쓴이·IP 표시는 안 내보내고 «막을 수 있나» 만 */
+function adminRequests(db, status = '', as = {}) {
+  needSite(as);
+  const st = REQ_STATUS.includes(status) ? status : '';
+  const sols = db.prepare('SELECT id, name, url, note, hidden, at, atag, iptag FROM solutions WHERE request=? ORDER BY id');
+  return db.prepare(`SELECT * FROM requests WHERE (? = '' OR status = ?) ORDER BY pinned DESC, created DESC, id LIMIT 300`).all(st, st)
+    .map(r => {
+      const ss = sols.all(r.id);
+      return { id: r.id, kind: r.kind, name: r.name, topic: r.topic, pain: r.pain, now: r.now, done: r.done, contact: r.contact,
+        event: r.event, status: r.status, created: r.created, pinned: !!r.pinned, reply: r.admin_note || '',
+        hide: publicHide(r), canBan: !!(r.atag || r.iptag),
+        solutions: ss.filter(x => !x.hidden).length, solutionsAll: ss.length,
+        sols: ss.map(x => ({ id: x.id, name: x.name, url: x.url, note: x.note, hidden: !!x.hidden, at: x.at, canBan: !!(x.atag || x.iptag) })) };
+    });
+}
+/* 고정 — 공개 목록 맨 위. 여러 개를 고정하면 그 안에서는 올라온 순이다 */
+function pinRequest(db, id, on, as = {}) {
+  needSite(as);
+  if (!db.prepare('UPDATE requests SET pinned=? WHERE id=?').run(on ? 1 : 0, String(id)).changes) throw new HttpError(404, '없는 의뢰입니다');
+  return { id: String(id), pinned: !!on };
+}
+/* 운영자 답 — 문제 아래에 공개로 한 줄(«이 대회 주제로 갑니다», «이렇게 풀렸어요»). 글자만, 300자, 욕설 거름. 비우면 지운다 */
+function replyRequest(db, id, text, as = {}) {
+  needSite(as);
+  const t = plain(text, 300).replace(/\s+/g, ' ');
+  if (t && hasSlur(t)) throw new HttpError(400, SLUR_MSG);
+  if (!db.prepare('UPDATE requests SET admin_note=? WHERE id=?').run(t, String(id)).changes) throw new HttpError(404, '없는 의뢰입니다');
+  return { id: String(id), reply: t };
+}
+/* 풀이 하나 숨기기 — 공개 수·받는 화면에서 빠진다. 지우지 않으니 되살릴 수 있다 */
+function hideSolution(db, id, on, as = {}) {
+  needSite(as);
+  if (!db.prepare('UPDATE solutions SET hidden=? WHERE id=?').run(on ? 1 : 0, +id).changes) throw new HttpError(404, '없는 풀이입니다');
+  return { id: +id, hidden: !!on };
+}
+
+/* ── 신고함 — 흩어진 신고를 한곳에.
+   reports(대회 안 것·만든 것·외주) · board_reports(게시판 글·댓글·집필 제안) · market_reports(마켓) 셋이 따로 쌓인다.
+   대회 없는 신고(event='' — 만든 것·외주)와 게시판에서 저절로 내려간 글은 지금까지 아무도 다시 볼 곳이 없었다.
+   여기서는 «숨기기·되살리기·봤음» 만 한다. 지우지 않는다 — 판정이 틀렸을 때 되돌릴 수 있어야 한다. */
+const REPORT_LABEL = { work: '만든 것', gig: '외주', question: '질문', team: '팀', submission: '제출물', sponsor: '후원', other: '기타',
+                       post: '게시판 글', comment: '게시판 댓글', edit: '집필 제안', market: '마켓' };
+const cut = (s, n = 120) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+const reasonsOf = list => [...new Set(String(list || '').split('|').map(x => x.trim()).filter(Boolean))].slice(0, 5);
+/** 신고함 열쇠(r:12 · bp:3 · bc:4 · be:5 · mk:6) 하나를 대상으로 푼다. 없으면 null */
+function reportTarget(db, key) {
+  const m = /^(r|bp|bc|be|mk):(\d+)$/.exec(String(key || ''));
+  if (!m) return null;
+  const id = +m[2];
+  if (m[1] === 'r') {
+    const r = db.prepare('SELECT event, kind, ref, note FROM reports WHERE id=?').get(id);
+    if (!r) return null;
+    const g = db.prepare(`SELECT COUNT(*) n, SUM(done = 0) open, MAX(at) at, GROUP_CONCAT(reason, '|') rs FROM reports WHERE event=? AND kind=? AND ref=?`).get(r.event, r.kind, r.ref);
+    const base = { key, count: g.n, pending: g.open > 0, at: g.at, reasons: reasonsOf(g.rs), event: r.event,
+                   done: () => db.prepare('UPDATE reports SET done=1 WHERE event=? AND kind=? AND ref=?').run(r.event, r.kind, r.ref) };
+    let w;
+    if ((w = /^work:(\d+)$/.exec(r.ref))) {
+      const x = db.prepare('SELECT id, title, line, hidden FROM works WHERE id=?').get(+w[1]);
+      return { ...base, kind: 'work', text: x ? cut(x.title + (x.line ? ' — ' + x.line : '')) : cut(r.note) + ' (지워짐)', link: x ? '/made?w=' + x.id : '',
+               hidden: x ? !!x.hidden : null, set: h => db.prepare('UPDATE works SET hidden=? WHERE id=?').run(h ? 1 : 0, x.id) };
+    }
+    if ((w = /^gig:(\d+)$/.exec(r.ref))) {
+      const x = db.prepare('SELECT id, title, hidden FROM gigs WHERE id=?').get(+w[1]);
+      return { ...base, kind: 'gig', text: x ? cut(x.title) : cut(r.note) + ' (지워짐)', link: x ? '/gigs?g=' + x.id : '',
+               hidden: x ? !!x.hidden : null, set: h => db.prepare('UPDATE gigs SET hidden=? WHERE id=?').run(h ? 1 : 0, x.id) };
+    }
+    if (r.kind === 'question' && /^\d+$/.test(r.ref)) {
+      const x = db.prepare('SELECT id, text, hidden FROM questions WHERE id=? AND event=?').get(+r.ref, r.event);
+      return { ...base, kind: 'question', text: x ? cut(x.text) : cut(r.note), link: r.event ? '/e/' + r.event : '',
+               hidden: x ? !!x.hidden : null, set: h => db.prepare('UPDATE questions SET hidden=? WHERE id=?').run(h ? 1 : 0, x.id) };
+    }
+    /* 팀 이름·제출물·후원은 그 대회 운영자가 고칠 것이라 여기서는 «봤음» 과 대회로 가는 길만 */
+    return { ...base, kind: REPORT_LABEL[r.kind] ? r.kind : 'other', text: cut(r.note || r.ref), link: r.event ? '/e/' + r.event : '', hidden: null };
+  }
+  const seen = (n) => { const d = db.prepare('SELECT n FROM mod_done WHERE key=?').get(key); return n > (d ? d.n : 0); };
+  const doneAt = (n) => () => db.prepare(`INSERT INTO mod_done(key,n) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET n=excluded.n, at=datetime('now')`).run(key, n);
+  if (m[1] === 'mk') {
+    const x = db.prepare('SELECT id, title, off, at FROM listings WHERE id=?').get(id);
+    const g = db.prepare(`SELECT COUNT(*) n, MAX(at) at, GROUP_CONCAT(reason, '|') rs FROM market_reports WHERE listing=?`).get(id);
+    if (!x || !g.n) return null;
+    return { key, kind: 'market', text: cut(x.title), link: '/m/' + x.id, count: g.n, at: g.at, reasons: reasonsOf(g.rs).map(r => cut(r, 80)),
+             pending: seen(g.n), done: doneAt(g.n), hidden: x.off !== '',
+             set: h => db.prepare('UPDATE listings SET off=? WHERE id=?').run(h ? '신고로 내림' : '', x.id) };
+  }
+  const K = m[1] === 'bc' ? 'c' : m[1] === 'be' ? 'e' : 'p';
+  const g = db.prepare(`SELECT COUNT(DISTINCT ip) n, GROUP_CONCAT(reason, '|') rs FROM board_reports WHERE kind=? AND ref=?`).get(K, id);
+  if (!g.n) return null;
+  const base = { key, count: g.n, reasons: reasonsOf(g.rs), pending: seen(g.n), done: doneAt(g.n) };
+  if (K === 'p') {
+    const x = db.prepare('SELECT id, title, body, hidden, created, atag, iptag FROM board_posts WHERE id=?').get(id);
+    if (!x) return null;
+    return { ...base, kind: 'post', text: cut(x.title + (x.body ? ' — ' + x.body : '')), link: '/board/' + x.id, at: x.created, hidden: !!x.hidden,
+             atag: x.atag, iptag: x.iptag, set: h => db.prepare('UPDATE board_posts SET hidden=? WHERE id=?').run(h ? 1 : 0, x.id) };
+  }
+  if (K === 'c') {
+    const x = db.prepare('SELECT id, post, body, hidden, created, atag, iptag FROM board_comments WHERE id=?').get(id);
+    if (!x) return null;
+    return { ...base, kind: 'comment', text: cut(x.body), link: '/board/' + x.post, at: x.created, hidden: !!x.hidden, atag: x.atag, iptag: x.iptag,
+             set: h => { db.prepare('UPDATE board_comments SET hidden=? WHERE id=?').run(h ? 1 : 0, x.id);
+                         db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(x.post, x.post); } };
+  }
+  const x = db.prepare('SELECT e.id, e.note, e.body, e.status, e.created, e.atag, e.ip, c.id AS ch, c.book FROM edits e JOIN chapters c ON c.id = e.chapter WHERE e.id=?').get(id);
+  if (!x) return null;
+  /* 집필 제안은 숨김 칸이 없다 — 신고 셋이면 «돌려보냄»(closed) 으로 닫히던 것과 같은 칸을 쓴다. 합쳐진 것은 못 숨긴다 */
+  return { ...base, kind: 'edit', text: cut((x.note ? x.note + ' — ' : '') + x.body), link: '/w/' + x.book + '/' + x.ch, at: x.created,
+           hidden: x.status === 'closed' ? true : x.status === 'pending' ? false : null, atag: x.atag, iptag: x.ip,
+           set: h => db.prepare(h ? "UPDATE edits SET status='closed', decided=datetime('now') WHERE id=? AND status='pending'"
+                                  : "UPDATE edits SET status='pending', decided='' WHERE id=? AND status='closed'").run(x.id) };
+}
+/** 신고함 목록. 기다리는 것이 위, 그 안에서는 최근 순. 표시(atag·iptag)는 안 내보낸다 */
+function adminReports(db, as = {}) {
+  needSite(as);
+  const keys = [
+    ...db.prepare('SELECT MAX(id) id FROM reports GROUP BY event, kind, ref ORDER BY MAX(id) DESC LIMIT 200').all().map(r => 'r:' + r.id),
+    ...db.prepare('SELECT kind, ref FROM board_reports GROUP BY kind, ref ORDER BY ref DESC LIMIT 200').all().map(r => (r.kind === 'c' ? 'bc:' : r.kind === 'e' ? 'be:' : 'bp:') + r.ref),
+    ...db.prepare('SELECT listing FROM market_reports GROUP BY listing ORDER BY MAX(id) DESC LIMIT 100').all().map(r => 'mk:' + r.listing),
+  ];
+  return keys.map(k => reportTarget(db, k)).filter(Boolean)
+    .map(t => ({ key: t.key, kind: t.kind, label: REPORT_LABEL[t.kind] || '기타', text: t.text, link: t.link || '', event: t.event || '',
+                 count: t.count, reasons: t.reasons, at: t.at || '', pending: !!t.pending, hidden: t.hidden === undefined ? null : t.hidden,
+                 canBan: !!(t.atag || t.iptag) }))
+    .sort((a, b) => (b.pending - a.pending) || String(b.at).localeCompare(String(a.at)))
+    .slice(0, 200);
+}
+/** 신고함 처리 — hide 숨기기 · restore 되살리기 · done 봤음. 숨기기·되살리기도 «봤음» 을 같이 남긴다 */
+function reportAct(db, b, as = {}) {
+  needSite(as);
+  const act = String(b.act || '');
+  if (!['hide', 'restore', 'done'].includes(act)) throw new HttpError(400, '모르는 처리입니다');
+  const t = reportTarget(db, b.key);
+  if (!t) throw new HttpError(404, '없는 신고입니다');
+  if (act !== 'done') {
+    if (t.hidden === null || !t.set) throw new HttpError(409, '여기서 숨길 수 없는 신고입니다 — 그 대회 운영 화면에서 고쳐 주세요');
+    t.set(act === 'hide');
+  }
+  t.done();
+  const after = reportTarget(db, b.key);
+  return { key: t.key, hidden: after ? after.hidden : null, pending: after ? after.pending : false };
+}
+
+/* ── 쓰기 막기 — 신고된 글(또는 문제·풀이)에서 고른다. 표시는 그 글이 적어 둔 것을 서버가 꺼낸다 — 화면은 표시를 모른다 */
+function banSource(db, key) {
+  const m = /^(bp|bc|be|rq|sol):([a-z0-9]+)$/.exec(String(key || ''));
+  if (!m) throw new HttpError(400, '어느 글에서 막을지 골라 주세요');
+  const q = {
+    bp: ['SELECT atag, iptag FROM board_posts WHERE id=?', '게시판 글'],
+    bc: ['SELECT atag, iptag FROM board_comments WHERE id=?', '게시판 댓글'],
+    be: ['SELECT atag, ip AS iptag FROM edits WHERE id=?', '집필 제안'],
+    rq: ['SELECT atag, iptag FROM requests WHERE id=?', '풀어 달라는 문제'],
+    sol: ['SELECT atag, iptag FROM solutions WHERE id=?', '풀이'],
+  }[m[1]];
+  const r = db.prepare(q[0]).get(m[1] === 'rq' ? m[2] : +m[2]);
+  if (!r) throw new HttpError(404, '없는 글입니다');
+  return { label: `${q[1]} ${m[1] === 'rq' ? m[2] : '#' + m[2]}`, atag: r.atag || '', iptag: r.iptag || '' };
+}
+function banWriter(db, b, as = {}) {
+  needSite(as);
+  const days = BAN_DAYS.includes(+b.days) ? +b.days : 0;
+  if (!days) throw new HttpError(400, '7일이나 30일 중에 골라 주세요');
+  const src = banSource(db, b.from);
+  const tags = [];
+  if (src.atag) tags.push(['a:' + src.atag, 'author']);
+  if (b.ip === true && src.iptag) tags.push(['i:' + src.iptag, 'ip']);
+  if (!tags.length) throw new HttpError(409, src.iptag ? '글쓴이 표시가 없는 글입니다 — «같은 인터넷도 막기» 를 켜야 막을 수 있습니다'
+                                                       : '누가 썼는지 표시가 없는 예전 글이라 막을 수 없습니다');
+  const reason = plain(b.reason, 100) || '운영 규칙 위반';
+  const up = db.prepare(`INSERT INTO write_bans(tag,kind,src,reason,until) VALUES(?,?,?,?,datetime('now', ?))
+    ON CONFLICT(tag) DO UPDATE SET kind=excluded.kind, src=excluded.src, reason=excluded.reason, until=excluded.until, created=datetime('now')`);
+  for (const [tag, kind] of tags) up.run(tag, kind, src.label, reason, `+${days} days`);
+  return { banned: tags.length, days, until: db.prepare('SELECT until FROM write_bans WHERE tag=?').get(tags[0][0]).until };
+}
+function liftBan(db, tag, as = {}) {
+  needSite(as);
+  if (!db.prepare('DELETE FROM write_bans WHERE tag=?').run(String(tag || '')).changes) throw new HttpError(404, '없는 막기입니다');
+  return { ok: true };
+}
+/* 목록 — 지금 막힌 것이 위. 끝난 지 30일이 지난 것은 안 싣는다.
+   ipStable: IP 소금이 환경변수(IP_SALT)로 고정돼 있나. 아니면 서버를 다시 켤 때 IP 막기가 풀린다(글쓴이 막기는 남는다) */
+function listBans(db, as = {}) {
+  needSite(as);
+  return { ipStable: !!process.env.IP_SALT,
+           rows: db.prepare(`SELECT tag, kind, src, reason, until, created, (until > datetime('now')) AS active FROM write_bans
+                             WHERE until > datetime('now', '-30 days') ORDER BY active DESC, created DESC LIMIT 200`).all()
+             .map(r => ({ ...r, active: !!r.active })) };
+}
+/** /app 운영 카드와 /admin 머리의 숫자 — 문제 상태별 수, 기다리는 신고, 지금 막힌 수 */
+function adminSummary(db, as = {}) {
+  needSite(as);
+  const problems = Object.fromEntries(REQ_STATUS.map(s => [s, 0]));
+  for (const r of db.prepare('SELECT status, COUNT(*) c FROM requests GROUP BY status').all()) if (r.status in problems) problems[r.status] = r.c;
+  return { problems, reports: adminReports(db, as).filter(x => x.pending).length,
+           bans: db.prepare("SELECT COUNT(*) c FROM write_bans WHERE until > datetime('now')").get().c };
+}
+
+/* 문제 은행 공개 목록. 고정한 것이 맨 위, 풀린 것은 맨 뒤, 그 사이는 올라온 순. 숨긴 풀이는 세지 않는다 */
 function openRequests(db, all = false) {
-  return db.prepare("SELECT * FROM requests WHERE event='' AND status='open' ORDER BY created, id LIMIT 200").all()
+  return db.prepare(`SELECT * FROM requests WHERE event='' AND status IN (${REQ_PUBLIC_SQL})
+                     ORDER BY pinned DESC, (status = 'solved'), created, id LIMIT 200`).all()
     .filter(r => all || !publicHide(r))
     .slice(0, 50)
-    .map(r => ({ ...publicRequest(r), solutions: db.prepare('SELECT COUNT(*) c FROM solutions WHERE request=?').get(r.id).c }));
+    .map(r => ({ ...publicRequest(r), solutions: db.prepare('SELECT COUNT(*) c FROM solutions WHERE request=? AND hidden=0').get(r.id).c }));
 }
 /* 대회 없이 푼 결과. 백준처럼 «문제 → 풀이» 만 있고 점수는 없다 — 판정은 낸 사람이 «이거면 됩니다» 로. */
-function addSolution(db, request, b) {
+function addSolution(db, request, b, who = {}) {
+  banGuard(db, who.voter, who.ip);
   const r = db.prepare('SELECT id, status FROM requests WHERE id=?').get(request);
   if (!r) throw new HttpError(404, '없는 문제입니다');
-  if (r.status !== 'open') throw new HttpError(409, '닫힌 문제입니다');
+  if (r.status === 'solved') throw new HttpError(409, '이미 풀린 문제입니다');
+  if (r.status !== 'open' && r.status !== 'doing') throw new HttpError(409, '닫힌 문제입니다');
   const name = plain(b.name, 40), url = String(b.url || '').trim(), note = plain(b.note, 200), contact = plain(b.contact, 80);
   if (!name) throw new HttpError(400, '이름을 넣어 주세요');
   if (!/^https?:\/\//i.test(url) || url.length > 500) throw new HttpError(400, 'https:// 로 시작하는 주소를 넣어 주세요');
   if (db.prepare('SELECT COUNT(*) c FROM solutions WHERE request=?').get(request).c >= 50) throw new HttpError(409, '풀이가 가득 찼습니다');
-  const id = Number(db.prepare('INSERT INTO solutions(request,name,url,note,contact) VALUES(?,?,?,?,?)').run(request, name, url, note, contact).lastInsertRowid);
+  const id = Number(db.prepare('INSERT INTO solutions(request,name,url,note,contact,atag,iptag) VALUES(?,?,?,?,?,?,?)').run(request, name, url, note, contact, authorTag(who.voter), String(who.ip || '')).lastInsertRowid);
   return { id, request, name, url, note };
 }
 function canReceive(db, id, rkey) {
@@ -6160,7 +6544,7 @@ function requestView(db, id) {
   const vd = {}; for (const v of db.prepare('SELECT team, ok, note, at FROM verdicts WHERE request=?').all(id)) vd[v.team] = v;
   return {
     request: publicRequest(r), followup: r.followup, followupAt: r.followup_at,
-    solutions: db.prepare('SELECT id,name,url,note,contact,at FROM solutions WHERE request=? ORDER BY id').all(id),
+    solutions: db.prepare('SELECT id,name,url,note,contact,at FROM solutions WHERE request=? AND hidden=0 ORDER BY id').all(id),
     event: e ? { id: e.id, title: e.title, starts: e.starts, ends: e.ends, due: e.due, closed: isClosed } : null,
     teams: teams.map(t => ({
       id: t.id, name: t.name, note: t.note || '',
@@ -6461,15 +6845,38 @@ function bookCreate(db, x) {
 function bookOf(db, id, ekey = '') {
   const b = db.prepare('SELECT * FROM books WHERE id=?').get(String(id));
   if (!b) throw new HttpError(404, '없는 책입니다');
-  return { b, editor: !!ekey && String(ekey) === b.ekey };
+  const owner = !!ekey && String(ekey) === b.ekey;
+  const co = !owner && /^[0-9a-f]{20}$/.test(String(ekey || '')) ? db.prepare('SELECT id, name FROM book_editors WHERE book=? AND ekey=?').get(b.id, String(ekey)) : null;
+  return { b, editor: owner || !!co, owner, who: owner ? b.editor : co ? co.name : '' };
 }
 function needEditor(db, id, ekey) { const r = bookOf(db, id, ekey); if (!r.editor) throw new HttpError(403, '편집자만 할 수 있습니다'); return r.b; }
+const BOOK_CO_MAX = 5;
+function bookEditorAdd(db, id, ekey, x) {
+  const r = bookOf(db, id, ekey);
+  if (!r.owner) throw new HttpError(403, '처음 편집자만 공동 편집자를 초대합니다');
+  const name = plain(x && x.name, 30);
+  if (!name) throw new HttpError(400, '초대할 사람 이름을 적어 주세요');
+  if (hasSlur(name)) throw new HttpError(400, SLUR_MSG);
+  if (db.prepare('SELECT COUNT(*) c FROM book_editors WHERE book=?').get(r.b.id).c >= BOOK_CO_MAX) throw new HttpError(429, `공동 편집자는 ${BOOK_CO_MAX}명까지입니다`);
+  const key = crypto.randomBytes(10).toString('hex');
+  const q = db.prepare('INSERT INTO book_editors(book,name,ekey) VALUES(?,?,?)').run(r.b.id, name, key);
+  return { id: Number(q.lastInsertRowid), name, ekey: key };
+}
+function bookEditorDel(db, id, ekey, eid) {
+  const r = bookOf(db, id, ekey);
+  if (!r.owner) throw new HttpError(403, '처음 편집자만 공동 편집자를 뺍니다');
+  const q = db.prepare('DELETE FROM book_editors WHERE id=? AND book=?').run(+eid, r.b.id);
+  if (!q.changes) throw new HttpError(404, '없는 공동 편집자입니다');
+  return { ok: true };
+}
 function bookView(db, id, ekey = '') {
-  const { b, editor } = bookOf(db, id, ekey);
+  const { b, editor, owner, who } = bookOf(db, id, ekey);
   const chapters = db.prepare(`SELECT c.id, c.ord, c.title, c.ver, c.updated, length(c.body) AS chars,
       (SELECT COUNT(*) FROM edits e WHERE e.chapter = c.id AND e.status = 'pending') AS pending FROM chapters c WHERE c.book=? ORDER BY c.ord, c.id`).all(b.id);
   const people = db.prepare(`SELECT author, COUNT(*) n FROM chapter_vers v JOIN chapters c ON c.id = v.chapter WHERE c.book=? AND author<>'' GROUP BY author ORDER BY n DESC`).all(b.id);
-  return { book: { id: b.id, title: b.title, about: b.about, editor: b.editor, created: b.created }, chapters, people, isEditor: editor };
+  const co = db.prepare('SELECT id, name, created FROM book_editors WHERE book=? ORDER BY id').all(b.id);
+  return { book: { id: b.id, title: b.title, about: b.about, editor: b.editor, created: b.created, coEditors: co.map(e => e.name) }, chapters, people,
+    isEditor: editor, isOwner: owner, me: editor ? who : '', editors: owner ? co : undefined };
 }
 function chapterOf(db, cid) {
   const c = db.prepare('SELECT * FROM chapters WHERE id=?').get(+cid);
@@ -6495,6 +6902,7 @@ function chapterAdd(db, bookId, ekey, x) {
 /* 제안 — 어느 판 위에서 썼는지(base)를 같이 받는다. 지금 판과 똑같은 글은 제안이 아니다 */
 const EDIT_PER_PERSON = 3;   // 한 사람(IP 해시)이 한 장에 걸어 둘 수 있는 기다리는 제안
 function editPropose(db, cid, x, ip = '', voter = '') {
+  banGuard(db, voter, ip);
   const c = chapterOf(db, cid);
   const body = bookText(x.body, BOOK_BODY_MAX);
   if (!body.trim()) throw new HttpError(400, '고쳐 쓴 글이 비었습니다');
@@ -6535,20 +6943,21 @@ function chapterSave(db, cid, ekey, x) {
   const c = chapterOf(db, cid); needEditor(db, c.book, ekey);
   if (x.title !== undefined) db.prepare('UPDATE chapters SET title=? WHERE id=?').run(plain(x.title, 60) || c.title, c.id);
   if (x.body === undefined) return { ver: c.ver };
-  const e = editPropose(db, cid, { body: x.body, base: x.base, note: x.note || '편집자 직접 고침', author: bookOf(db, c.book).b.editor });
+  const e = editPropose(db, cid, { body: x.body, base: x.base, note: x.note || '편집자 직접 고침', author: bookOf(db, c.book, ekey).who });
   return editMerge(db, e.id, ekey);
 }
 /* 되돌리기 — 편집자가 판 기록에서 고른 판의 글을 «새 판» 으로 다시 올린다. 지우지 않는다(되돌린 것도 또 되돌릴 수 있게).
    0판은 «처음 빈 장» 이다. 지금 글과 같으면 판을 만들지 않는다 */
 function chapterRevert(db, cid, ekey, ver) {
-  const c = chapterOf(db, cid), b = needEditor(db, c.book, ekey);
+  const c = chapterOf(db, cid); needEditor(db, c.book, ekey);
+  const who = bookOf(db, c.book, ekey).who;
   const v = parseInt(ver, 10);
   if (!(v >= 0 && v < c.ver)) throw new HttpError(400, '되돌릴 판을 골라 주세요');
   const body = v === 0 ? '' : ((db.prepare('SELECT body FROM chapter_vers WHERE chapter=? AND ver=?').get(c.id, v) || {}).body);
   if (body === undefined) throw new HttpError(404, '없는 판입니다');
   if (body === c.body) throw new HttpError(400, '지금 글과 같습니다');
   const nv = c.ver + 1;
-  db.prepare('INSERT INTO chapter_vers(chapter,ver,body,author,note) VALUES(?,?,?,?,?)').run(c.id, nv, body, b.editor, `${v}판으로 되돌림`);
+  db.prepare('INSERT INTO chapter_vers(chapter,ver,body,author,note) VALUES(?,?,?,?,?)').run(c.id, nv, body, who, `${v}판으로 되돌림`);
   db.prepare("UPDATE chapters SET body=?, ver=?, updated=datetime('now') WHERE id=?").run(body, nv, c.id);
   return { ver: nv };
 }
@@ -6579,9 +6988,38 @@ function boardClean(title, body) {
   const t = plain(title, 80), b = String(body == null || typeof body === 'object' ? '' : body).replace(/[<>]/g, '').replace(/\r/g, '').replace(/\n{4,}/g, '\n\n\n').trim().slice(0, 3000);
   return { t, b };
 }
-const authorTag = v => /^[0-9a-z]{12,40}$/i.test(String(v || '')) ? crypto.createHash('sha256').update('a|' + IP_SALT + '|' + v).digest('hex').slice(0, 12) : '';
+/* 글쓴이 표시(authorTag)의 소금. 표(voter)는 브라우저가 만든 난수라 사람 정보가 아니다 — 그래서 이 소금은 DB 에 적어 두고
+   켤 때마다 같은 것을 쓴다(pinTagSalt, main 에서 한 번). 안 그러면 배포 한 번에 «내 글» 세기와 쓰기 막기가 다 풀린다.
+   IP 소금은 다르다: DB 와 같이 새면 IPv4 를 다 넣어 보는 것으로 IP 가 드러나므로 DB 에 안 적는다(IP_SALT 환경변수로만 고정).
+   IP_SALT 를 넣어 둔 서버는 예전처럼 그 값 하나를 둘 다에 쓴다 — 이미 적힌 표시가 그대로 맞는다 */
+let TAG_SALT = process.env.IP_SALT || crypto.randomBytes(16).toString('hex');
+function pinTagSalt(db) {
+  if (process.env.IP_SALT) return TAG_SALT;
+  let r = db.prepare("SELECT v FROM meta WHERE k='tag_salt'").get();
+  if (!r) { r = { v: crypto.randomBytes(16).toString('hex') }; db.prepare("INSERT INTO meta(k,v) VALUES('tag_salt',?)").run(r.v); }
+  return (TAG_SALT = r.v);
+}
+const authorTag = v => /^[0-9a-z]{12,40}$/i.test(String(v || '')) ? crypto.createHash('sha256').update('a|' + TAG_SALT + '|' + v).digest('hex').slice(0, 12) : '';
 const SLUR_MSG = '욕설·비방은 올릴 수 없습니다';
-function boardPost(db, x, voter = '') {
+/* ── 쓰기 막기 — 사이트 운영자가 신고된 글에서 «7일·30일 쓰기 막기». 이용 규칙의 «쓰기를 제한할 수 있습니다» 가 이것이다.
+   막는 표시는 둘: 글쓴이 표시(a:)와 IP 표시(i:). IP 는 와이파이를 같이 쓰는 남까지 막으므로 운영자가 따로 켤 때만 넣는다.
+   막힌 사람의 글은 지우지 않는다 — 새로 쓰는 것만 막는다. 기한이 지나면 저절로 풀린다(지울 필요 없음) */
+const BAN_MSG = '운영 규칙 위반으로 쓰기가 잠시 막혔습니다 — 문의 hi@mandeun.com';
+const BAN_DAYS = [7, 30];
+function banTags(voter, ip) {
+  const t = [], a = authorTag(voter);
+  if (a) t.push('a:' + a);
+  if (ip) t.push('i:' + String(ip));
+  return t;
+}
+/** 쓰는 길 맨 앞에서 부른다. ip 는 이미 ipTag 를 거친 값이다(날 IP 를 받지 않는다) */
+function banGuard(db, voter = '', ip = '') {
+  const tags = banTags(voter, ip);
+  if (tags.length && db.prepare(`SELECT 1 FROM write_bans WHERE tag IN (${tags.map(() => '?').join(',')}) AND until > datetime('now') LIMIT 1`).get(...tags))
+    throw new HttpError(403, BAN_MSG);
+}
+function boardPost(db, x, voter = '', ip = '') {
+  banGuard(db, voter, ip);
   const topic = BOARD_TOPIC_KEYS.includes(x.topic) ? x.topic : '';
   if (!topic) throw new HttpError(400, '주제를 골라 주세요');
   const { t, b } = boardClean(x.title, x.body);
@@ -6590,7 +7028,7 @@ function boardPost(db, x, voter = '') {
   if (hasSlur(t) || hasSlur(b)) throw new HttpError(400, SLUR_MSG);
   if (boardContact(t) || boardContact(b)) throw new HttpError(400, '연락처는 공개 글에 적지 않습니다 — 팀원은 대회 «같이 할 사람 추천» 의 서로 좋아요로 이어집니다');
   const bkey = crypto.randomBytes(8).toString('hex');
-  const r = db.prepare('INSERT INTO board_posts(topic,title,body,nick,bkey,atag) VALUES(?,?,?,?,?,?)').run(topic, t, b, boardNick(x.nick), bkey, authorTag(voter));
+  const r = db.prepare('INSERT INTO board_posts(topic,title,body,nick,bkey,atag,iptag) VALUES(?,?,?,?,?,?,?)').run(topic, t, b, boardNick(x.nick), bkey, authorTag(voter), String(ip || ''));
   return { id: Number(r.lastInsertRowid), bkey };
 }
 function boardList(db, { topic = '', sort = 'hot', page = 0, now = Date.now() } = {}) {
@@ -6614,7 +7052,8 @@ function boardView(db, id, voter = '') {
   const comments = db.prepare('SELECT id, body, nick, atag, created FROM board_comments WHERE post=? AND hidden=0 ORDER BY id').all(post.id);
   return { post, comments, topics: BOARD_TOPICS };
 }
-function boardComment(db, id, x, voter = '') {
+function boardComment(db, id, x, voter = '', ip = '') {
+  banGuard(db, voter, ip);
   const p = db.prepare('SELECT id FROM board_posts WHERE id=? AND hidden=0').get(+id);
   if (!p) throw new HttpError(404, '없거나 내려간 글입니다');
   const b = String(x.body == null || typeof x.body === 'object' ? '' : x.body).replace(/[<>]/g, '').replace(/\r/g, '').replace(/\n{4,}/g, '\n\n\n').trim().slice(0, 1000);
@@ -6622,7 +7061,7 @@ function boardComment(db, id, x, voter = '') {
   if (hasSlur(b)) throw new HttpError(400, SLUR_MSG);
   if (boardContact(b)) throw new HttpError(400, '연락처는 공개 댓글에 적지 않습니다');
   const ckey = crypto.randomBytes(8).toString('hex');
-  const r = db.prepare('INSERT INTO board_comments(post,body,nick,ckey,atag) VALUES(?,?,?,?,?)').run(p.id, b, boardNick(x.nick), ckey, authorTag(voter));
+  const r = db.prepare('INSERT INTO board_comments(post,body,nick,ckey,atag,iptag) VALUES(?,?,?,?,?,?)').run(p.id, b, boardNick(x.nick), ckey, authorTag(voter), String(ip || ''));
   db.prepare('UPDATE board_posts SET comments=(SELECT COUNT(*) FROM board_comments WHERE post=? AND hidden=0) WHERE id=?').run(p.id, p.id);
   return { id: Number(r.lastInsertRowid), ckey };
 }
@@ -6764,7 +7203,7 @@ function meStats(db, b, owner, voter) {
   for (const k of list('comments')) { const r = db.prepare("SELECT id, created FROM board_comments WHERE id=? AND ckey=? AND ckey<>'' AND hidden=0").get(+k.id || 0, String(k.key || '')); if (r) comments.set(r.id, r); }
   const votes = /^[0-9a-z]{12,40}$/i.test(String(voter || '')) ? db.prepare('SELECT COUNT(*) c FROM board_votes WHERE voter=?').get(String(voter)).c : 0;
   const edits = tag ? db.prepare('SELECT status, created FROM edits WHERE atag=?').all(tag) : [];
-  const books = list('books', 50).map(k => db.prepare("SELECT id, created FROM books WHERE id=? AND ekey=? AND ekey<>''").get(String(k.id || ''), String(k.key || ''))).filter(Boolean);
+  const books = list('books', 50).map(k => db.prepare("SELECT id, created FROM books b WHERE id=? AND ?<>'' AND (ekey=? OR EXISTS(SELECT 1 FROM book_editors e WHERE e.book=b.id AND e.ekey=?))").get(String(k.id || ''), String(k.key || ''), String(k.key || ''), String(k.key || ''))).filter(Boolean);
   let giver = 0, asksOk = 0;
   const g = b.giver && typeof b.giver === 'object' ? db.prepare("SELECT id, created FROM givers WHERE id=? AND gkey=? AND gkey<>'' AND hidden=0").get(+b.giver.id || 0, String(b.giver.key || '')) : null;
   if (g) { giver = 1; day(g.created); asksOk = db.prepare("SELECT COUNT(*) c FROM asks WHERE giver=? AND status='ok'").get(g.id).c; }
@@ -7438,7 +7877,18 @@ const hueOf = (hex) => {
   return Math.round(((h * 60) + 360) % 360);
 };
 
-const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg',
+/* 힉스필드 그림(작은 webp 원본 주소). /art/<이름>.webp 가 이 표만 본다 */
+const HF_CDN = 'https://d8j0ntlcm91z4.cloudfront.net/user_3ERvwmumZiLA4IhDFgAw5PMHUW7/';
+const ART = {
+  hero: HF_CDN + 'hf_20261002_173019_d7a89225-acbf-4872-b42a-24b4a12e1a8a_min.webp',    // 첫 화면 — 카페 책상 위 노랑이
+  me: HF_CDN + 'hf_20261002_173020_fb9dc8fe-af45-4ae0-be52-4d2f75d8fdec_min.webp',      // 나 — 트로피
+  board: HF_CDN + 'hf_20261002_173020_aa109475-961d-4f1c-a45f-cd515afe20d0_min.webp',   // 게시판 — 수다 떠는 둘
+  write: HF_CDN + 'hf_20261002_173020_600d8dbc-0ad5-4604-bd82-80214173d0dd_min.webp',   // 공동 집필 — 책 위
+  news: HF_CDN + 'hf_20261002_173022_77056f80-6a43-4da1-80a7-2c2137ae5240_min.webp',    // 소식 — 돋보기
+  club: HF_CDN + 'hf_20261002_173022_3fcdf796-6462-4d9a-9e96-bc5323e494f3_min.webp',    // ON 클럽 — 옥상 밤
+  tools: HF_CDN + 'hf_20261002_160648_a852d09d-d35a-4262-9016-f2b2067af247_min.webp',   // 삽 공구함
+};
+const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 'zh.html', 'menu.js', 'qr.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'logo.svg',
   /* 첫 화면 표제 사진과 링크 미리보기 그림. 빠져 있어서 둘 다 404 였다 — CSS 는 있는데 사진만 안 나왔다 */
   'hero.jpg', 'og.png',
   /* 노랑이. 평면 SVG 라 셋 합쳐 5KB 가 안 된다 — 그림 파일로 두면 색을 고칠 때마다 다시 만들어야 한다 */
@@ -7449,7 +7899,9 @@ const STATIC_OK = new Set(['home.html', 'hack-on.html', 'news.html', 'en.html', 
   'tools.html',
   'brand.html',
   /* 계정 삭제 안내 — 구글 플레이가 앱 밖 주소를 요구한다(/delete-account) */
-  'delete-account.html']);
+  'delete-account.html',
+  /* 안드로이드 앱(TWA)·설치형 웹앱 — PNG 아이콘(일반·maskable)과 끊겼을 때 화면. store/icons.py 가 아이콘을 만든다 */
+  'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'offline.html']);
 /* 보안 헤더(감사 11). 화면이 inline script/style 을 쓰므로 그건 허용하고, 밖으로 나가는 연결·프레임은 https 만 */
 /* ── 토스 미니앱에서 오는 요청만 교차 출처를 허용한다.
    앱인토스 문서: «실제 서비스 환경 https://<appName>.apps.tossmini.com ·
@@ -7481,7 +7933,7 @@ const SEC_HEADERS = {
    아래 selftest 가 STATIC_OK 의 확장자를 전부 이 표와 대조한다. */
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg',
-  '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
+  '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.webp': 'image/webp' };
 
 function body(req) {
   return new Promise((res, rej) => {
@@ -7513,6 +7965,13 @@ function routes(db) {
       if (req.method === 'OPTIONS' && p.startsWith('/api/')) {
         res.writeHead(Object.keys(res.corsHeaders).length ? 204 : 403, res.corsHeaders);
         return res.end();
+      }
+      /* 안드로이드 앱 링크 확인 파일. www 로 와도 넘기지 않고 그 자리에서 낸다 — 구글 검증기는 리다이렉트를 따라가지 않는다 */
+      if (p === '/.well-known/assetlinks.json' && req.method === 'GET') {
+        const al = assetLinks(process.env.TWA_PACKAGE, process.env.TWA_SHA256);
+        if (!al) throw new HttpError(404, '없습니다');
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600', ...SEC_HEADERS });
+        return res.end(JSON.stringify(al));
       }
       const bare = wwwTo(req.headers.host);
       if (bare) { res.writeHead(301, { location: bare + req.url }); return res.end(); }
@@ -7626,7 +8085,7 @@ function routes(db) {
           /* «이 문제로 내 대회 열기» — 열린 의뢰(어느 대회에도 안 붙은 것)를 새 대회의 첫 주제로 붙인다.
              의뢰자가 자기 문제로 여는 길이자, 남의 문제를 보고 여는 길. 이미 붙은 의뢰는 조용히 건너뛴다. */
           if (b.req) {
-            const rq = db.prepare("SELECT id FROM requests WHERE id=? AND event='' AND status='open'").get(String(b.req));
+            const rq = db.prepare("SELECT id FROM requests WHERE id=? AND event='' AND status IN ('open','doing')").get(String(b.req));   // 내린·닫힌·풀린 문제로는 안 연다
             if (rq) { db.prepare('UPDATE requests SET event=? WHERE id=?').run(made.id, rq.id); made.req = rq.id; }
           }
           if (src) {
@@ -8653,7 +9112,7 @@ function routes(db) {
         }
         /* ── 받는 사람(후원자·의뢰자) ── */
         if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/solutions$/)) && req.method === 'POST')
-          return json(res, 201, addSolution(db, m[1], await body(req)));   // 문제 은행 — 대회 없이 «풀었습니다»
+          return json(res, 201, addSolution(db, m[1], await body(req), { voter: String(req.headers['x-voter'] || ''), ip: ipTag(clientIp(req)) }));   // 문제 은행 — 대회 없이 «풀었습니다»
         /* 줄은 이미 «합쳐지고 점수 매겨지고 종류가 붙은» 채로 나간다 — 화면은 그리기만 한다(server.js 의 newsEnrich).
            providers 도 같이 싣는다 — 제보 칸의 로그인 단추를 그리는 데 쓴다. 소식 화면이 /api/auth 를 또 부르지 않게.
            kinds·pick 도 함께 내려보낸다. 묶음 이름과 «꼭 볼 것» 개수 규칙이 화면에 또 적히면 둘이 어긋난다. */
@@ -8673,7 +9132,7 @@ function routes(db) {
                                   end: seasonEnd(seasonNow()), left: seasonLeft(seasonNow()) });
         }
         if (p === '/api/requests' && req.method === 'POST')
-          return json(res, 201, addRequest(db, await body(req)));          // 누구나 — 열쇠는 여기서 딱 한 번
+          return json(res, 201, addRequest(db, await body(req), { voter: String(req.headers['x-voter'] || ''), ip: ipTag(clientIp(req)) }));   // 누구나 — 열쇠는 여기서 딱 한 번
         if (p === '/api/benefits' && req.method === 'GET') {
           const b = await benefits();
           const t = String(u.searchParams.get('type') || '');
@@ -8687,7 +9146,7 @@ function routes(db) {
         if ((m = p.match(/^\/api\/events\/([a-z0-9]+)\/pick$/)) && req.method === 'POST') {
           needAdmin(db, m[1], key, owner, siteAdmin);                                 // 운영자가 후보를 이 대회 주제로 붙인다/뗀다
           const b = await body(req);
-          const r = db.prepare('SELECT id, event FROM requests WHERE id=?').get(String(b.request || ''));
+          const r = db.prepare('SELECT id, event, status FROM requests WHERE id=?').get(String(b.request || ''));
           if (!r) throw new HttpError(404, '없는 요청입니다');
           if (b.on === false) {
             if (r.event !== m[1]) throw new HttpError(403, '이 대회의 주제가 아닙니다');
@@ -8695,6 +9154,8 @@ function routes(db) {
             db.prepare("UPDATE teams SET request='' WHERE event=? AND request=?").run(m[1], r.id);
             return json(res, 200, { picked: false });
           }
+          /* 사이트 운영자가 내렸거나 닫은 문제는 대회 주제로 못 붙인다 — 붙이면 공개 대회 페이지에 다시 걸린다 */
+          if (r.status === 'hidden' || r.status === 'closed') throw new HttpError(409, '내렸거나 닫힌 문제는 대회 주제로 붙일 수 없습니다');
           if (r.event && r.event !== m[1]) throw new HttpError(409, '이미 다른 대회에 붙은 요청입니다');
           if (db.prepare('SELECT COUNT(*) c FROM requests WHERE event=?').get(m[1]).c >= 5)
             throw new HttpError(409, '한 대회에 주제는 다섯 개까지입니다');   // 설계 §7 상한
@@ -8705,11 +9166,21 @@ function routes(db) {
            그건 «내 의뢰 하나» 를 여는 열쇠라, 그걸로 남의 의뢰를 지우게 하면 안 된다. */
         if (p === '/api/admin/requests' && req.method === 'GET') {
           if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 볼 수 있습니다');
-          return json(res, 200, db.prepare(`SELECT id, kind, name, topic, pain, now, done, contact,
-                                                   event, status, created FROM requests
-                                            ORDER BY created DESC LIMIT 300`).all()
-            .map(r => ({ ...r, hide: publicHide(r) })));
+          return json(res, 200, adminRequests(db, String(q.status || ''), { siteAdmin }));
         }
+        /* 사이트 운영(/admin) — 고정·운영자 답·풀이 숨기기·신고함·쓰기 막기. 함수가 siteAdmin 을 다시 본다(닫힌 쪽이 기본) */
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/pin$/)) && req.method === 'POST')
+          return json(res, 200, pinRequest(db, m[1], (await body(req)).on !== false, { siteAdmin }));
+        if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)\/reply$/)) && req.method === 'POST')
+          return json(res, 200, replyRequest(db, m[1], (await body(req)).text, { siteAdmin }));
+        if ((m = p.match(/^\/api\/solutions\/(\d+)\/hide$/)) && req.method === 'POST')
+          return json(res, 200, hideSolution(db, m[1], (await body(req)).on !== false, { siteAdmin }));
+        if (p === '/api/admin/summary' && req.method === 'GET') return json(res, 200, adminSummary(db, { siteAdmin }));
+        if (p === '/api/admin/reports' && req.method === 'GET') return json(res, 200, adminReports(db, { siteAdmin }));
+        if (p === '/api/admin/reports/act' && req.method === 'POST') return json(res, 200, reportAct(db, await body(req), { siteAdmin }));
+        if (p === '/api/admin/bans' && req.method === 'GET') return json(res, 200, listBans(db, { siteAdmin }));
+        if (p === '/api/admin/bans' && req.method === 'POST') return json(res, 201, banWriter(db, await body(req), { siteAdmin }));
+        if (p === '/api/admin/bans/lift' && req.method === 'POST') return json(res, 200, liftBan(db, (await body(req)).tag, { siteAdmin }));
         if ((m = p.match(/^\/api\/requests\/([a-z0-9]+)$/)) && req.method === 'PATCH') {
           if (!siteAdmin) throw new HttpError(403, '사이트 운영자만 고칠 수 있습니다');
           return json(res, 200, adminEditRequest(db, m[1], await body(req)));
@@ -8808,6 +9279,8 @@ function routes(db) {
           res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="hackon-book-${m[1]}.md"` });
           return res.end(bookMd(db, m[1]));
         }
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\/editors$/)) && req.method === 'POST') return json(res, 201, bookEditorAdd(db, m[1], req.headers['x-ekey'] || '', await body(req)));
+        if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\/editors\/(\d+)\/remove$/)) && req.method === 'POST') return json(res, 200, bookEditorDel(db, m[1], req.headers['x-ekey'] || '', m[2]));
         if ((m = p.match(/^\/api\/books\/([0-9a-f]{8})\/chapters$/)) && req.method === 'POST') return json(res, 201, chapterAdd(db, m[1], req.headers['x-ekey'] || '', await body(req)));
         if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'GET') return json(res, 200, chapterView(db, m[1], req.headers['x-ekey'] || ''));
         if ((m = p.match(/^\/api\/chapters\/(\d+)$/)) && req.method === 'POST') return json(res, 200, chapterSave(db, m[1], req.headers['x-ekey'] || '', await body(req)));
@@ -8827,7 +9300,7 @@ function routes(db) {
           if (tooMany('bp:' + clientIp(req), BOARD_LIMIT)) throw new HttpError(429, '글을 너무 빨리 올리고 있습니다. 10분 뒤에 다시 해 주세요');
           const bb = await body(req);
           if (bb.agree !== true) throw new HttpError(400, '이용 규칙에 동의해야 올릴 수 있습니다');
-          return json(res, 201, boardPost(db, bb, req.headers['x-voter'] || ''));
+          return json(res, 201, boardPost(db, bb, req.headers['x-voter'] || '', ipTag(clientIp(req))));
         }
         if ((m = p.match(/^\/api\/board\/(\d+)$/)) && req.method === 'GET')
           return json(res, 200, boardView(db, m[1], String(req.headers['x-voter'] || '')));
@@ -8835,7 +9308,7 @@ function routes(db) {
           if (tooMany('bc:' + clientIp(req), BOARD_LIMIT * 3)) throw new HttpError(429, '댓글을 너무 빨리 달고 있습니다. 잠시 뒤에 다시 해 주세요');
           const bb = await body(req);
           if (bb.agree !== true) throw new HttpError(400, '이용 규칙에 동의해야 올릴 수 있습니다');
-          return json(res, 201, boardComment(db, m[1], bb, req.headers['x-voter'] || ''));
+          return json(res, 201, boardComment(db, m[1], bb, req.headers['x-voter'] || '', ipTag(clientIp(req))));
         }
         if ((m = p.match(/^\/api\/board\/(\d+)\/up$/)) && req.method === 'POST') {
           /* 표는 브라우저가 만든다 — 새 표를 계속 만들어 추천을 부풀리는 것을 IP 상한으로 묶는다(레드팀 10/02) */
@@ -9061,10 +9534,10 @@ function routes(db) {
           }) + eventLd(ev, base)));
         }
       }
-      /* 개인정보 처리방침 — 앱스토어가 요구한다. 앱과 웹이 같은 것을 받는다 */
-      if (p === '/privacy') {
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
-        return res.end(privacyPage());
+      /* 개인정보 처리방침·이용 규칙 — 앱스토어·플레이가 요구한다. 앱과 웹이 같은 것을 받는다 */
+      if (p === '/privacy' || p === '/terms') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', ...SEC_HEADERS });
+        return res.end(p === '/privacy' ? privacyPage() : termsPage());
       }
       if (p === '/manual') {
         let md = '';
@@ -9073,6 +9546,18 @@ function routes(db) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8',
                              'cache-control': 'no-cache' });
         return res.end(manualPage(md));
+      }
+
+      /* 그림 — 힉스필드로 만든 노랑이 스티커. art/<이름>.webp 가 저장소에 있으면 그것을, 없으면 힉스필드 원본(작은 webp)으로 보낸다.
+         파일을 art/ 에 넣기만 하면 코드 수정 없이 우리 서버 것으로 바뀐다(scripts/fetch-art.sh). 이름은 ART 에 있는 것만 — 경로를 받지 않는다 */
+      if ((m = p.match(/^\/art\/([a-z]+)\.webp$/)) && ART[m[1]]) {
+        const f = path.join(ROOT, 'art', m[1] + '.webp');
+        if (fs.existsSync(f)) {
+          res.writeHead(200, { 'content-type': 'image/webp', 'cache-control': 'public, max-age=86400', ...SEC_HEADERS });
+          return fs.createReadStream(f).pipe(res);
+        }
+        res.writeHead(302, { location: ART[m[1]], 'cache-control': 'public, max-age=3600', ...SEC_HEADERS });
+        return res.end();
       }
 
       /* 주소가 셋 갈린다.
@@ -9087,7 +9572,7 @@ function routes(db) {
                || p === '/app' || p === '/give' || p.match(/^\/give\/[a-z0-9]+$/)
                || p === '/ask' || p === '/problems' || p === '/rank' || p === '/judge' || p === '/learn'
                || p === '/market' || p === '/around' || p === '/setups' || p === '/wallet' || p === '/recruit' || p === '/made' || p === '/gigs' || p === '/ref' || p === '/brief' || p === '/card' || p === '/cal' || p === '/me' || p === '/board' || p.match(/^\/board\/\d+$/) || p === '/write' || p.match(/^\/w\/[0-9a-f]{8}(\/\d+)?$/) || p === '/thanks' || p === '/partner' || p === '/launch' || p === '/biz' || p === '/crew' || p === '/cert' || p.match(/^\/m\/\d+$/) || p.match(/^\/c\/[0-9a-f]{12}$/)
-               || p === '/conditions'
+               || p === '/conditions' || p === '/admin'   // 사이트 운영 — 화면은 누구에게나 나가고, 내용은 운영자 쿠키가 있을 때만 API 가 준다
                || p.match(/^\/r\/[a-z0-9]+$/)
                || p.match(/^\/s\/[po]\d+$/);   // 준 사람의 화면
 
@@ -9105,7 +9590,7 @@ function routes(db) {
         return res.end(fs.readFileSync(path.join(ROOT, 'home.html'), 'utf8')
           .replace('<link rel="canonical"', `<meta name="naver-site-verification" content="${nv}">\n<link rel="canonical"`));
       }
-      const name = p === '/' ? 'home.html' : p === '/en' ? 'en.html' : p === '/club' ? 'club.html' : p === '/tools' ? 'tools.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
+      const name = p === '/' ? 'home.html' : p === '/en' ? 'en.html' : p === '/zh' ? 'zh.html' : p === '/club' ? 'club.html' : p === '/tools' ? 'tools.html' : p === '/news' ? 'news.html' : p === '/brand' ? 'brand.html' : p === '/delete-account' ? 'delete-account.html' : pub ? 'hack-on.html' : decodeURIComponent(rel).replace(/^\//, '');
       if (!STATIC_OK.has(name)) throw new HttpError(404, '없습니다');
       const f = path.join(ROOT, name);
       if (!f.startsWith(ROOT)) throw new HttpError(403, '안 됩니다');
@@ -9888,6 +10373,25 @@ async function selftest() {
       ok(chapterRevert(wdb, ch, bk.ekey, cur.ver).ver === cur.ver + 2 && chapterView(wdb, ch).chapter.body === cur.body, '공동 집필 — 되돌린 것도 다시 되돌릴 수 있다');
       bad = false; try { chapterRevert(wdb, ch, bk.ekey, 99); } catch (e) { bad = e.code === 400; } ok(bad, '공동 집필 — 없는 판(지금 판 이상)으로는 못 되돌린다');
       ok(!bookText('<script>alert(1)</script>본문', 100).includes('<script'), '공동 집필 — 스크립트 꼬리표는 벗긴다(화면은 글자로만 그린다)');
+      /* 공동 편집자 — 처음 편집자만 초대·빼기, 공동 편집자는 합치기·되돌리기·직접 고침(이름이 판 기록에), 빼면 바로 끝 */
+      bad = false; try { bookEditorAdd(wdb, bk.id, 'wrong', { name: '남' }); } catch (e) { bad = e.code === 403; } ok(bad, '공동 편집자 — 아무나 초대 못 한다');
+      const co = bookEditorAdd(wdb, bk.id, bk.ekey, { name: '부편집' });
+      ok(/^[0-9a-f]{20}$/.test(co.ekey) && bookView(wdb, bk.id, co.ekey).isEditor && !bookView(wdb, bk.id, co.ekey).isOwner && bookView(wdb, bk.id, co.ekey).me === '부편집', '공동 편집자 — 받은 열쇠로 편집자, 처음 편집자는 아님');
+      bad = false; try { bookEditorAdd(wdb, bk.id, co.ekey, { name: '또' }); } catch (e) { bad = e.code === 403; } ok(bad, '공동 편집자 — 공동 편집자는 남을 초대 못 한다');
+      ok(bookView(wdb, bk.id).editors === undefined && bookView(wdb, bk.id, bk.ekey).editors.length === 1 && !JSON.stringify(bookView(wdb, bk.id, bk.ekey)).includes(co.ekey), '공동 편집자 — 목록은 처음 편집자에게만, 열쇠는 안 나간다');
+      const cv = chapterView(wdb, ch).chapter.ver;
+      chapterSave(wdb, ch, co.ekey, { body: '부편집이 고친 글', base: cv });
+      ok(chapterView(wdb, ch).history[0].author === '부편집', '공동 편집자 — 직접 고친 판에 공동 편집자 이름');
+      ok(chapterRevert(wdb, ch, co.ekey, cv).ver === cv + 2 && chapterView(wdb, ch).history[0].author === '부편집', '공동 편집자 — 되돌리기도 되고 이름이 남는다');
+      const ce = editPropose(wdb, ch, { body: '누군가의 제안', base: cv + 2 }); ok(editMerge(wdb, ce.id, co.ekey).ver === cv + 3, '공동 편집자 — 제안을 합칠 수 있다');
+      bad = false; try { bookEditorDel(wdb, bk.id, co.ekey, co.id); } catch (e) { bad = e.code === 403; } ok(bad, '공동 편집자 — 스스로나 남을 못 뺀다(처음 편집자만)');
+      bookEditorDel(wdb, bk.id, bk.ekey, co.id);
+      bad = false; try { chapterSave(wdb, ch, co.ekey, { body: '빠진 뒤', base: cv + 3 }); } catch (e) { bad = e.code === 403; } ok(bad, '공동 편집자 — 빼면 그 열쇠로 바로 못 고친다');
+      for (let i = 0; i < 5; i++) bookEditorAdd(wdb, bk.id, bk.ekey, { name: '편' + i });
+      bad = false; try { bookEditorAdd(wdb, bk.id, bk.ekey, { name: '여섯째' }); } catch (e) { bad = e.code === 429; } ok(bad, '공동 편집자 — 다섯 명까지');
+      const other = bookCreate(wdb, { title: '다른 책' });
+      const oco = bookEditorAdd(wdb, other.id, other.ekey, { name: 'x' });
+      ok(bookOf(wdb, other.id, oco.ekey).editor && !bookOf(wdb, bk.id, oco.ekey).editor, '공동 편집자 — 다른 책 열쇠로는 이 책 편집자가 아니다');
     }
     /* 화면(SCREEN) 이름이 겹치면 뒤엣것이 앞엣것을 조용히 덮는다 — 게시판 board() 가 순위표 board() 를 덮어
        대회를 만들면 운영 화면 대신 게시판이 떴다(10/02 e2e 가 잡음). 파일에서 이름을 세어 막는다 */
@@ -10009,6 +10513,53 @@ async function selftest() {
       const ics2 = calIcs(db, refs, 'https://x.test');
       ok(!/\r(?!\n)/.test(ics2) && !/\r\nATTENDEE/.test(ics2) && !/\r\nX-EVIL/.test(ics2), '내 달력 — 제목의 줄바꿈으로 달력 파일에 줄을 끼워 넣지 못한다');
     }
+    /* 법·약관 — 처리방침·이용 규칙·안드로이드 앱 링크·지운 대회 사본 파일 */
+    {
+      const FP = Array.from({ length: 32 }, (_, i) => (i * 7 % 256).toString(16).padStart(2, '0').toUpperCase()).join(':');
+      const al = assetLinks('kr.hackon.app', FP.toLowerCase() + ' , ' + FP);
+      ok(Array.isArray(al) && al.length === 1 && al[0].relation[0] === 'delegate_permission/common.handle_all_urls'
+         && al[0].target.namespace === 'android_app' && al[0].target.package_name === 'kr.hackon.app'
+         && JSON.stringify(al[0].target.sha256_cert_fingerprints) === JSON.stringify([FP]),
+         '앱 링크 — 패키지·지문이 맞으면 Digital Asset Links 한 장(지문은 대문자로, 겹치면 하나)');
+      ok(assetLinks('kr.hackon.app', FP + ',' + FP.replace(/^../, 'AB')).length === 1
+         && assetLinks('kr.hackon.app', FP + ',' + FP.replace(/^../, 'AB'))[0].target.sha256_cert_fingerprints.length === 2,
+         '앱 링크 — 지문을 쉼표로 여럿 받는다');
+      const bad = [['', FP], [undefined, FP], ['hackon', FP], ['1kr.hackon', FP], ['kr..hackon', FP], ['kr.hackon-app', FP], ['kr.hackon.', FP],
+                   ['kr.hackon.app', ''], ['kr.hackon.app', undefined], ['kr.hackon.app', FP.slice(0, -3)], ['kr.hackon.app', FP + ':00'],
+                   ['kr.hackon.app', FP.replace(/:/g, '')], ['kr.hackon.app', FP.replace(/^../, 'ZZ')], ['kr.hackon.app', FP + ',nope']];
+      ok(bad.every(([p, s]) => assetLinks(p, s) === null), '앱 링크 — 패키지 이름·지문 모양이 하나라도 틀리면 안 낸다(404): '
+         + bad.filter(([p, s]) => assetLinks(p, s) !== null).map(x => JSON.stringify(x)).join(' '));
+      const pv = privacyPage(), tv = termsPage(), src = fs.readFileSync(__filename, 'utf8');
+      ok(pv.includes('hackon.kr') && !pv.includes('hackon.mandeun.com'), '처리방침 — 대표 주소 hackon.kr 로 적는다(옛 mandeun 주소 없음)');
+      ok(pv.includes('위탁') && pv.includes('국외 이전') && pv.includes('만 14세') && pv.includes(LEGAL_SINCE),
+         '처리방침 — 위탁·국외 이전·만 14세·시행일');
+      ok(/<b>개인정보 보호책임자<\/b> — HACK:ON 운영자 · <a href="mailto:hi@mandeun\.com">/.test(pv), '처리방침 — 보호책임자를 이름 대신 «HACK:ON 운영자 · hi@mandeun.com» 으로 적는다');
+      /* 글자 하나로 보면 공회전한다 — 화면 글꼴 이름(Apple SD Gothic)에도 «Apple» 이 있다. 줄·절을 잘라서 본다 */
+      const cut = (from, to = '</') => ((pv.split(from)[1] || '').split(to)[0]);
+      const loginLine = cut('<b>로그인(선택)</b>', '</li>'), p4 = cut('id="p4"', '</section>'), p5 = cut('id="p5"', '</section>');
+      ok(['카카오', '구글', '네이버', 'Apple'].every(l => loginLine.includes(l)) && Object.values(LOGINS).every(l => loginLine.includes(l.label)),
+         '처리방침 — 로그인 줄에 공급자를 빠짐없이 적는다(LOGINS 에 붙이면 여기도): ' + loginLine.slice(0, 60));
+      const reg = (String(fs.readFileSync(path.join(ROOT, 'fly.toml'), 'utf8')).match(/primary_region\s*=\s*"(\w+)"/) || [])[1];
+      ok(({ nrt: '도쿄' })[reg] && pv.includes(({ nrt: '도쿄' })[reg]) && pv.includes('Fly.io'), '처리방침 — 서버 지역이 fly.toml 의 primary_region 과 같다: ' + reg);
+      ok(!src.includes('api.resend' + '.com') || (p4.includes('Resend, Inc.') && p5.includes('Resend, Inc.(미국)')), '처리방침 — 메일을 Resend 로 보내면 위탁·국외 이전 둘 다에 적는다');
+      ok(p4.includes('Fly.io, Inc.') && p5.includes('Fly.io, Inc.(미국 회사)'), '처리방침 — 서버 회사를 위탁·국외 이전 둘 다에 적는다');
+      ok(pv.includes('href="/terms"') && pv.includes('href="/delete-account"') && pv.includes('href="/"'), '처리방침 — 이용 규칙·계정 삭제·첫 화면으로 가는 길');
+      ok(pv.includes('위쪽 «계정 삭제»') && pv.includes('«대회» 탭'), '처리방침 — 계정 삭제 자리를 화면 그대로(«대회» 탭 위쪽)');
+      ok(tv.includes('신고하면 저절로 내려갑니다') && tv.includes('만 14세') && tv.includes('24시간') && tv.includes('보여 줄 권한만') && tv.includes('href="/privacy"'),
+         '이용 규칙 — 신고·만 14세·24시간·글의 권리·처리방침 길');
+      ok(tv.includes(({ 2: '두 사람', 3: '세 사람', 4: '네 사람', 5: '다섯 사람' })[BOARD_HIDE_AT] || '모름'), '이용 규칙 — 저절로 내려가는 신고 수가 BOARD_HIDE_AT 과 같다');
+      ok(!/hidden|undefined/.test(pv + tv), '법·약관 — 감춘 줄·빈 값 없음');
+      ok(sitemap(db).includes('/terms</loc>'), 'sitemap 에 이용 규칙(/terms)');
+      /* 지운 대회 사본 파일 — 30일 넘은 .json 만 지운다. DB 백업(.db)·다른 파일은 안 건드린다 */
+      const dd = fs.mkdtempSync(path.join(require('os').tmpdir(), 'hackon-dumps-'));
+      const put = (f, age) => { fs.writeFileSync(path.join(dd, f), '{}'); const t = (Date.now() - age * 864e5) / 1000; fs.utimesSync(path.join(dd, f), t, t); };
+      put('hackon-old1-2026-01-01T00-00-00.json', 31); put('hackon-new1-2026-09-30T00-00-00.json', 29);
+      put('hackon-2026-01-01T00-00-00.db', 40); put('keep-me.json', 40);
+      ok(sweepDumps(dd) === 1 && fs.readdirSync(dd).sort().join(',') === 'hackon-2026-01-01T00-00-00.db,hackon-new1-2026-09-30T00-00-00.json,keep-me.json',
+         '지운 대회 사본 파일 — 30일 넘은 것만 지운다: ' + fs.readdirSync(dd).join(','));
+      ok(sweepDumps(path.join(dd, 'none')) === 0, '사본 폴더가 없어도 멈추지 않는다');
+      fs.rmSync(dd, { recursive: true, force: true });
+    }
     /* 대회 혜택 — 확정된 것만, 끝난 대회·비공개 대회는 빼고 */
     {
       const pe = createEvent(db, { title: '혜택 검사', starts: '2099-06-01', ends: '2099-06-01', prize: 300000 });
@@ -10030,6 +10581,198 @@ async function selftest() {
       ok(!pk.some(x => x.id === hidden.id) && !pk.some(x => x.id === old.id), '대회 혜택 — 비공개·끝난 대회는 안 실린다');
       ok(!JSON.stringify(pk).includes('contact'), '대회 혜택 — 연락처 칸이 없다');
       db.prepare('UPDATE events SET listed=0 WHERE id IN (?,?)').run(pe.id, old.id);   /* 아래 «공개한 것만» 검사와 안 섞이게 */
+    }
+    /* 사이트 운영(/admin) — 문제 상태·공개 거름·고정·운영자 답·풀이 숨김 · 신고함 · 쓰기 막기 · 운영자 아니면 403 */
+    {
+      const adb = open(':memory:'), SA = { siteAdmin: true }, NO = { siteAdmin: false };
+      const code = f => { try { f(); return 0; } catch (e) { return e.code || -1; } };
+      const q1 = addRequest(adb, { name: '꽃집 이', pain: '주문 장부가 엉망이에요' });
+      const q2 = addRequest(adb, { name: '분식 최', pain: '배달 주소 받아 적기' });
+      const q3 = addRequest(adb, { name: '서점 한', pain: '재고 엑셀 맞추기' });
+      [q1, q2, q3].forEach((q, i) => adb.prepare('UPDATE requests SET created=? WHERE id=?').run(`2026-01-01 00:00:0${i + 1}`, q.id));
+      const pub = () => openRequests(adb).map(r => r.id).join();
+      setRequestStatus(adb, q1.id, 'doing'); setRequestStatus(adb, q2.id, 'solved');
+      const st = id => (openRequests(adb).find(r => r.id === id) || {}).status;
+      ok(pub() === [q1.id, q3.id, q2.id].join() && st(q1.id) === 'doing' && st(q2.id) === 'solved',
+         '운영 — 진행 중·풀림도 공개 목록에 상태와 함께 실리고, 풀린 것은 맨 뒤: ' + pub());
+      for (const s of ['closed', 'hidden']) {
+        setRequestStatus(adb, q3.id, s);
+        ok(!openRequests(adb).some(r => r.id === q3.id), `운영 — ${s} 문제는 공개 목록에 없다`);
+      }
+      ok(code(() => setRequestStatus(adb, q3.id, 'done')) === 400, '운영 — 모르는 상태는 안 받는다');
+      /* 대회 페이지 — 내린·닫은 문제는 손님에게 안 보이고 그 대회 운영자에게만 */
+      const aev = createEvent(adb, { title: '운영 검사 대회', starts: '2099-03-01' });
+      adb.prepare('UPDATE requests SET event=? WHERE id=?').run(aev.id, q3.id);
+      for (const s of ['hidden', 'closed']) {
+        setRequestStatus(adb, q3.id, s);
+        ok(!requestsOf(adb, aev.id).some(r => r.id === q3.id) && requestsOf(adb, aev.id, true).some(r => r.id === q3.id),
+           `운영 — ${s} 문제는 대회 페이지 손님에게 안 보인다(운영자에게는 보인다)`);
+      }
+      setRequestStatus(adb, q3.id, 'open');
+      ok(requestsOf(adb, aev.id).some(r => r.id === q3.id), '운영 — 다시 열면 대회 페이지에 돌아온다');
+      adb.prepare("UPDATE requests SET event='' WHERE id=?").run(q3.id);
+      /* 풀이 — 풀린 문제에는 더 안 받고, 진행 중에는 받는다 */
+      { let m = ''; try { addSolution(adb, q2.id, { name: '늦은 풀이', url: 'https://x.example/late' }); } catch (e) { m = e.code + ' ' + e.message; }
+        ok(m === '409 이미 풀린 문제입니다', '운영 — 풀린 문제에는 풀이를 더 안 받고, 닫힌 것과 다르게 «풀렸다» 고 말한다: ' + m); }
+      const s1 = addSolution(adb, q1.id, { name: '스팸 풀이', url: 'https://spam.example/x' });
+      const s2 = addSolution(adb, q1.id, { name: '진짜 풀이', url: 'https://real.example/x' });
+      ok(s1.id && s2.id, '운영 — 진행 중인 문제에는 풀이를 받는다');
+      /* 고정 — 맨 위로. 풀린 것을 고정해도 맨 위 */
+      ok(code(() => pinRequest(adb, q2.id, true, NO)) === 403, '운영 — 고정은 사이트 운영자만');
+      pinRequest(adb, q2.id, true, SA);
+      ok(openRequests(adb)[0].id === q2.id && openRequests(adb)[0].pinned === true, '운영 — 고정한 문제가 맨 위');
+      pinRequest(adb, q2.id, false, SA);
+      ok(openRequests(adb).slice(-1)[0].id === q2.id && openRequests(adb).slice(-1)[0].pinned === false, '운영 — 고정을 풀면 제자리(풀린 것은 맨 뒤)');
+      ok(code(() => pinRequest(adb, 'zzzzzzzz', true, SA)) === 404, '운영 — 없는 문제는 고정 못 한다');
+      /* 운영자 답 — 공개로 한 줄, 꺾쇠 없음, 300자, 욕설 거름 */
+      ok(code(() => replyRequest(adb, q1.id, '답', NO)) === 403, '운영 — 운영자 답은 사이트 운영자만');
+      replyRequest(adb, q1.id, '  <b>이 문제는</b>   다음 대회 주제로 갑니다  ', SA);
+      const rp = openRequests(adb).find(r => r.id === q1.id).reply;
+      ok(rp === 'b이 문제는/b 다음 대회 주제로 갑니다', '운영 — 운영자 답이 공개 목록에 꺾쇠 없이 실린다: ' + rp);
+      ok(code(() => replyRequest(adb, q1.id, '씨발 이딴 문제', SA)) === 400 && openRequests(adb).find(r => r.id === q1.id).reply === rp, '운영 — 운영자 답도 욕설은 거른다');
+      ok(replyRequest(adb, q1.id, 'ㄱ'.repeat(400), SA).reply.length === 300, '운영 — 운영자 답은 300자까지');
+      replyRequest(adb, q1.id, '', SA);
+      ok(openRequests(adb).find(r => r.id === q1.id).reply === '', '운영 — 비우면 답이 지워진다');
+      /* 풀이 숨기기 — 공개 수·받는 화면에서 빠지고, 운영자 목록에는 남는다 */
+      ok(code(() => hideSolution(adb, s1.id, true, NO)) === 403, '운영 — 풀이 숨기기는 사이트 운영자만');
+      hideSolution(adb, s1.id, true, SA);
+      const aq1 = adminRequests(adb, '', SA).find(r => r.id === q1.id);
+      ok(openRequests(adb).find(r => r.id === q1.id).solutions === 1 && !requestView(adb, q1.id).solutions.some(x => x.id === s1.id)
+         && aq1.solutions === 1 && aq1.solutionsAll === 2 && aq1.sols.find(x => x.id === s1.id).hidden === true,
+         '운영 — 숨긴 풀이는 공개 수·받는 화면에서 빠지고 운영자 목록에는 숨김으로 남는다');
+      hideSolution(adb, s1.id, false, SA);
+      ok(openRequests(adb).find(r => r.id === q1.id).solutions === 2, '운영 — 숨긴 풀이를 되살린다');
+      /* 운영자 목록 — 상태로 거르기, 표시(atag·iptag)는 안 나간다 */
+      ok(code(() => adminRequests(adb, '', NO)) === 403, '운영 — 운영자 목록은 사이트 운영자만');
+      ok(adminRequests(adb, 'solved', SA).map(r => r.id).join() === q2.id && adminRequests(adb, 'doing', SA).map(r => r.id).join() === q1.id
+         && adminRequests(adb, '아무거나', SA).length === 3, '운영 — 상태로 거른다(모르는 값이면 전부)');
+      /* 쓰기 막기 — 글쓴이 표시로, 기한, 다른 사람은 그대로, IP 는 따로 켤 때만 */
+      const V1 = 'ban' + 'a'.repeat(12), V2 = 'ban' + 'b'.repeat(12), IP1 = ipTag('10.1.1.1'), IP2 = ipTag('10.1.1.2');
+      const bp = boardPost(adb, { topic: 'free', title: '싸게 팝니다 여기로', body: '광고' }, V1, IP1);
+      boardReport(adb, 'p', bp.id, 'r'.repeat(12), '광고', 'ip-a');
+      const inbox = adminReports(adb, SA), it = inbox.find(x => x.key === 'bp:' + bp.id);
+      ok(it && it.pending && it.canBan && it.hidden === false && it.reasons.includes('광고') && it.label === '게시판 글',
+         '신고함 — 게시판 신고가 기다림으로 뜬다: ' + JSON.stringify(it));
+      ok(!JSON.stringify(inbox).includes(IP1) && !JSON.stringify(inbox).includes(authorTag(V1)), '신고함 — 글쓴이·IP 표시는 화면으로 안 나간다');
+      ok(code(() => adminReports(adb, NO)) === 403 && code(() => reportAct(adb, { key: it.key, act: 'hide' }, NO)) === 403, '신고함 — 사이트 운영자만');
+      ok(code(() => banWriter(adb, { from: 'bp:' + bp.id, days: 7 }, NO)) === 403, '쓰기 막기 — 사이트 운영자만');
+      ok(code(() => banWriter(adb, { from: 'bp:' + bp.id, days: 3 }, SA)) === 400, '쓰기 막기 — 7일·30일만');
+      ok(banWriter(adb, { from: 'bp:' + bp.id, days: 7 }, SA).banned === 1, '쓰기 막기 — IP 는 켜지 않으면 글쓴이만');
+      const why = f => { try { f(); return ''; } catch (e) { return e.code + ' ' + e.message; } };
+      const BANNED = '403 ' + BAN_MSG;
+      const bk = bookCreate(adb, { title: '막기 검사 책' }), bch = adb.prepare('SELECT id FROM chapters WHERE book=?').get(bk.id).id;
+      ok(why(() => boardPost(adb, { topic: 'free', title: '또 광고', body: '다른 인터넷에서' }, V1, IP2)) === BANNED, '쓰기 막기 — 막힌 글쓴이는 다른 인터넷에서도 새 글을 못 쓴다');
+      ok(why(() => boardComment(adb, bp.id, { body: '댓글로라도' }, V1, IP2)) === BANNED, '쓰기 막기 — 댓글도 막힌다');
+      ok(why(() => editPropose(adb, bch, { body: '고쳐 쓰기', base: 0 }, IP2, V1)) === BANNED, '쓰기 막기 — 집필 제안도 막힌다');
+      ok(why(() => addRequest(adb, { name: '광고', pain: '문제인 척' }, { voter: V1, ip: IP2 })) === BANNED, '쓰기 막기 — 문제 올리기도 막힌다');
+      ok(why(() => addSolution(adb, q1.id, { name: '광고', url: 'https://ad.example' }, { voter: V1 })) === BANNED, '쓰기 막기 — 풀이 보내기도 막힌다');
+      ok(boardPost(adb, { topic: 'free', title: '같은 와이파이의 다른 사람', body: '멀쩡' }, V2, IP1).id > 0
+         && addRequest(adb, { name: '옆자리', pain: '출석 세기가 번거로워요' }, { voter: V2, ip: IP1 }).id,
+         '쓰기 막기 — 다른 사람은 같은 인터넷에서도 그대로 쓴다');
+      ok(banWriter(adb, { from: 'bp:' + bp.id, days: 30, ip: true }, SA).banned === 2, '쓰기 막기 — «같은 인터넷도» 를 켜면 IP 표시까지');
+      ok(why(() => boardPost(adb, { topic: 'free', title: '같은 와이파이', body: '이번엔' }, V2, IP1)) === BANNED
+         && boardPost(adb, { topic: 'free', title: '다른 와이파이', body: '여기는' }, V2, IP2).id > 0, '쓰기 막기 — IP 막기는 그 인터넷만');
+      const old0 = boardPost(adb, { topic: 'free', title: '표시 없는 예전 글', body: 'x' });
+      ok(code(() => banWriter(adb, { from: 'bp:' + old0.id, days: 7 }, SA)) === 409, '쓰기 막기 — 표시가 없는 예전 글로는 못 막는다(아무나 막지 않는다)');
+      adb.prepare("UPDATE write_bans SET until=datetime('now', '-1 minute')").run();
+      ok(boardPost(adb, { topic: 'free', title: '기한 지나고', body: '다시 씀' }, V1, IP1).id > 0, '쓰기 막기 — 기한이 지나면 저절로 풀린다');
+      banWriter(adb, { from: 'bp:' + bp.id, days: 7 }, SA);
+      const lb = listBans(adb, SA), live = lb.rows.find(r => r.active && r.kind === 'author');
+      ok(live && live.src === '게시판 글 #' + bp.id && lb.rows.some(r => !r.active && r.kind === 'ip') && lb.ipStable === !!process.env.IP_SALT,
+         '쓰기 막힌 사람 — 지금 막힌 것과 끝난 것이 함께, 어디서 막았는지와: ' + JSON.stringify(lb));
+      ok(code(() => listBans(adb, NO)) === 403 && code(() => liftBan(adb, live.tag, NO)) === 403, '쓰기 막힌 사람 — 사이트 운영자만');
+      liftBan(adb, live.tag, SA);
+      ok(boardPost(adb, { topic: 'free', title: '풀린 뒤', body: '바로 씀' }, V1, IP1).id > 0 && code(() => liftBan(adb, live.tag, SA)) === 404, '쓰기 막기 — 풀면 바로 쓴다');
+      /* 문제·풀이에서도 막는다 — 올릴 때 적어 둔 표시로 */
+      const spamQ = addRequest(adb, { name: '도배', pain: '도배 문제입니다' }, { voter: V2, ip: IP2 });
+      banWriter(adb, { from: 'rq:' + spamQ.id, days: 7 }, SA);
+      ok(why(() => addSolution(adb, q1.id, { name: '도배', url: 'https://x.example' }, { voter: V2 })) === BANNED
+         && adminRequests(adb, '', SA).find(r => r.id === spamQ.id).canBan === true, '쓰기 막기 — 문제 글에서도 막는다');
+      adb.prepare('DELETE FROM write_bans').run();
+      /* 신고함 — 대회 없는 신고(만든 것·외주)도 보이고, 숨기기·되살리기, 대회 안 팀 신고는 «봤음» 만 */
+      const wid = Number(adb.prepare("INSERT INTO works(owner,title,demo) VALUES('o-x','신고된 작업물','https://w.example')").run().lastInsertRowid);
+      const gid = Number(adb.prepare("INSERT INTO gigs(owner,kind,title) VALUES('o-x','의뢰','신고된 외주')").run().lastInsertRowid);
+      addReport(adb, { event: '', kind: 'other', ref: 'work:' + wid, reason: '불쾌하거나 부적절함', note: '신고된 작업물' });
+      addReport(adb, { event: '', kind: 'other', ref: 'work:' + wid, reason: '차단함', note: '신고된 작업물' });
+      addReport(adb, { event: '', kind: 'other', ref: 'gig:' + gid, reason: '불쾌하거나 부적절함', note: '신고된 외주' });
+      addReport(adb, { event: aev.id, kind: 'team', ref: '1', reason: '불쾌하거나 부적절함', note: '나쁜팀이름' });
+      const ib = adminReports(adb, SA), wk = ib.find(x => x.kind === 'work'), gg = ib.find(x => x.kind === 'gig'), tm = ib.find(x => x.kind === 'team');
+      ok(wk && wk.count === 2 && wk.pending && wk.hidden === false && wk.text === '신고된 작업물' && wk.link === '/made?w=' + wid && !wk.canBan
+         && gg && gg.link === '/gigs?g=' + gid && tm && tm.hidden === null && tm.link === '/e/' + aev.id,
+         '신고함 — 대회 없는 신고(만든 것·외주)도 묶여서 뜬다: ' + JSON.stringify([wk, gg, tm]));
+      reportAct(adb, { key: wk.key, act: 'hide' }, SA);
+      ok(adb.prepare('SELECT hidden FROM works WHERE id=?').get(wid).hidden === 1 && !adminReports(adb, SA).find(x => x.key === wk.key).pending,
+         '신고함 — 숨기면 만든 것이 내려가고 «봤음» 이 된다');
+      reportAct(adb, { key: wk.key, act: 'restore' }, SA);
+      ok(adb.prepare('SELECT hidden FROM works WHERE id=?').get(wid).hidden === 0, '신고함 — 되살리면 다시 보인다');
+      ok(code(() => reportAct(adb, { key: tm.key, act: 'hide' }, SA)) === 409, '신고함 — 대회 안 팀 신고는 여기서 못 숨긴다(그 대회 운영자 몫)');
+      reportAct(adb, { key: tm.key, act: 'done' }, SA);
+      ok(adb.prepare("SELECT MIN(done) d FROM reports WHERE event=? AND kind='team'").get(aev.id).d === 1, '신고함 — «봤음» 은 그 대회 운영자 화면에도 처리됨으로 남는다');
+      ok(code(() => reportAct(adb, { key: 'r:99999', act: 'done' }, SA)) === 404 && code(() => reportAct(adb, { key: wk.key, act: 'delete' }, SA)) === 400, '신고함 — 없는 것·모르는 처리는 거절');
+      /* 게시판에서 저절로 내려간 글 — 신고함에서 되살리고, 새 신고가 오면 다시 기다림 */
+      const bz = boardPost(adb, { topic: 'free', title: '억울하게 내려간 글', body: '멀쩡' }, V2, IP2);
+      for (const [v, ip] of [['s'.repeat(12), 'i1'], ['t'.repeat(12), 'i2'], ['u'.repeat(12), 'i3']]) boardReport(adb, 'p', bz.id, v, '', ip);
+      ok(adminReports(adb, SA).find(x => x.key === 'bp:' + bz.id).hidden === true, '신고함 — 셋이 신고해 저절로 내려간 글이 «숨김» 으로 뜬다');
+      reportAct(adb, { key: 'bp:' + bz.id, act: 'restore' }, SA);
+      ok(boardList(adb).rows.some(r => r.id === bz.id) && !adminReports(adb, SA).find(x => x.key === 'bp:' + bz.id).pending, '신고함 — 되살리면 게시판에 돌아온다');
+      boardReport(adb, 'p', bz.id, 'w'.repeat(12), '또', 'i4');
+      ok(adminReports(adb, SA).find(x => x.key === 'bp:' + bz.id).pending, '신고함 — 본 뒤에 새 신고가 오면 다시 기다림');
+      /* 요약 — /app 운영 카드의 숫자 */
+      const sm = adminSummary(adb, SA);
+      ok(sm.problems.doing === 1 && sm.problems.solved === 1 && sm.problems.open >= 2 && sm.reports === adminReports(adb, SA).filter(x => x.pending).length && sm.bans === 0,
+         '운영 요약 — 문제 상태별 수·기다리는 신고·막힌 수: ' + JSON.stringify(sm));
+      ok(code(() => adminSummary(adb, NO)) === 403, '운영 요약 — 사이트 운영자만');
+      /* 글쓴이 표시 소금 — DB 에 한 번 적고 다시 켜도 같은 값(IP_SALT 가 없을 때) */
+      {
+        const keep = TAG_SALT, sdb = open(':memory:');
+        const a = pinTagSalt(sdb), t1 = authorTag(V1), b2 = pinTagSalt(sdb), t2 = authorTag(V1);
+        ok(a === b2 && t1 === t2 && (process.env.IP_SALT ? a === process.env.IP_SALT : sdb.prepare("SELECT v FROM meta WHERE k='tag_salt'").get().v === a),
+           '글쓴이 표시 소금 — 한 번 정하면 다시 켜도 같다(쓰기 막기가 배포 한 번에 안 풀린다)');
+        TAG_SALT = keep;
+      }
+      /* 라우터 — 쿠키 로그인한 사이트 운영자만. 대회 운영자가 내린 문제를 주제로 못 붙이고, 막힌 표는 403 */
+      {
+        const srv = http.createServer(routes(adb));
+        await new Promise(r => srv.listen(0, '127.0.0.1', r));
+        const base = 'http://127.0.0.1:' + srv.address().port;
+        const hit = async (pth, o = {}) => {
+          const r = await fetch(base + pth, { method: o.method || 'GET', headers: { 'content-type': 'application/json', ...(o.h || {}) }, body: o.body ? JSON.stringify(o.body) : undefined });
+          return { s: r.status, j: await r.json().catch(() => null) };
+        };
+        try {
+          const shut = [['/api/admin/summary'], ['/api/admin/reports'], ['/api/admin/bans'], ['/api/admin/requests'],
+            ['/api/admin/reports/act', { key: 'bp:' + bz.id, act: 'hide' }], ['/api/admin/bans', { from: 'bp:' + bp.id, days: 7 }],
+            ['/api/admin/bans/lift', { tag: 'a:x' }], [`/api/requests/${q1.id}/pin`, { on: true }], [`/api/requests/${q1.id}/reply`, { text: 'x' }],
+            [`/api/solutions/${s1.id}/hide`, { on: true }]];
+          const codes = [];
+          for (const [pth, bd] of shut) codes.push((await hit(pth, bd ? { method: 'POST', body: bd, h: { 'x-owner': aev.owner, 'x-okey': aev.okey } } : { h: { 'x-owner': aev.owner } })).s);
+          ok(codes.every(c => c === 403), '운영 라우터 — 쿠키 없이는(대회 운영 열쇠·x-owner 가 있어도) 전부 403: ' + codes.join(','));
+          const sa = crypto.randomBytes(6).toString('hex');
+          adb.prepare('INSERT INTO owners(id,name) VALUES(?,?)').run(sa, '운영');
+          adb.prepare('INSERT INTO site_admins(owner) VALUES(?)').run(sa);
+          const ck = { cookie: 'hackon_s=' + encodeURIComponent(sign(adb, sa)) };
+          const sum = await hit('/api/admin/summary', { h: ck });
+          ok(sum.s === 200 && sum.j.problems.solved === 1, '운영 라우터 — 쿠키 로그인한 사이트 운영자는 연다');
+          ok((await hit(`/api/requests/${q2.id}/pin`, { method: 'POST', body: { on: true }, h: ck })).s === 200 && openRequests(adb)[0].id === q2.id, '운영 라우터 — 고정이 공개 목록에 반영된다');
+          ok((await hit('/api/admin/requests?status=solved', { h: ck })).j.map(r => r.id).join() === q2.id, '운영 라우터 — ?status= 로 거른다');
+          setRequestStatus(adb, q3.id, 'hidden');
+          const pk = await hit(`/api/events/${aev.id}/pick`, { method: 'POST', body: { request: q3.id }, h: { 'x-okey': aev.okey } });
+          setRequestStatus(adb, q3.id, 'open');
+          const pk2 = await hit(`/api/events/${aev.id}/pick`, { method: 'POST', body: { request: q3.id }, h: { 'x-okey': aev.okey } });
+          ok(pk.s === 409 && pk2.s === 200, `운영 라우터 — 내린 문제는 대회 주제로 못 붙이고 열면 붙는다: ${pk.s}/${pk2.s}`);
+          const qh = addRequest(adb, { name: '내린 문제 주인', pain: '내려간 문제로 대회 열기' });
+          setRequestStatus(adb, qh.id, 'hidden');
+          const mh = await hit('/api/events', { method: 'POST', body: { title: '내린 문제로 열기', starts: '2099-04-01', req: qh.id } });
+          setRequestStatus(adb, qh.id, 'doing');
+          const md = await hit('/api/events', { method: 'POST', body: { title: '진행 중 문제로 열기', starts: '2099-04-01', req: qh.id } });
+          ok(mh.s === 201 && mh.j.req === undefined && md.s === 201 && md.j.req === qh.id, `운영 라우터 — 내린 문제로는 대회를 못 열고, 진행 중이면 연다: ${mh.s}/${md.s}`);
+          ok((await hit('/api/admin/bans', { method: 'POST', body: { from: 'bp:' + bp.id, days: 7 }, h: ck })).s === 201, '운영 라우터 — 쓰기 막기');
+          const nb = await hit('/api/board', { method: 'POST', body: { topic: 'free', title: '막힌 뒤 글', body: 'x', agree: true }, h: { 'x-voter': V1 } });
+          const nq = await hit('/api/requests', { method: 'POST', body: { name: '막힌 이', pain: '문제' }, h: { 'x-voter': V1 } });
+          const ok2 = await hit('/api/board', { method: 'POST', body: { topic: 'free', title: '다른 사람 글', body: 'x', agree: true }, h: { 'x-voter': V2 } });
+          ok(nb.s === 403 && nb.j.error === BAN_MSG && nq.s === 403 && ok2.s === 201, `운영 라우터 — 막힌 표는 글·문제가 403(안내 문구), 다른 표는 201: ${nb.s}/${nq.s}/${ok2.s}`);
+        } finally { srv.closeAllConnections(); srv.close(); }
+      }
     }
     /* 자리 매칭 — 카드 올리기 → 주최자 요청 → 카드 주인 수락 → 둘에게만 연락처, 확정 기여로 */
     {
@@ -12945,14 +13688,17 @@ if (require.main === module) {
 }
 function main() {
   const db = open(DBFILE);
+  pinTagSalt(db);   // 글쓴이 표시 소금을 DB 에 고정 — 다시 켜도 쓰기 막기·«내 글» 이 안 풀린다
 
   /* 10분마다 통째로 복사해 둔다. 심사 도중에 노트북이 죽는 일이 실제로 생긴다.
      최근 12벌이면 두 시간 치다. 그 이상은 지운다. */
   const tick = () => { try { backup(db, DBFILE); } catch (e) { console.error('백업 실패', e.message); } };
   tick();
   setInterval(tick, 10 * 60 * 1000).unref();
-  try { purgeOld(db); } catch (e) { console.error('purge', e.message); }
-  setInterval(() => { try { purgeOld(db); } catch (e) { console.error('purge', e.message); } }, 60 * 60 * 1000).unref();
+  /* 보유 기간 — DB 의 연락처(purgeOld)와 지운 대회의 사본 파일(sweepDumps, 30일). 처리방침 3절이 이 둘을 약속한다 */
+  const purge = () => { try { purgeOld(db); sweepDumps(path.join(path.dirname(DBFILE), 'backup')); } catch (e) { console.error('purge', e.message); } };
+  purge();
+  setInterval(purge, 60 * 60 * 1000).unref();
   const sweep = () => sweepSamples(db).catch(e => console.error('sample sweep', e.message));
   sweep(); setInterval(sweep, 60 * 60 * 1000).unref();
   /* 해커온뉴스 — 켜지고 15초 뒤 한 번, 그 뒤 6시간마다. 밖이 죽어도 앱은 산다. */

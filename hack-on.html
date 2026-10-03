@@ -692,6 +692,7 @@ body.guest:not(.tv) #cta{background:linear-gradient(rgba(238,241,244,0),#EEF1F4 
 body.tv #cta{display:none}
 @media print{#cta{display:none!important}}
 </style>
+<script src="/menu.js"></script>
 </head>
 <body>
 <a href="#view" class="sr">본문으로 건너뛰기</a>
@@ -711,6 +712,7 @@ body.tv #cta{display:none}
       <span id="who"></span>
       <!-- 손님 머리글의 오른쪽 자리. 첫 화면 .top 과 같은 모양이다. 운영 화면·큰 화면에는 안 나온다 -->
       <a id="g-open" href="/app?make=1">대회 열기</a>
+      <button type="button" class="hk-btn" id="nav-menu" data-menu-open aria-haspopup="dialog" aria-controls="menu-sheet" aria-expanded="false"><i aria-hidden="true"><b></b><b></b><b></b></i>메뉴</button>
     </div>
   </header>
   <main id="view"></main>
@@ -946,6 +948,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .mechips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
 .mechips button{font-size:13px;font-weight:800;padding:7px 11px;border-radius:99px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
 .mechips button.on{background:#C8F53B;color:#0B1020;border-color:#C8F53B}
+.nsay{margin-top:10px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.07);color:#E8ECF3;font-size:14px;line-height:1.5}
 .lvbar{height:10px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden;margin:12px 0 6px}
 .lvbar span{display:block;height:100%;background:#C8F53B;border-radius:99px}
 .mgoal{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--rule);text-decoration:none;color:var(--ink)}
@@ -1042,6 +1045,13 @@ nav button.on::before{content:"";position:absolute;top:0;left:50%;width:22px;hei
 .bdmini + .bdmini{margin-left:0}
 .bdform textarea{width:100%;resize:vertical}
 .wrbody{font-size:16px;line-height:1.8;margin-top:6px}
+.wrdoc{font-size:17px;line-height:1.85;margin-top:10px;max-width:680px;color:var(--ink)}
+.wrdoc p{margin:0 0 .9em}.wrdoc h2{font-size:21px;margin:1.2em 0 .5em;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+.wrdoc h3{font-size:18px;margin:1em 0 .4em}.wrdoc h4{font-size:16px;margin:.9em 0 .3em}
+.wrdoc ul{margin:0 0 .9em 1.2em}.wrdoc li{margin:.2em 0}
+.wrdoc blockquote{margin:0 0 .9em;padding:6px 12px;border-left:3px solid #C8F53B;background:var(--bg);color:var(--ink2)}
+.wrdoc code{font-family:ui-monospace,Menlo,monospace;font-size:.9em;background:var(--bg2);padding:1px 5px;border-radius:5px}
+.wrstamp{font-size:12.5px;color:var(--ink3);margin-top:10px;padding-top:8px;border-top:1px dashed var(--rule)}
 .diff{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;background:var(--bg,#F4F6FA);border-radius:12px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;margin-top:8px}
 .df{padding:1px 4px;border-radius:4px}
 .dfa{background:#E3F5EC;color:#0A6E49}
@@ -1399,7 +1409,13 @@ async function pollNews() {
   NEWS.top = +fresh[0].id;
   const nn = $('#news-n'); if (nn) nn.textContent = list.children.length;
   if ('Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('새 소식', { body: fresh[0].text }); } catch (_) {}
+    /* 안드로이드 크롬·앱(TWA)은 new Notification 을 막는다(«Illegal constructor» 를 던진다).
+       서비스워커가 붙어 있으면 그쪽으로 띄우고, 없을 때만 옛 방식. ready 는 등록이 없으면 끝나지 않아 먼저 확인한다 */
+    const opts = { body: fresh[0].text, icon: '/icon-192.png', tag: 'hackon-news-' + cur };
+    const sw = 'serviceWorker' in navigator ? navigator.serviceWorker : null;
+    (sw ? sw.getRegistration().then(r => r ? sw.ready : null) : Promise.resolve(null))
+      .then(r => r ? r.showNotification('새 소식', opts) : new Notification('새 소식', opts))
+      .catch(() => {});
   }
 }
 /* 자리마다 카톡에 붙일 부탁 글. 서버 없이 화면이 만든다. */
@@ -1647,7 +1663,7 @@ function applyForm() {
         보유 기간 · 대회 종료 후 <b>6개월</b>. 그 뒤 지웁니다<br>
         동의하지 않으시면 참가 신청을 받을 수 없습니다.</div>
       <label class="ck"><input type="checkbox" id="t-agree">
-        <span>개인정보 수집·이용에 동의합니다 <span class="pill">필수</span></span></label>
+        <span>개인정보 수집·이용에 동의합니다 · 만 14세 이상입니다 <span class="pill">필수</span></span></label>
       <div class="meta" style="margin-top:8px"><b>후원사 제공 안내</b><br>
         받는 곳 · 이 대회 페이지에 표시된 협찬사<br>
         제공 항목 · 이메일<br>
@@ -1885,6 +1901,23 @@ let wrEditing = false;
 const wrPath = () => { const m = /^\/w\/([0-9a-f]{8})(?:\/(\d+))?$/.exec(location.pathname); return m ? { book: m[1], ch: m[2] ? +m[2] : 0 } : null; };
 const ekeyOf = id => { try { return localStorage.getItem('hackon.ekey.' + id) || ''; } catch { return ''; } };
 /* 줄 단위 차이 — 같은 줄은 그대로, 빠진 줄은 빨강 취소선, 들어온 줄은 초록. 최장 공통 부분열(LCS) */
+/* 집필 본문 — 공공 문서처럼 읽히게. 먼저 글자를 전부 이스케이프하고, 그 위에 머리글(# ##)·목록(-)·굵게(**)·인용(>)만 입힌다.
+   링크·그림·HTML 은 안 받는다(남의 글에 스크립트가 끼지 않게) */
+function wrMd(src) {
+  const inl = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  const out = []; let list = false;
+  for (const raw of String(src || '').split('\n')) {
+    const l = raw.trimEnd(), li = /^\s*[-*] (.+)/.exec(l);
+    if (!li && list) { out.push('</ul>'); list = false; }
+    if (li) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${inl(li[1])}</li>`); continue; }
+    const hd = /^(#{1,3}) (.+)/.exec(l);
+    if (hd) { out.push(`<h${hd[1].length + 1}>${inl(hd[2])}</h${hd[1].length + 1}>`); continue; }
+    if (/^> /.test(l)) { out.push(`<blockquote>${inl(l.slice(2))}</blockquote>`); continue; }
+    out.push(l.trim() ? `<p>${inl(l)}</p>` : '');
+  }
+  if (list) out.push('</ul>');
+  return out.join('');
+}
 function lineDiff(a, b) {
   const A = String(a).split('\n'), B = String(b).split('\n'), n = A.length, m = B.length;
   if (n * m > 4e6) return [{ t: '-', s: '(너무 길어 차이를 못 그립니다 — 아래 전체 글을 보세요)' }];
@@ -1898,7 +1931,7 @@ function lineDiff(a, b) {
 const bdPostId = () => { const m = /^\/board\/(\d+)$/.exec(location.pathname); return m ? +m[1] : 0; };
 const voterTok = () => { try { let v = localStorage.getItem('hackon.voter'); if (!v || !/^[0-9a-z]{12,40}$/i.test(v)) { v = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('hackon.voter', v); } return v; } catch { return ''; } };
 /* App Store 1.2 — 첫 글 전에 이용 규칙 한 번, 차단한 글쓴이(이 기기에만) */
-const RULES_TEXT = '이용 규칙\n· 욕설·비방·차별·성적인 글 금지(올리기 전에 막힙니다)\n· 연락처·광고 금지\n· 신고 셋이면 저절로 내려가고, 운영자가 24시간 안에 확인합니다\n· 어기면 글이 지워지고 쓰기가 막힐 수 있습니다\n\n동의하고 올릴까요?';
+const RULES_TEXT = '이용 규칙\n· 욕설·비방·차별·성적인 글 금지(올리기 전에 막힙니다)\n· 연락처·광고 금지\n· 신고 셋이면 저절로 내려가고, 운영자가 24시간 안에 확인합니다\n· 어기면 글이 지워지고 쓰기가 막힐 수 있습니다\n\n동의하고 올릴까요?\n\n자세한 규칙: hackon.kr/terms';
 const needRules = () => { try { if (localStorage.getItem('hackon.rules') === '1') return true; } catch {} if (!confirm(RULES_TEXT)) return false; try { localStorage.setItem('hackon.rules', '1'); } catch {} return true; };
 const blockedSet = () => { try { return new Set(JSON.parse(localStorage.getItem('hackon.blocked') || '[]')); } catch { return new Set(); } };
 const setBlocked = set => { try { localStorage.setItem('hackon.blocked', JSON.stringify([...set].slice(-500))); } catch {} };
@@ -2464,6 +2497,37 @@ const ownedCard = e => `<div class="card ev" role="button" tabindex="0" data-ope
 </div>`;
 /* 이 브라우저가 든 열쇠를 접두사별로 모은다. localStorage 를 못 읽는 브라우저(사생활 모드)면 빈 목록 */
 const keyIds = pre => { try { return Object.keys(localStorage).filter(k => k.startsWith(pre)).map(k => k.slice(pre.length)).filter(Boolean); } catch (_) { return []; } };
+/* 노랑이 한마디 — 듀오링고 부엉이처럼 성격이 있되, 죄책감은 안 준다(쉬었다 와도 반긴다) */
+let ME_LAST = null, ADM_FILTER = '';
+function norangiSays(m) {
+  const c = m.counts, n = m.next[0];
+  if (!c.acts) return '아직 플러그만 꽂혀 있어요. 아무거나 하나 눌러 주면 제가 켜져요.';
+  if (n && n.goal - n.have === 1) return `${n.name}까지 딱 하나. 지금 하면 오늘 저녁이 자랑이 됩니다.`;
+  if (m.days.length && m.days[m.days.length - 1] < ymdLocal()) return '오랜만이에요! 쉬어도 모은 건 그대로예요. 다시 켜 볼까요?';
+  if (c.submitted) return '만든 걸 낸 사람만 아는 기분, 그거 맞아요. 다음 판도 같이 가요.';
+  return m.level >= 3 ? '이 정도면 동네에서 소문나요. 친구 한 명만 데려와 볼래요?' : '좋아요, 불 들어왔어요. 다음 배지가 저기 보여요.';
+}
+/* 자랑 카드 — 인스타 스토리 크기(1080×1920) 한 장. 이 기기에서 그리고, 서버로 안 보낸다 */
+async function meCardBlob(m) {
+  const W = 1080, H = 1920, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'), F = (w, s) => `${w} ${s}px Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif`;
+  g.fillStyle = '#0B1020'; g.fillRect(0, 0, W, H);
+  const gl = g.createRadialGradient(W / 2, 520, 40, W / 2, 520, 620); gl.addColorStop(0, 'rgba(200,245,59,.35)'); gl.addColorStop(1, 'rgba(200,245,59,0)');
+  g.fillStyle = gl; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#C8F53B'; g.font = F(800, 44); g.textAlign = 'left'; g.fillText('HACK:ON', 80, 130);
+  await new Promise(ok => { const im = new Image(); im.onload = () => { g.drawImage(im, W / 2 - 200, 260, 400, 400); ok(); }; im.onerror = ok; im.src = '/norangi-on.svg'; });
+  g.textAlign = 'center';
+  g.fillStyle = '#C8F53B'; g.font = F(900, 72); g.fillText(`Lv.${m.level}`, W / 2, 790);
+  g.fillStyle = '#fff'; g.font = F(900, 110); g.fillText(m.title, W / 2, 920);
+  const got = m.badges.filter(b => b.got);
+  g.fillStyle = '#C9CFDA'; g.font = F(700, 46); g.fillText(`배지 ${got.length} / ${m.badges.length}  ·  켜진 날 ${m.days.length}일`, W / 2, 1020);
+  g.font = F(400, 96);
+  const sh = got.slice(0, 12); sh.forEach((b, i) => { const row = Math.floor(i / 4), inRow = Math.min(4, sh.length - row * 4); g.fillText(b.icon, W / 2 + ((i % 4) - (inRow - 1) / 2) * 190, 1180 + row * 170); });
+  if (!got.length) { g.fillStyle = '#C9CFDA'; g.font = F(700, 44); g.fillText('첫 배지를 켜는 중', W / 2, 1200); }
+  g.fillStyle = '#fff'; g.font = F(700, 44); g.fillText(m.next[0] ? `다음 목표 — ${m.next[0].name} ${m.next[0].have}/${m.next[0].goal}` : '배지를 다 모았어요', W / 2, 1720);
+  g.fillStyle = '#C8F53B'; g.font = F(800, 40); g.fillText('hackon.kr — 코딩 몰라도, 혼자 와도', W / 2, 1810);
+  return new Promise(ok => cv.toBlob(ok, 'image/png'));
+}
 /* 나(/me) — 이 기기에 든 열쇠를 모아 보낸다. 서버가 하나씩 맞춰 보고 맞는 것만 센다 */
 const meBody = () => {
   const kv = pre => { try { return keyIds(pre).map(id => ({ id, key: localStorage.getItem(pre + id) || '' })).slice(-200); } catch { return []; } };
@@ -4846,7 +4910,7 @@ const SCREEN = {
     if (!at) {
       const mine = keyIds('hackon.ekey.');
       const books = await Promise.all(mine.map(id => api(`/books/${id}`).then(d => d.book).catch(() => null)));
-      return `<section class="mhero" id="wr-hero"><h2>같이 쓰는 <span class="lime">책</span></h2>
+      return `<section class="mhero" id="wr-hero"><img class="hk-art" src="/art/write.webp" alt="" width="96" height="96" loading="lazy" decoding="async"><h2>같이 쓰는 <span class="lime">책</span></h2>
           <p>장을 나눠 링크를 보내면, 누구나 고쳐 쓰기를 제안하고 편집자가 <b>합치기</b>를 누릅니다.</p>
           <div class="steps3"><span>① 책 만들기</span><span>② 링크 보내기</span><span>③ 고친 것 합치기</span></div></section>
         <div class="card" id="wr-new"><label>책 이름</label><input id="wr-title" maxlength="80" placeholder="예) 바이브코딩 첫걸음">
@@ -4867,7 +4931,12 @@ const SCREEN = {
         ${d.isEditor && pend ? `<div class="card" style="border-color:#C8F53B"><b>합칠 제안 ${pend}개</b><div class="meta">장을 열면 차이가 보입니다.</div></div>` : ''}
         <div id="wr-chs">${d.chapters.map(c => `<a class="bdrow" href="/w/${esc(d.book.id)}/${c.id}"><span class="bdv"><b>${c.ord}</b></span>
           <span class="bdr"><b class="bdt">${esc(c.title)}</b><span class="bdmeta"><span>${c.chars.toLocaleString()}자 · ${c.ver}판</span>${c.pending ? `<span class="bdtopic">제안 ${c.pending}</span>` : ''}</span></span></a>`).join('')}</div>
-        ${d.isEditor ? `<div class="shrow" style="margin-top:8px"><input id="wr-chname" maxlength="60" placeholder="새 장 이름"><button class="btn sm" id="wr-chadd">장 더하기</button></div>` : ''}`;
+        ${d.isEditor ? `<div class="shrow" style="margin-top:8px"><input id="wr-chname" maxlength="60" placeholder="새 장 이름"><button class="btn sm" id="wr-chadd">장 더하기</button></div>` : ''}
+        ${d.isOwner ? `<div class="card" id="wr-co" style="margin-top:12px"><h3>같이 편집할 사람 <span class="pill">${d.editors.length}/5</span></h3>
+          <div class="meta">초대 링크를 받은 사람도 합치기·되돌리기·직접 고치기를 할 수 있어요. 빼면 그 링크는 바로 끝납니다.</div>
+          ${d.editors.map(e => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${esc(e.name)}</b><span>${esc(ago(e.created))}</span><button type="button" class="bdmini" data-coremove="${e.id}">빼기</button></div>`).join('')}
+          ${d.editors.length < 5 ? `<div class="shrow" style="margin-top:8px"><input id="wr-coname" maxlength="30" placeholder="초대할 사람 이름"><button class="btn sm" id="wr-coadd">초대 링크 만들기</button></div>` : ''}<div id="wr-coout"></div></div>`
+        : d.isEditor ? `<div class="meta" style="margin:10px 4px">공동 편집자 <b>${esc(d.me)}</b> 로 편집 중</div>` : ''}`;
     }
     let d = null; try { d = await api(`/chapters/${at.ch}`, { ekey: ek }); } catch { d = null; }
     if (!d || d.book.id !== at.book) return `<a class="bdback" href="/w/${esc(at.book)}">‹ 책으로</a><div class="card"><div class="meta">없는 장이거나 지금 못 불러왔습니다.</div></div>`;
@@ -4879,7 +4948,7 @@ const SCREEN = {
         ${wrEditing ? `<textarea id="wr-body" rows="16" style="width:100%">${esc(c.body)}</textarea>
             <div class="row"><div><input id="wr-note" maxlength="140" placeholder="무엇을 고쳤나요 (한 줄)"></div><div><input id="wr-author" maxlength="30" placeholder="내 이름" value="${esc((() => { try { return localStorage.getItem('hackon.nick') || ''; } catch { return ''; } })())}"></div></div>
             <div class="shrow" style="margin-top:10px"><button class="btn sm" id="wr-send" data-base="${c.ver}">${d.isEditor ? '바로 저장' : '제안 보내기'}</button><button class="btn sec sm" id="wr-cancel">그만두기</button></div>`
-          : `${c.body ? `<div class="bdbody wrbody">${esc(c.body)}</div>` : '<div class="meta">아직 비어 있습니다. 첫 문단을 써 주세요.</div>'}
+          : `${c.body ? `<div class="wrdoc" id="wr-doc">${wrMd(c.body)}</div><div class="wrstamp">${c.ver}판 · ${esc(ago(c.updated))} 고침${d.history[0] ? ` · ${esc(d.history[0].author)}` : ''} · 누구나 고쳐 쓰기를 제안할 수 있는 공개 문서</div>` : '<div class="meta">아직 비어 있습니다. 첫 문단을 써 주세요.</div>'}
             <div class="bdacts"><button type="button" id="wr-edit">✍️ ${d.isEditor ? '고치기' : '고쳐 쓰기 제안'}</button><button type="button" data-wrshare>↗ 링크</button></div>`}
       </article>
       ${d.edits.length ? `<h3 class="calsec">기다리는 제안 ${d.edits.length}</h3>${d.edits.map(e => `<div class="card wredit" data-edit="${e.id}">
@@ -4947,14 +5016,42 @@ const SCREEN = {
             <b class="bdt">${esc(r.title)}</b>
             ${r.peek ? `<span class="bdpeek">${esc(r.peek)}</span>` : ''}
             <span class="bdmeta"><span>${esc(r.nick)} · ${esc(ago(r.created))}</span><span>💬 ${r.comments}</span></span></span></a>`).join('')
-        : `<div class="card"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>${SAFETY_LINE}`;
+        : `<div class="card" id="bd-empty"><img class="hk-art" src="/art/board.webp" alt="" width="96" height="96" loading="lazy" decoding="async"><h3>${bdTopic ? '이 주제엔 아직 글이 없습니다' : '아직 글이 없습니다'}</h3><div class="meta">첫 글을 써 보세요 — 켜 본 것, 막힌 것, 구하는 것.</div></div>`}</div>${SAFETY_LINE}`;
   },
 
   /* ── 오늘 — 내 달력 ── 구글 달력에 하나씩 넣던 것을 해커온 안에서 한눈에.
      열쇠는 이 기기에 있으니 화면이 모아 보내고, 서버는 맞는 것만 내 일정으로 돌려준다(/api/cal). */
+  async adminsite() {
+    if (LIVE && !AUTH) { try { AUTH = await api('/auth'); } catch { AUTH = { providers: [], links: [] }; } }
+    if (!AUTH || !AUTH.siteAdmin) return `<section class="mhero" id="adm-hero"><h2>사이트 운영</h2><p>운영자만 볼 수 있어요.</p>
+      <div class="shrow" style="margin-top:10px"><a class="btn sm" href="/app?login=1">로그인</a></div></section>`;
+    const ST = { open: '열림', doing: '진행 중', solved: '풀림', closed: '닫힘', hidden: '내림' };
+    const f = ADM_FILTER || '';
+    const [rq, rp, bn] = await Promise.all([api('/admin/requests' + (f ? '?status=' + f : '')).catch(() => null), api('/admin/reports').catch(() => null), api('/admin/bans').catch(() => null)]);
+    const banBtns = from => `<button type="button" class="bdmini" data-adban="${esc(from)}" data-days="7">7일 쓰기 막기</button><button type="button" class="bdmini" data-adban="${esc(from)}" data-days="30">30일</button>`;
+    const reqCard = r => `<div class="card adm-rq" data-rq="${esc(r.id)}"><div class="bdmeta"><span class="bdtopic">${esc(ST[r.status] || r.status)}</span>${r.pinned ? '<span class="bdbest">📌 고정</span>' : ''}${r.hide ? '<span class="gstate wait">자동 가림</span>' : ''}<span>${esc(ago(r.created))}</span><span>풀이 ${r.solutions}/${r.solutionsAll}</span></div>
+        <h3 style="margin:6px 0">${esc(r.topic || r.pain || '(제목 없음)')}</h3><div class="meta">${esc(r.pain || '')}</div>${r.contact ? `<div class="meta">연락처(운영자만): ${esc(r.contact)}</div>` : ''}
+        <div class="shrow" style="margin-top:8px;flex-wrap:wrap">${Object.keys(ST).map(s => `<button type="button" class="btn ${s === r.status ? '' : 'sec '}sm" data-adst="${s}">${ST[s]}</button>`).join('')}
+          <button type="button" class="btn sec sm" data-adpin="${r.pinned ? 0 : 1}">${r.pinned ? '고정 풀기' : '📌 고정'}</button></div>
+        <div class="shrow" style="margin-top:8px"><input data-adreply maxlength="300" placeholder="운영자 답(공개)" value="${esc(r.reply)}"><button type="button" class="btn sm" data-adreplysave>답 저장</button></div>
+        ${r.sols.length ? `<details class="more"><summary>풀이 ${r.sols.length}</summary><div class="in">${r.sols.map(x => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${esc(x.name)}</b><span>${esc(x.note || x.url || '')}</span>${x.hidden ? '<span class="gstate wait">숨김</span>' : ''}<button type="button" class="bdmini" data-adsol="${x.id}" data-on="${x.hidden ? 0 : 1}">${x.hidden ? '되살리기' : '숨기기'}</button>${x.canBan ? banBtns('sol:' + x.id) : ''}</div>`).join('')}</div></details>` : ''}
+        ${r.canBan ? `<div style="margin-top:6px">${banBtns('rq:' + r.id)}</div>` : ''}</div>`;
+    const repCard = t => `<div class="card adm-rp" data-key="${esc(t.key)}"><div class="bdmeta"><span class="bdtopic">${esc(t.label)}</span>${t.pending ? '<span class="gstate wait">안 봄</span>' : '<span>봤음</span>'}${t.hidden ? '<span>숨김</span>' : ''}<span>신고 ${t.count}</span><span>${esc(ago(t.at))}</span></div>
+        <div style="margin:6px 0">${esc(t.text || '')}</div>${t.reasons && t.reasons.length ? `<div class="meta">${t.reasons.map(esc).join(' · ')}</div>` : ''}
+        <div class="shrow" style="margin-top:6px;flex-wrap:wrap">${t.hidden === null ? '' : `<button type="button" class="btn sm" data-adrep="${t.hidden ? 'restore' : 'hide'}">${t.hidden ? '되살리기' : '숨기기'}</button>`}<button type="button" class="btn sec sm" data-adrep="done">봤음</button>${t.link ? `<a class="btn sec sm" href="${esc(t.link)}">가 보기</a>` : ''}${t.canBan && /^(bp|bc|be):/.test(t.key) ? banBtns(t.key) : ''}</div></div>`;
+    return `<section class="mhero" id="adm-hero"><h2>사이트 운영</h2><p>문제 손질 · 신고함 · 쓰기 막기. 신고는 24시간 안에 봅니다.</p></section>
+      <h3 class="calsec">풀어 달라는 문제</h3>
+      <div class="mechips" id="adm-filter" style="margin:0 0 10px">${[['', '전체'], ...Object.entries(ST)].map(([k, n]) => `<button type="button" data-adf="${k}"${k === f ? ' class="on"' : ''} style="color:var(--ink);background:var(--paper)">${n}</button>`).join('')}</div>
+      <div id="adm-rqs">${rq === null ? '<div class="card"><div class="meta">지금 못 읽었습니다 — 있는지 없는지 모릅니다.</div></div>' : rq.length ? rq.map(reqCard).join('') : '<div class="card"><div class="meta">이 상태의 문제가 없습니다.</div></div>'}</div>
+      <h3 class="calsec">신고함</h3>
+      <div id="adm-reps">${rp === null ? '<div class="card"><div class="meta">지금 못 읽었습니다.</div></div>' : rp.length ? rp.map(repCard).join('') : '<div class="card"><div class="meta">신고가 없습니다.</div></div>'}</div>
+      <h3 class="calsec">쓰기 막힌 사람</h3>
+      <div class="card" id="adm-bans">${bn === null ? '<div class="meta">지금 못 읽었습니다.</div>' : bn.rows.length ? bn.rows.map(b => `<div class="bdmeta" style="padding:6px 0;border-top:1px solid var(--rule)"><b>${esc(b.src || b.kind)}</b><span>${esc(b.reason || '')}</span><span>${b.active ? '~' + esc(String(b.until).slice(0, 10)) : '끝남'}</span>${b.active ? `<button type="button" class="bdmini" data-adlift="${esc(b.tag)}">풀기</button>` : ''}</div>`).join('') : '<div class="meta">막힌 사람이 없습니다.</div>'}</div>`;
+  },
+
   async mypage() {
     let m = null, unknown = false;
-    if (LIVE) { try { m = await api('/me', { method: 'POST', body: meBody(), voter: voterTok() }); meSave(m); } catch { unknown = true; } }
+    if (LIVE) { try { m = await api('/me', { method: 'POST', body: meBody(), voter: voterTok() }); meSave(m); ME_LAST = m; } catch { unknown = true; } }
     else unknown = true;
     if (!m) return `<section class="mhero" id="me-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi.svg" alt="" width="34" height="34"><span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">나</span></div>
         <h2 style="margin-top:10px">지금은 못 읽었습니다</h2><p>모은 배지가 있는지 없는지 <b>모릅니다</b>. 잠시 뒤 다시 열어 주세요 — 모은 것은 사라지지 않습니다.</p></section>`;
@@ -4965,11 +5062,13 @@ const SCREEN = {
     const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const cells = []; for (let d = new Date(t0.getTime() - 111 * 86400000); d <= t0; d.setDate(d.getDate() + 1)) { const k = ymd(d); cells.push(`<i class="${on.has(k) ? 'on' : ''}" title="${k}"></i>`); }
     const stat = [['🏁', '연 대회', c.hosted], ['🎟️', '신청', c.joined], ['🚀', '제출', c.submitted], ['💬', '글', c.posts], ['🗨️', '댓글', c.comments], ['🔥', '받은 추천', c.upsGot], ['✍️', '합쳐진 고침', c.editsMerged], ['🤝', '연결', c.asksOk]];
-    return `<section class="mhero" id="me-hero"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi-on.svg" alt="" width="40" height="40">
+    return `<section class="mhero" id="me-hero"><img class="hk-art" src="/art/me.webp" alt="" width="104" height="104" loading="lazy" decoding="async"><div style="display:flex;align-items:center;gap:10px"><img src="/norangi-on.svg" alt="" width="40" height="40">
         <span class="pill" style="background:rgba(200,245,59,.15);color:#C8F53B">Lv.${m.level}</span><b style="color:#fff">${esc(m.title)}</b></div>
         <h2 style="margin-top:10px" id="me-lv">${got ? `배지 <span class="lime">${got}</span> / ${m.badges.length}` : '첫 배지까지 한 걸음'}</h2>
         <div class="lvbar" role="progressbar" aria-label="다음 레벨까지" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
-        <p>${m.xp} XP · 다음 레벨까지 <b>${Math.max(0, m.lvTo - m.xp)} XP</b></p></section>
+        <p>${m.xp} XP · 다음 레벨까지 <b>${Math.max(0, m.lvTo - m.xp)} XP</b></p>
+        <p class="nsay" id="me-say">🔌 ${esc(norangiSays(m))}</p>
+        <button type="button" class="btn sm" id="me-share" style="margin-top:12px;background:#C8F53B;color:#0B1020">자랑 카드 만들기</button><div id="me-shareout"></div></section>
       <div class="card" id="me-next"><h3>다음 목표</h3>
         ${m.next.map(b => `<a class="mgoal" href="${esc(b.href)}"><span class="mi">${b.icon}</span><span class="mt"><b>${esc(b.name)}</b><em>${esc(b.how)}</em>
           <span class="mbar"><span style="width:${Math.round(b.have / b.goal * 100)}%"></span></span></span><span class="mn">${b.have}/${b.goal}</span><span aria-hidden="true">›</span></a>`).join('') || '<div class="meta">배지를 다 모았습니다. 전설입니다.</div>'}</div>
@@ -7701,6 +7800,22 @@ function wire() {
     const url = location.origin + location.pathname;
     try { if (navigator.share) await navigator.share({ title: document.title, url }); else { await navigator.clipboard.writeText(url); flash('링크를 복사했습니다 — 같이 쓸 사람에게 보내세요'); } } catch {}
   });
+  const wrCoAdd = $('#wr-coadd');
+  if (wrCoAdd) wrCoAdd.addEventListener('click', async () => {
+    const at = wrPath(), name = ($('#wr-coname').value || '').trim();
+    if (!name) return flash('초대할 사람 이름을 적어 주세요', true);
+    try {
+      const r = await api(`/books/${at.book}/editors`, { method: 'POST', body: { name }, ekey: ekeyOf(at.book) });
+      const link = `${location.origin}/w/${at.book}#ek=${r.ekey}`;
+      $('#wr-coout').innerHTML = `<div class="meta" style="margin-top:8px"><b>${esc(r.name)}</b> 님에게만 보내세요 — 이 링크가 편집 열쇠입니다.</div><input id="wr-colink" readonly value="${esc(link)}"><button class="btn sec sm" id="wr-cocopy" style="margin-top:6px">링크 복사</button>`;
+      $('#wr-cocopy').addEventListener('click', () => { try { navigator.clipboard.writeText(link); flash('복사했습니다'); } catch { $('#wr-colink').select(); } });
+    } catch (e) { flash(e.message, true); }
+  });
+  document.querySelectorAll('[data-coremove]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('빼면 그 사람의 편집 링크가 바로 끝납니다. 뺄까요?')) return;
+    const at = wrPath();
+    try { await api(`/books/${at.book}/editors/${b.dataset.coremove}/remove`, { method: 'POST', ekey: ekeyOf(at.book) }); flash('뺐습니다'); render(); } catch (e) { flash(e.message, true); }
+  }));
   const wrChAdd = $('#wr-chadd');
   if (wrChAdd) wrChAdd.onclick = async () => { const at = wrPath();
     try { await api(`/books/${at.book}/chapters`, { method: 'POST', ekey: ekeyOf(at.book), body: { title: $('#wr-chname').value } }); render(); } catch (e) { flash(e.message, true); } };
@@ -7841,6 +7956,37 @@ function wire() {
   if (gveLink) gveLink.onclick = async () => { const me = myGiver(); if (!me) return;
     try { await navigator.clipboard.writeText(`${location.origin}/card#${me.id}.${me.gkey}`); flash('복사했습니다 — 다른 기기에서 열면 내 카드가 따라옵니다'); } catch { flash(`${location.origin}/card#${me.id}.${me.gkey}`); } };
 
+  const meShare = $('#me-share');
+  if (meShare) meShare.addEventListener('click', async () => {
+    if (!ME_LAST) return;
+    meShare.disabled = true;
+    try {
+      const blob = await meCardBlob(ME_LAST), file = new File([blob], 'hackon-me.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: `HACK:ON Lv.${ME_LAST.level} ${ME_LAST.title} — hackon.kr` }); } catch {} }
+      const url = URL.createObjectURL(blob);
+      $('#me-shareout').innerHTML = `<img id="me-card" src="${url}" alt="자랑 카드 — Lv.${ME_LAST.level} ${esc(ME_LAST.title)}" style="width:160px;border-radius:14px;margin-top:12px;display:block">
+        <a class="btn sec sm" id="me-dl" href="${url}" download="hackon-me.png" style="margin-top:8px">이미지 저장</a>`;
+    } catch (e) { flash('카드를 못 그렸습니다', true); }
+    meShare.disabled = false;
+  });
+  /* 사이트 운영 단추 — 한 곳에서 위임 */
+  const admView = $('#adm-hero') && $('#view');
+  if (admView && !admView.dataset.admWired) {
+    admView.dataset.admWired = '1';
+    admView.addEventListener('click', async e => {
+      const b = e.target.closest('button'); if (!b) return;
+      const rq = b.closest('[data-rq]'), id = rq && rq.dataset.rq, rk = b.closest('[data-key]');
+      const go = async (path, body, msg) => { try { await api(path, { method: 'POST', body }); flash(msg); render(); } catch (err) { flash(err.message, true); } };
+      if (b.dataset.adf !== undefined) { ADM_FILTER = b.dataset.adf; render(); }
+      else if (b.dataset.adst && id) go(`/requests/${id}/status`, { status: b.dataset.adst }, '상태를 바꿨습니다');
+      else if (b.dataset.adpin && id) go(`/requests/${id}/pin`, { on: b.dataset.adpin === '1' }, b.dataset.adpin === '1' ? '고정했습니다' : '고정을 풀었습니다');
+      else if (b.hasAttribute('data-adreplysave') && id) go(`/requests/${id}/reply`, { text: rq.querySelector('[data-adreply]').value.trim() }, '답을 저장했습니다');
+      else if (b.dataset.adsol) go(`/solutions/${b.dataset.adsol}/hide`, { on: b.dataset.on === '1' }, '바꿨습니다');
+      else if (b.dataset.adrep && rk) go('/admin/reports/act', { key: rk.dataset.key, act: b.dataset.adrep }, '처리했습니다');
+      else if (b.dataset.adban) { if (confirm(`${b.dataset.days}일 동안 이 사람의 쓰기를 막을까요?`)) go('/admin/bans', { from: b.dataset.adban, days: +b.dataset.days, ip: true, reason: '운영 규칙 위반' }, '쓰기를 막았습니다'); }
+      else if (b.dataset.adlift) go('/admin/bans/lift', { tag: b.dataset.adlift }, '풀었습니다');
+    });
+  }
   const acctDel = $('#b-acct-del');
   if (acctDel) acctDel.onclick = async () => {
     const v = ($('#acct-del-in') || {}).value || '';
@@ -8673,6 +8819,9 @@ const MKT = location.pathname === '/market';     // 마켓 — 시연하고 파�
 const REF = location.pathname === '/ref';        // 추천인 코드 품앗이 — 써 준 만큼 내 차례가 빨라진다
 /* 대회 공개 페이지에서는 위 오른쪽 단추가 «대회 열기» 가 아니라 «오늘» — 참가자에게 대회 열기는 엉뚱하다(10/02) */
 if (/^\/(e|board|w|write)(\/|$)/.test(location.pathname)) document.addEventListener('DOMContentLoaded', () => { const g = document.getElementById('g-open'); if (g) { g.textContent = '오늘'; g.href = '/cal'; } });
+/* /w/<책>#ek=<열쇠> — 공동 편집자 초대 링크. 열쇠는 # 뒤라 서버에 안 가고, 넣자마자 주소에서 지운다 */
+{ const m = /^\/w\/([0-9a-f]{8})/.exec(location.pathname), k = /^#ek=([0-9a-f]{20})$/.exec(location.hash || '');
+  if (m && k) { try { if (!localStorage.getItem('hackon.ekey.' + m[1])) localStorage.setItem('hackon.ekey.' + m[1], k[1]); } catch {} history.replaceState(null, '', location.pathname); } }
 /* /card#<id>.<열쇠> — 카드 열쇠를 이 기기에 넣고 «자리 → 드려요» 로. 열쇠는 # 뒤라 서버에 안 간다 */
 if (location.pathname === '/card') {
   const m = /^#(\d+)\.([0-9a-f]{16})$/.exec(location.hash || '');
@@ -8682,6 +8831,7 @@ if (location.pathname === '/card') {
 }
 const WRT = location.pathname === '/write' || /^\/w\/[0-9a-f]{8}(\/\d+)?$/.test(location.pathname);   // 공동 집필
 const BRD = location.pathname === '/board' || /^\/board\/\d+$/.test(location.pathname);   // 게시판 — 주제별 글·댓글·추천
+const ADM = location.pathname === '/admin';   // 사이트 운영 — 문제 손질·신고함·쓰기 막기(운영자 쿠키가 있을 때만 내용)
 const MYP = location.pathname === '/me';   // 나 — 배지·레벨·다음 목표·켜진 날(열쇠로 서버가 센다)
 const CAL = location.pathname === '/cal' || location.pathname === '/brief';   /* 브리핑은 «오늘» 에 합쳤다(10/02) — /brief 주소는 살려 같은 화면으로 */        // 오늘 — 내 달력 + 오늘의 한 걸음(일상 입구)
 const BRF = location.pathname === '/brief';      // 아침 브리핑 — 오늘 켤 것 한 장
@@ -8737,6 +8887,7 @@ else if (LVL) { tab = 'levels'; document.querySelector('nav').style.display = 'n
 else if (REF) { tab = 'ref'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (WRT) { tab = 'write'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRD) { tab = 'forum'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
+else if (ADM) { tab = 'adminsite'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (MYP) { tab = 'mypage'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (CAL) { tab = 'cal'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }
 else if (BRF) { tab = 'brief'; document.querySelector('nav').style.display = 'none'; document.body.classList.add('guest'); }

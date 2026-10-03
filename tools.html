@@ -54,11 +54,12 @@ textarea{min-height:170px;resize:vertical}
 .priv{font-size:12.5px;color:var(--grey);margin-top:10px}
 footer{color:var(--grey);font-size:13.5px;margin-top:22px}
 </style>
+<script src="/menu.js"></script>
 </head>
 <body>
 <div class="wrap">
-  <header class="top"><a class="logo" href="/"><img src="/norangi-vibe.svg" alt="" width="26" height="26">HACK:ON</a><a class="s" href="/news">소식</a></header>
-  <section class="hero"><h1>삽 <em>공구함</em></h1><p>붙여 넣으면 끝. 서버로 안 보냅니다.</p></section>
+  <header data-hk-top></header>
+  <section class="hero"><img class="hk-art" src="/art/tools.webp" alt="" width="104" height="104" loading="lazy" decoding="async"><h1>삽 <em>공구함</em></h1><p>붙여 넣으면 끝. 서버로 안 보냅니다.</p></section>
 
   <div class="tabs" role="tablist" aria-label="공구">
     <button role="tab" id="t-leak" aria-selected="true" aria-controls="p-leak">🔑 키 새는 곳</button>

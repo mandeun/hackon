@@ -1,8 +1,6 @@
 <!doctype html>
 <!-- HACK:ON in English — the door for people outside Korea.
-     «가장 한국적인 것이 해외에서 먹힌다». So the Korean words are not hidden behind translations:
-     each principle is written in Hangul first, then romanized, then explained. They are how the product works,
-     not decoration — 빨리빨리 is the five-minute setup, 품앗이 is the referral exchange, 정 is teammate matching.
+     10/05 — the «five Korean words» section felt like too much; one plain «How it works» and one line about the mascot.
      No external scripts. Events come from the same public list as the Korean home (/api/events). -->
 <html lang="en">
 <head>
@@ -15,6 +13,7 @@
 <link rel="canonical" href="https://hackon.kr/en">
 <link rel="alternate" hreflang="ko" href="https://hackon.kr/">
 <link rel="alternate" hreflang="en" href="https://hackon.kr/en">
+<link rel="alternate" hreflang="zh-Hans" href="https://hackon.kr/zh">
 <link rel="alternate" hreflang="x-default" href="https://hackon.kr/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HACK:ON">
@@ -46,6 +45,10 @@ a{color:inherit}
 .card{background:var(--card);border-radius:20px;padding:18px;margin:0 0 12px}
 .card h2{font-size:20px;margin:0 0 6px}
 .meta{color:var(--grey);font-size:14px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--hair)}
+.step:first-of-type{border-top:0}
+.step>b{flex:none;width:30px;height:30px;border-radius:50%;background:var(--lime);display:grid;place-items:center;font-size:15px}
+.top a.lang{font-size:14px;font-weight:700;text-decoration:none;padding:8px 12px;border:1px solid var(--hair);border-radius:999px;background:#fff}
 .ko-word{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--hair)}
 .ko-word:first-of-type{border-top:0}
 .ko-word .h{flex:none;width:92px}
@@ -61,6 +64,7 @@ footer{padding:24px 0 40px;color:var(--grey);font-size:14px}
 <div class="wrap">
   <header class="top">
     <a class="logo" href="/en"><img src="/norangi.svg" alt="" width="24" height="24">HACK<b>:</b>ON</a>
+    <a class="lang" href="/zh" hreflang="zh-Hans" lang="zh-Hans">中文</a>
     <a class="ko" href="/" hreflang="ko" lang="ko">한국어</a>
   </header>
 
@@ -71,19 +75,12 @@ footer{padding:24px 0 40px;color:var(--grey);font-size:14px}
     <div class="btns"><a class="btn" href="#events">See open events</a><a class="btn sec" href="/app">Open your own event</a></div>
   </section>
 
-  <section class="card" id="words">
-    <h2>Five Korean words that run this place</h2>
-    <div class="meta">We don't translate them away. They are how the product works.</div>
-    <div class="ko-word"><div class="h"><b lang="ko">빨리빨리</b><span>ppalli-ppalli</span></div>
-      <div><b>Hurry-hurry.</b> Open an event with just its name — five minutes, no account. Join with a name and an email.</div></div>
-    <div class="ko-word"><div class="h"><b lang="ko">품앗이</b><span>pumasi</span></div>
-      <div><b>Village work-swap.</b> Use someone's referral code and yours moves up the queue (<a href="/ref">referral exchange</a>). Help is paid back in help.</div></div>
-    <div class="ko-word"><div class="h"><b lang="ko">정</b><span>jeong</span></div>
-      <div><b>The bond that stays.</b> Teammate suggestions match roles, strengths and why you're here. Contacts open only when both press «Like».</div></div>
-    <div class="ko-word"><div class="h"><b lang="ko">켜다</b><span>kyeoda</span></div>
-      <div><b>To switch on.</b> Our mascot <span lang="ko">노랑이</span> (Norangi) is a power plug. "HACK:ON" is where things get switched on — your first app, your first users.</div></div>
-    <div class="ko-word"><div class="h"><b lang="ko">너랑</b><span>neorang</span></div>
-      <div><b>"With you."</b> Say it fast and it sounds like <span lang="ko">노랑</span>. What you thought was a «NO» becomes «with you».</div></div>
+  <section class="card" id="how">
+    <h2>How it works</h2>
+    <div class="step"><b>1</b><div><b>Open or join in five minutes.</b> An event needs only a name. Joining needs a name and an email — no account.</div></div>
+    <div class="step"><b>2</b><div><b>Find a team.</b> Teammate suggestions match roles and goals. Contacts open only when both people press «Like».</div></div>
+    <div class="step"><b>3</b><div><b>Ship in a day.</b> Build with AI, demo for two minutes, and keep a public record you can paste into LinkedIn.</div></div>
+    <div class="meta" style="margin-top:8px">Our mascot <span lang="ko">노랑이</span> (Norangi) is a power plug — HACK:ON is where your first app gets switched on.</div>
   </section>
 
   <section class="card" id="events">
@@ -106,7 +103,7 @@ footer{padding:24px 0 40px;color:var(--grey);font-size:14px}
     <div class="btns"><a class="btn" style="background:var(--ink);color:#fff" href="mailto:hi@mandeun.com?subject=%5BHACK%3AON%20global%5D%20">Write to hi@mandeun.com</a></div>
   </section>
 
-  <footer><span lang="ko">해커온</span> HACK:ON · Seoul · <a href="/" hreflang="ko">한국어</a> · <a href="/privacy">Privacy</a> · <a href="/llms.txt">llms.txt</a></footer>
+  <footer><span lang="ko">해커온</span> HACK:ON · Seoul · <a href="/" hreflang="ko">한국어</a> · <a href="/zh" hreflang="zh-Hans" lang="zh-Hans">中文</a> · <a href="/privacy">Privacy</a> · <a href="/llms.txt">llms.txt</a></footer>
 </div>
 <script>
 /* 열린 대회 — 한국어 첫 화면과 같은 공개 목록. 못 읽으면 «모름», 없으면 «없음» — 둘을 섞지 않는다 */

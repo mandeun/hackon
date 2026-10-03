@@ -1,0 +1,127 @@
+<!doctype html>
+<!-- HACK:ON 中文版 (简体) — 10/05. 英文版的结构照搬：一句话、三步、正在报名的比赛、为什么来、合作。
+     不讲文化课，只讲怎么用。比赛列表和韩语首页同一个公开接口(/api/events)。
+     No external scripts. Events come from the same public list as the Korean home (/api/events). -->
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0B1020">
+<title>HACK:ON — 在韩国，一天用 AI 做出一个产品</title>
+<meta name="description" content="HACK:ON（해커온）在韩国举办 Vibe Coding 黑客松和 Demo Day。和韩国团队组队，用 AI 一天做出能点开的产品。只要一个名字就能办比赛。">
+<link rel="icon" href="/icon.svg">
+<link rel="canonical" href="https://hackon.kr/zh">
+<link rel="alternate" hreflang="ko" href="https://hackon.kr/">
+<link rel="alternate" hreflang="en" href="https://hackon.kr/en">
+<link rel="alternate" hreflang="zh-Hans" href="https://hackon.kr/zh">
+<link rel="alternate" hreflang="x-default" href="https://hackon.kr/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HACK:ON">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="ko_KR">
+<meta property="og:url" content="https://hackon.kr/zh">
+<meta property="og:title" content="HACK:ON — 在韩国，一天用 AI 做出一个产品">
+<meta property="og:description" content="来自首尔的 Vibe Coding 黑客松。和韩国团队组队，用 AI 一天做出产品。">
+<meta property="og:image" content="https://hackon.kr/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+:root{--ink:#0B1020;--lime:#C8F53B;--amber:#FFB020;--pg:#EEF1F4;--card:#fff;--grey:#5B6470;--hair:#EAECEF;
+  --sans:'Pretendard','PingFang SC','Microsoft YaHei','Noto Sans SC','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,'Segoe UI',sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--ink);font:16px/1.6 var(--sans);word-break:normal;line-break:strict;overflow-wrap:break-word;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px}
+.top{display:flex;align-items:center;gap:12px;min-height:60px}
+.top .logo{font-weight:800;font-size:19px;text-decoration:none;margin-right:auto;display:inline-flex;align-items:center;gap:6px}
+.top .logo b{color:#8BB51A}
+.top a.ko{font-size:14px;font-weight:700;text-decoration:none;padding:8px 12px;border:1px solid var(--hair);border-radius:999px;background:#fff}
+.hero{background:var(--ink);color:#fff;border-radius:24px;padding:28px 22px;margin:8px 0 16px}
+.hero h1{font-size:34px;line-height:1.15;margin:12px 0 10px;letter-spacing:-.02em}
+.hero h1 em{font-style:normal;color:var(--lime)}
+.hero p{color:#C9CFDA;margin:0}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 18px;border-radius:14px;font-weight:800;text-decoration:none;background:var(--lime);color:var(--ink)}
+.btn.sec{background:transparent;color:#fff;border:1px solid #2A3350}
+.card{background:var(--card);border-radius:20px;padding:18px;margin:0 0 12px}
+.card h2{font-size:20px;margin:0 0 6px}
+.meta{color:var(--grey);font-size:14px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--hair)}
+.step:first-of-type{border-top:0}
+.step>b{flex:none;width:30px;height:30px;border-radius:50%;background:var(--lime);display:grid;place-items:center;font-size:15px}
+.top a.lang{font-size:14px;font-weight:700;text-decoration:none;padding:8px 12px;border:1px solid var(--hair);border-radius:999px;background:#fff}
+.ko-word{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--hair)}
+.ko-word:first-of-type{border-top:0}
+.ko-word .h{flex:none;width:92px}
+.ko-word .h b{display:block;font-size:24px;line-height:1.1}
+.ko-word .h span{font-size:12px;color:var(--grey);font-style:italic}
+.ev{padding:12px 0;border-top:1px solid var(--hair);display:block;text-decoration:none}
+.ev:first-child{border-top:0}
+.ev b{display:block}
+footer{padding:24px 0 40px;color:var(--grey);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="/zh"><img src="/norangi.svg" alt="" width="24" height="24">HACK<b>:</b>ON</a>
+    <a class="lang" href="/en" hreflang="en" lang="en">English</a>
+    <a class="ko" href="/" hreflang="ko" lang="ko">한국어</a>
+  </header>
+
+  <section class="hero">
+    <div class="meta" style="color:var(--lime);font-weight:700">해커온 · 来自首尔</div>
+    <h1>一天用 AI 做出产品，<br><em>和韩国团队一起。</em></h1>
+    <p>HACK:ON 在韩国举办 Vibe Coding 黑客松和 Demo Day。不会写代码也可以参加——和韩国的开发者、设计师、策划组队，当天做出别人能点开的东西。</p>
+    <div class="btns"><a class="btn" href="#events">看正在报名的比赛</a><a class="btn sec" href="/app">自己办一场</a></div>
+  </section>
+
+  <section class="card" id="how">
+    <h2>怎么参加</h2>
+    <div class="step"><b>1</b><div><b>五分钟办比赛或报名。</b>办比赛只要一个名字；报名只要名字和邮箱，不用注册账号。</div></div>
+    <div class="step"><b>2</b><div><b>找队友。</b>系统按角色和目标推荐队友。双方都点「喜欢」后才互相看到联系方式。</div></div>
+    <div class="step"><b>3</b><div><b>一天做完。</b>用 AI 开发，上台演示两分钟，留下可以贴到领英（LinkedIn）的公开记录。</div></div>
+    <div class="meta" style="margin-top:8px">吉祥物 <span lang="ko">노랑이</span>（Norangi）是一个插头——HACK:ON 就是把你的第一个应用「打开」的地方。</div>
+  </section>
+
+  <section class="card" id="events">
+    <h2>正在报名的比赛</h2>
+    <div class="meta">比赛标题是韩语。可以用浏览器的翻译功能，或在比赛页面的问答里用英语提问。</div>
+    <div id="ev-list" style="margin-top:8px"><div class="meta">加载中…</div></div>
+  </section>
+
+  <section class="card" id="why">
+    <h2>为什么来韩国的黑客松</h2>
+    <div class="ko-word"><div class="h"><b>速度</b></div><div>韩国团队做事快。一天、一个 Demo、台上两分钟。</div></div>
+    <div class="ko-word"><div class="h"><b>市场</b></div><div>在韩国用户身上验证想法——全球最「手机优先」的市场之一。</div></div>
+    <div class="ko-word"><div class="h"><b>履历</b></div><div>完成的每场比赛都会进入你的公开记录，一键复制到领英。</div></div>
+    <div class="ko-word"><div class="h"><b>人脉</b></div><div>把「中文」写进你的特长，想做海外市场的韩国团队会来找你。</div></div>
+  </section>
+
+  <section class="card" id="partners">
+    <h2>企业、社群、城市通讯员</h2>
+    <div class="meta">赞助韩国的黑客松、带你的社群一起来，或者做我们的城市通讯员——每月三行字，写写你所在城市的 AI 新动向。</div>
+    <div class="btns"><a class="btn" style="background:var(--ink);color:#fff" href="mailto:hi@mandeun.com?subject=%5BHACK%3AON%20%E4%B8%AD%E6%96%87%5D%20">写信到 hi@mandeun.com</a></div>
+  </section>
+
+  <footer><span lang="ko">해커온</span> HACK:ON · 首尔 · <a href="/" hreflang="ko" lang="ko">한국어</a> · <a href="/en" hreflang="en" lang="en">English</a> · <a href="/privacy">隐私</a></footer>
+</div>
+<script>
+/* 열린 대회 — 한국어 첫 화면과 같은 공개 목록. 못 읽으면 «모름», 없으면 «없음» — 둘을 섞지 않는다 */
+(function () {
+  var box = document.getElementById('ev-list');
+  var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  fetch('/api/events').then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (d) {
+    var rows = Array.isArray(d) ? d : (d.rows || []);
+    var today = new Date().toISOString().slice(0, 10);
+    rows = rows.filter(function (e) { return !e.ends || String(e.ends).slice(0, 10) >= today; }).slice(0, 8);
+    if (!rows.length) { box.innerHTML = '<div class="meta">现在没有正在报名的比赛。<a href="/app">自己办一场</a>——只要一个名字。</div>'; return; }
+    box.innerHTML = rows.map(function (e) {
+      var when = e.starts ? new Date(e.starts + 'T00:00:00').toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', weekday: 'short' }) : '日期待定';
+      return '<a class="ev" href="/e/' + esc(e.id) + '"><b lang="ko">' + esc(e.title) + '</b><span class="meta">' + esc(when) +
+        (e.place ? ' · ' + esc(e.place) : '') + (e.teams ? ' · 已报名 ' + e.teams + ' 队' : '') + '</span></a>';
+    }).join('');
+  }).catch(function () { box.innerHTML = '<div class="meta">比赛列表暂时读不出来——现在无法确定有没有比赛。请稍后再试。</div>'; });
+})();
+</script>
+</body>
+</html>

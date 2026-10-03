@@ -23,6 +23,7 @@
 <link rel="canonical" href="https://hackon.kr/">
 <link rel="alternate" hreflang="ko" href="https://hackon.kr/">
 <link rel="alternate" hreflang="en" href="https://hackon.kr/en">
+<link rel="alternate" hreflang="zh-Hans" href="https://hackon.kr/zh">
 <link rel="alternate" hreflang="x-default" href="https://hackon.kr/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HACK:ON">
@@ -96,44 +97,7 @@ input::placeholder{color:var(--mute)}
 .top nav.sec #nav-menu{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:0 13px;border-radius:999px;border:1px solid var(--hair);background:#fff;font:inherit;font-weight:800;color:var(--ink);cursor:pointer}
 .top nav.sec #nav-menu i{display:grid;gap:3px}
 .top nav.sec #nav-menu i b{display:block;width:14px;height:2px;border-radius:2px;background:var(--ink)}
-/* 전체 메뉴 판 — 폰은 아래에서 올라오는 시트, 넓은 화면은 오른쪽 위 판. 묶음마다 아이콘 타일 + 한 줄 */
-#menu-sheet{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center}
-#menu-sheet[hidden]{display:none}
-#menu-sheet .bd{position:absolute;inset:0;background:rgba(11,16,32,.45);backdrop-filter:blur(2px)}
-#menu-sheet .pn{position:relative;width:100%;max-height:86vh;overflow:auto;background:#fff;border-radius:24px 24px 0 0;padding:10px 16px calc(18px + env(safe-area-inset-bottom));animation:up .18s ease-out}
-@keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
-#menu-sheet .grip{width:40px;height:4px;border-radius:4px;background:#DDE1E6;margin:2px auto 10px}
-#menu-sheet .mh{display:flex;align-items:center;justify-content:space-between;margin:0 2px 6px}
-#menu-sheet .mh b{font-size:18px;letter-spacing:-.02em}
-#menu-sheet .mh button{width:40px;height:40px;border-radius:12px;border:0;background:var(--soft);font-size:18px;cursor:pointer}
-#menu-sheet .mg{display:block;font-size:12px;font-weight:800;color:var(--mute);letter-spacing:.04em;margin:14px 4px 8px}
-#menu-sheet .tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-#menu-sheet .tiles a{display:flex;gap:10px;align-items:center;min-height:58px;padding:10px 12px;border-radius:16px;background:var(--soft);text-decoration:none;color:var(--ink)}
-#menu-sheet .tiles a:hover,#menu-sheet .tiles a:focus-visible{background:#F1FBD5;outline:none}
-#menu-sheet .tiles .ic{flex:none;width:34px;height:34px;border-radius:11px;background:#0B1020;display:grid;place-items:center;font-size:17px}
-#menu-sheet .tiles b{display:block;font-size:14.5px;line-height:1.25}
-#menu-sheet .tiles small{display:block;font-size:12px;color:var(--mute);font-weight:500;line-height:1.3}
-#menu-sheet .tiles a.hot .ic{background:#C8F53B}
-#menu-sheet .meCard{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:#0B1020;color:#fff;text-decoration:none;margin:4px 0 2px}
-#menu-sheet .meCard b{display:block;font-size:15px}
-#menu-sheet .meCard small{display:block;font-size:12.5px;color:#C9CFDA;line-height:1.35}
-#menu-sheet .meCard em{margin-left:auto;font-style:normal;font-size:20px;color:#C8F53B}
-#menu-sheet .meCard .lv{display:inline-block;margin-right:6px;padding:1px 7px;border-radius:99px;background:#C8F53B;color:#0B1020;font-size:12px}
-#menu-sheet .mbar{display:block;height:5px;border-radius:99px;background:rgba(255,255,255,.15);overflow:hidden;margin-top:5px;width:160px;max-width:100%}
-#menu-sheet .mbar i{display:block;height:100%;background:#C8F53B}
-#menu-recent{display:flex;align-items:center;gap:8px;margin:10px 2px 0;overflow-x:auto}
-#menu-recent .mr{flex:none;font-size:12px;font-weight:800;color:var(--mute)}
-#menu-recent .recent{display:flex;gap:6px}
-#menu-recent .recent a{flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700;padding:7px 11px;border-radius:99px;background:var(--soft);color:var(--ink);text-decoration:none}
-#menu-sheet .morelinks{display:flex;flex-wrap:wrap;gap:4px 14px;padding:0 4px 4px}
-#menu-sheet .morelinks a{font-size:13.5px;color:var(--mute);text-decoration:none;min-height:36px;display:inline-flex;align-items:center}
-#menu-sheet .morelinks a:hover{color:var(--ink)}
-@media (min-width:720px){#menu-sheet{align-items:flex-start;justify-content:flex-end;padding:64px 24px 0}
-  #menu-sheet .bd{background:rgba(11,16,32,.18)}
-  #menu-sheet .pn{width:560px;border-radius:22px;max-height:80vh;box-shadow:0 24px 60px rgba(11,16,32,.25)}
-  #menu-sheet .grip{display:none}
-  #menu-sheet .tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
-  #menu-sheet .pn{width:640px}}
+/* 전체 메뉴 판·글자 크게는 /menu.js 한 곳에서(모든 화면 공통, 10/05) */
 .top nav.tools{display:flex;gap:12px;align-items:center}
 .top nav.tools #nav-me{gap:5px;padding:0 10px 0 6px;border-radius:999px;border:1px solid var(--hair);background:#fff;font-weight:800;font-size:13px;color:var(--ink);text-decoration:none}
 @media (min-width:720px){ .top nav.sec{width:auto;order:0;margin-right:auto;font-size:14px} .top .logo{margin-right:24px} }
@@ -155,6 +119,14 @@ input::placeholder{color:var(--mute)}
 .hero .btn.o{background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.55)}
 .hero .btn.o:hover{background:rgba(255,255,255,.12);border-color:#fff}
 .hero .eyebrow{font-size:14px;font-weight:700;color:var(--on);margin-bottom:10px}
+.hero .hero-art{display:block;width:150px;height:150px;object-fit:contain;margin:14px auto 0}
+@media (min-width:900px){.hero .hero-art{position:absolute;right:24px;top:24px;width:260px;height:260px;margin:0}}
+.hero .mk-h{margin-top:26px;font-size:13px;font-weight:800;color:#C9CFDA;letter-spacing:.02em}
+.hero .mk{list-style:none;display:flex;gap:8px;overflow-x:auto;padding:8px 0 4px;margin:0 -16px;padding-left:16px;padding-right:16px;scrollbar-width:none}
+.hero .mk::-webkit-scrollbar{display:none}
+.hero .mk li{flex:none;padding:9px 13px;border-radius:999px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);font-size:14px;font-weight:700;color:#fff;white-space:nowrap}
+.hero .mk-trust{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:10px;font-size:13px;color:#C9CFDA}
+.hero .mk-trust span::before{content:'✓ ';color:var(--on);font-weight:900}
 .hero h1{font-size:clamp(30px,7.2vw,46px);font-weight:850;letter-spacing:-.045em;line-height:1.12}
 .hero .lead{margin-top:14px;font-size:17px;color:#D5DAE6;line-height:1.6;text-wrap:pretty}
 .hero .cta{margin-top:var(--s5);display:flex;flex-wrap:wrap;gap:var(--s3)}
@@ -282,9 +254,10 @@ footer a{color:inherit;display:inline-flex;align-items:center;min-height:44px}
 @media (prefers-reduced-motion:reduce){ .btn{transition:none} .btn:active{transform:none} }
 @media (max-width:640px){ section{padding:var(--s5) var(--s4);border-radius:18px;margin:var(--s3) 0} main{padding:var(--s1) var(--s3) 0} .wrap{padding:0 var(--s4)} }
 </style>
+<script src="/menu.js"></script>
 </head>
 
-<body>
+<body data-hk-cond>
 <script>
 /* ═══════════════ 고치는 곳 ═══════════════ */
 var 연락메일 = 'hi@mandeun.com';
@@ -303,11 +276,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a href="/cal" class="nav-today"><span class="dot" aria-hidden="true"></span>오늘</a>
       <a href="#list">대회</a>
       <a href="/news">소식</a>
-      <a id="nav-learn" href="/learn" hidden>강의</a>
-      <a id="nav-market" href="/market" hidden>마켓</a>
-      <a id="nav-rank" href="/rank" hidden>순위</a>
-      <a id="nav-conds" href="/conditions" hidden>그날의 조건</a>
-      <button type="button" id="nav-menu" aria-haspopup="dialog" aria-controls="menu-sheet" aria-expanded="false"><i aria-hidden="true"><b></b><b></b><b></b></i>메뉴</button>
+      <button type="button" id="nav-menu" data-menu-open aria-haspopup="dialog" aria-controls="menu-sheet" aria-expanded="false"><i aria-hidden="true"><b></b><b></b><b></b></i>메뉴</button>
     </nav>
     <nav class="tools" aria-label="도구">
       <a id="nav-login" href="/app?login=1" style="display:none">로그인</a>
@@ -317,17 +286,7 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     </nav>
   </div>
 </header>
-<!-- 전체 메뉴 판 — 10/03 23칸 → 12칸. 매일 여는 것·같이 하는 것·만드는 것 셋, 네 칸씩. 나머지는 아래 «그 밖에» 글자 고리(주소는 그대로) -->
-<div id="menu-sheet" hidden role="dialog" aria-modal="true" aria-label="전체 메뉴"><div class="bd" data-menu-close></div><div class="pn">
-  <div class="grip" aria-hidden="true"></div>
-  <div class="mh"><b>메뉴</b><button type="button" data-menu-close aria-label="닫기">✕</button></div>
-  <a href="/me" id="menu-me" class="meCard"><img src="/norangi-on.svg" alt="" width="40" height="40"><span><b id="menu-me-lv">나</b><small id="menu-me-next">배지·레벨·다음 목표 보기</small></span><em aria-hidden="true">›</em></a>
-  <div id="menu-recent" hidden><span class="mr">최근</span><nav class="recent" aria-label="최근 간 곳"></nav></div>
-  <b class="mg">매일</b><nav class="tiles" aria-label="매일"><a href="/cal" class="hot"><span class="ic" aria-hidden="true">📅</span><span><b>오늘</b><small>일정·브리핑</small></span></a><a href="/news"><span class="ic" aria-hidden="true">📰</span><span><b>소식</b><small>⏱ 바로 해 보기</small></span></a><a href="/tools" class="hot"><span class="ic" aria-hidden="true">🔑</span><span><b>삽 공구함</b><small>키 검사·CLAUDE.md</small></span></a><a href="/wallet"><span class="ic" aria-hidden="true">👛</span><span><b>AI 지갑</b><small>구독 마감</small></span></a></nav>
-  <b class="mg">같이</b><nav class="tiles" aria-label="같이"><a href="/board"><span class="ic" aria-hidden="true">💬</span><span><b>게시판</b><small>주제별 수다</small></span></a><a href="/write"><span class="ic" aria-hidden="true">✍️</span><span><b>공동 집필</b><small>제안→합치기</small></span></a><a href="/club"><span class="ic" aria-hidden="true">🔌</span><span><b>ON 클럽</b><small>매달 켜 보기</small></span></a><a href="/card"><span class="ic" aria-hidden="true">🤝</span><span><b>매칭</b><small>심사·장소·크레딧</small></span></a></nav>
-  <b class="mg">만들기</b><nav class="tiles" aria-label="만들기"><a href="/app?make=1"><span class="ic" aria-hidden="true">⚡</span><span><b>대회 열기</b><small>이름 하나면</small></span></a><a href="/recruit"><span class="ic" aria-hidden="true">📣</span><span><b>모집·외주</b><small>팀·일감</small></span></a><a href="/made"><span class="ic" aria-hidden="true">🛠️</span><span><b>만든 것</b><small>구경·별</small></span></a><a href="/cert"><span class="ic" aria-hidden="true">📜</span><span><b>실무 기록</b><small>완주가 이력</small></span></a></nav>
-  <b class="mg">그 밖에</b><nav class="morelinks" aria-label="그 밖에"><a href="/setups">세팅 모음</a><a href="/problems">문제 은행</a><a href="/gigs">외주</a><a href="/ref">추천 코드</a><a href="#" id="nav-manual">운영 매뉴얼</a><a href="/around">모아 보기</a><a href="/launch">시작하면 받는 것</a><a href="/partner">협찬 안내</a><a href="/biz">기업·기관</a><a href="/crew">크루</a><a href="/thanks">기여자</a><a href="/en">English</a></nav>
-</div></div>
+
 
 
 <!-- 표제. 한 문장, 단추 둘. -->
@@ -340,6 +299,13 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
       <a class="btn" id="hero-open" href="/app?make=1">대회 열기</a>
       <a class="btn o" id="hero-go" href="#list">참가할 대회 보기</a>
     </div>
+    <!-- 10/05 — 개발자만의 곳이 아니라는 것을 «만드는 것» 으로 보여 준다(2030·직장인·셀러). 설명 대신 예시 여섯 -->
+    <p class="mk-h">퇴근 후 한 시간, 이런 걸 만들어요</p>
+    <ul class="mk" id="hero-made" tabindex="0" aria-label="코딩 몰라도 만드는 것 예시">
+      <li>💌 모바일 청첩장</li><li>🧾 가계부 자동 정리</li><li>🛍️ 스마트스토어 주문 정리</li><li>📚 독서 기록 앱</li><li>🐶 반려동물 병원 기록</li><li>✈️ 여행 일정표</li>
+    </ul>
+    <img class="hero-art" src="/art/hero.webp" alt="" width="180" height="180" loading="lazy" decoding="async">
+    <p class="mk-trust" id="hero-trust"><span>혼자 와도 팀 찾아 드려요</span><span>처음이어도 OK</span><span>낮 2시간</span><span>악플은 거르고 차단</span></p>
   </div>
 </div>
 
@@ -440,6 +406,11 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
     <span class="foot-mark" translate="no"><img src="/norangi.svg" alt="" width="22" height="22">HACK<span class="stamp">:</span>ON</span>
     <span>코드와 운영 방법이 전부 공개입니다.</span>
     <a id="foot-manual" href="#">운영 매뉴얼</a>
+    <a href="/terms">이용 규칙</a>
+    <a href="/privacy">개인정보</a>
+    <a href="/delete-account">계정 삭제</a>
+    <a href="/en" hreflang="en" lang="en">English</a>
+    <a href="/zh" hreflang="zh-Hans" lang="zh-Hans">中文</a>
     <a href="https://github.com/mandeun/hackon" rel="noopener">소스 보기</a>
     <a href="/brand">브랜드</a>
     <span id="foot-mail"></span>
@@ -449,50 +420,8 @@ var 매뉴얼  = location.protocol.startsWith('http') ? '/manual' : 'https://git
 
 <script>
 /* 링크는 '고치는 곳' 에서 받아 꽂는다 */
-/* 전체 메뉴 판 — 열면 첫 타일에 포커스, Esc·바깥·✕ 로 닫고 «메뉴» 단추로 포커스를 돌려준다 */
-(function () {
-  var btn = document.getElementById('nav-menu'), sh = document.getElementById('menu-sheet');
-  if (!btn || !sh) return;
-  /* «나» 카드 — 마지막으로 /me 를 열었을 때의 요약(hackon.melv). 없으면 «아직 모름» 이라 숫자를 안 지어낸다 */
-  function fillMe() {
-    var m = null; try { m = JSON.parse(localStorage.getItem('hackon.melv') || 'null'); } catch (e) {}
-    var lv = document.getElementById('menu-me-lv'), nx = document.getElementById('menu-me-next'), top = document.getElementById('nav-me-lv');
-    if (!m || !m.level) return;
-    lv.innerHTML = '<span class="lv">Lv.' + (+m.level) + '</span>';
-    lv.appendChild(document.createTextNode(String(m.title || '')));
-    top.textContent = 'Lv.' + (+m.level);
-    nx.textContent = m.next ? '다음 — ' + m.next.icon + ' ' + m.next.name + ' ' + m.next.have + '/' + m.next.goal : '배지를 다 모았습니다';
-    if (m.next && m.next.goal) { var bar = document.createElement('span'); bar.className = 'mbar'; bar.innerHTML = '<i style="width:' + Math.round(100 * Math.min(1, m.next.have / m.next.goal)) + '%"></i>'; nx.appendChild(bar); }
-  }
-  /* 최근 간 곳 — 다른 화면들이 이 기기에 적어 둔 것. 이름은 메뉴 타일 이름을 먼저 쓴다 */
-  function fillRecent() {
-    var l = []; try { l = JSON.parse(localStorage.getItem('hackon.recent') || '[]'); } catch (e) {}
-    var OK = /^\/(cal|news|tools|wallet|board|write|club|card|recruit|made|cert|setups|problems|gigs|around|me|learn|market|rank|e\/[a-z0-9]+|board\/\d+|w\/[0-9a-f]{8})$/;
-    var box = document.getElementById('menu-recent'), nav = box.querySelector('.recent'); nav.textContent = '';
-    l.filter(function (x) { return x && OK.test(x.p); }).slice(0, 4).forEach(function (x) {
-      var known = sh.querySelector('.tiles a[href="' + x.p + '"] b, .morelinks a[href="' + x.p + '"]');
-      var a = document.createElement('a'); a.href = x.p; a.textContent = x.p === '/me' ? '나' : (known && known.textContent) || x.t || x.p; nav.appendChild(a);
-    });
-    box.hidden = !nav.children.length;
-  }
-  fillMe();
-  function open() { fillMe(); fillRecent(); sh.hidden = false; btn.setAttribute('aria-expanded', 'true'); document.body.style.overflow = 'hidden'; var f = sh.querySelector('.tiles a'); if (f) f.focus(); }
-  function close() { sh.hidden = true; btn.setAttribute('aria-expanded', 'false'); document.body.style.overflow = ''; btn.focus(); }
-  btn.addEventListener('click', open);
-  sh.addEventListener('click', function (e) { if (e.target.closest('[data-menu-close]')) close(); });
-  /* Tab 이 판 밖(뒤 화면)으로 새지 않게 — 키보드·화면 읽기 사용자가 판 뒤에서 길을 잃었다(레드팀 10/03) */
-  document.addEventListener('keydown', function (e) {
-    if (sh.hidden) return;
-    if (e.key === 'Escape') { close(); return; }
-    if (e.key !== 'Tab') return;
-    var f = sh.querySelectorAll('a[href], button'); if (!f.length) return;
-    var first = f[0], last = f[f.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    else if (!sh.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
-  });
-})();
-['nav-manual','manual-link2','foot-manual'].forEach(function(id){ document.getElementById(id).href = 매뉴얼; });
+
+['manual-link2','foot-manual'].forEach(function(id){ var e = document.getElementById(id); if (e) e.href = 매뉴얼; });
 var mailLink = document.getElementById('mail-link');
 mailLink.href = 'mailto:' + 연락메일 + '?subject=' + encodeURIComponent('[협찬 문의] HACK:ON');
 mailLink.textContent = 연락메일;
@@ -604,27 +533,9 @@ fetch('/api/requests').then(function(r){ return r.json(); }).then(function(list)
   }).join('');
 }).catch(function(){});
 
-/* 그날의 조건. 둘부터 목록이라 그때 문을 연다 — 하나는 아카이브가 아니다. */
-fetch('/api/conditions').then(function(r){ return r.json(); }).then(function(d){
-  if (d && d.enough) document.getElementById('nav-conds').hidden = false;
-}).catch(function(){});
 
-/* 강의 입구. 한 편이라도 올라왔을 때만 연다 — 순위 입구와 같은 이유다 */
-fetch('/api/lectures').then(function(r){ return r.json(); }).then(function(d){
-  if (d && d.rows && d.rows.length) document.getElementById('nav-learn').hidden = false;
-}).catch(function(){});
 
-/* 마켓 입구 — 공개된 것이 하나라도 있을 때만 */
-fetch('/api/market').then(function(r){ return r.json(); }).then(function(d){
-  if (d && d.rows && d.rows.length) document.getElementById('nav-market').hidden = false;
-}).catch(function(){});
 
-/* 순위 입구. 이름을 정한 사람이 하나라도 있을 때만 연다 —
-   빈 표로 가는 문을 미리 걸어 두면 «비어 있는 서비스» 로 읽힌다. */
-fetch('/api/rank').then(function(r){ return r.json(); }).then(function(d){
-  var n = ((d && d.all) || []).length || ((d && d.rows) || []).length;
-  if (n) document.getElementById('nav-rank').hidden = false;
-}).catch(function(){});
 
 fetch('/api/showcase').then(function(r){ return r.json(); }).then(function(list){
   if (!list || !list.length) return;

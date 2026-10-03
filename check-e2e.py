@@ -3380,7 +3380,8 @@ with sync_playwright() as pw:
     A(r["len"] > 1000, f"화면이 너무 짧다: {r['len']}")
     A(r["same"], "서비스워커가 서버 것과 다른(오래된) 화면을 돌려준다")
     keys = pg.evaluate("async () => await caches.keys()")
-    A(all(k == "hackon-v2" for k in keys), f"옛 캐시가 남아 있다: {keys}")
+    _cv = re.search(r"const CACHE = '([^']+)'", open("sw.js", encoding="utf-8").read()).group(1)   # 판을 올릴 때마다 여기를 안 고치게
+    A(all(k == _cv for k in keys), f"옛 캐시가 남아 있다: {keys}")
     ok(f"배포한 것이 사용자에게 간다 — 서버를 먼저 본다 (캐시 {keys})")
     ctx.close()
     b.close()
@@ -3672,7 +3673,7 @@ with sync_playwright() as pw:
     A("아직 올라온 강의가 없습니다" in pg.inner_text("body"), "강의 0건일 때 «없음» 문구가 안 나온다")
     A("불러오지 못했습니다" not in pg.inner_text("body"), "강의 0건을 «모름» 으로 그린다")
     pg.goto(f"{LEARN_BASE}/", wait_until="networkidle")
-    A(pg.locator("#nav-learn").is_hidden(), "강의가 없는데 첫 화면에 강의 입구가 열려 있다")
+    pg.wait_for_selector("#nav-learn", state="attached"); A(pg.get_attribute("#nav-learn", "hidden") is not None, "강의가 없는데 메뉴에 강의 입구가 열려 있다")
     # 바깥에서 쓸 때는 서버를 끄고 쓴 뒤 새로 띄운다(checklib.stop 설명 참고)
     checklib.stop(LEARN_BASE)
     con = _sq.connect(_ldb)
@@ -3684,7 +3685,7 @@ with sync_playwright() as pw:
     LEARN_BASE = checklib.start(extra_env={"DB": _ldb})
     pg.goto(f"{LEARN_BASE}/", wait_until="networkidle")
     pg.wait_for_timeout(500)
-    A(pg.locator("#nav-learn").is_visible(), "강의가 있는데 첫 화면에 강의 입구가 안 열린다")
+    pg.wait_for_function("document.querySelector('#nav-learn') && !document.querySelector('#nav-learn').hidden", timeout=8000); A(pg.get_attribute("#nav-learn", "hidden") is None, "강의가 있는데 메뉴에 강의 입구가 안 열린다")
     pg.goto(f"{LEARN_BASE}/learn", wait_until="networkidle")
     pg.wait_for_selector("body[data-ready='1']", timeout=10000)
     body_t = pg.inner_text("body")
@@ -3946,7 +3947,7 @@ with sync_playwright() as pw:
     pg = ctx.new_page()
     pg.on("pageerror", lambda e: errs.append("market2: " + str(e)))
     pg.goto(f"{LEARN_BASE}/", wait_until="networkidle"); pg.wait_for_timeout(500)
-    A(pg.locator("#nav-market").is_visible(), "공개된 것이 있는데 첫 화면에 마켓 입구가 없다")
+    pg.wait_for_function("document.querySelector('#nav-market') && !document.querySelector('#nav-market').hidden", timeout=8000); A(pg.get_attribute("#nav-market", "hidden") is None, "공개된 것이 있는데 메뉴에 마켓 입구가 없다")
     pg.goto(f"{LEARN_BASE}/market", wait_until="networkidle")
     pg.wait_for_selector("a.mk", timeout=10000)
     A("9,900" in pg.inner_text("a.mk") and "완주 1" in pg.inner_text("a.mk"), "목록에 값·만든 사람의 완주가 없다")
@@ -4337,12 +4338,18 @@ with sync_playwright() as pw:
     b.close()
 ok("기업·기관 안내(사내 해커톤·출제형·워크숍·스타트업, 업종별 사례)와 크루 모집(홍보·운영·개발)")
 
-# ── 해외 — /en(한국 말 다섯 개를 원리로), hreflang, 한국어 아닌 브라우저엔 대회 페이지에 영어 한 줄 ──
+# ── 해외 — /en·/zh(쓰는 법 세 걸음, 문화 설명은 한 줄), hreflang, 한국어 아닌 브라우저엔 대회 페이지에 영어 한 줄 ──
 A(code_of("/en") == 200, "/en 이 안 열린다")
 _enh = urllib.request.urlopen(BASE + "/en").read().decode()
-A('hreflang="ko"' in _enh and "빨리빨리" in _enh and "품앗이" in _enh, "/en 에 hreflang·한국 말 원리가 없다")
+A('hreflang="ko"' in _enh and 'hreflang="zh-Hans"' in _enh and "How it works" in _enh, "/en 에 hreflang·쓰는 법이 없다")
+A("빨리빨리" not in _enh and "jeong" not in _enh, "/en 에 과한 한국 말 풀이가 남아 있다(10/05 줄임)")
+A(code_of("/zh") == 200, "/zh 가 안 열린다")
+_zhh = urllib.request.urlopen(BASE + "/zh").read().decode()
+A('<html lang="zh-Hans">' in _zhh and "怎么参加" in _zhh and 'hreflang="en"' in _zhh and 'hreflang="ko"' in _zhh, "/zh 가 중국어판이 아니거나 hreflang 이 없다")
+A('hreflang="zh-Hans"' in urllib.request.urlopen(BASE + "/").read().decode(), "첫 화면이 중국어판을 hreflang 으로 안 가리킨다")
 A('hreflang="en"' in urllib.request.urlopen(BASE + "/").read().decode(), "첫 화면이 영어판을 hreflang 으로 안 가리킨다")
-A("/en</loc>" in urllib.request.urlopen(BASE + "/sitemap.xml").read().decode(), "sitemap 에 /en 이 없다")
+_sm = urllib.request.urlopen(BASE + "/sitemap.xml").read().decode()
+A("/en</loc>" in _sm and "/zh</loc>" in _sm, "sitemap 에 /en·/zh 가 없다")
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     _ev = post("/api/events", {"title": "해외 검사 대회"})[1]
@@ -4351,10 +4358,88 @@ with sync_playwright() as pw:
         pg.goto(BASE + f"/e/{_ev['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-name")
         A((pg.query_selector("#en-note") is not None) == _want, f"{_loc} 브라우저에서 영어 안내 한 줄이 {'안 ' if _want else ''}뜬다")
         ctx.close()
-    pg = b.new_page(viewport={"width": 390, "height": 844}); pg.goto(BASE + "/en", wait_until="networkidle"); pg.wait_for_timeout(500)
-    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/en 이 폰 폭에서 옆으로 밀린다")
+    for _p in ("/en", "/zh"):
+        pg = b.new_page(viewport={"width": 390, "height": 844}); pg.on("pageerror", lambda e: errs.append("intl: " + str(e)))
+        pg.goto(BASE + _p, wait_until="networkidle"); pg.wait_for_timeout(500)
+        A(pg.evaluate("document.documentElement.scrollWidth") <= 391, f"{_p} 이 폰 폭에서 옆으로 밀린다")
+        _evt = pg.inner_text("#ev-list")
+        A("Loading" not in _evt and "加载中" not in _evt and len(_evt) > 5, f"{_p} 대회 목록이 «불러오는 중» 에 멈춰 있다: {_evt[:80]}")
     b.close()
-ok("해외 — /en(빨리빨리·품앗이·정·켜다·너랑), hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
+ok("해외 — /en·/zh(세 걸음·대회 목록), 과한 한국 말 풀이 뺌, hreflang·sitemap, 외국어 브라우저엔 대회 페이지 영어 한 줄")
+# ── 법·약관 — 처리방침(hackon.kr·위탁·보호책임자), 이용 규칙 /terms, 앱 링크 assetlinks ──
+import http.client as _hc
+_lr = urllib.request.urlopen(BASE + "/privacy")
+_pv = _lr.read().decode("utf-8")
+A(_lr.status == 200 and _lr.headers.get("x-content-type-options") == "nosniff"
+  and "frame-ancestors 'none'" in (_lr.headers.get("content-security-policy") or ""), "/privacy 에 보안 헤더(SEC_HEADERS)가 없다")
+A("hackon.kr" in _pv and "hackon.mandeun.com" not in _pv and "위탁" in _pv and "보호책임자" in _pv and "만 14세" in _pv,
+  "처리방침에 hackon.kr·위탁·보호책임자·만 14세가 없거나 옛 주소가 남았다")
+A('href="/terms"' in _pv and 'href="/delete-account"' in _pv, "처리방침에서 이용 규칙·계정 삭제로 가는 길이 없다")
+_lr = urllib.request.urlopen(BASE + "/terms")
+_tv = _lr.read().decode("utf-8")
+A(_lr.status == 200 and _lr.headers.get("x-content-type-options") == "nosniff", "/terms 가 안 열리거나 보안 헤더가 없다")
+A("신고하면 저절로 내려갑니다" in _tv and "만 14세" in _tv and 'href="/privacy"' in _tv, "이용 규칙에 신고·만 14세·처리방침 길이 없다")
+A("/terms</loc>" in urllib.request.urlopen(BASE + "/sitemap.xml").read().decode(), "sitemap 에 /terms 가 없다")
+A(code_of("/.well-known/assetlinks.json") == 404, "TWA_PACKAGE·TWA_SHA256 이 없는 서버가 앱 링크 파일을 낸다")
+# 열쇠를 넣은 서버 — 200·JSON·한 시간 캐시, www 로 와도 넘기지 않는다(구글 검증기는 리다이렉트를 안 따라간다)
+_fp = ":".join(f"{i * 5:02X}" for i in range(32))
+TWA_BASE = checklib.start(extra_env={"TWA_PACKAGE": "kr.hackon.twa", "TWA_SHA256": _fp.lower(), "SITES": "https://hackon.kr"})
+_tw = urllib.parse.urlparse(TWA_BASE)
+
+
+def _raw(path, host):
+    c = _hc.HTTPConnection(_tw.hostname, _tw.port, timeout=10)
+    c.request("GET", path, headers={"Host": host})
+    r = c.getresponse()
+    out = (r.status, r.getheader("content-type") or "", r.getheader("cache-control") or "", r.getheader("location") or "", r.read())
+    c.close()
+    return out
+
+
+_st, _ct, _cc, _loc, _bd = _raw("/.well-known/assetlinks.json", "hackon.kr")
+_al = json.loads(_bd) if _st == 200 else None
+A(_st == 200 and _ct.startswith("application/json") and "max-age=3600" in _cc, f"앱 링크 파일이 200·JSON·한 시간 캐시가 아니다: {_st} {_ct} {_cc}")
+A(_al and _al[0]["relation"] == ["delegate_permission/common.handle_all_urls"] and _al[0]["target"]["namespace"] == "android_app"
+  and _al[0]["target"]["package_name"] == "kr.hackon.twa" and _al[0]["target"]["sha256_cert_fingerprints"] == [_fp],
+  f"앱 링크 파일 모양이 다르다: {_al}")
+A(_raw("/terms", "www.hackon.kr")[0] == 301, "www 넘기기가 안 켜져 있다 — 아래 단언이 공회전한다")
+A(_raw("/.well-known/assetlinks.json", "www.hackon.kr")[0] == 200, "www 로 온 앱 링크 확인을 301 로 넘긴다")
+checklib.stop(TWA_BASE)
+# 계정 삭제 안내 = deleteAccount 가 실제로 지우는 표. 함수 본문을 읽어 맞춘다
+_src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.js"), encoding="utf-8").read()
+_fn = _src[_src.index("async function deleteAccount("):]
+_fn = _fn[:_fn.index("\n}\n")]
+_del = set(re.findall(r"DELETE FROM (\w+) WHERE", _fn)) | ({"events"} if "deleteEvent(" in _fn else set())
+_keep = set(re.findall(r"UPDATE (\w+) SET", _fn))
+_dh = urllib.request.urlopen(BASE + "/delete-account").read().decode("utf-8")
+_pdel = set(" ".join(re.findall(r'data-del="([^"]+)"', _dh)).split())
+_pkeep = set(" ".join(re.findall(r'data-keep="([^"]+)"', _dh)).split())
+A(len(_del) >= 10 and _pdel == _del, f"계정 삭제 안내의 «지워지는 것» 이 코드와 다르다 — 코드에만: {sorted(_del - _pdel)}, 안내에만: {sorted(_pdel - _del)}")
+A(_keep and _pkeep == _keep, f"계정 삭제 안내의 «남는 것» 이 코드와 다르다 — 코드에만: {sorted(_keep - _pkeep)}, 안내에만: {sorted(_pkeep - _keep)}")
+A("위쪽(«내가 연 대회» 아래)" in _dh and "href=\"/terms\"" in _dh, "계정 삭제 안내가 단추 자리를 화면과 다르게 적는다")
+# 화면 — 안내가 말한 자리(«대회» 탭, «내가 연 대회» 아래, 열린 대회 목록 위)에 «계정 삭제» 가 있다. 신청 동의 칸엔 만 14세
+_, _lev = post("/api/events", {"title": "약관 검사 대회", "starts": (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d")})
+A(post(f"/api/events/{_lev['id']}/list", {"on": True}, key=_lev["okey"])[0] == 200, "약관 검사 대회를 목록에 못 올렸다 — «열린 대회» 위치 단언이 공회전한다")
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    pg = b.new_context(viewport={"width": 390, "height": 844}).new_page()
+    pg.on("pageerror", lambda e: errs.append("legal: " + str(e)))
+    pg.add_init_script(f"localStorage.setItem('hackon.owner','{_lev['owner']}')")
+    pg.goto(BASE + "/app", wait_until="networkidle"); pg.wait_for_selector("body[data-ready='1']")
+    A(pg.locator("nav button[data-t='home'].on").count() == 1 and "대회" in pg.inner_text("nav button[data-t='home']"), "첫 탭이 «대회» 가 아니다")
+    _order = pg.evaluate("""() => { const a = document.querySelector('#acct-del'); if (!a) return 'none';
+      const hs = [...document.querySelectorAll('#view h2')]; const mine = hs.find(h => h.textContent.includes('내가 연 대회')),
+            open = hs.find(h => h.textContent.includes('열린 대회'));
+      if (!mine || !open) return 'h2 없음';
+      const F = Node.DOCUMENT_POSITION_FOLLOWING;
+      return (mine.compareDocumentPosition(a) & F) && (a.compareDocumentPosition(open) & F) ? 'ok' : 'order'; }""")
+    A(_order == "ok", f"«계정 삭제» 가 «내가 연 대회» 아래·열린 대회 위에 없다: {_order}")
+    A(pg.inner_text("#acct-del summary").strip() == "계정 삭제", "«계정 삭제» 이름이 안내와 다르다")
+    A(pg.evaluate("RULES_TEXT").endswith("자세한 규칙: hackon.kr/terms"), "첫 글 전 이용 규칙 창이 /terms 를 안 가리킨다")
+    pg.goto(BASE + f"/e/{_lev['id']}", wait_until="networkidle"); pg.wait_for_selector("#t-agree")
+    A("만 14세 이상입니다" in pg.inner_text("label:has(#t-agree)"), "참가 신청 동의 칸에 만 14세 확인이 없다")
+    b.close()
+ok("법·약관 — 처리방침·이용 규칙 200·보안 헤더·서로 잇는 길·sitemap, 앱 링크(열쇠 없으면 404·있으면 JSON·www 안 넘김), 삭제 안내 = deleteAccount, 삭제 자리·만 14세")
 # ── 대회 혜택 탭 — 열린 대회에서 받는 것(확정된 것만). 장학금 목록은 이 탭에서 뺐다 ──
 _, _bev = post("/api/events", {"title": "혜택 화면 검사", "starts": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"), "ends": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")})
 post(f"/api/events/{_bev['id']}", {"prize": 500000, "topic": "생활 불편", "place": "온라인"}, key=_bev["okey"], method="PATCH")
@@ -4452,9 +4537,12 @@ with sync_playwright() as pw:
     # «있을 때만 뜨는 것»(id 가 nav- 로 시작 — 강의·마켓·순위·그날의 조건)은 자료가 생기면 켜진다. 늘 보이는 고리만 센다
     _vis = pg.evaluate("[...document.querySelectorAll('nav.sec > a')].filter(a => !(a.id || '').startsWith('nav-')).map(a => a.textContent.trim())")
     A(len(_vis) <= 3, f"첫 화면 늘 보이는 고리가 셋을 넘는다: {_vis}")
+    A(pg.locator("#hero-made li").count() == 6 and "혼자 와도" in pg.inner_text("#hero-trust"), "첫 화면에 «코딩 몰라도 만드는 것»·«혼자 와도» 가 없다(개발자만의 곳처럼 보인다)")
     _groups = pg.evaluate("[...document.querySelectorAll('#menu-sheet .mg')].map(x => x.textContent.trim())")
-    A(_groups == ["매일", "같이", "만들기", "그 밖에"], f"전체 메뉴 묶음이 다르다: {_groups}")
-    A(pg.locator("#menu-sheet .tiles a").count() <= 12, "메뉴 타일이 열둘을 넘는다 — 덜 쓰는 것은 «그 밖에» 로")
+    A(_groups == ["매일", "대회", "같이"], f"전체 메뉴 묶음이 다르다: {_groups}")
+    _rows = pg.evaluate("[...document.querySelectorAll('#menu-sheet .mrow .mr2')].map(x => x.textContent.trim())")
+    A(_rows == ["찾아보기", "함께하기", "안내", "언어 · Language"] and pg.query_selector("#menu-sheet .morelinks") is None, f"이름 없는 «그 밖에» 덩어리가 남았거나 줄 이름이 다르다: {_rows}")
+    A(pg.locator("#menu-sheet .tiles a").count() <= 12, "메뉴 타일이 열둘을 넘는다 — 덜 쓰는 것은 이름 붙은 줄로")
     _hrefs = pg.evaluate("[...document.querySelectorAll('nav.sec a[href^=\"/\"], #menu-sheet a[href^=\"/\"]')].map(a => a.getAttribute('href'))")
     for _h in _hrefs:
         try:
@@ -4484,8 +4572,33 @@ with sync_playwright() as pw:
     A(_rc == ["/board=게시판", "/me=나", "/e/abc123=동네 해커톤"], f"최근 간 곳이 이상하다(열쇠 든 주소가 보이거나 이름이 틀림): {_rc}")
     A(pg.inner_text("#nav-me-lv") == "Lv.3", "위 막대 «나» 에 레벨이 안 뜬다")
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "«나»·최근 줄을 더하니 폰 폭에서 옆으로 밀린다")
+    # 글자 크게(4050) — 메뉴 판에서 켜면 이 기기에 남고, 다른 화면에서도 켜져 있고, 폰 폭에서 안 밀린다
+    pg.click("#menu-sheet [data-big]"); pg.wait_for_timeout(150)
+    A(pg.evaluate("document.documentElement.classList.contains('big') && localStorage.getItem('hackon.big') === '1'"), "«글자 크게» 를 눌러도 안 켜지거나 안 남는다")
+    pg.keyboard.press("Escape")
+    for _p in ("/", "/news", "/cal", "/board", "/tools", "/club"):
+        pg.goto(BASE + _p, wait_until="networkidle"); pg.wait_for_timeout(300)
+        A(pg.evaluate("document.documentElement.classList.contains('big')"), f"{_p} 에서 «글자 크게» 가 안 이어진다")
+        A(pg.evaluate("document.documentElement.scrollWidth") <= 391, f"«글자 크게» 를 켜면 {_p} 가 폰 폭에서 옆으로 밀린다")
+        A(pg.query_selector("[data-menu-open]") is not None, f"{_p} 에 같은 «메뉴» 단추가 없다")
+    pg.click("[data-menu-open]"); pg.wait_for_selector("#menu-sheet .tiles a")
+    A(pg.locator("#menu-sheet .tiles a").count() == 12 and pg.get_attribute("#nav-manual", "href") == "/manual", "다른 화면의 메뉴가 첫 화면 메뉴와 다르다")
+    pg.click("#menu-sheet [data-big]"); pg.wait_for_timeout(150)
+    A(pg.evaluate("!document.documentElement.classList.contains('big') && localStorage.getItem('hackon.big') === null"), "«글자 크게» 를 다시 눌러도 안 꺼진다")
     b.close()
-ok("첫 화면 고리 — 늘 보이는 것 셋(오늘·대회·소식) + 메뉴 판(묶음 넷·타일·Esc·포커스·«나» 카드·최근 간 곳), 고리마다 200")
+ok("첫 화면 고리 — 늘 보이는 것 셋 + 공통 메뉴 판(묶음 셋·이름 붙은 줄 넷·Esc·포커스·«나» 카드·최근 간 곳·글자 크게, 다른 화면도 같은 메뉴), 고리마다 200")
+
+# ── 사이트 운영 /admin — 운영자가 아니면 «운영자만», 관리 API 는 403 ──
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
+    pg.on("pageerror", lambda e: errs.append("admin: " + str(e)))
+    pg.goto(BASE + "/admin", wait_until="networkidle"); pg.wait_for_selector("#adm-hero")
+    A("운영자만" in pg.inner_text("#adm-hero") and pg.query_selector("#adm-rqs") is None, "운영자가 아닌데 사이트 운영 화면 내용이 보인다")
+    A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "/admin 이 폰 폭에서 옆으로 밀린다")
+    b.close()
+for _ap in ("/api/admin/requests", "/api/admin/reports", "/api/admin/bans", "/api/admin/summary"):
+    A(code_of(_ap) == 403, f"운영자가 아닌데 {_ap} 가 열린다")
+ok("사이트 운영 — 운영자 아니면 «운영자만»·관리 API 403")
 
 # ── 막힌 곳 모음 — 제출 폼에 한 줄, 끝난 뒤 공개 페이지에 팀 이름 없이 ──
 _, _kev = post("/api/events", {"title": "막힌 곳 화면 검사", "starts": "2026-01-10", "ends": "2026-01-10"})
@@ -4585,14 +4698,124 @@ with sync_playwright() as pw:
     b.close()
 ok("오늘 · 내 달력 — 비면 «없음», 신청한 대회·답하기가 달력에, 사람별 한 걸음, 구독 주소(열쇠 없음)")
 
+# ── PWA·안드로이드 — 아이콘 PNG·maskable, 매니페스트 id·scope·바로가기, 오프라인 화면 ──
+# 플레이(TWA)는 매니페스트의 PNG 아이콘·maskable 로 런처 아이콘을 만들고, 끊겼을 때 공룡 화면이 뜨면 «앱이 깨졌다» 로 본다.
+import struct as _st, zlib as _zl
+
+
+def _png_info(b):
+    """PNG 머리에서 폭·높이·색 형식, 그리고 왼쪽 위 첫 점(RGBA)을 읽는다. 첫 줄 첫 점은 필터 종류와 상관없이 원래 값 그대로다."""
+    A(b[:8] == b"\x89PNG\r\n\x1a\n" and b[12:16] == b"IHDR", "PNG 가 아니다")
+    w, h, depth, ctype = _st.unpack(">IIBB", b[16:26])
+    i, idat = 8, b""
+    while i < len(b):
+        n, t = _st.unpack(">I4s", b[i:i + 8])
+        if t == b"IDAT": idat += b[i + 8:i + 8 + n]
+        i += 12 + n
+    raw = _zl.decompress(idat)
+    return w, h, ctype, (tuple(raw[1:5]) if ctype == 6 and depth == 8 else None)
+
+
+_mf = json.loads(urllib.request.urlopen(BASE + "/manifest.webmanifest", timeout=10).read().decode())
+A(_mf.get("id") == "/app" and _mf.get("scope") == "/" and _mf.get("start_url") == "/app",
+  f"매니페스트 id·scope·start_url 이 이상하다: {_mf.get('id')} {_mf.get('scope')} {_mf.get('start_url')}")
+_sc = _mf.get("shortcuts") or []
+A(len(_sc) >= 2 and all(s.get("name") and s.get("url", "").startswith("/") and s.get("icons") for s in _sc),
+  f"매니페스트 바로가기가 없거나 이름·주소·아이콘이 빠졌다: {_sc}")
+_png = [i for i in _mf.get("icons", []) if i.get("type") == "image/png"]
+_mask = [i for i in _png if i.get("purpose") == "maskable" and i.get("sizes") == "512x512"]
+A(_mask, "maskable 512 PNG 가 매니페스트에 없다 — 안드로이드 런처가 아이콘을 흰 동그라미 안에 작게 가둔다")
+for _sz in ("192x192", "512x512"):
+    A(any(i.get("purpose", "any") == "any" and i.get("sizes") == _sz for i in _png), f"일반(any) {_sz} PNG 아이콘이 없다")
+for _ic in _png + [ic for s in _sc for ic in s["icons"]]:
+    try:
+        with urllib.request.urlopen(BASE + _ic["src"], timeout=10) as _r:
+            _st_code, _ct, _b = _r.status, _r.headers.get("content-type", ""), _r.read()
+    except urllib.error.HTTPError as _e:
+        _st_code, _ct, _b = _e.code, "", b""
+    A(_st_code == 200 and _ct.startswith("image/png"),
+      f"{_ic['src']} 가 PNG 로 안 나온다: {_st_code} {_ct} — 404 면 server.js STATIC_OK·Dockerfile COPY 에 적는다")
+    _w, _h, _ctype, _px = _png_info(_b)
+    A(f"{_w}x{_h}" == _ic["sizes"], f"{_ic['src']} 실제 크기 {_w}x{_h} 가 매니페스트({_ic['sizes']})와 다르다")
+    if _ic in _mask:   # 런처가 원·물방울로 깎으므로 모서리까지 먹이 차 있어야 한다. 투명하면 깎인 자리에 구멍이 보인다
+        A(_px and _px[3] == 255, f"maskable 아이콘 모서리가 비어 있다(꽉 찬 바탕이 아니다): {_px}")
+with urllib.request.urlopen(BASE + "/offline.html", timeout=10) as _r:
+    A(_r.status == 200 and "인터넷이 끊겼어요" in _r.read().decode(), "/offline.html 이 안 열리거나 «인터넷이 끊겼어요» 가 없다")
+
+# 진짜로 끊는다 — 이 블록만 쓰는 서버를 하나 더 띄웠다가 끈다. playwright 의 set_offline 은 서비스워커 안의
+# fetch 를 안 끊거나(기본) 첫 이동만 끊어서(실험 깃발) 믿을 수 없었다. 서버가 죽으면 SW 의 fetch 는 실제 오프라인과
+# 똑같이 실패한다.
+_OFF = checklib.start()
+with urllib.request.urlopen(urllib.request.Request(_OFF + "/api/events", method="POST", headers={"content-type": "application/json"},
+                                                   data=json.dumps({"title": "오프라인 검사"}).encode()), timeout=10) as _r:
+    _pev = json.load(_r)   # 달력 파일이 200 으로 나와야 «캐시에 안 남는다» 가 의미가 있다(404 는 원래 안 남는다)
+_cache = re.search(r"const CACHE = '([^']+)'", open("sw.js", encoding="utf-8").read()).group(1)
+with sync_playwright() as pw:
+    b = pw.chromium.launch(); ctx = b.new_context(viewport={"width": 390, "height": 844}); pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("offline: " + str(e)))
+    pg.goto(_OFF + "/app", wait_until="networkidle"); pg.wait_for_selector("body[data-ready='1']", timeout=10000)
+    pg.evaluate("async () => { await navigator.serviceWorker.ready; }")
+    pg.wait_for_function("!!navigator.serviceWorker.controller", timeout=10000)
+    # 달력 파일·데이터는 캐시에 안 남는다 — 옛 일정·옛 순위가 나오면 안 된다
+    _keys = pg.evaluate(f"""async () => {{
+        const ics = await fetch('/api/events/{_pev['id']}/ics');
+        if (!ics.ok || !(await ics.text()).includes('BEGIN:VCALENDAR')) return ['ics 를 못 받음 ' + ics.status];
+        await (await fetch('/api/health')).text();
+        await new Promise(r => setTimeout(r, 400));
+        return (await (await caches.open('{_cache}')).keys()).map(r => new URL(r.url).pathname);
+    }}""")
+    A("/offline.html" in _keys and "/norangi.svg" in _keys, f"오프라인 화면이나 그 그림이 미리 저장되지 않았다: {_keys}")
+    A("/app" in _keys, f"서비스워커가 아예 캐시를 안 쓴다(검사가 헛돈다): {_keys}")
+    A(not [k for k in _keys if k.startswith("/api/") or k.endswith(".ics")], f"데이터·달력 파일이 캐시에 남았다: {_keys}")
+    # 새 소식 알림 — 안드로이드 크롬·앱처럼 new Notification 이 던져도 서비스워커로 뜬다
+    _shown = pg.evaluate("""async () => {
+        const got = [];
+        ServiceWorkerRegistration.prototype.showNotification = function (t, o) { got.push(t + '|' + (o && o.body)); return Promise.resolve(); };
+        window.Notification = function () { throw new TypeError('Illegal constructor'); };
+        window.Notification.permission = 'granted';
+        document.body.insertAdjacentHTML('beforeend', '<ol id="news-list" hidden><li data-nid="1"></li></ol>');
+        NEWS.top = 1;
+        window.api = async () => [{ id: 2, text: '알림 검사 소식', at: new Date().toISOString() }];
+        await pollNews();
+        await new Promise(r => setTimeout(r, 400));
+        document.getElementById('news-list').remove();
+        return got;
+    }""")
+    A(_shown == ["새 소식|알림 검사 소식"], f"안드로이드에서 새 소식 알림이 안 뜬다(서비스워커로 안 띄움): {_shown}")
+    # 끊긴 채 처음 가는 화면 — 브라우저 오류(공룡) 대신 오프라인 화면
+    checklib.stop(_OFF)
+    for _path in ("/board", "/cal?x=1", "/me"):
+        try:
+            pg.goto(_OFF + _path, wait_until="load")
+        except Exception as _e:
+            A(False, f"끊긴 채 {_path} 로 가면 브라우저 오류가 난다: {_e}")
+        A("인터넷이 끊겼어요" in pg.inner_text("body"), f"끊긴 채 {_path} 로 가도 오프라인 화면이 안 나온다")
+        A(pg.evaluate("[...document.images].every(i => i.complete && i.naturalWidth > 0)"), "오프라인 화면의 노랑이 그림이 깨진다")
+        A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "오프라인 화면이 폰 폭에서 옆으로 밀린다")
+    # 다시 이어지면(online) 누르지 않아도 다시 시도한다 — 화면이 새로 열리면 표시가 사라진다
+    pg.evaluate("window.__still = 1")
+    ctx.set_offline(True)
+    try:
+        with pg.expect_navigation(timeout=5000):
+            ctx.set_offline(False)
+    except Exception:
+        A(False, "인터넷이 다시 이어져도 오프라인 화면이 다시 시도하지 않는다(online 을 안 듣는다)")
+    A(pg.evaluate("window.__still") is None, "인터넷이 다시 이어져도 오프라인 화면이 다시 시도하지 않는다")
+    b.close()
+ok("PWA·안드로이드 — PNG 아이콘·maskable(꽉 찬 바탕) 실제 크기, id·scope·바로가기, 데이터·달력 캐시 안 함, SW 알림, 끊기면 오프라인 화면 → 이어지면 저절로 다시 시도")
+
 # ── ON 클럽 /club — 바이브코더 문화 한 장. 노랑이 새 자세 둘, 다가오는 밤(없음·모름 가르기), 폰 폭 ──
 with sync_playwright() as pw:
     b = pw.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
     pg.on("pageerror", lambda e: errs.append("club: " + str(e)))
     pg.goto(BASE + "/club", wait_until="networkidle"); pg.wait_for_timeout(400)
     for _img in pg.eval_on_selector_all("img", "els => els.map(e => e.getAttribute('src'))"):
+        if _img.startswith("/art/"):   # 힉스필드 그림 — art/ 에 파일이 없으면 원본으로 302(이 검사 환경은 그 CDN 을 못 연다)
+            try: _ac = _noredir.open(BASE + _img, timeout=10).status
+            except urllib.error.HTTPError as _e: _ac = _e.code
+            A(_ac in (200, 302), f"ON 클럽 그림 {_img} 이 200·302 가 아니다: {_ac}"); continue
         A(urllib.request.urlopen(BASE + _img, timeout=10).status == 200, f"ON 클럽 그림 {_img} 이 안 열린다")
-    A(pg.evaluate("[...document.images].every(i => i.complete && i.naturalWidth > 0)"), "ON 클럽 그림이 깨진다")
+    A(pg.evaluate("[...document.images].filter(i => !i.getAttribute('src').startsWith('/art/')).every(i => i.complete && i.naturalWidth > 0)"), "ON 클럽 그림이 깨진다")
     A("불러오는 중" not in pg.inner_text("#club-ev"), "다가오는 밤이 «불러오는 중» 에서 멈췄다")
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "ON 클럽이 폰 폭에서 옆으로 밀린다")
     b.close()
@@ -4686,8 +4909,26 @@ with sync_playwright() as pw:
     ed.on("dialog", lambda d: d.accept())
     ed.click("details.more summary"); ed.click('[data-revert="1"]'); ed.wait_for_timeout(600)
     A("둘째 문단을 고쳤다." not in ed.inner_text("#wr-ch") and "3판" in ed.inner_text("#wr-ch"), "1판으로 되돌렸는데 글·판이 안 바뀐다")
+    # 공공 문서처럼 — 머리글·목록·굵게는 입히고, 꺾쇠는 글자로
+    ed.click("#wr-edit"); ed.fill("#wr-body", "## 준비물\n- 노트북\n- **충전기**\n<img src=x onerror=alert(1)>"); ed.click("#wr-send"); ed.wait_for_timeout(600)
+    A(ed.locator("#wr-doc h3").inner_text() == "준비물" and ed.locator("#wr-doc li").count() == 2 and ed.locator("#wr-doc b").inner_text() == "충전기", "본문 머리글·목록·굵게가 문서처럼 안 그려진다")
+    A(ed.locator("#wr-doc img").count() == 0 and "<img" in ed.inner_text("#wr-doc"), "본문 HTML 이 화면에 그대로 박힌다")
+    A("공개 문서" in ed.inner_text(".wrstamp"), "판·고친 사람 도장이 없다")
+    # 공동 편집자 — 처음 편집자가 초대 링크, 받은 사람은 합치기·되돌리기, 주소에서 열쇠가 지워진다, 빼면 끝
+    ed.goto(BASE + f"/w/{_book}", wait_until="networkidle"); ed.wait_for_selector("#wr-co")
+    ed.fill("#wr-coname", "부편집e2e"); ed.click("#wr-coadd"); ed.wait_for_selector("#wr-colink")
+    _inv = ed.input_value("#wr-colink")
+    A("#ek=" in _inv and f"/w/{_book}" in _inv, f"초대 링크가 이상하다: {_inv}")
+    cp = b.new_context(viewport={"width": 390, "height": 844}).new_page(); cp.on("pageerror", lambda e: errs.append("write-co: " + str(e)))
+    cp.goto(_inv, wait_until="networkidle"); cp.wait_for_selector("#wr-chs")
+    A("#ek=" not in cp.url, "초대 링크 열쇠가 주소창에 남는다")
+    A("부편집e2e" in cp.inner_text("#view") and cp.query_selector("#wr-chadd") is not None and cp.query_selector("#wr-co") is None, "공동 편집자가 편집자로 안 열리거나 초대 칸까지 보인다")
+    ed.reload(wait_until="networkidle"); ed.wait_for_selector("[data-coremove]")
+    ed.click("[data-coremove]"); ed.wait_for_timeout(600)
+    cp.reload(wait_until="networkidle"); cp.wait_for_selector("#wr-chs")
+    A(cp.query_selector("#wr-chadd") is None, "뺀 공동 편집자가 아직 편집자다")
     b.close()
-ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md")
+ok("공동 집필 — 책 만들기, 편집자 고치기, 두 사람 제안, 차이 보고 합치기, 충돌 제안은 합칠 수 없음, .md, 되돌리기, 공공 문서 보기, 공동 편집자 초대·빼기")
 
 # ── 삽 공구함 /tools — 키 새는 곳 찾기(진짜 키 잡고 process.env 는 안 잡음)·규칙 파일·.env.example, 서버로 안 보냄 ──
 with sync_playwright() as pw:
@@ -4738,6 +4979,10 @@ with sync_playwright() as pw:
     A(_lv and _lv["level"] >= 1 and _lv["next"], f"메뉴 «나» 카드용 요약이 안 남는다: {_lv}")
     pg.wait_for_timeout(1400)
     A('"/me"' in (pg.evaluate("localStorage.getItem('hackon.recent')") or ""), "연 화면이 «최근 간 곳» 에 안 적힌다")
+    A(len(pg.inner_text("#me-say")) > 10, "노랑이 한마디가 없다")
+    pg.click("#me-share"); pg.wait_for_selector("#me-card")
+    _wh = pg.evaluate("new Promise(ok => { const i = document.querySelector('#me-card'); const f = () => ok([i.naturalWidth, i.naturalHeight]); i.complete ? f() : i.onload = f; })")
+    A(_wh == [1080, 1920] and pg.get_attribute("#me-dl", "download") == "hackon-me.png", f"자랑 카드가 스토리 크기(1080×1920)로 안 나온다: {_wh}")
     A(pg.evaluate("document.documentElement.scrollWidth") <= 391, "나 화면이 폰 폭에서 옆으로 밀린다")
     from axe_playwright_python.sync_playwright import Axe as _AxeMe
     _bad = [v for v in _AxeMe().run(pg).response["violations"] if v["impact"] in ("critical", "serious")]
